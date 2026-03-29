@@ -12,7 +12,8 @@ class EnviromentManager:
         "DB_PORT":"Puerto de la base de datos.",
         "DJANGO_SECRET_KEY":"Llave secreta para la seguridad y criptografía de Django.",
         "DEBUG":"Booleano que indica si Django se debe ejecutar en modo Debug. Debe ser binario (0 o 1).",
-        "API_VERSION":"Version de la API."
+        "API_VERSION":"Version de la API.",
+        "JWT_SECRET_KEY":"Llave secreta para la firma de jwt."
     }
 
     def __init__(self):
@@ -22,6 +23,7 @@ class EnviromentManager:
         self._db_host = None
         self._db_port = None
         self._secret_key = None
+        self._jwt_secret_key = None
         self._debug = None
         self._api_version = None
         self.__execute_sh_file()
@@ -67,6 +69,10 @@ class EnviromentManager:
         """ Version de la API. """
         return self._api_version
     
+    @property
+    def JWT_SECRET_KEY(self) -> str:
+        return self._jwt_secret_key
+    
     def __get_env_variable_description(self, env_variable_name:str)->str:
         """
         Retorna una descripcion para la variable indicada.
@@ -107,7 +113,8 @@ class EnviromentManager:
             # Credenciales de Django
             "DJANGO_SECRET_KEY":os.environ.get("DJANGO_SECRET_KEY"),
             "DEBUG":self.__process_boolean_env_variable(os.environ.get('DEBUG')),
-            "API_VERSION":os.environ.get("API_VERSION")
+            "API_VERSION":os.environ.get("API_VERSION"),
+            "JWT_SECRET_KEY":os.environ.get("JWT_SECRET_KEY")
         }
         self.__check_variables(env_variables)
         self._db_name = env_variables['DB_NAME']
@@ -118,6 +125,7 @@ class EnviromentManager:
         self._secret_key = env_variables['DJANGO_SECRET_KEY']
         self._debug = env_variables['DEBUG']
         self._api_version = env_variables['API_VERSION']
+        self._jwt_secret_key = env_variables['JWT_SECRET_KEY']
 
     def __process_boolean_env_variable(self, variable:str)->bool:
         """Procesa la variable indicada en el parametro. Se espera

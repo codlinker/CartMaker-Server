@@ -12,6 +12,9 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 
 from pathlib import Path
 from .enviroment_manager import EnviromentManager
+from datetime import timedelta
+from django.utils.translation import gettext_lazy as _
+from django.templatetags.static import static
 
 env_manager = EnviromentManager()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -26,11 +29,19 @@ SECRET_KEY = env_manager.DJANGO_SECRET_KEY
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env_manager.DEBUG
 
+# settings.py
+if DEBUG:
+    # Evita que WhiteNoise intente comprimir o manifestar archivos en cada request
+    STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
+else:
+    STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
 ALLOWED_HOSTS = ['*']
 
 # Application definition
 
 INSTALLED_APPS = [
+    "unfold",
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -46,6 +57,8 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
+    "django.middleware.locale.LocaleMiddleware",
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
@@ -75,15 +88,36 @@ WSGI_APPLICATION = 'cartmaker_admin.wsgi.application'
 # Configuración global de DRF
 REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
-    'DEFAULT_AUTHENTICATION_CLASSES': [
-       
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ),
+    'DEFAULT_PERMISSION_CLASSES': [
+        # 'rest_framework.permissions.IsAuthenticated',
     ],
+    'DEFAULT_THROTTLE_RATES': {
+        'auth': '5/minute', # Para registro, login.
+        'navigation': '30/minute', # Para navegacion entre vistas.
+        'actions': '50/minute', # Para visualizacion de productos.
+        'anti_bots':"1/second",
+    }
 }
 
 SPECTACULAR_SETTINGS = {
     'TITLE': 'CartMaker API',
     'DESCRIPTION': 'Documentación oficial del backend de CartMaker.',
     'VERSION': env_manager.API_VERSION,
+}
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'ALGORITHM': 'HS256',
+    'SIGNING_KEY': env_manager.JWT_SECRET_KEY,
+    'AUTH_HEADER_TYPES': ('Bearer',),
+    'USER_ID_FIELD': 'id',
+    'USER_ID_CLAIM': 'user_id',
 }
 
 # Database
@@ -127,6 +161,11 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
+
+LANGUAGES = (
+    ("es", _("Spanish")),
+)
+
 TIME_ZONE = 'UTC'
 
 USE_I18N = True
@@ -144,3 +183,102 @@ STATICFILES_DIRS = [
 ]
 MEDIA_URL = 'media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+
+# Django Unfold (Panel de admin moderno)
+
+USE_I18N = True
+
+UNFOLD = {
+    "SITE_TITLE": "Administracion",
+    "SITE_HEADER": "Administracion de CartMaker",
+    "SITE_SUBHEADER": "Cart Maker",
+    "SITE_LOGO": {
+        "light": lambda request: static("img/logo.svg"),
+        "dark": lambda request: static("img/logo.svg"),
+    },
+    "SIDEBAR": {
+        "show_search": True,
+        "navigation": [
+            {
+                "title": "Manejo de Usuarios",
+                "items": [
+                    {"title": "Usuarios", "link": "/admin/web/user/", "icon": "account_circle"},
+                    {"title":"Ubicaciones", "link":"/admin/web/clientlocation/", "icon":"location_on"},
+                    {'title':"Métodos de contacto", "link":"/admin/web/clientcontactmethod/", "icon":"call"}
+                ],
+            },
+            {
+                "title": "Estructura Comercial",
+                "items": [
+                    {"title": "Compañías", "link": "/admin/web/company/", "icon": "business"},
+                    {"title":"Categorías", 'link':"/admin/web/companycategory/", "icon":"domain_disabled"},
+                    {"title": "Tiendas", "link": "/admin/web/companystore/", "icon": "storefront"},
+                    {"title": "Ubicaciones", "link":"/admin/web/storelocation/", "icon":"location_on"},
+                    {"title": "Métodos de contacto", "link":"/admin/web/storecontactmethod/", "icon":"call"}
+                ],
+            },
+            {
+                "title": "Productos e Inventario",
+                "items": [
+                    {"title":"Categorías", 'link':"/admin/web/category/", "icon":"category"},
+                    {"title":"Sub-Categorías", 'link':"/admin/web/subcategory/", "icon":"category_search"},
+                    {"title": "Productos", "link": "/admin/web/product/", "icon": "inventory_2"},
+                    {"title": "Items en inventario", "link":"/admin/web/inventoryitem/", "icon":"box"},
+                    {"title":"Ofertas en items", "link":"/admin/web/inventoryitemoffer/", "icon":"percent_discount"},
+                    {"title":"Transacciones de items", "link":"/admin/web/inventoryitemtransaction/", "icon":"arrows_left_right_circle"},
+                    {"title":"Preguntas de clientes", "link":"/admin/web/inventoryitemquestion/", "icon":"contact_support"},
+                ],
+            },
+            {
+                "title":"Ventas y Fidelización",
+                "items":[
+                    {"title": "Topicos de cancelación de órdenes", "link": "/admin/web/ordercancellationtopic/", "icon": "cancel"},
+                    {"title": "Órdenes", "link": "/admin/web/order/", "icon": "shopping_cart"},
+                    {"title": "Billeteras de tokens", "link":"/admin/web/tokenwallet/", "icon":"wallet"},
+                    {"title": "Movimientos de billeteras", "link":"/admin/web/tokenwallettransaction", "icon":"payments"},
+                ]
+            },
+            {
+                "title":"Calificación y Soporte",
+                "items":[
+                    {"title":"Calificaciones de tiendas", "link":"/admin/web/storecalification/", "icon":"star_rate"},
+                    {"title":"Calificaciones de productos", "link":"/admin/web/productcalification/", "icon":"star_rate"},
+                    {"title":"Calificaciones de comerciantes", "link":"/admin/web/merchantcalification/", "icon":"star_rate"},
+                    {"title":"Tickets de soporte", "link":"/admin/web/supportticket/", "icon":"support_agent"},
+                ]
+            },
+            {
+                "title":"Suscripciones y Planes",
+                "items":[
+                    {'title':'Planes de comerciantes', "link":"/admin/web/merchantplan/", "icon":"id_card"},
+                    {'title':"Suscripciones de comerciantes", "link":"/admin/web/merchantsubscription", "icon":"credit_score"},
+                    {"title":'Pagos de planes', "link":"/admin/web/merchantplanpayment", "icon":"price_check"},
+                ]
+            },
+            {
+                "title": "Atlas IA",
+                "items": [
+                    {"title": "Suscripciones a Atlas Plus", "link": "/admin/web/atlasplusplan/", "icon": "credit_score"},
+                    {"title": "Pagos a Atlas Plus", "link": "/admin/web/atlasplusplanpayment/", "icon": "price_check"},
+                    {"title": "Conversaciones con Atlas", "link":"/admin/web/atlasthread/", "icon":"comment"},
+                    {"title": "Mensajes en Atlas", "link":"/admin/web/atlasmessage/", "icon":"chat"},
+                ],
+            },
+            {
+                "title":"Configuración y Anuncios",
+                "items":[
+                    {'title':"Configuración del sistema", "link":"/admin/web/systemconfig/", "icon":"settings"},
+                    {"title":"Anuncios", "link":"/link/web/announcement/", "icon":"brand_awareness"}
+                ]
+            },
+            {
+                "title":"Logs y Estadísticas",
+                "items":[
+                    {'title':"Navegaciones", "link":"/admin/web/usernavigationlog/", "icon":"navigation"},
+                    {'title':"Ojeos a tiendas", "link":"/admin/web/storeviewlog/", 'icon':'store'},
+                    {'title':'Ojeos a productos', "link":"/admin/web/productviewlog/", "icon":'feature_search'}
+                ]
+            }
+        ],
+    },
+}
