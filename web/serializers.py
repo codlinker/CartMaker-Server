@@ -11,7 +11,7 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ('id', 'email', 'first_name', 'last_name', 'password', 'tokens')
+        fields = ('email', 'first_name', 'last_name', 'password', 'tokens', 'gender')
 
     def create(self, validated_data):
         user = User.objects.create_user(
@@ -19,7 +19,7 @@ class RegisterSerializer(serializers.ModelSerializer):
             password=validated_data['password'],
             first_name=validated_data.get('first_name', ''),
             last_name=validated_data.get('last_name', ''),
-            username=validated_data['email'] # O el campo que uses como username
+            gender=validated_data['gender']
         )
         return user
 
@@ -48,8 +48,8 @@ class CartMakerTokenSerializer(TokenObtainPairSerializer):
         # 'self.user' es cargado automáticamente por el método validate original
         data['user_id'] = self.user.id
         data['user_type'] = self.user.user_type
-        data['profile_picture'] = self.user.profile_picture
         data['email'] = self.user.email
-        data['full_name'] = f"{self.user.first_name} {self.user.last_name}".strip()
+        data['first_name'] = f"{self.user.first_name}".strip()
+        data['last_name'] = f"{self.user.last_name}".strip()
         
         return data

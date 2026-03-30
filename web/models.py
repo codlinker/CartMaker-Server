@@ -9,6 +9,14 @@ from django.utils.translation import gettext_lazy as _
 # ENUMS (Para validación automática en DRF)
 # ==========================================
 
+class UserGender(models.IntegerChoices):
+    """
+    ENUM Genero del usuario.
+    """
+    MALE = 0, _('Masculino'),
+    FEMALE = 1, _('Femenino'),
+    NO_BINARY = 2, _("No Binario")
+
 class UserType(models.IntegerChoices):
     """
     ENUM Tipo de usuario.
@@ -146,6 +154,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     cedula_verified = models.BooleanField(default=False)
     cedula_number = models.CharField(max_length=50, null=True, blank=True)
     biometric_vector = VectorField(dimensions=512, null=True, blank=True)
+    gender = models.IntegerField(choices=UserGender.choices, default=UserGender.MALE)
 
     objects = UserManager()
 
@@ -257,6 +266,33 @@ class StoreContactMethod(models.Model):
     store = models.ForeignKey(CompanyStore, on_delete=models.CASCADE, related_name='contact_methods')
     method_type = models.IntegerField(choices=ContactMethodType.choices)
     value = models.CharField(max_length=255)
+
+class Employee(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="employment_records")
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="employees")
+    is_active = models.BooleanField(default=True)
+    hired_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('user', 'company') # Un usuario no puede ser empleado dos veces de la misma empresa
+
+class EmployeePermission(models.Model):
+    employee = models.OneToOneField(Employee, on_delete=models.CASCADE, related_name="permissions")
+    allowed_stores = models.ManyToManyField(
+        'CompanyStore', 
+        blank=True,
+        related_name="assigned_employees"
+    )
+    can_edit_inventory = models.BooleanField(default=False)
+    can_view_sales = models.BooleanField(default=False)
+    can_manage_orders = models.BooleanField(default=True)
+
+class EmployeeStoreAssignment(models.Model):
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE)
+    store = models.ForeignKey(CompanyStore, on_delete=models.CASCADE)
+
+    class Meta:
+        unique_together = ('employee', 'store')
 
 
 # ==========================================

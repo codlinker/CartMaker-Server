@@ -159,11 +159,12 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/6.0/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = 'en'
 
 
 LANGUAGES = (
     ("es", _("Spanish")),
+    ("en", _("English"))
 )
 
 TIME_ZONE = 'UTC'
@@ -214,7 +215,10 @@ UNFOLD = {
                     {"title":"Categorías", 'link':"/admin/web/companycategory/", "icon":"domain_disabled"},
                     {"title": "Tiendas", "link": "/admin/web/companystore/", "icon": "storefront"},
                     {"title": "Ubicaciones", "link":"/admin/web/storelocation/", "icon":"location_on"},
-                    {"title": "Métodos de contacto", "link":"/admin/web/storecontactmethod/", "icon":"call"}
+                    {"title": "Métodos de contacto", "link":"/admin/web/storecontactmethod/", "icon":"call"},
+                    {"title":"Empleados", "link":"/admin/web/employee/", "icon":"emoji_people"},
+                    {"title":"Permisos de empleados", "link":"/admin/web/employeepermission/", "icon":"manage_accounts"},
+                    {"title":"Asignaciones empleado-sucursal", "link":"/admin/web/employeestoreassignment/", "icon":"add_home_work"}
                 ],
             },
             {

@@ -24,7 +24,6 @@ class RegisterView(generics.CreateAPIView):
     throttle_scope = 'auth'
 
     def post(self, request, *args, **kwargs):
-        print("ARGS EN POST DE REGISTRO: ", args)
         return super().post(request, *args, **kwargs)
 
 class Home(APIView):

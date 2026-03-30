@@ -22,8 +22,8 @@ class OrderTransactionInline(TabularInline):
 
 @admin.register(User)
 class UserAdmin(ModelAdmin):
-    list_display = ("email", "full_name", "user_type_label", "cedula_number", "cedula_verified_status", "is_active")
-    list_filter = ("user_type", "cedula_verified", "is_active")
+    list_display = ("email", "full_name", "user_type_label", "cedula_number", "cedula_verified_status", "is_active", "gender")
+    list_filter = ("user_type", "cedula_verified", "is_active", "gender")
     search_fields = ("email", "first_name", "last_name", "cedula_number")
     
     @display(description="Tipo Usuario", label=True)
@@ -64,6 +64,21 @@ class InventoryItemAdmin(ModelAdmin):
     list_display = ("product", "stock", "custom_price", "paused", "expiration_date")
     list_editable = ("stock", "paused")
     list_filter = ("paused", "product__company")
+
+@admin.register(Employee)
+class EmployeeAdmin(ModelAdmin):
+    list_display = ("user", "company", "is_active", "hired_at")
+    list_filter = ("company", "is_active")
+
+@admin.register(EmployeePermission)
+class EmployeePermissionAdmin(ModelAdmin):
+    list_display = ("employee", "can_edit_inventory", "can_view_sales", "can_manage_orders")
+    list_filter = ("can_edit_inventory", "can_view_sales", "can_manage_orders")
+
+@admin.register(EmployeeStoreAssignment)
+class EmployeeStoreAssignmentAdmin(ModelAdmin):
+    list_display = ("employee", "store")
+    list_filter = ("store",)
 
 # --- MÓDULO 4: VENTAS Y FIDELIZACIÓN ---
 
