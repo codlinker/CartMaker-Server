@@ -11,9 +11,13 @@ class EnviromentManager:
         "DB_HOST":"Host de la base de datos.",
         "DB_PORT":"Puerto de la base de datos.",
         "DJANGO_SECRET_KEY":"Llave secreta para la seguridad y criptografía de Django.",
-        "DEBUG":"Booleano que indica si Django se debe ejecutar en modo Debug. Debe ser binario (0 o 1).",
+        "DEBUG":"Booleano que indica si Django se debe ejecutar en modo Debug. Debe ser \
+            binario (0 o 1).",
         "API_VERSION":"Version de la API.",
-        "JWT_SECRET_KEY":"Llave secreta para la firma de jwt."
+        "JWT_SECRET_KEY":"Llave secreta para la firma de jwt.",
+        "GOOGLE_OAUTH_CLIENT_ID":"Id client de la plataforma de Google Cloud necesaria \
+            para usar la api de autenticacion de Google.",
+        "GOOGLE_MAPS_API_KEY":"Api key de google maps."
     }
 
     def __init__(self):
@@ -26,6 +30,8 @@ class EnviromentManager:
         self._jwt_secret_key = None
         self._debug = None
         self._api_version = None
+        self._google_oauth_client_id = None
+        self._google_maps_api_key = None
         self.__execute_sh_file()
         self.__load_enviroment_variables()
 
@@ -71,7 +77,24 @@ class EnviromentManager:
     
     @property
     def JWT_SECRET_KEY(self) -> str:
+        """
+        Secret key de los Json Web Tokens
+        """
         return self._jwt_secret_key
+    
+    @property
+    def GOOGLE_OAUTH_CLIENT_ID(self) -> str:
+        """
+        ID Client de Google OAuth
+        """
+        return self._google_oauth_client_id
+    
+    @property
+    def GOOGLE_MAPS_API_KEY(self) -> str:
+        """
+        API KEY de Google Maps.
+        """
+        return self._google_maps_api_key
     
     def __get_env_variable_description(self, env_variable_name:str)->str:
         """
@@ -114,7 +137,9 @@ class EnviromentManager:
             "DJANGO_SECRET_KEY":os.environ.get("DJANGO_SECRET_KEY"),
             "DEBUG":self.__process_boolean_env_variable(os.environ.get('DEBUG')),
             "API_VERSION":os.environ.get("API_VERSION"),
-            "JWT_SECRET_KEY":os.environ.get("JWT_SECRET_KEY")
+            "JWT_SECRET_KEY":os.environ.get("JWT_SECRET_KEY"),
+            "GOOGLE_OAUTH_CLIENT_ID":os.environ.get('GOOGLE_OAUTH_CLIENT_ID'),
+            "GOOGLE_MAPS_API_KEY":os.environ.get("GOOGLE_MAPS_API_KEY"),
         }
         self.__check_variables(env_variables)
         self._db_name = env_variables['DB_NAME']
@@ -126,6 +151,8 @@ class EnviromentManager:
         self._debug = env_variables['DEBUG']
         self._api_version = env_variables['API_VERSION']
         self._jwt_secret_key = env_variables['JWT_SECRET_KEY']
+        self._google_oauth_client_id = env_variables['GOOGLE_OAUTH_CLIENT_ID']
+        self._google_maps_api_key = env_variables['GOOGLE_MAPS_API_KEY']
 
     def __process_boolean_env_variable(self, variable:str)->bool:
         """Procesa la variable indicada en el parametro. Se espera

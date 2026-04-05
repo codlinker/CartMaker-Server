@@ -41,6 +41,7 @@ ALLOWED_HOSTS = ['*']
 # Application definition
 
 INSTALLED_APPS = [
+    'django.contrib.gis',
     "unfold",
     'django.contrib.admin',
     'django.contrib.auth',
@@ -286,3 +287,16 @@ UNFOLD = {
         ],
     },
 }
+
+SECURE_REFERRER_POLICY = 'strict-origin-when-cross-origin'
+
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'cartmaker-cache',
+    }
+}
+
+# CREDENCIALES PARA SERVICIOS DE TERCEROS
+GOOGLE_OAUTH_CLIENT_ID=env_manager.GOOGLE_OAUTH_CLIENT_ID
+GOOGLE_MAPS_API_KEY=env_manager.GOOGLE_MAPS_API_KEY

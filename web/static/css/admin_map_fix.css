@@ -1,0 +1,16 @@
+/* Corrige el bug de altura 0px de Unfold para mapas GIS */
+.dj_map_wrapper {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    margin-top: 10px;
+    margin-bottom: 10px;
+}
+
+.dj_map {
+    height: 400px !important;
+    width: 100% !important;
+    border-radius: 8px;
+    border: 1px solid #374151; /* Borde oscuro para combinar con el tema Dark de Unfold */
+    z-index: 0;
+}

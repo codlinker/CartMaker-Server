@@ -145,7 +145,18 @@ class StoreViewLogAdmin(ModelAdmin):
 # Modelos Geográficos
 @admin.register(ClientLocation, StoreLocation)
 class GeoAdmin(GISModelAdmin, ModelAdmin):
-    pass
+    gis_widget_kwargs = {
+        'attrs': {
+            'default_lon': -66.6115, 
+            'default_lat': 10.4686,  
+            'default_zoom': 14,      
+        }
+    }
+    
+    class Media:
+        css = {
+            'all': ('css/admin_map_fix.css',)
+        }
 
 # Modelos de Soporte y Configuración (Registro Simple con Estilo Unfold)
 others = [
