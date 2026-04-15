@@ -22,18 +22,19 @@ class OrderTransactionInline(TabularInline):
 
 @admin.register(User)
 class UserAdmin(ModelAdmin):
-    list_display = ("email", "full_name", "user_type_label", "cedula_number", "cedula_verified_status", "is_active", "gender")
+    list_display = ("email", "full_name", "user_type_label", "is_external_account", "cedula_verified_status", "is_active", "gender")
     list_filter = ("user_type", "cedula_verified", "is_active", "gender")
-    search_fields = ("email", "first_name", "last_name", "cedula_number")
+    search_fields = ("email", "first_name", "last_name", "is_external_account")
     
     @display(description="Tipo Usuario", label=True)
     def user_type_label(self, obj):
         return obj.get_user_type_display()
 
-    @display(description="Vectores", boolean=True)
+    @display(description="Identidad verificada", boolean=True)
     def cedula_verified_status(self, obj):
         return obj.cedula_verified
 
+    @display(description="Nombres")
     def full_name(self, obj):
         return f"{obj.first_name} {obj.last_name}"
 
@@ -152,11 +153,16 @@ class GeoAdmin(GISModelAdmin, ModelAdmin):
             'default_zoom': 14,      
         }
     }
+    list_display = ("coordinates", "name")
     
     class Media:
         css = {
             'all': ('css/admin_map_fix.css',)
         }
+
+@admin.register(Announcement)
+class AnnouncementAdmin(ModelAdmin):
+    list_display = ("active", "banner_img", "navigate_to", "creation")
 
 # Modelos de Soporte y Configuración (Registro Simple con Estilo Unfold)
 others = [
@@ -164,7 +170,7 @@ others = [
     InventoryItemTransaction, InventoryItemQuestion, OrderCancellationTopic, 
     TokenWalletTransaction, StoreCalification, ProductCalification, 
     MerchantCalification, SupportTicket, MerchantPlan, AtlasMessage, 
-    SystemConfig, Announcement, UserNavigationLog, ClientContactMethod, 
+    SystemConfig, UserNavigationLog, ClientContactMethod, 
     StoreContactMethod
 ]
 

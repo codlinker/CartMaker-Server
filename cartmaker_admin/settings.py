@@ -29,6 +29,8 @@ SECRET_KEY = env_manager.DJANGO_SECRET_KEY
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env_manager.DEBUG
 
+DOMAIN = env_manager.DOMAIN
+
 # settings.py
 if DEBUG:
     # Evita que WhiteNoise intente comprimir o manifestar archivos en cada request
@@ -273,7 +275,7 @@ UNFOLD = {
                 "title":"Configuración y Anuncios",
                 "items":[
                     {'title':"Configuración del sistema", "link":"/admin/web/systemconfig/", "icon":"settings"},
-                    {"title":"Anuncios", "link":"/link/web/announcement/", "icon":"brand_awareness"}
+                    {"title":"Anuncios", "link":"/admin/web/announcement/", "icon":"brand_awareness"}
                 ]
             },
             {
@@ -300,3 +302,9 @@ CACHES = {
 # CREDENCIALES PARA SERVICIOS DE TERCEROS
 GOOGLE_OAUTH_CLIENT_ID=env_manager.GOOGLE_OAUTH_CLIENT_ID
 GOOGLE_MAPS_API_KEY=env_manager.GOOGLE_MAPS_API_KEY
+STORAGE_TYPE=env_manager.STORAGE_TYPE
+
+AWS_ACCESS_KEY_ID = env_manager.AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY = env_manager.AWS_SECRET_ACCESS_KEY
+AWS_STORAGE_BUCKET_NAME = env_manager.AWS_STORAGE_BUCKET_NAME
+AWS_S3_REGION_NAME = env_manager.AWS_S3_REGION_NAME

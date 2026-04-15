@@ -17,7 +17,14 @@ class EnviromentManager:
         "JWT_SECRET_KEY":"Llave secreta para la firma de jwt.",
         "GOOGLE_OAUTH_CLIENT_ID":"Id client de la plataforma de Google Cloud necesaria \
             para usar la api de autenticacion de Google.",
-        "GOOGLE_MAPS_API_KEY":"Api key de google maps."
+        "GOOGLE_MAPS_API_KEY":"Api key de google maps.",
+        "DOMAIN":"Dominio del proyecto.",
+        "STORAGE_TYPE":"Almacenamiento que se utilizara para guardar toda la media con la \
+            que interactuan los usuarios.",
+        "AWS_ACCESS_KEY_ID":"Acces key id del bucket de AWS.",
+        "AWS_SECRET_ACCESS_KEY":"Secret key del bucket de AWS.",
+        "AWS_STORAGE_BUCKET_NAME":"Nombre del bucket de AWS.",
+        "AWS_S3_REGION_NAME":"Region del bucket de AWS."
     }
 
     def __init__(self):
@@ -32,6 +39,12 @@ class EnviromentManager:
         self._api_version = None
         self._google_oauth_client_id = None
         self._google_maps_api_key = None
+        self._domain = None
+        self._storage_type = None
+        self._aws_access_key_id = None
+        self._aws_secret_access_key = None
+        self._aws_storage_bucket_name = None
+        self._aws_s3_region_name = None
         self.__execute_sh_file()
         self.__load_enviroment_variables()
 
@@ -96,6 +109,48 @@ class EnviromentManager:
         """
         return self._google_maps_api_key
     
+    @property
+    def DOMAIN(self) -> str:
+        """
+        Dominio del proyecto.
+        """
+        return self._domain
+    
+    @property
+    def STORAGE_TYPE(self) -> str:
+        """
+        Almacenamiento que se utilizara para guardar toda la media con la que interactuan los usuarios.
+        """
+        return self._storage_type
+    
+    @property
+    def AWS_ACCESS_KEY_ID(self) -> str:
+        """
+        Access key id del bucket de AWS.
+        """
+        return self._aws_access_key_id
+    
+    @property
+    def AWS_SECRET_ACCESS_KEY(self) -> str:
+        """
+        Secret key del bucket de AWS.
+        """
+        return self._aws_secret_access_key
+    
+    @property
+    def AWS_STORAGE_BUCKET_NAME(self) -> str:
+        """
+        Nombre del bucket de AWS.
+        """
+        return self._aws_storage_bucket_name
+    
+    @property
+    def AWS_S3_REGION_NAME(self) -> str:
+        """
+        Region del bucket de AWS.
+        """
+        return self._aws_s3_region_name
+    
     def __get_env_variable_description(self, env_variable_name:str)->str:
         """
         Retorna una descripcion para la variable indicada.
@@ -112,6 +167,13 @@ class EnviromentManager:
         for variable in env_variables:
             if env_variables[variable] is None:
                 missing_variables.append(variable)
+            else:
+                if env_variables[variable] == "STORAGE_TYPE":
+                    if not env_variables[variable] in ['aws', 'local']:
+                        print("********** ENVIROMENT MANAGER **********")
+                        print(f"Tipo de almacenamiento {env_variables[variable]} no permitido.")
+                        print("****************************************")
+                        sys.exit()
         if len(missing_variables) > 0:
             print("********** ENVIROMENT MANAGER **********")
             for missing_variable in missing_variables:
@@ -140,6 +202,12 @@ class EnviromentManager:
             "JWT_SECRET_KEY":os.environ.get("JWT_SECRET_KEY"),
             "GOOGLE_OAUTH_CLIENT_ID":os.environ.get('GOOGLE_OAUTH_CLIENT_ID'),
             "GOOGLE_MAPS_API_KEY":os.environ.get("GOOGLE_MAPS_API_KEY"),
+            "DOMAIN":os.environ.get('DOMAIN'),
+            "STORAGE_TYPE":os.environ.get('STORAGE_TYPE'),
+            "AWS_ACCESS_KEY_ID":os.environ.get("AWS_ACCESS_KEY_ID"),
+            "AWS_SECRET_ACCESS_KEY":os.environ.get('AWS_SECRET_ACCESS_KEY'),
+            "AWS_STORAGE_BUCKET_NAME":os.environ.get("AWS_STORAGE_BUCKET_NAME"),
+            "AWS_S3_REGION_NAME":os.environ.get("AWS_S3_REGION_NAME"),
         }
         self.__check_variables(env_variables)
         self._db_name = env_variables['DB_NAME']
@@ -153,6 +221,12 @@ class EnviromentManager:
         self._jwt_secret_key = env_variables['JWT_SECRET_KEY']
         self._google_oauth_client_id = env_variables['GOOGLE_OAUTH_CLIENT_ID']
         self._google_maps_api_key = env_variables['GOOGLE_MAPS_API_KEY']
+        self._domain = env_variables['DOMAIN']
+        self._storage_type = env_variables['STORAGE_TYPE']
+        self._aws_access_key_id = env_variables['AWS_ACCESS_KEY_ID']
+        self._aws_secret_access_key = env_variables['AWS_SECRET_ACCESS_KEY']
+        self._aws_storage_bucket_name = env_variables['AWS_STORAGE_BUCKET_NAME']
+        self._aws_s3_region_name = env_variables['AWS_S3_REGION_NAME']
 
     def __process_boolean_env_variable(self, variable:str)->bool:
         """Procesa la variable indicada en el parametro. Se espera

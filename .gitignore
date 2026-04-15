@@ -1,3 +1,4 @@
 # */migrations/*
 variables.sh
 *__pycache__
+media/

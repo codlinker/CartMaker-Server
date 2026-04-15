@@ -4,6 +4,7 @@ from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseU
 from django.contrib.gis.db import models as gis_models
 from pgvector.django import VectorField
 from django.utils.translation import gettext_lazy as _
+from django.conf import settings
 
 # ==========================================
 # ENUMS (Para validación automática en DRF)
@@ -136,11 +137,12 @@ class User(AbstractBaseUser, PermissionsMixin):
         cedula_verified (bool): Estado de verificación legal de la identidad.
         cedula_number (str): Número de identificación legal (Cédula/DNI).
         biometric_vector (vector): Vector de 512 dimensiones para reconocimiento facial.
+        gender (int): Genero del usuario.
+        is_external_account (bool): Indica si es una cuenta de Google o Apple.
     """
     username = None
     is_staff = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
-    date_joined = models.DateTimeField(auto_now_add=True)
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     first_name = models.CharField(max_length=150, blank=True)
     last_name = models.CharField(max_length=150, blank=True)
@@ -155,6 +157,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     cedula_number = models.CharField(max_length=50, null=True, blank=True)
     biometric_vector = VectorField(dimensions=512, null=True, blank=True)
     gender = models.IntegerField(choices=UserGender.choices, default=UserGender.MALE)
+    is_external_account = models.BooleanField(default=False)
 
     objects = UserManager()
 
@@ -169,10 +172,21 @@ class ClientLocation(models.Model):
         user (ForeignKey): Referencia al usuario dueño de la ubicación.
         coordinates (Point): Coordenadas espaciales (Lat, Lon).
         name (str): Etiqueta de la ubicación (ej: 'Casa', 'Trabajo').
+        is_default (str): Indica si esta es la ubicacion seleccionada por el usuario como predeterminada.
     """
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='locations')
     coordinates = gis_models.PointField()
     name = models.CharField(max_length=255)
+    is_default = models.BooleanField(default=False)
+
+    def get_json(self)->dict:
+        return {
+            'id':self.id,
+            'latitude':self.coordinates.y,
+            'longitude':self.coordinates.x,
+            'name':self.name,
+            'is_default':self.is_default
+        }
 
 class ClientContactMethod(models.Model):
     """
@@ -307,6 +321,14 @@ class Category(models.Model):
         name (str): Nombre del sector (ej: 'Alimentos', 'Electrónica').
     """
     name = models.CharField(max_length=255)
+    img_url = models.CharField(help_text="Colocar ruta a traves del endpoint static del servidor. Ej: static/img/test.png", blank=True, null=True)
+
+    def get_json(self) -> dict:
+        return {
+            "id":self.id,
+            "name":self.name,
+            "img_url":f"{settings.DOMAIN}/{self.img_url}"
+        }
 
 class SubCategory(models.Model):
     """
@@ -318,6 +340,15 @@ class SubCategory(models.Model):
     """
     name = models.CharField(max_length=255)
     parent_category = models.ForeignKey(Category, on_delete=models.CASCADE, related_name='subcategories')
+    img_url = models.CharField(help_text="Colocar ruta a traves del endpoint static del servidor. Ej: static/img/test.png", blank=True, null=True)
+
+    def get_json(self) -> dict:
+        return {
+            "id":self.id,
+            "name":self.name,
+            "parent_category":self.parent_category.id,
+            "img_url":f"{settings.DOMAIN}/{self.img_url}"
+        }
 
 class Product(models.Model):
     """
@@ -731,10 +762,19 @@ class Announcement(models.Model):
         active (bool): Visibilidad del anuncio.
         creation (datetime): Fecha de lanzamiento.
     """
-    banner_img = models.URLField(max_length=500)
+    banner_img = models.CharField(max_length=500, help_text="La imagen debe ser de 1920px x 1080px. Los primeros 180px de arriba estaran tapados por el AppBar del home. \
+                                 Si la imagen esta en el servidor, solo especificar la ruta en la carpeta static, ej: static/img/banner_1_test.png")
     navigate_to = models.CharField(max_length=255)
     active = models.BooleanField(default=True)
     creation = models.DateTimeField(auto_now_add=True)
+
+    def get_json(self) -> dict:
+        url = f"{settings.DOMAIN}/{self.banner_img}" if not self.banner_img.startswith('http') else self.banner_img
+        return {
+            "banner_img_url":url,
+            "navigate_to":self.navigate_to,
+            "creation":self.creation.strftime('%d/%m/%Y, %H:%M:%S')
+        }
 
 
 # ==========================================

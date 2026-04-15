@@ -38,6 +38,7 @@ class RegisterSerializer(serializers.ModelSerializer):
         representation = super().to_representation(instance)
         representation['user_id'] = representation.pop('id')
         representation['user_type'] = instance.user_type 
+        representation['gender'] = instance.gender
         representation['email_otp_code'] = get_email_otp(instance.email)
         representation['email_verified'] = instance.email_verified
         return representation
@@ -59,6 +60,7 @@ class CartMakerTokenSerializer(TokenObtainPairSerializer):
         data['first_name'] = f"{self.user.first_name}".strip()
         data['last_name'] = f"{self.user.last_name}".strip()
         data['email_verified'] = self.user.email_verified
+        data['gender'] = self.user.gender
         return data
     
 class ClientLocationSerializer(serializers.ModelSerializer):
@@ -67,16 +69,25 @@ class ClientLocationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ClientLocation
-        fields = ['id', 'name', 'latitude', 'longitude'] 
+        fields = ['id', 'name', 'latitude', 'longitude', "is_default"] 
         read_only_fields = ['id']
 
     def create(self, validated_data):
         user = validated_data.get('user')
-        if ClientLocation.objects.filter(user=user).count() >= 5:
-            # Lanzamos la excepción. DRF la atrapará y devolverá un HTTP 400 a Flutter
+        client_locations_qs = ClientLocation.objects.only('id', 'user', 'is_default').filter(user=user)
+        locations_count = client_locations_qs.count()
+        if locations_count >= 5:
             raise serializers.ValidationError(
                 {"error": "Has alcanzado el límite máximo de 5 ubicaciones permitidas."}
             )
+        elif locations_count == 0:
+            validated_data['is_default'] = True
+        default_location = None
+        if client_locations_qs.filter(is_default=True).exists():
+            default_location = client_locations_qs.get(is_default=True)
+        if validated_data['is_default'] and default_location != None:
+            default_location.is_default = False
+            default_location.save()
         lat = validated_data.pop('latitude')
         lon = validated_data.pop('longitude')
         validated_data['coordinates'] = Point(lon, lat, srid=4326)
@@ -87,3 +98,34 @@ class ClientLocationSerializer(serializers.ModelSerializer):
         representation['latitude'] = instance.coordinates.y
         representation['longitude'] = instance.coordinates.x
         return representation
+    
+class UserSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True, required=False)
+
+    class Meta:
+        model = User
+        fields = [
+            'id', 'email', 'first_name', 'last_name', 'birth_date', 
+            'gender', 'profile_picture', 'user_type', 'cedula_number', 
+            'cedula_document', 'cedula_verified', 'email_verified', 
+            'is_external_account', 'creation', 'password' 
+        ]
+        read_only_fields = [
+            'id', 'email', 'user_type', 'cedula_verified', 
+            'email_verified', 'is_external_account', 'creation'
+        ]
+
+    def validate_first_name(self, value):
+        return value.strip().title()
+
+    def validate_last_name(self, value):
+        return value.strip().title()
+
+    def update(self, instance, validated_data):
+        password = validated_data.pop('password', None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        if password is not None:
+            instance.set_password(password)
+        instance.save()
+        return instance

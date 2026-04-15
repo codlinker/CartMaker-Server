@@ -12,7 +12,13 @@ from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 from django.conf import settings
 from rest_framework.permissions import IsAuthenticated
-from rest_framework import viewsets
+from rest_framework import viewsets, mixins
+from rest_framework.decorators import action
+import secrets
+from django.contrib.auth.hashers import check_password
+from .cos import storage_manager
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from datetime import datetime
 
 class CartMakerTokenView(TokenObtainPairView):
     """
@@ -31,6 +37,50 @@ class GoogleClientId(APIView):
 
     def get(self, request):
         return Response({"google_client_id":settings.GOOGLE_OAUTH_CLIENT_ID}, status=200)
+    
+class GoogleRegistView(APIView):
+    """
+    API para el registro de usuarios a traves de Google OAuth.
+    """
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'auth'
+
+    def post(self, request):
+        token = request.data.get('token_id')
+        try:
+            idinfo = id_token.verify_oauth2_token(token, google_requests.Request(), settings.GOOGLE_OAUTH_CLIENT_ID)
+            email = idinfo['email']
+            if User.objects.filter(email=email).exists():
+                return Response({'error':'Ya existe esta cuenta.'}, status=400)
+            first_name = idinfo.get('given_name', '')
+            last_name = idinfo.get('family_name', '')
+            profile_pic = idinfo.get('picture', '')
+            random_password = secrets.token_urlsafe(32)
+            user = User.objects.create(
+                email=email,
+                first_name=first_name,
+                last_name=last_name,
+                profile_picture=profile_pic,
+                email_verified=True,
+                password=random_password,
+                is_external_account=True
+            )
+            tokens = get_tokens_for_user(user) 
+            return Response({
+                "user_id": user.id,
+                "access": tokens['access'],
+                "refresh":tokens['refresh'],
+                "email":user.email,
+                "first_name":user.first_name,
+                "last_name":user.last_name,
+                "gender":user.gender,
+                "user_type":user.user_type,
+                "email_verified":True,
+                "is_external_account":user.is_external_account
+            }, status=201)
+        except ValueError as e:
+            print(e)
+            return Response({"error": "Token inválido"}, status=400)
 
 class GoogleLoginView(APIView):
     """
@@ -40,47 +90,35 @@ class GoogleLoginView(APIView):
     throttle_scope = 'auth'
 
     def post(self, request):
-        token = request.data.get('idToken')
-        
+        token = request.data.get('token_id')
         try:
-            # 1. Validar el token con Google
-            idinfo = id_token.verify_oauth2_token(token, google_requests.Request(), settings.GOOGLE_OAUTH_CLIENT_ID)
-
-            print('ID INFO DEL USUARIO OBTENIDA DE GOOGLE: ', idinfo)
-
-            # 2. Extraer información del usuario
+            idinfo = id_token.verify_oauth2_token(
+                token, google_requests.Request(),
+                settings.GOOGLE_OAUTH_CLIENT_ID)
             email = idinfo['email']
-            first_name = idinfo.get('given_name', '')
-            last_name = idinfo.get('family_name', '')
-            profile_pic = idinfo.get('picture', '')
-
-            # # 3. Lógica de "Get or Create" en tu modelo User
-            # user, created = User.objects.get_or_create(
-            #     email=email,
-            #     defaults={
-            #         'first_name': first_name,
-            #         'last_name': last_name,
-            #         'profile_picture': profile_pic,
-            #         'email_verified': True, # Google ya lo verificó
-            #         'password': User.objects.make_random_password() # Password dummy
-            #     }
-            # )
-
-            # 4. Generar TU token (SimpleJWT u otro)
-            # tokens = get_tokens_for_user(user) 
-            
-            # return Response({
-            #     "user_id": user.id,
-            #     "created": created,
-            #     # "access": tokens['access']
-            # })
-            return Response({"error":"Solo probando"}, status=500)
-
-        except ValueError:
+            try:
+                user = User.objects.only('id', 'email', 'first_name', 'last_name', 'gender', 'user_type'
+                                            ).get(email=email)
+            except User.DoesNotExist:
+                return Response({'error':"No existe esta cuenta."}, status=400)
+            tokens = get_tokens_for_user(user) 
+            return Response({
+                "user_id": user.id,
+                "access": tokens['access'],
+                "refresh":tokens['refresh'],
+                "email":user.email,
+                "first_name":user.first_name,
+                "last_name":user.last_name,
+                "gender":user.gender,
+                "user_type":user.user_type,
+                "email_verified":True
+            }, status=200)
+        except ValueError as e:
+            print(e)
             return Response({"error": "Token inválido"}, status=400)
 
 class RegisterView(generics.CreateAPIView):
-    queryset = User.objects.none() # Vacio porque solo se necesita especificar el modelo
+    queryset = User.objects.none()
     serializer_class = RegisterSerializer
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'auth'
@@ -158,18 +196,113 @@ class ClientLocationViewSet(viewsets.ModelViewSet):
     serializer_class = ClientLocationSerializer
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'actions'
-    permission_classes = [IsAuthenticated] # Exige que el usuario envíe un token válido
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        # Magia de privacidad: Sobrescribimos la consulta base.
-        # Cuando el usuario haga GET /locations/, solo verá las suyas.
         return ClientLocation.objects.filter(user=self.request.user)
 
     def perform_create(self, serializer):
-        # Magia de creación: Cuando Flutter haga POST para guardar "Casa",
-        # no necesitamos que envíe su ID de usuario. Django lo saca 
-        # automáticamente del token de seguridad y lo inyecta aquí.
         serializer.save(user=self.request.user)
+
+class UserViewSet(mixins.RetrieveModelMixin,
+                  mixins.UpdateModelMixin,
+                  viewsets.GenericViewSet):
+    serializer_class = UserSerializer
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'actions'
+    permission_classes = [IsAuthenticated]
+    parser_classes = (JSONParser, MultiPartParser, FormParser)
+
+    def get_queryset(self):
+        return User.objects.filter(id=self.request.user.id)
+
+    def get_object(self):
+        return self.request.user
+    
+    @action(detail=False, methods=['post'], url_path='upload-avatar')
+    def upload_avatar(self, request):
+        file_obj = request.FILES.get('photo')
+        if not file_obj:
+            return Response({"error": "No se envió ninguna imagen"}, status=400)
+        user = request.user
+        extension = file_obj.name.split('.')[-1]
+        file_name = f"avatar_{user.id}_{datetime.now().strftime('%d-%m-%Y_%H-%M-%S')}.{extension}"
+        folder = "profiles/avatars"
+        relative_path = storage_manager.save_file(file_obj, folder, file_name)
+        if relative_path:
+            if user.profile_picture:
+                storage_manager.delete_file(user.profile_picture)
+            user.profile_picture = storage_manager.get_url(relative_path) 
+            user.save()
+            return Response({
+                "message": "Foto actualizada",
+                "url": storage_manager.get_url(relative_path)
+            })
+        return Response({"error": "Error al guardar el archivo"}, status=500)
+        
+class UserCacheAPI(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'navigation'
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """
+        Devuelve todos los datos necesarios para la cache de usuario de la app.
+        """
+        user = request.user
+        locations = [location.get_json() for location in ClientLocation.objects.filter(user=user)]
+        cache = {
+            "user_id":user.id,
+            "email":user.email,
+            "creation":user.creation.strftime('%d/%m/%Y, %H:%M:%S'),
+            "first_name":user.first_name,
+            "last_name":user.last_name,
+            "birth_date":user.birth_date if user.birth_date else "",
+            "email_verified":user.email_verified,
+            "user_type":user.user_type,
+            "profile_picture":user.profile_picture if user.profile_picture else "",
+            "cedula_document_url":user.cedula_document if user.cedula_document else "",
+            "cedula_verified":user.cedula_verified,
+            "cedula_number":user.cedula_number if user.cedula_number else "",
+            "gender":user.gender,
+            "locations":locations,
+            "is_external_account":user.is_external_account,
+        }
+        print(f"Cache del usuario {user}: {cache}")
+        return Response(cache, status=200)
+    
+class HomeCacheAPI(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'navigation'
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """
+        Devuelve todos los datos necesarios para la cache de la home screen de la app.
+        """
+        user = request.user
+        announcements = [announcement.get_json() for announcement in Announcement.objects.filter(active=True).order_by('-creation')]
+        cache = {
+            "announcements":announcements
+        }
+        return Response(cache, status=200)
+
+class VerifyPasswordAPI(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'navigation'
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        """
+        Devuelve 200 si la contrasenia es correcta, 401 si no.
+        """
+        user = request.user
+        password_input = request.data.get('password')
+        if not password_input:
+            return Response({'error':"Debe ingresar la contrasenia."}, status=400)
+        if not check_password(password_input, user.password):
+            return Response({'error':"Contrasenia incorrecta."}, status=400)
+        return Response(status=200)
 
 class Home(APIView):
     """
