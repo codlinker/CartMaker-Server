@@ -5,6 +5,7 @@ from django.contrib.gis.db import models as gis_models
 from pgvector.django import VectorField
 from django.utils.translation import gettext_lazy as _
 from django.conf import settings
+from .cos import storage_manager
 
 # ==========================================
 # ENUMS (Para validación automática en DRF)
@@ -151,7 +152,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     email_verified = models.BooleanField(default=False)
     creation = models.DateTimeField(auto_now_add=True)
     user_type = models.IntegerField(choices=UserType.choices, default=UserType.CLIENT)
-    profile_picture = models.URLField(max_length=500, null=True, blank=True)
+    profile_picture = models.CharField(max_length=500, default="")
     cedula_document = models.URLField(max_length=500, null=True, blank=True)
     cedula_verified = models.BooleanField(default=False)
     cedula_number = models.CharField(max_length=50, null=True, blank=True)
@@ -163,6 +164,13 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = ['first_name', 'last_name', 'password']
+
+    def get_profile_picture_url(self) -> str:
+        """
+        Retorna la URL publica de la foto de perfil del usuario.
+        """
+        return self.profile_picture if self.profile_picture.startswith('http')\
+              else storage_manager.get_url(self.profile_picture)
 
 class ClientLocation(models.Model):
     """
@@ -200,6 +208,13 @@ class ClientContactMethod(models.Model):
     client = models.ForeignKey(User, on_delete=models.CASCADE, related_name='contact_methods')
     method_type = models.IntegerField(choices=ContactMethodType.choices)
     value = models.CharField(max_length=255)
+
+    def get_json(self)->dict:
+        return {
+            "id":self.id,
+            'method_type':self.method_type,
+            'value':self.value
+        }
 
 
 # ==========================================
@@ -325,10 +340,22 @@ class Category(models.Model):
 
     def get_json(self) -> dict:
         return {
-            "id":self.id,
-            "name":self.name,
-            "img_url":f"{settings.DOMAIN}/{self.img_url}"
+            "id": self.id,
+            "name": self.name,
+            "img_url": f"{settings.DOMAIN}/{self.img_url}",
+            "sub_categories": [{
+                "id": sub.id,
+                "name": sub.name,
+                "img_url": self.get_img_url()
+            } for sub in self.subcategories.all()] 
         }
+    
+    def get_img_url(self) -> str:
+        """
+        Retorna la URL publica de la imagen de la categoria.
+        """
+        return self.img_url if self.img_url.startswith('http')\
+              else storage_manager.get_url(self.img_url)
 
 class SubCategory(models.Model):
     """
@@ -347,8 +374,15 @@ class SubCategory(models.Model):
             "id":self.id,
             "name":self.name,
             "parent_category":self.parent_category.id,
-            "img_url":f"{settings.DOMAIN}/{self.img_url}"
+            "img_url":self.get_img_url()
         }
+    
+    def get_img_url(self) -> str:
+        """
+        Retorna la URL publica de la imagen de la sub-categoria.
+        """
+        return self.img_url if self.img_url.startswith('http')\
+              else storage_manager.get_url(self.img_url)
 
 class Product(models.Model):
     """
@@ -376,6 +410,21 @@ class Product(models.Model):
     discounts_data = models.JSONField(default=dict, blank=True)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='products')
     images = models.JSONField(default=list)
+    # Ejemplo de 'images':
+    # [
+    #     {
+    #         "image_url": "https://...",
+    #         "idx": 0,
+    #         "apply_transparency": true,
+    #         "transparency_color": "#00FF00"
+    #     },
+    #     {
+    #         "image_url": "https://...",
+    #         "idx": 1,
+    #         "apply_transparency": false,
+    #         "transparency_color": null
+    #     }
+    # ]
 
 class InventoryItem(models.Model):
     """

@@ -99,6 +99,43 @@ class ClientLocationSerializer(serializers.ModelSerializer):
         representation['longitude'] = instance.coordinates.x
         return representation
     
+class ClientContactMethodSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ClientContactMethod
+        fields = [
+            'id',
+            'client',
+            'method_type',
+            'value'
+        ]
+        read_only_fields = [
+            'client'
+        ]
+
+    def create(self, validated_data):
+        if ClientContactMethod.objects.filter(client=validated_data['client']).count() >= 5:
+            raise serializers.ValidationError("Máximo 5 métodos de contacto permitidos."
+            )
+        if validated_data['method_type'] in [1, 2]:
+            if len(validated_data['value']) != 11:
+                raise serializers.ValidationError("Debes ingresar un número telefónico válido. No uses el +58."
+                )
+        return super().create(validated_data)
+    
+    def update(self, instance, validated_data):
+        if validated_data['method_type'] in [1, 2]:
+            if len(validated_data['value']) != 11:
+                raise serializers.ValidationError("Debes ingresar un número telefónico válido. No uses el +58."
+                )
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        return instance
+
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+        representation.pop('client')
+        return representation
+    
 class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=False)
 
@@ -129,3 +166,17 @@ class UserSerializer(serializers.ModelSerializer):
             instance.set_password(password)
         instance.save()
         return instance
+    
+class ProductImageSerializer(serializers.Serializer):
+    image_url = serializers.URLField()
+    idx = serializers.IntegerField()
+    apply_transparency = serializers.BooleanField(default=False)
+    transparency_color = serializers.CharField(max_length=7, required=False, allow_null=True)
+
+class ProductSerializer(serializers.ModelSerializer):
+    # Esto te permite validar la estructura del JSON al recibir datos
+    images = ProductImageSerializer(many=True)
+
+    class Meta:
+        model = Product
+        fields = '__all__'

@@ -2,7 +2,7 @@ from django.urls import path, include
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from .views import CartMakerTokenView, RegisterView, Home, GoogleLoginView, GoogleClientId,\
 VerifyEmailView, ResendEmailView, ClientLocationViewSet, GoogleRegistView, UserCacheAPI, HomeCacheAPI, \
-VerifyPasswordAPI, UserViewSet
+VerifyPasswordAPI, UserViewSet, ClientContactMethodViewSet
 from rest_framework_simplejwt.views import (
     TokenRefreshView,
 )
@@ -11,8 +11,9 @@ from django.conf import settings
 from django.conf.urls.static import static
 
 router = DefaultRouter()
-router.register(r'locations', ClientLocationViewSet, basename='client-location')
+router.register(r'locations', ClientLocationViewSet, basename='client-locations')
 router.register(r'user', UserViewSet, basename='user')
+router.register(r'client-contact-methods', ClientContactMethodViewSet, basename='client-contact-methods')
 
 # --- DEFINICIÓN DE RUTAS (URLS) ---
 urlpatterns = [

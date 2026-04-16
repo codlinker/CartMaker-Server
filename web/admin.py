@@ -164,9 +164,17 @@ class GeoAdmin(GISModelAdmin, ModelAdmin):
 class AnnouncementAdmin(ModelAdmin):
     list_display = ("active", "banner_img", "navigate_to", "creation")
 
+@admin.register(Category)
+class CategoryAdmin(ModelAdmin):
+    list_display = ("id", "name", "img_url")
+
+@admin.register(SubCategory)
+class SubCategory(ModelAdmin):
+    list_display = ("id", "name", "img_url", "parent_category")
+
 # Modelos de Soporte y Configuración (Registro Simple con Estilo Unfold)
 others = [
-    CompanyCategory, Category, SubCategory, InventoryItemOffer, 
+    CompanyCategory, InventoryItemOffer, 
     InventoryItemTransaction, InventoryItemQuestion, OrderCancellationTopic, 
     TokenWalletTransaction, StoreCalification, ProductCalification, 
     MerchantCalification, SupportTicket, MerchantPlan, AtlasMessage, 

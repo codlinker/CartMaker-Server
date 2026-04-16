@@ -191,6 +191,18 @@ class ResendEmailView(APIView):
                 {'error': f"Ha ocurrido un error al enviar el código: {e}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+class ClientContactMethodViewSet(viewsets.ModelViewSet):
+    serializer_class = ClientContactMethodSerializer
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'actions'
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return ClientContactMethod.objects.filter(client=self.request.user)
+
+    def perform_create(self, serializer):
+        serializer.save(client=self.request.user)
         
 class ClientLocationViewSet(viewsets.ModelViewSet):
     serializer_class = ClientLocationSerializer
@@ -232,7 +244,7 @@ class UserViewSet(mixins.RetrieveModelMixin,
         if relative_path:
             if user.profile_picture:
                 storage_manager.delete_file(user.profile_picture)
-            user.profile_picture = storage_manager.get_url(relative_path) 
+            user.profile_picture = relative_path
             user.save()
             return Response({
                 "message": "Foto actualizada",
@@ -251,6 +263,7 @@ class UserCacheAPI(APIView):
         """
         user = request.user
         locations = [location.get_json() for location in ClientLocation.objects.filter(user=user)]
+        contact_methods = [contact_method.get_json() for contact_method in ClientContactMethod.objects.filter(client=user)]
         cache = {
             "user_id":user.id,
             "email":user.email,
@@ -260,13 +273,14 @@ class UserCacheAPI(APIView):
             "birth_date":user.birth_date if user.birth_date else "",
             "email_verified":user.email_verified,
             "user_type":user.user_type,
-            "profile_picture":user.profile_picture if user.profile_picture else "",
+            "profile_picture":user.get_profile_picture_url(),
             "cedula_document_url":user.cedula_document if user.cedula_document else "",
             "cedula_verified":user.cedula_verified,
             "cedula_number":user.cedula_number if user.cedula_number else "",
             "gender":user.gender,
             "locations":locations,
             "is_external_account":user.is_external_account,
+            'contact_methods':contact_methods
         }
         print(f"Cache del usuario {user}: {cache}")
         return Response(cache, status=200)
@@ -282,8 +296,13 @@ class HomeCacheAPI(APIView):
         """
         user = request.user
         announcements = [announcement.get_json() for announcement in Announcement.objects.filter(active=True).order_by('-creation')]
+        categories = [
+            category.get_json() 
+            for category in Category.objects.prefetch_related('subcategories').all()
+        ]
         cache = {
-            "announcements":announcements
+            "announcements":announcements,
+            "categories":categories
         }
         return Response(cache, status=200)
 
