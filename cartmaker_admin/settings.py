@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     "unfold",
     'django.contrib.admin',
     'django.contrib.auth',
+    'django.contrib.postgres',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
@@ -308,3 +309,7 @@ AWS_ACCESS_KEY_ID = env_manager.AWS_ACCESS_KEY_ID
 AWS_SECRET_ACCESS_KEY = env_manager.AWS_SECRET_ACCESS_KEY
 AWS_STORAGE_BUCKET_NAME = env_manager.AWS_STORAGE_BUCKET_NAME
 AWS_S3_REGION_NAME = env_manager.AWS_S3_REGION_NAME
+
+CEDULAS_API_APP_ID = env_manager.CEDULAS_API_APP_ID
+CEDULAS_API_ACCESS_TOKEN = env_manager.CEDULAS_API_ACCESS_TOKEN
+USE_CEDULAS_API = env_manager.USE_CEDULAS_API

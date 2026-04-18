@@ -1,8 +1,6 @@
 from django.urls import path, include
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
-from .views import CartMakerTokenView, RegisterView, Home, GoogleLoginView, GoogleClientId,\
-VerifyEmailView, ResendEmailView, ClientLocationViewSet, GoogleRegistView, UserCacheAPI, HomeCacheAPI, \
-VerifyPasswordAPI, UserViewSet, ClientContactMethodViewSet
+from .views import *
 from rest_framework_simplejwt.views import (
     TokenRefreshView,
 )
@@ -33,6 +31,9 @@ urlpatterns = [
     path('api/v1/email/verify', VerifyEmailView.as_view(), name='verify_email'),
     path('api/v1/email/resend', ResendEmailView.as_view(), name='resend_email'),
     path('api/v1/verify-password', VerifyPasswordAPI.as_view(), name='verify_password'),
+    # Rutas para la verificacion de usuarios
+    path('api/v1/check-cedula/<str:cedula_number>/', CheckIfCedulaExists.as_view(), name='check-cedula-exists'),
+    path('api/v1/verify-user', VerifyUser.as_view(), name='verify_user'),
     # CRUD de modelos (viewsets)
     path('api/v1/', include(router.urls)),
     # Vistas web

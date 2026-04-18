@@ -2,7 +2,7 @@ import uuid
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
 from django.contrib.gis.db import models as gis_models
-from pgvector.django import VectorField
+from pgvector.django import HnswIndex, VectorField
 from django.utils.translation import gettext_lazy as _
 from django.conf import settings
 from .cos import storage_manager
@@ -26,6 +26,13 @@ class UserType(models.IntegerChoices):
     CLIENT = 0, _('Cliente')
     MERCHANT = 1, _('Vendedor')
     ADMIN = 2, _('Administrador')
+
+class UserNacionality(models.IntegerChoices):
+    """
+    ENUM Nacionalidad del usuario.
+    """
+    VENEZOLANO = 0, _('Venezolano')
+    EXTRANJERO = 1, _('Extranjero')
 
 class ContactMethodType(models.IntegerChoices):
     """
@@ -128,6 +135,7 @@ class User(AbstractBaseUser, PermissionsMixin):
         first_name (str): Nombre del usuario.
         last_name (str): Apellido del usuario.
         email (str): Correo electrónico único.
+        nacionality (int): Nacionalidad del usuario.
         password (str): Hash de la clave de acceso.
         birth_date (datetime): Fecha de nacimiento.
         email_verified (bool): Indica si el correo fue validado.
@@ -147,16 +155,17 @@ class User(AbstractBaseUser, PermissionsMixin):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     first_name = models.CharField(max_length=150, blank=True)
     last_name = models.CharField(max_length=150, blank=True)
-    birth_date = models.DateTimeField(null=True, blank=True)
+    birth_date = models.DateField(null=True, blank=True)
     email = models.EmailField(unique=True)
+    nacionality = models.IntegerField(default=None, null=True, blank=True, choices=UserNacionality)
     email_verified = models.BooleanField(default=False)
     creation = models.DateTimeField(auto_now_add=True)
     user_type = models.IntegerField(choices=UserType.choices, default=UserType.CLIENT)
     profile_picture = models.CharField(max_length=500, default="")
-    cedula_document = models.URLField(max_length=500, null=True, blank=True)
+    cedula_document = models.CharField(max_length=500, null=True, blank=True)
     cedula_verified = models.BooleanField(default=False)
     cedula_number = models.CharField(max_length=50, null=True, blank=True)
-    biometric_vector = VectorField(dimensions=512, null=True, blank=True)
+    biometric_vector = VectorField(dimensions=192, null=True, blank=True)
     gender = models.IntegerField(choices=UserGender.choices, default=UserGender.MALE)
     is_external_account = models.BooleanField(default=False)
 
@@ -164,6 +173,18 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = ['first_name', 'last_name', 'password']
+
+    class Meta:
+        # Aquí sumamos, no restamos.
+        indexes = [
+            HnswIndex(
+                name='user_biometric_hsnw_idx',
+                fields=['biometric_vector'],
+                m=16,
+                ef_construction=64,
+                opclasses=['vector_cosine_ops']
+            ),
+        ]
 
     def get_profile_picture_url(self) -> str:
         """

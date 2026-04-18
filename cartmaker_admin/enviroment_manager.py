@@ -45,6 +45,9 @@ class EnviromentManager:
         self._aws_secret_access_key = None
         self._aws_storage_bucket_name = None
         self._aws_s3_region_name = None
+        self._cedulas_api_app_id = None
+        self._cedulas_api_access_token = None
+        self._use_cedulas_api = None
         self.__execute_sh_file()
         self.__load_enviroment_variables()
 
@@ -151,6 +154,27 @@ class EnviromentManager:
         """
         return self._aws_s3_region_name
     
+    @property
+    def CEDULAS_API_APP_ID(self) -> str:
+        """
+        App id de la api de cedulas.
+        """
+        return self._cedulas_api_app_id
+    
+    @property
+    def CEDULAS_API_ACCESS_TOKEN(self) -> str:
+        """
+        Access token de la api de cedulas.
+        """
+        return self._cedulas_api_access_token
+    
+    @property
+    def USE_CEDULAS_API(self) -> bool:
+        """
+        Indica si se debe usar la api de cedulas.
+        """
+        return self._use_cedulas_api
+    
     def __get_env_variable_description(self, env_variable_name:str)->str:
         """
         Retorna una descripcion para la variable indicada.
@@ -208,6 +232,9 @@ class EnviromentManager:
             "AWS_SECRET_ACCESS_KEY":os.environ.get('AWS_SECRET_ACCESS_KEY'),
             "AWS_STORAGE_BUCKET_NAME":os.environ.get("AWS_STORAGE_BUCKET_NAME"),
             "AWS_S3_REGION_NAME":os.environ.get("AWS_S3_REGION_NAME"),
+            "CEDULAS_API_APP_ID":os.environ.get("CEDULAS_API_APP_ID"),
+            "CEDULAS_API_ACCESS_TOKEN":os.environ.get("CEDULAS_API_ACCESS_TOKEN"),
+            "USE_CEDULAS_API":self.__process_boolean_env_variable(os.environ.get('USE_CEDULAS_API')),
         }
         self.__check_variables(env_variables)
         self._db_name = env_variables['DB_NAME']
@@ -227,6 +254,9 @@ class EnviromentManager:
         self._aws_secret_access_key = env_variables['AWS_SECRET_ACCESS_KEY']
         self._aws_storage_bucket_name = env_variables['AWS_STORAGE_BUCKET_NAME']
         self._aws_s3_region_name = env_variables['AWS_S3_REGION_NAME']
+        self._cedulas_api_app_id = env_variables['CEDULAS_API_APP_ID']
+        self._cedulas_api_access_token = env_variables['CEDULAS_API_ACCESS_TOKEN']
+        self._use_cedulas_api = env_variables['USE_CEDULAS_API']
 
     def __process_boolean_env_variable(self, variable:str)->bool:
         """Procesa la variable indicada en el parametro. Se espera

@@ -1,3 +1,5 @@
+import math
+
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
@@ -5,6 +7,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from .models import *
 from web.utils import *
 from django.contrib.gis.geos import Point
+from pgvector.django import CosineDistance
 
 User = get_user_model()
 
@@ -180,3 +183,48 @@ class ProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = '__all__'
+
+class VerifyUserSerializer(serializers.Serializer):
+    first_name = serializers.CharField(max_length=150, required=True)
+    last_name = serializers.CharField(max_length=150, required=True)
+    cedula_number = serializers.CharField(max_length=20, required=True)
+    birth_date = serializers.DateField(format="%d/%m/%Y", input_formats=['%d/%m/%Y'], required=True)
+    cedula_photo = serializers.ImageField(required=True)
+    nacionality = serializers.CharField(max_length=1, required=True)
+    biometry = serializers.ListField(
+        child=serializers.FloatField(),
+        min_length=192,
+        max_length=192,
+        required=True
+    )
+
+    def validate_biometry(self, value):
+        """
+        Validación de identidad duplicada usando el índice HNSW y Distancia del Coseno.
+        """
+        # 1. Definimos el umbral de Distancia del Coseno.
+        # En FaceNet/InsightFace, una distancia < 0.15 - 0.20 suele indicar la misma persona.
+        THRESHOLD = 0.18 
+        
+        current_user = self.context['request'].user
+
+        # 2. Ejecutamos la búsqueda vectorial en la DB.
+        # Gracias al HnswIndex, esto es O(log n) en lugar de O(n).
+        closest_match = User.objects.exclude(id=current_user.id).filter(
+            cedula_verified=True,
+            biometric_vector__isnull=False
+        ).annotate(
+            distance=CosineDistance('biometric_vector', value)
+        ).order_by('distance').first()
+
+        # 3. Verificamos si el más cercano es "demasiado" parecido
+        if closest_match and closest_match.distance < THRESHOLD:
+            # Log para auditoría interna
+            print(f"🚨 ALERTA DE SEGURIDAD: Intento de duplicado. Distancia: {closest_match.distance}")
+            print(f"Comparado con C.I: {closest_match.cedula_number}")
+            
+            raise serializers.ValidationError(
+                "Esta identidad biométrica ya está vinculada a otra cuenta verificada."
+            )
+
+        return value

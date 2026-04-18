@@ -19,6 +19,45 @@ from django.contrib.auth.hashers import check_password
 from .cos import storage_manager
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from datetime import datetime
+import requests
+from django.db import transaction
+
+class VerifyUser(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'navigation'
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = VerifyUserSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        user = request.user
+        try:
+            with transaction.atomic():
+                file_obj = data['cedula_photo']
+                extension = file_obj.name.split('.')[-1]
+                file_name = f"cedula_{user.id}.{extension}"
+                folder = "cedulas"
+                relative_path = storage_manager.save_file(file_obj, folder, file_name)
+                print("RUTA RELATIVA A LA CEDULA DEL USUARIO: ", relative_path)
+                if relative_path:
+                    user.cedula_document = relative_path
+                else:
+                    raise Exception("Error al guardar el archivo de la cedula en el storage.")
+                user.first_name = str(data['first_name']).capitalize()
+                user.last_name = str(data['last_name']).capitalize()
+                user.cedula_number = data['cedula_number']
+                user.nacionality = UserNacionality.VENEZOLANO if str(data['nacionality']).upper() == "V" else UserNacionality.EXTRANJERO
+                user.biometric_vector = data['biometry']
+                user.birth_date = data['birth_date']
+                user.cedula_verified = True
+                user.save()
+            return Response({
+                "message": "Identidad confirmada. Ahora eres un usuario verificado en CartMaker."
+            }, status=status.HTTP_200_OK) 
+        except Exception as e:
+            print(f"Error al verificar al usuario: {e}")
+            raise Exception("Hubo un problema al procesar tu verificación. Inténtalo de nuevo.")
 
 class CartMakerTokenView(TokenObtainPairView):
     """
@@ -263,7 +302,7 @@ class UserCacheAPI(APIView):
         """
         user = request.user
         locations = [location.get_json() for location in ClientLocation.objects.filter(user=user)]
-        contact_methods = [contact_method.get_json() for contact_method in ClientContactMethod.objects.filter(client=user)]
+        contact_methods = [contact_method.get_json() for contact_method in ClientContactMethod.objects.filter(client=user).order_by('method_type')]
         cache = {
             "user_id":user.id,
             "email":user.email,
@@ -305,6 +344,65 @@ class HomeCacheAPI(APIView):
             "categories":categories
         }
         return Response(cache, status=200)
+    
+class CheckIfCedulaExists(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'actions'
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, cedula_number: str):
+        details = {'error': '', 'data_retrieved': False}
+        status_code = status.HTTP_200_OK
+
+        # 1. Validación de duplicados
+        if User.objects.filter(cedula_number=cedula_number).exists():
+            return Response(
+                {'error': f"Ya existe un usuario con la cédula {cedula_number}."}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if settings.USE_CEDULAS_API:
+            nacionalidad = cedula_number[0].upper()
+            cedula = cedula_number[1:] # Asumiendo formato V123456
+            
+            try:
+                cedula_api_response = requests.get(
+                    f'https://api.cedula.com.ve/api/v1',
+                    params={
+                        'app_id': settings.CEDULAS_API_APP_ID,
+                        'token': settings.CEDULAS_API_ACCESS_TOKEN,
+                        'nacionalidad': nacionalidad,
+                        'cedula': cedula
+                    },
+                    timeout=5 # Siempre pon timeout para no colgar tu server
+                )
+                
+                api_data = cedula_api_response.json()
+                error = api_data.get('error', True)
+
+                if not error:
+                    # CASO A: Existe en CNE. Traemos nombre y fecha real.
+                    details = api_data['data']
+                    fecha_objeto = datetime.strptime(details['fecha_nac'], '%Y-%m-%d')
+                    details['fecha_nac'] = fecha_objeto.strftime('%d/%m/%Y')
+                    details['data_retrieved'] = True
+                    return Response(details, status=status.HTTP_200_OK)
+                
+                else:
+                    # CASO B: No existe en CNE (como tu sobrino)
+                    # En lugar de 404, devolvemos un 200 pero avisamos que no hay data.
+                    # El Flutter deberá permitirle al usuario escribir su nombre manualmente.
+                    return Response({
+                        'data_retrieved': False,
+                        'message': 'Documento no está en CNE (posible menor de edad). Proceda con carga manual.'
+                    }, status=status.HTTP_200_OK)
+
+            except Exception as e:
+                print(f"ERROR API CEDULA: {e}")
+                # Si la API se cae, permitimos registro manual para no perder la venta
+                return Response({'data_retrieved': False}, status=status.HTTP_200_OK)
+
+        return Response({'data_retrieved': False}, status=status_code)
 
 class VerifyPasswordAPI(APIView):
     throttle_classes = [ScopedRateThrottle]
@@ -313,14 +411,14 @@ class VerifyPasswordAPI(APIView):
 
     def post(self, request):
         """
-        Devuelve 200 si la contrasenia es correcta, 401 si no.
+        Devuelve 200 si la contrasenia es correcta. 403 si no.
         """
         user = request.user
         password_input = request.data.get('password')
         if not password_input:
             return Response({'error':"Debe ingresar la contrasenia."}, status=400)
         if not check_password(password_input, user.password):
-            return Response({'error':"Contrasenia incorrecta."}, status=400)
+            return Response({'error':"Contrasenia incorrecta."}, status=403)
         return Response(status=200)
 
 class Home(APIView):
