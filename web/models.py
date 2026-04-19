@@ -185,6 +185,9 @@ class User(AbstractBaseUser, PermissionsMixin):
                 opclasses=['vector_cosine_ops']
             ),
         ]
+    
+    def __str__(self)-> str:
+        return f"{self.first_name} {self.last_name} ({self.email})"
 
     def get_profile_picture_url(self) -> str:
         """
@@ -690,8 +693,26 @@ class MerchantPlan(models.Model):
     gamification_analytics = models.BooleanField(default=False)
     digital_performance_analytics = models.BooleanField(default=False)
     clients_behavior_analytics = models.BooleanField(default=False)
-    operative_managment_analytics = models.BooleanField(default=False)
+    operative_management_analytics = models.BooleanField(default=False)
     company_branches = models.BooleanField(default=False)
+    company_employees = models.BooleanField(default=False)
+
+    def get_json(self) -> dict:
+        return {
+            'id': self.id,
+            'name': self.name,
+            'price': float(self.price),
+            'inventory_capacity': self.inventory_capacity,
+            'products_registration_with_ia': self.products_registration_with_ia,
+            'profile_histories': self.profile_histories,
+            'gamification_system': self.gamification_system,
+            'gamification_analytics': self.gamification_analytics,
+            'digital_performance_analytics': self.digital_performance_analytics,
+            'clients_behavior_analytics': self.clients_behavior_analytics,
+            'operative_management_analytics': self.operative_management_analytics,
+            'company_branches': self.company_branches,
+            'company_employees': self.company_employees,
+        }
 
 class MerchantSubscription(models.Model):
     """

@@ -17,12 +17,14 @@ router.register(r'client-contact-methods', ClientContactMethodViewSet, basename=
 urlpatterns = [
     # Rutas para la documentación de la API
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
-    path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
+    path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger_ui'),
     # Rutas para la obtencion de datos
-    path('api/v1/cache/user', UserCacheAPI.as_view(), name="user-cache"),
-    path('api/v1/cache/home', HomeCacheAPI.as_view(), name="home-cache"),
+    path('api/v1/cache/user', UserCacheAPI.as_view(), name="user_cache"),
+    path('api/v1/cache/home', HomeCacheAPI.as_view(), name="home_cache"),
+    path('api/v1/get-merchant-plans', GetMerchantPlans.as_view(), name="get_merchant_plans"),
     # Rutas para la autenticacion
     path('api/v1/token', CartMakerTokenView.as_view(), name='token_obtain_pair'),
+    path('api/v1/biometric-login', BiometricLoginView.as_view(), name='biometric_login'),
     path('api/v1/token/refresh', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/v1/register', RegisterView.as_view(), name="register"),
     path('api/v1/google/auth', GoogleLoginView.as_view(), name='google_login'),

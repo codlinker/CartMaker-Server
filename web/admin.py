@@ -172,12 +172,18 @@ class CategoryAdmin(ModelAdmin):
 class SubCategory(ModelAdmin):
     list_display = ("id", "name", "img_url", "parent_category")
 
+@admin.register(MerchantPlan)
+class MerchantPlanAdmin(ModelAdmin):
+    list_display = ('name', 'price', 'inventory_capacity', 'products_registration_with_ia',
+    'profile_histories', 'gamification_system', 'gamification_analytics', 'digital_performance_analytics',
+    'clients_behavior_analytics', 'company_branches', 'company_employees')
+
 # Modelos de Soporte y Configuración (Registro Simple con Estilo Unfold)
 others = [
     CompanyCategory, InventoryItemOffer, 
     InventoryItemTransaction, InventoryItemQuestion, OrderCancellationTopic, 
     TokenWalletTransaction, StoreCalification, ProductCalification, 
-    MerchantCalification, SupportTicket, MerchantPlan, AtlasMessage, 
+    MerchantCalification, SupportTicket, AtlasMessage, 
     SystemConfig, UserNavigationLog, ClientContactMethod, 
     StoreContactMethod
 ]
