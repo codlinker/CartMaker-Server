@@ -114,7 +114,7 @@ class MerchantSubscriptionAdmin(ModelAdmin):
 @admin.register(AtlasPlusPlanPayment)
 class PaymentAdmin(ModelAdmin):
     list_display = ("reference_number", "amount", "status_label", "verified_at")
-    list_filter = ("status", "payment_method")
+    list_filter = ("status",)
 
     @display(description="Estado Pago", label=True)
     def status_label(self, obj):
@@ -177,6 +177,10 @@ class MerchantPlanAdmin(ModelAdmin):
     list_display = ('name', 'price', 'inventory_capacity', 'products_registration_with_ia',
     'profile_histories', 'gamification_system', 'gamification_analytics', 'digital_performance_analytics',
     'clients_behavior_analytics', 'company_branches', 'company_employees')
+
+@admin.register(CartMakerBankAccount)
+class CartMakerBankAccountAdmin(ModelAdmin):
+    list_display = ('bank', 'pago_movil_enabled', 'tlf', 'document_number', 'document_type', 'beneficiary_name')
 
 # Modelos de Soporte y Configuración (Registro Simple con Estilo Unfold)
 others = [

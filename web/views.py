@@ -380,13 +380,25 @@ class VerifyUser(APIView):
             print(f"Error al verificar al usuario: {e}")
             raise Exception("Hubo un problema al procesar tu verificación. Inténtalo de nuevo.")
 
-####################################################
-###################### CACHE #######################
-####################################################
+######################################################
+###################### ACTIONS #######################
+######################################################
+
+class GetCartMakerAccounts(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'actions'
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """
+        Devuelve todas las cuentas bancarias disponibles para CartMaker.
+        """
+        return Response({'data':[bank.get_json() for bank in CartMakerBankAccount.objects.filter(active=True)]}, status=status.HTTP_200_OK)
+
 
 class GetMerchantPlans(APIView):
     throttle_classes = [ScopedRateThrottle]
-    throttle_scope = 'navigation'
+    throttle_scope = 'actions'
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -394,7 +406,90 @@ class GetMerchantPlans(APIView):
         Devuelve todas los planes disponibles para comerciantes.
         """
         plans = [mp.get_json() for mp in MerchantPlan.objects.all().order_by('price')]
+        dollar_bcv_tax = 0.0
+        bs_price = 0.0
+        try:
+            response = requests.get('https://ve.dolarapi.com/v1/estado')
+            response.raise_for_status()
+            data = response.json()
+            api_available = data.get('estado') == 'Disponible' if data.get('estado') else False
+            if api_available:
+                response = requests.get('https://ve.dolarapi.com/v1/dolares/oficial')
+                response.raise_for_status()
+                data = response.json()
+                dollar_bcv_tax = data.get('promedio', 0.0)
+        except Exception as e:
+            print(f"Error obteniendo el precio del dolar bcv: {e}")
+        for plan in plans:
+            if dollar_bcv_tax > 0.0:
+                bs_price = plan['price'] * dollar_bcv_tax
+            plan['bs_price'] = bs_price
+            plan['dollar_bcv_tax'] = dollar_bcv_tax
         return Response({'data':plans}, status=status.HTTP_200_OK)
+    
+class UploadSubscriptionPayment(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'actions'
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = UploadSubscriptionPaymentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        bank_api_available = False 
+        # TODO: Implementar chequeo de disponibilidad de api de bancos.
+        subscription_type = data['subscription_type']
+        subscription_id = data['subscription_id']
+        if subscription_type == 1:
+            # TODO: Subscripciones de Atlas Plus
+            pass
+        elif subscription_type == 2:
+            try:
+                merchant_plan = MerchantPlan.objects.get(id=subscription_id)
+            except MerchantPlan.DoesNotExist:
+                return Response({'error':'Plan de comerciante no encontrado.'}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                merchant_subscription = MerchantSubscription.objects.get(merchant=request.user)
+                if merchant_subscription.valid_until < datetime.now():
+                    return Response({'error':'La suscripcion aun esta activa.'}, status=status.HTTP_406_NOT_ACCEPTABLE)
+            except MerchantSubscription.DoesNotExist:
+                merchant_subscription = MerchantSubscription.objects.create(
+                    merchant=request.user,
+                    merchant_type = MerchantType.BUSINESS if merchant_plan.requires_business else MerchantType.ENTREPRENEUR,
+                    plan = merchant_plan
+                )
+            if not bank_api_available:
+                file_obj = data['payment_proof']
+                extension = file_obj.name.split('.')[-1]
+                file_name = f"payment_proof_{merchant_subscription.id}_{datetime.now().strftime('%d-%m-%Y_%H-%M-%S')}.{extension}"
+                folder = f"subscriptions/merchant_plans/{merchant_plan.name}"
+                relative_path = storage_manager.save_file(file_obj, folder, file_name)
+                try:
+                    payment = MerchantPlanPayment.objects.get(subscription=merchant_subscription)
+                    payment.reference_number = data['reference_number']
+                    payment.payment_proof_url = storage_manager.get_url(relative_path)
+                    payment.amount=data['amount_sended']
+                    payment.bcv_taxes_to_day=data['dollar_bcv_tax']
+                except MerchantPlanPayment.DoesNotExist:
+                    payment = MerchantPlanPayment(
+                        subscription=merchant_subscription,
+                        reference_number = data['reference_number'],
+                        payment_proof_url = storage_manager.get_url(relative_path),
+                        amount=data['amount_sended'],
+                        bcv_taxes_to_day=data['dollar_bcv_tax'],
+                    )
+                payment.save()
+                return Response(status=status.HTTP_201_CREATED)
+            else:
+                # TODO: Implementar caso para utilizar api de bancos para validar el pago.
+                pass
+            return Response(status=status.HTTP_200_OK)
+        else:
+            return Response({'error':'Tipo de subscripcion no valida.'}, status=status.HTTP_400_BAD_REQUEST)
+
+####################################################
+###################### CACHE #######################
+####################################################
 
 class UserCacheAPI(APIView):
     throttle_classes = [ScopedRateThrottle]

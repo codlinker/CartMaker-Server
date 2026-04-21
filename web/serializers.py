@@ -234,3 +234,12 @@ class VerifyUserSerializer(serializers.Serializer):
                     'Error interno al validar la biometría. Por favor, intentelo de nuevo.'
                 )
         return value
+
+class UploadSubscriptionPaymentSerializer(serializers.Serializer):
+    reference_number = serializers.CharField(required=True)
+    payment_date = serializers.DateField(format="%d/%m/%Y", input_formats=['%d/%m/%Y'], required=True)
+    amount_sended = serializers.FloatField(required=True)
+    subscription_type = serializers.IntegerField(required=True)
+    subscription_id = serializers.IntegerField(required=True)
+    payment_proof = serializers.ImageField(required=True)
+    dollar_bcv_tax = serializers.FloatField(required=True)

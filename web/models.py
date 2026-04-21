@@ -6,6 +6,7 @@ from pgvector.django import HnswIndex, VectorField
 from django.utils.translation import gettext_lazy as _
 from django.conf import settings
 from .cos import storage_manager
+from colorfield.fields import ColorField
 
 # ==========================================
 # ENUMS (Para validación automática en DRF)
@@ -80,12 +81,43 @@ class PaymentStatus(models.IntegerChoices):
     APPROVED = 1, _('Aprobada')
     REJECTED = 2, _('Rechazada')
 
-class PaymentMethod(models.IntegerChoices):
+class BankDocumentType(models.IntegerChoices):
     """
-    ENUM Metodo de pago.
+    ENUM para el tipo de documento del banco.
     """
-    TRANSFER = 0, _('Transferencia')
-    MOBILE_PAYMENT = 1, _('Pago Móvil')
+    CEDULA = 0, _('CI'),
+    RIF = 1, _('RIF')
+
+
+class BankEnum(models.IntegerChoices):
+    """
+    ENUM del banco.
+    """
+    BANESCO = 0, _('Banesco')
+    MERCANTIL = 1, _('Banco Mercantil')
+    PROVINCIAL = 2, _('BBVA Provincial')
+    VENEZUELA = 3, _('Banco de Venezuela')
+    EXTERIOR = 4, _('Banco Exterior')
+    BNC = 5, _('Banco Nacional de Crédito')
+    BANPLUS = 6, _('Banplus')
+    DIGITAL_DE_LOS_TRABAJADORES = 7, _('Banco Digital de los Trabajadores')
+    SOFITASA = 8, _('Sofitasa')
+    PLAZA = 9, _('Banco Plaza')
+    BANCAMIGA = 10, _('Bancamiga')
+
+BANK_IMAGES = {
+    BankEnum.BANESCO:"img/bank_icons/banesco.png",
+    BankEnum.MERCANTIL:"img/bank_icons/banco_mercantil.png",
+    BankEnum.PROVINCIAL:"img/bank_icons/banco_provincial.png",
+    BankEnum.VENEZUELA:"img/bank_icons/banco_de_venezuela.png",
+    BankEnum.EXTERIOR:"img/bank_icons/banco_exterior.png",
+    BankEnum.BNC:"img/bank_icons/bnc.png",
+    BankEnum.BANPLUS:"img/bank_icons/banplus.png",
+    BankEnum.DIGITAL_DE_LOS_TRABAJADORES:"img/bank_icons/banco_digital_de_los_trabajadores.png",
+    BankEnum.SOFITASA:"img/bank_icons/banco_sofitasa.png",
+    BankEnum.PLAZA:"img/bank_icons/banco_plaza.png",
+    BankEnum.BANCAMIGA:"img/bank_icons/bancamiga.png"
+}
 
 class MessageOrigin(models.IntegerChoices):
     """
@@ -669,7 +701,7 @@ class SupportTicket(models.Model):
 
 class MerchantPlan(models.Model):
     """
-    Definición de paquetes de servicios para comercios.
+    Definición de paquetes de planes para comercios y su configuración visual en la App.
 
     Attributes:
         name (str): Nombre comercial del plan.
@@ -681,8 +713,20 @@ class MerchantPlan(models.Model):
         gamification_analytics (bool): Métricas de fidelización.
         digital_performance_analytics (bool): Métricas de rendimiento.
         clients_behavior_analytics (bool): Métricas de comportamiento.
-        operative_managment_analytics (bool): Métricas operativas.
+        operative_management_analytics (bool): Métricas operativas.
         company_branches (bool): Permite múltiples sucursales.
+        company_employees (bool): Permite gestión de múltiples empleados.
+
+        is_popular (bool): Flag para destacar el plan con un banner de 'POPULAR'.
+        short_description_html (str): Resumen para la tarjeta principal (soporta <b>).
+        large_description_html (str): Detalle extendido para la vista de beneficios.
+        warning_description_html (str): Requisitos o notas críticas en color de alerta.
+        requires_business (bool): Indica si requiere que el propietario sea una compania registrada.
+        
+        card_bg_color (str): Color Hexadecimal para el fondo de la tarjeta.
+        label_bg_color (str): Color Hexadecimal para el fondo de la etiqueta de título.
+        label_border_color (str): Color Hexadecimal para el borde de la etiqueta de título.
+        label_text_color (str): Color Hexadecimal para el texto del título del plan.
     """
     name = models.CharField(max_length=255)
     price = models.DecimalField(max_digits=12, decimal_places=2)
@@ -696,22 +740,98 @@ class MerchantPlan(models.Model):
     operative_management_analytics = models.BooleanField(default=False)
     company_branches = models.BooleanField(default=False)
     company_employees = models.BooleanField(default=False)
+    # Campos design
+    is_popular = models.BooleanField(
+        default=False, 
+        help_text="Si está activo, mostrará el banner de 'POPULAR' y resaltará la tarjeta."
+    )
+    short_description_html = models.TextField(
+        blank=True,
+        help_text="Descripción corta del plan. Sale en la tarjeta."
+    )
+    large_description_html = models.TextField(
+        blank=True,
+        help_text="Descripción larga del plan. Sale en la pantalla de beneficios."
+    )
+    warning_description_html = models.TextField(
+        blank=True,
+        help_text="Corta descripcion de requisitos indispensables. (Se ven de color rojo en la pantalla de beneficios)"
+    )
+    requires_business = models.BooleanField(default=False)
+    card_bg_color = ColorField(default='#E7E7E7', help_text="Color de fondo de la tarjeta")
+    label_bg_color = ColorField(default='#B79DF0', help_text="Fondo de la etiqueta del nombre")
+    label_border_color = ColorField(default='#6200EE', help_text="Borde de la etiqueta del nombre")
+    label_text_color = ColorField(default='#FFFFFF', help_text="Color del texto de la etiqueta")
 
     def get_json(self) -> dict:
         return {
             'id': self.id,
             'name': self.name,
             'price': float(self.price),
-            'inventory_capacity': self.inventory_capacity,
-            'products_registration_with_ia': self.products_registration_with_ia,
-            'profile_histories': self.profile_histories,
-            'gamification_system': self.gamification_system,
-            'gamification_analytics': self.gamification_analytics,
-            'digital_performance_analytics': self.digital_performance_analytics,
-            'clients_behavior_analytics': self.clients_behavior_analytics,
-            'operative_management_analytics': self.operative_management_analytics,
-            'company_branches': self.company_branches,
-            'company_employees': self.company_employees,
+            "bs_price":0.0, # Se llenan en las peticiones
+            "dollar_bcv_tax":0.0, # Se llenan en las peticiones
+            'benefits': {
+                'inventory_capacity': {
+                    "label": "Capacidad del inventario",
+                    "description":"Límite de productos registrados en el inventario.",
+                    "value": self.inventory_capacity
+                },
+                'products_registration_with_ia': {
+                    "label": "Registro de productos con IA",
+                    "description":"Permite escanear productos con IA para rellenar los campos correspondientes a los datos del producto automáticamente, así como también recibir sugerencias de precio.",
+                    "value": self.products_registration_with_ia
+                },
+                'profile_histories': {
+                    "label": "Historial de perfiles",
+                    "description":"Desbloquea la función de subir historias en tu cuenta de comerciante, al igual que en Instagram. Mantén a los clientes al tanto de tus promociones y ofertas a través del contenido multimedia.",
+                    "value": self.profile_histories
+                },
+                'gamification_system': {
+                    "label": "Sistema de gamificación",
+                    "description":"Incentiva las ventas brindándoles a tus clientes la posibilidad de obtener tokens por comprar en tu tienda y poder canjearlos por descuentos en tus productos.",
+                    "value": self.gamification_system
+                },
+                'gamification_analytics': {
+                    "label": "Analítica de gamificación",
+                    "description":"Sección de datos sobre los resultados y rendimiento del sistema de gamificación.",
+                    "value": self.gamification_analytics
+                },
+                'digital_performance_analytics': {
+                    "label": "Analítica de rendimiento digital",
+                    "description":"Sección de datos sobre visualizaciones de la tienda, conversión de ventas, efectividad de productos y membresía.",
+                    "value": self.digital_performance_analytics
+                },
+                'clients_behavior_analytics': {
+                    "label": "Analítica de comportamiento de clientes",
+                    "description":"Sección de datos sobre retencion de clientes, rankings, mapas de calor sobre horas pico de compra.",
+                    "value": self.clients_behavior_analytics
+                },
+                'operative_management_analytics': {
+                    "label": "Analítica de gestión operativa",
+                    "description":"Sección de datos sobre el estado del inventario en cada sucursal, gastos promedios por cliente y contabilidad.",
+                    "value": self.operative_management_analytics
+                },
+                'company_branches': {
+                    "label": "Sucursales de la empresa",
+                    "description":"Permite la bifurcación de tu negocio en diferentes localizaciones. Podrás registrar cuantas sucursales desees y tendrás un inventario por cada una.",
+                    "value": self.company_branches
+                },
+                'company_employees': {
+                    "label": "Empleados de la empresa",
+                    "description":"Permite el registro de biometría de terceros para autorizar su acceso a la cuenta y gestionar sus permisos para ejecutar acciones.",
+                    "value": self.company_employees
+                },
+            },
+            'ui_data':{
+                'is_popular':self.is_popular,
+                'short_description_html':self.short_description_html,
+                'large_description_html':self.large_description_html,
+                'warning_description_html':self.warning_description_html,
+                'card_bg_color':self.card_bg_color,
+                'label_bg_color':self.label_bg_color,
+                'label_border_color':self.label_border_color,
+                'label_text_color':self.label_text_color
+            }
         }
 
 class MerchantSubscription(models.Model):
@@ -730,7 +850,7 @@ class MerchantSubscription(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     merchant = models.ForeignKey(User, on_delete=models.CASCADE, related_name='subscriptions')
     plan = models.ForeignKey(MerchantPlan, on_delete=models.PROTECT)
-    valid_until = models.DateTimeField()
+    valid_until = models.DateTimeField(null=True, default=None)
     merchant_type = models.IntegerField(choices=MerchantType.choices)
     rif_number = models.CharField(max_length=50, null=True, blank=True)
     company_document_url = models.URLField(max_length=500, null=True, blank=True)
@@ -747,7 +867,6 @@ class MerchantPlanPayment(models.Model):
         bcv_taxes_to_day (Decimal): Tasa de cambio oficial del día.
         status (int): Estado del pago (Pendiente, Verificado, Rechazado).
         verified_at (datetime): Fecha de validación por staff.
-        payment_method (int): Método usado (Pago Móvil, Transferencia).
     """
     subscription = models.ForeignKey(MerchantSubscription, on_delete=models.CASCADE, related_name='payments')
     reference_number = models.CharField(max_length=100)
@@ -756,7 +875,6 @@ class MerchantPlanPayment(models.Model):
     bcv_taxes_to_day = models.DecimalField(max_digits=10, decimal_places=4)
     status = models.IntegerField(choices=PaymentStatus.choices, default=PaymentStatus.PENDING)
     verified_at = models.DateTimeField(null=True, blank=True)
-    payment_method = models.IntegerField(choices=PaymentMethod.choices)
 
 
 # ==========================================
@@ -790,7 +908,6 @@ class AtlasPlusPlanPayment(models.Model):
         bcv_taxes_to_day (Decimal): Tasa oficial de cambio.
         status (int): Estado de verificación.
         verified_at (datetime): Fecha de aprobación.
-        payment_method (int): Canal de pago.
     """
     plan = models.ForeignKey(AtlasPlusPlan, on_delete=models.CASCADE, related_name='payments')
     reference_number = models.CharField(max_length=100)
@@ -799,7 +916,6 @@ class AtlasPlusPlanPayment(models.Model):
     bcv_taxes_to_day = models.DecimalField(max_digits=10, decimal_places=4)
     status = models.IntegerField(choices=PaymentStatus.choices, default=PaymentStatus.PENDING)
     verified_at = models.DateTimeField(null=True, blank=True)
-    payment_method = models.IntegerField(choices=PaymentMethod.choices)
 
 class AtlasThread(models.Model):
     """
@@ -831,6 +947,40 @@ class AtlasMessage(models.Model):
 # ==========================================
 # MÓDULO 8: CONFIGURACIÓN Y ANUNCIOS
 # ==========================================
+
+class CartMakerBankAccount(models.Model):
+    """
+    Bancos configurados en CartMaker para recibir pagos de suscripciones.
+    """
+    bank = models.IntegerField(blank=True, choices=BankEnum.choices)
+    pago_movil_enabled = models.BooleanField(default=False)
+    tlf = models.CharField(blank=True)
+    document_number = models.CharField()
+    document_type = models.IntegerField(choices=BankDocumentType.choices, default=BankDocumentType.CEDULA)
+    account_number = models.CharField()
+    active = models.BooleanField(default=True)
+    beneficiary_name = models.CharField(default='CODLINKER C.A')
+
+    @property
+    def bank_img_url(self)->str:
+        try:
+            return f"{settings.DOMAIN}{settings.STATIC_URL}{BANK_IMAGES[self.bank]}"
+        except Exception as e:
+            print(f"Error al obtener la imagen del banco: {e}")
+            return f"{settings.DOMAIN}{settings.STATIC_URL}img/no_image.jpg"
+        
+    def get_json(self)->dict:
+        return {
+            'id':self.id,
+            'bank':self.get_bank_display(),
+            'pago_movil_enabled':self.pago_movil_enabled,
+            'tlf':self.tlf,
+            'document_number':self.document_number,
+            'document_type':self.get_document_type_display(),
+            'account_number':self.account_number,
+            'beneficiary_name':self.beneficiary_name,
+            'bank_img_url':self.bank_img_url
+        }
 
 class SystemConfig(models.Model):
     """

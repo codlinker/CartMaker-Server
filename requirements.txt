@@ -45,3 +45,4 @@ watchfiles==1.1.1
 websockets==16.0
 whitenoise==6.12.0
 Pillow==12.2.0
+django-colorfield==0.14.0

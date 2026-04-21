@@ -22,6 +22,9 @@ urlpatterns = [
     path('api/v1/cache/user', UserCacheAPI.as_view(), name="user_cache"),
     path('api/v1/cache/home', HomeCacheAPI.as_view(), name="home_cache"),
     path('api/v1/get-merchant-plans', GetMerchantPlans.as_view(), name="get_merchant_plans"),
+    path('api/v1/get-cartmaker-bank-accounts', GetCartMakerAccounts.as_view(), name='get_cartmaker_bank_accounts'),
+    # Rutas para manejo de pagos
+    path('api/v1/upload-subscription-payment', UploadSubscriptionPayment.as_view(), name='upload_subscription_payment'),
     # Rutas para la autenticacion
     path('api/v1/token', CartMakerTokenView.as_view(), name='token_obtain_pair'),
     path('api/v1/biometric-login', BiometricLoginView.as_view(), name='biometric_login'),

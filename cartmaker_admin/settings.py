@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'drf_spectacular',
+    "colorfield",
     'web',
 ]
 
@@ -275,6 +276,7 @@ UNFOLD = {
             {
                 "title":"Configuración y Anuncios",
                 "items":[
+                    {'title':'Cuentas bancarias de CartMaker', 'link':"/admin/web/cartmakerbankaccount", "icon":"account_balance"},
                     {'title':"Configuración del sistema", "link":"/admin/web/systemconfig/", "icon":"settings"},
                     {"title":"Anuncios", "link":"/admin/web/announcement/", "icon":"brand_awareness"}
                 ]
