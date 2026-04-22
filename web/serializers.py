@@ -243,3 +243,7 @@ class UploadSubscriptionPaymentSerializer(serializers.Serializer):
     subscription_id = serializers.IntegerField(required=True)
     payment_proof = serializers.ImageField(required=True)
     dollar_bcv_tax = serializers.FloatField(required=True)
+
+class RegistDeviceSerializer(serializers.Serializer):
+    fcm_token = serializers.CharField(required=True)
+    platform = serializers.CharField(required=True)

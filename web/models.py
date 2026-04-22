@@ -228,6 +228,18 @@ class User(AbstractBaseUser, PermissionsMixin):
         return self.profile_picture if self.profile_picture.startswith('http')\
               else storage_manager.get_url(self.profile_picture)
 
+class DeviceToken(models.Model):
+    """
+    Token de Firebase asociado al dispositivo del usuario.
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='fcm_tokens')
+    token = models.CharField(max_length=255, unique=True)
+    creation = models.DateTimeField(auto_now_add=True)
+    platform = models.CharField(max_length=20, choices=[('android', 'Android'), ('ios', 'iOS')])
+
+    def __str__(self):
+        return f"Token de {self.user.username}"
+
 class ClientLocation(models.Model):
     """
     Direcciones guardadas por los clientes.

@@ -22,7 +22,7 @@ class OrderTransactionInline(TabularInline):
 
 @admin.register(User)
 class UserAdmin(ModelAdmin):
-    list_display = ("email", "full_name", "user_type_label", "is_external_account", "cedula_verified_status", "is_active", "gender")
+    list_display = ('id', "email", "full_name", "user_type_label", "is_external_account", "cedula_verified_status", "is_active", "gender")
     list_filter = ("user_type", "cedula_verified", "is_active", "gender")
     search_fields = ("email", "first_name", "last_name", "is_external_account")
     
@@ -181,6 +181,10 @@ class MerchantPlanAdmin(ModelAdmin):
 @admin.register(CartMakerBankAccount)
 class CartMakerBankAccountAdmin(ModelAdmin):
     list_display = ('bank', 'pago_movil_enabled', 'tlf', 'document_number', 'document_type', 'beneficiary_name')
+
+@admin.register(DeviceToken)
+class DeviceTokenAdmin(ModelAdmin):
+    list_display = ('user', 'token', 'creation', 'platform')
 
 # Modelos de Soporte y Configuración (Registro Simple con Estilo Unfold)
 others = [

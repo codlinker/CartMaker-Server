@@ -21,15 +21,41 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from datetime import datetime
 import requests
 from django.db import transaction
+from .firebase_admin import NotificationManager
 
 ####################################################
 ################## AUTENTICACION ###################
 ####################################################
 
+class RegistDeviceView(APIView):
+    serializer_class = RegistDeviceSerializer
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'auth'
+
+    def delete(self, request):
+        token = request.data.get('fcm_token')
+        DeviceToken.objects.filter(token=token, user=request.user).delete()
+        return Response({"message": "Token eliminado"}, status=status.HTTP_204_NO_CONTENT)
+
+    def post(self, request):
+        fcm_token = request.data.get('fcm_token')
+        platform = request.data.get('platform', 'android')
+        device, created = DeviceToken.objects.update_or_create(
+            token=fcm_token,
+            defaults={
+                'user': request.user, 
+                'platform': platform
+            }
+        )
+        return Response({"message": "Dispositivo registrado"}, status=status.HTTP_200_OK)
+
 class BiometricLoginView(APIView):
     """
     Endpoint para autenticación mediante vectores biométricos.
     """
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'auth'
+
     def post(self, request):
         vector = request.data.get('biometry')
         
@@ -63,7 +89,6 @@ class BiometricLoginView(APIView):
         if closest_user and closest_user.distance <= THRESHOLD:
             # ✅ ÉXITO: Generamos tokens manualmente
             refresh = RefreshToken.for_user(closest_user)
-            
             # Construimos la respuesta con la misma metadata que tu CartMakerTokenSerializer
             return Response({
                 'refresh': str(refresh),
@@ -113,7 +138,7 @@ class GoogleRegistView(APIView):
         try:
             idinfo = id_token.verify_oauth2_token(token, google_requests.Request(), settings.GOOGLE_OAUTH_CLIENT_ID)
             email = idinfo['email']
-            if User.objects.filter(email=email).exists():
+            if User.objects.filter(email=email, is_active=True).exists():
                 return Response({'error':'Ya existe esta cuenta.'}, status=400)
             first_name = idinfo.get('given_name', '')
             last_name = idinfo.get('family_name', '')
@@ -161,7 +186,7 @@ class GoogleLoginView(APIView):
             email = idinfo['email']
             try:
                 user = User.objects.only('id', 'email', 'first_name', 'last_name', 'gender', 'user_type'
-                                            ).get(email=email)
+                                            ).get(email=email, is_active=True)
             except User.DoesNotExist:
                 return Response({'error':"No existe esta cuenta."}, status=400)
             tokens = get_tokens_for_user(user) 
@@ -286,7 +311,7 @@ class CheckIfCedulaExists(APIView):
         status_code = status.HTTP_200_OK
 
         # 1. Validación de duplicados
-        if User.objects.filter(cedula_number=cedula_number).exists():
+        if User.objects.filter(cedula_number=cedula_number, is_active=True).exists():
             return Response(
                 {'error': f"Ya existe un usuario con la cédula {cedula_number}."}, 
                 status=status.HTTP_403_FORBIDDEN
@@ -521,7 +546,6 @@ class UserCacheAPI(APIView):
             "is_external_account":user.is_external_account,
             'contact_methods':contact_methods
         }
-        print(f"Cache del usuario {user}: {cache}")
         return Response(cache, status=200)
     
 class HomeCacheAPI(APIView):
@@ -582,7 +606,7 @@ class UserViewSet(mixins.RetrieveModelMixin,
     parser_classes = (JSONParser, MultiPartParser, FormParser)
 
     def get_queryset(self):
-        return User.objects.filter(id=self.request.user.id)
+        return User.objects.filter(id=self.request.user.id, is_active=True)
 
     def get_object(self):
         return self.request.user
@@ -623,3 +647,20 @@ class Home(APIView):
 
     def get(self, request):
         return Response({}, template_name='index.html')
+
+################################################################
+################### ENDPOINTS PARA TESTING #####################
+################################################################
+
+class SendNotificationToUser(APIView):
+    """
+    Prueba de envio de notificacion a traves de Firebase.
+    """
+    def post(self, request):
+        NotificationManager._send_multicast(
+            User.objects.get(id=request.data.get('user_id')),
+            request.data.get('title'),
+            request.data.get('message'),
+            request.data.get('payload')
+        )
+        return Response(status=status.HTTP_200_OK)

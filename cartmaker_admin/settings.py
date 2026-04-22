@@ -15,6 +15,9 @@ from .enviroment_manager import EnviromentManager
 from datetime import timedelta
 from django.utils.translation import gettext_lazy as _
 from django.templatetags.static import static
+import firebase_admin
+from firebase_admin import credentials
+import os
 
 env_manager = EnviromentManager()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -210,7 +213,8 @@ UNFOLD = {
                 "items": [
                     {"title": "Usuarios", "link": "/admin/web/user/", "icon": "account_circle"},
                     {"title":"Ubicaciones", "link":"/admin/web/clientlocation/", "icon":"location_on"},
-                    {'title':"Métodos de contacto", "link":"/admin/web/clientcontactmethod/", "icon":"call"}
+                    {'title':"Métodos de contacto", "link":"/admin/web/clientcontactmethod/", "icon":"call"},
+                    {'title':"Dispositivos registrados", "link":"/admin/web/devicetoken/", "icon":"phone"}
                 ],
             },
             {
@@ -301,6 +305,11 @@ CACHES = {
         'LOCATION': 'cartmaker-cache',
     }
 }
+
+# FIREBASE
+path_to_json = os.path.join(BASE_DIR, '.', 'firebase-adminsdk.json')
+cred = credentials.Certificate(path_to_json)
+firebase_admin.initialize_app(cred)
 
 # CREDENCIALES PARA SERVICIOS DE TERCEROS
 GOOGLE_OAUTH_CLIENT_ID=env_manager.GOOGLE_OAUTH_CLIENT_ID

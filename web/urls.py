@@ -26,6 +26,7 @@ urlpatterns = [
     # Rutas para manejo de pagos
     path('api/v1/upload-subscription-payment', UploadSubscriptionPayment.as_view(), name='upload_subscription_payment'),
     # Rutas para la autenticacion
+    path('api/v1/regist-new-device', RegistDeviceView.as_view(), name="regist_new_device"),
     path('api/v1/token', CartMakerTokenView.as_view(), name='token_obtain_pair'),
     path('api/v1/biometric-login', BiometricLoginView.as_view(), name='biometric_login'),
     path('api/v1/token/refresh', TokenRefreshView.as_view(), name='token_refresh'),
@@ -43,6 +44,8 @@ urlpatterns = [
     path('api/v1/', include(router.urls)),
     # Vistas web
     path('', Home.as_view(), name="home"),
+    # Rutas para testing
+    path('test/send-notification', SendNotificationToUser.as_view(), name="send_notification"),
 ]
 
 if settings.DEBUG:
