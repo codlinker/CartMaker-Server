@@ -7,6 +7,9 @@ from django.utils.translation import gettext_lazy as _
 from django.conf import settings
 from .cos import storage_manager
 from colorfield.fields import ColorField
+from django.core.exceptions import ValidationError
+from django.utils import timezone
+from django.utils.html import mark_safe
 
 # ==========================================
 # ENUMS (Para validación automática en DRF)
@@ -118,6 +121,35 @@ BANK_IMAGES = {
     BankEnum.PLAZA:"img/bank_icons/banco_plaza.png",
     BankEnum.BANCAMIGA:"img/bank_icons/bancamiga.png"
 }
+
+class RejectionReason(models.IntegerChoices):
+    """
+    ENUM Motivos de rechazo del pago.
+    """
+    INVALID_REFERENCE = 1, _('Referencia inválida o no encontrada')
+    INSUFFICIENT_AMOUNT = 2, _('Monto insuficiente')
+    INVALID_DATE = 3, _('Fecha de transferencia incorrecta')
+    FAKE_PROOF = 4, _('Comprobante falso o ilegible')
+    OTHER = 5, _('Otro motivo no especificado')
+
+class NotificationSection(models.IntegerChoices):
+    """
+    ENUM Tipo de notificacion.
+    """
+    HOME = 0, _('Home')
+    ORDERS = 1, _('Ordenes')
+    CART = 2, _('Carrito')
+    SEARCH = 3, _('Buscador')
+    ATLAS = 4, _('Atlas')
+    SETTINGS = 5, _('Ajustes')
+    HELP = 6, _('Ayuda')
+    
+class NotificationCategory(models.IntegerChoices):
+    # Usamos un rango distinto o simplemente empezamos desde 0
+    NEW_PAYMENT = 0, _('Nuevo pago recibido.')
+    PAYMENT_APPROVED = 1, _('Pago aprobado.')
+    PAYMENT_REJECTED = 2, _('Pago rechazado.')
+    SUBSCRIPTION_EXPIRED = 3, _('Suscripción expirada.')
 
 class MessageOrigin(models.IntegerChoices):
     """
@@ -240,6 +272,54 @@ class DeviceToken(models.Model):
     def __str__(self):
         return f"Token de {self.user.username}"
 
+class Notification(models.Model):
+    """
+    Modelo para gestionar las notificaciones persistentes en la interfaz de usuario (UI) de la App.
+
+    Este modelo actúa como la 'Fuente de la Verdad' para el sistema de alertas del frontend,
+    permitiendo sincronizar los contadores de notificaciones (badges) independientemente
+    del ciclo de vida de Firebase Cloud Messaging (FCM).
+
+    Atributos:
+        user (ForeignKey): Referencia al usuario que recibe la notificación.
+        section (int): Indica el módulo de la App (Home, Orders, etc.) donde se mostrará
+            la alerta, basado en `NotificationSection`.
+        category (int): Identifica el evento lógico específico (ej: pago aprobado) 
+            basado en `NotificationCategory`.
+        title (str): Título breve de la notificación para mostrar en la lista o push.
+        body (str): Contenido detallado del mensaje.
+        is_read (bool): Estado de lectura para el control de contadores en el NotificationProvider.
+        metadata (json): Almacén flexible para IDs adicionales (como payment_id), 
+            rutas de navegación o datos extras necesarios para la acción en Flutter.
+        created_at (datetime): Fecha de creación para ordenamiento cronológico.
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
+    section = models.IntegerField(choices=NotificationSection.choices)
+    title = models.CharField(max_length=255)
+    body = models.TextField()
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    category = models.IntegerField(choices=NotificationCategory.choices)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"[{self.get_category_display()}] {self.title} - {self.user.username}"
+
+    def get_json(self)->dict:
+        return {
+            "id":self.id,
+            "section":self.section.__index__(),
+            "title":self.title,
+            "body":self.body,
+            "is_read":self.is_read,
+            "created_at":timezone.localtime(self.created_at).strftime("%d/%m/%Y, %H:%M:%S"),
+            "category":self.category.__index__(),
+            "metadata":self.metadata
+        }
+
 class ClientLocation(models.Model):
     """
     Direcciones guardadas por los clientes.
@@ -332,7 +412,7 @@ class CompanyStore(models.Model):
     name = models.CharField(max_length=255)
     creation = models.DateTimeField(auto_now_add=True)
     business_hours = models.JSONField(default=dict)
-    image = models.URLField(max_length=500, null=True, blank=True)
+    image = models.CharField(max_length=500, null=True, blank=True)
 
 class StoreLocation(models.Model):
     """
@@ -860,33 +940,72 @@ class MerchantSubscription(models.Model):
         company_document_url (str): URL del registro mercantil.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    merchant = models.ForeignKey(User, on_delete=models.CASCADE, related_name='subscriptions')
+    merchant = models.OneToOneField(User, on_delete=models.CASCADE, related_name='subscription' )
     plan = models.ForeignKey(MerchantPlan, on_delete=models.PROTECT)
     valid_until = models.DateTimeField(null=True, default=None)
     merchant_type = models.IntegerField(choices=MerchantType.choices)
     rif_number = models.CharField(max_length=50, null=True, blank=True)
-    company_document_url = models.URLField(max_length=500, null=True, blank=True)
+    company_document_url = models.CharField(max_length=500, null=True, blank=True)
+
+    def get_json(self)->dict:
+        return {
+            'id':self.id,
+            'plan':self.plan.name,
+            'valid_until':self.valid_until.strftime("%d/%m/%Y, %H:%M:%S") if self.valid_until else None,
+            'merchant_type':self.get_merchant_type_display(),
+            'rif_number':self.rif_number,
+        }
 
 class MerchantPlanPayment(models.Model):
     """
     Registro de pagos de suscripción.
-
-    Attributes:
-        subscription (ForeignKey): Suscripción a la que abona.
-        reference_number (str): Número de confirmación bancaria.
-        payment_proof_url (str): URL del comprobante capturado.
-        amount (Decimal): Monto pagado.
-        bcv_taxes_to_day (Decimal): Tasa de cambio oficial del día.
-        status (int): Estado del pago (Pendiente, Verificado, Rechazado).
-        verified_at (datetime): Fecha de validación por staff.
     """
-    subscription = models.ForeignKey(MerchantSubscription, on_delete=models.CASCADE, related_name='payments')
+    subscription = models.ForeignKey('MerchantSubscription', on_delete=models.CASCADE, related_name='payments')
     reference_number = models.CharField(max_length=100)
-    payment_proof_url = models.URLField(max_length=500, null=True, blank=True)
+    payment_proof_url = models.CharField(max_length=500, null=True, blank=True)
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     bcv_taxes_to_day = models.DecimalField(max_digits=10, decimal_places=4)
     status = models.IntegerField(choices=PaymentStatus.choices, default=PaymentStatus.PENDING)
     verified_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.IntegerField(choices=RejectionReason.choices, null=True, blank=True)
+    creation = models.DateTimeField(auto_now_add=True)
+
+    def clean(self):
+        if self.pk:
+            original_instance = MerchantPlanPayment.objects.get(pk=self.pk)
+            if original_instance.status != PaymentStatus.REJECTED and self.status == PaymentStatus.REJECTED:
+                if self.rejection_reason is None:
+                    raise ValidationError({
+                        'rejection_reason': "Debes seleccionar una razón de rechazo."
+                    })
+        if self.status != PaymentStatus.REJECTED:
+            self.rejection_reason = None
+        super().clean()
+
+    # 2. Método para renderizar la imagen en el Admin
+    @property
+    def payment_proof_preview(self):
+        if self.payment_proof_url:
+            return mark_safe(f'<img src="{self.payment_proof_url}" style="max-height: 400px; max-width: 300px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" />')
+        return "Sin comprobante"
+    
+    payment_proof_preview.fget.short_description = "Comprobante de Pago"
+
+    def get_json(self) -> dict:
+        rejection_text = self.get_rejection_reason_display() if self.rejection_reason else ""
+        
+        return {
+            'id': self.id,
+            'subscription': self.subscription.id,
+            'reference_number': self.reference_number,
+            'payment_proof_url': self.payment_proof_url,
+            'amount': float(self.amount),
+            'bcv_taxes_to_day': float(self.bcv_taxes_to_day),
+            'status': self.status,
+            'verified_at': self.verified_at.strftime("%d/%m/%Y, %H:%M:%S") if self.verified_at else None,
+            'rejection_reason': rejection_text,
+            'creation': self.creation.strftime("%d/%m/%Y, %H:%M:%S") if self.creation else None
+        }
 
 
 # ==========================================
@@ -904,9 +1023,13 @@ class AtlasPlusPlan(models.Model):
         valid_until (datetime): Fecha de vencimiento.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='atlas_plans')
-    is_active = models.BooleanField(default=True)
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='atlas_plan')
     valid_until = models.DateTimeField()
+
+    def get_json(self) -> dict:
+        return {
+            'valid_until':self.valid_until.strftime("%d/%m/%Y, %H:%M:%S") if self.valid_until else None
+        }
 
 class AtlasPlusPlanPayment(models.Model):
     """
@@ -920,14 +1043,41 @@ class AtlasPlusPlanPayment(models.Model):
         bcv_taxes_to_day (Decimal): Tasa oficial de cambio.
         status (int): Estado de verificación.
         verified_at (datetime): Fecha de aprobación.
+        rejection_reason (str): Solo se utiliza si el pago fue rechazado.
     """
     plan = models.ForeignKey(AtlasPlusPlan, on_delete=models.CASCADE, related_name='payments')
     reference_number = models.CharField(max_length=100)
-    payment_proof_url = models.URLField(max_length=500, null=True, blank=True)
+    payment_proof_url = models.CharField(max_length=500, null=True, blank=True)
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     bcv_taxes_to_day = models.DecimalField(max_digits=10, decimal_places=4)
     status = models.IntegerField(choices=PaymentStatus.choices, default=PaymentStatus.PENDING)
     verified_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.CharField(blank=True, default="")
+    creation = models.DateTimeField(auto_now_add=True)
+
+    def clean(self):
+        if self.pk:
+            original_instance = AtlasPlusPlanPayment.objects.get(pk=self.pk)
+            if (original_instance.status != PaymentStatus.REJECTED and 
+                self.status == PaymentStatus.REJECTED):
+                if not self.rejection_reason or self.rejection_reason.strip() == "":
+                    raise ValidationError({
+                        'rejection_reason': "Debes especificar una razón de rechazo."
+                    })
+        super().clean()
+
+    def get_json(self)->dict:
+        return {
+            'id':self.id,
+            'reference_number':self.reference_number,
+            'payment_proof_url':self.payment_proof_url,
+            'amount':float(self.amount),
+            'bcv_taxes_to_day':float(self.bcv_taxes_to_day),
+            'status':self.status,
+            'verified_at':self.verified_at.strftime("%d/%m/%Y, %H:%M:%S") if self.verified_at else None,
+            'rejection_reason':self.rejection_reason,
+            'creation':self.creation.strftime("%d/%m/%Y, %H:%M:%S") if self.creation else None
+        }
 
 class AtlasThread(models.Model):
     """

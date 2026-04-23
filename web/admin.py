@@ -20,6 +20,10 @@ class OrderTransactionInline(TabularInline):
 
 # --- MÓDULO 1: USUARIOS ---
 
+@admin.register(Notification)
+class NotificationAdmin(ModelAdmin):
+    list_display = ('id', 'user', 'section', 'category', 'is_read', 'created_at')
+
 @admin.register(User)
 class UserAdmin(ModelAdmin):
     list_display = ('id', "email", "full_name", "user_type_label", "is_external_account", "cedula_verified_status", "is_active", "gender")
@@ -111,9 +115,23 @@ class MerchantSubscriptionAdmin(ModelAdmin):
     list_filter = ("plan", "merchant_type")
 
 @admin.register(MerchantPlanPayment)
+class PaymentAdmin(ModelAdmin):
+    list_display = ("reference_number", "amount", "status", 'bcv_taxes_to_day', 'creation')
+    readonly_fields = ('reference_number', 'amount', 'bcv_taxes_to_day', "verified_at", 'payment_proof_preview', 'creation')
+    list_filter = ("status", "rejection_reason")
+    fieldsets = (
+        ('Detalles del Pago', {
+            'fields': ('reference_number', 'amount', 'bcv_taxes_to_day', 'creation', 'payment_proof_preview')
+        }),
+        ('Estado de Verificación', {
+            'fields': ('status', 'rejection_reason')
+        }),
+    )
+
 @admin.register(AtlasPlusPlanPayment)
 class PaymentAdmin(ModelAdmin):
-    list_display = ("reference_number", "amount", "status_label", "verified_at")
+    list_display = ("reference_number", "amount", "status_label", "verified_at", 'bcv_taxes_to_day', 'creation')
+    readonly_fields = ('reference_number', 'amount', 'bcv_taxes_to_day', 'payment_proof_url', 'creation')
     list_filter = ("status",)
 
     @display(description="Estado Pago", label=True)
@@ -122,7 +140,7 @@ class PaymentAdmin(ModelAdmin):
 
 @admin.register(AtlasPlusPlan)
 class AtlasPlusPlanAdmin(ModelAdmin):
-    list_display = ("user", "is_active", "valid_until")
+    list_display = ("user", "valid_until")
 
 @admin.register(AtlasThread)
 class AtlasThreadAdmin(ModelAdmin):

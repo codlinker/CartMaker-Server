@@ -1,6 +1,7 @@
 from django.core.cache import cache
 import random
 from rest_framework_simplejwt.tokens import RefreshToken
+from django.db import connection
 
 def get_tokens_for_user(user):
     refresh = RefreshToken.for_user(user)
@@ -31,3 +32,8 @@ def get_email_otp(user_email) -> str:
     """
     cache_key = f"otp_verification_{user_email}"
     return cache.get(cache_key)
+
+
+def activate_pgvector(sender, **kwargs):
+    with connection.cursor() as cursor:
+        cursor.execute("CREATE EXTENSION IF NOT EXISTS vector;")

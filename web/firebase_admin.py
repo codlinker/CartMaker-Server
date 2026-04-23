@@ -2,7 +2,7 @@ import logging
 from typing import List, Dict, Optional
 from firebase_admin import messaging
 from firebase_admin.exceptions import FirebaseError
-from .models import DeviceToken 
+from .models import DeviceToken, User, Notification, NotificationCategory, NotificationSection
 
 logger = logging.getLogger(__name__)
 
@@ -53,25 +53,50 @@ class NotificationManager:
                 cls._clean_dead_tokens(failed_tokens)
         except FirebaseError as e:
             print(f"Error de Firebase: {e}")
+            raise e
 
     # =====================================================================
     # MÉTODOS PÚBLICOS (Los que llamarás desde tus vistas o señales)
     # =====================================================================
 
     @classmethod
-    def notify_payment_check(cls, user) -> None:
+    def notify_payment_check(cls, user_id:int, subscription_name:str, approved:bool, payment_id:id, rejection_reason="") -> None:
         """
-        Notifica al usuario que su pago ha sido validado por un supervisor
-        y que su cuenta ha sido convertida a comerciante.
+        Notifica al usuario si su pago ha sido validado o no por un supervisor.
         """
-        title = '¡Pago Validado! ✅'
-        body = 'Tu suscripción ha sido procesada exitosamente. Ya puedes registrar tus productos en CartMaker.'
-        
-        # El payload invisible que lee Flutter para actualizar la vista
-        data = {
-            'type': 'payment_verified',
-            'action': 'refresh_home_status'
-        }
+        try:
+            if approved:
+                title = '¡Pago Validado!'
+                body = f'Hemos aprobado el pago por la suscripción <b>{subscription_name}</b>. Ya puedes registrar tus productos en CartMaker.'
+                Notification.objects.create(
+                    user_id=user_id,
+                    section=NotificationSection.HOME,
+                    title=title,
+                    body=body,
+                    category=NotificationCategory.PAYMENT_APPROVED,
+                    metadata={'payment_id':str(payment_id)}
+                )
+            else:
+                title = 'Pago Rechazado'
+                body = f'El pago por la suscripción <b>{subscription_name}</b> ha sido rechazado por el siguiente motivo: <b>{rejection_reason}</b>'
+                Notification.objects.create(
+                    user_id=user_id,
+                    section=NotificationSection.HOME,
+                    title=title,
+                    body=body,
+                    category=NotificationCategory.PAYMENT_REJECTED,
+                    metadata={'payment_id':str(payment_id)}
+                )
 
-        logger.info(f"Iniciando notificación de validación de pago para usuario {user.id}")
+            data = {
+                'type': 'merchant_payment_checked',
+            }
+        except Exception as e:
+            print(f"Error armando las notificaciones: {e}")
+            raise e
+        try:
+            user = User.objects.prefetch_related('fcm_tokens').get(id=user_id)
+        except User.DoesNotExists:
+            print("Error en Notification Manager -> No se encontro el usuario con id: ", user_id)
+            raise User.DoesNotExist
         cls._send_multicast(user=user, title=title, body=body, data_payload=data)

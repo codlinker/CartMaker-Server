@@ -175,7 +175,7 @@ LANGUAGES = (
     ("en", _("English"))
 )
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'America/Caracas'
 
 USE_I18N = True
 
@@ -212,6 +212,7 @@ UNFOLD = {
                 "title": "Manejo de Usuarios",
                 "items": [
                     {"title": "Usuarios", "link": "/admin/web/user/", "icon": "account_circle"},
+                    {"title": "Notificaciones", "link": "/admin/web/notification/", "icon": "notification_important"},
                     {"title":"Ubicaciones", "link":"/admin/web/clientlocation/", "icon":"location_on"},
                     {'title':"Métodos de contacto", "link":"/admin/web/clientcontactmethod/", "icon":"call"},
                     {'title':"Dispositivos registrados", "link":"/admin/web/devicetoken/", "icon":"phone"}

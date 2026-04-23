@@ -139,6 +139,20 @@ class ClientContactMethodSerializer(serializers.ModelSerializer):
         representation.pop('client')
         return representation
     
+class NotificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Notification
+        # Incluimos los campos que Flutter necesitará leer
+        fields = [
+            'id', 
+            'section', 
+            'category', 
+            'title', 
+            'body', 
+            'metadata',
+            'created_at'
+        ]
+    
 class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=False)
 

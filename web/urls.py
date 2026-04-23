@@ -12,6 +12,7 @@ router = DefaultRouter()
 router.register(r'locations', ClientLocationViewSet, basename='client-locations')
 router.register(r'user', UserViewSet, basename='user')
 router.register(r'client-contact-methods', ClientContactMethodViewSet, basename='client-contact-methods')
+router.register(r'notifications', NotificationViewSet, basename='notifications')
 
 # --- DEFINICIÓN DE RUTAS (URLS) ---
 urlpatterns = [
@@ -21,6 +22,7 @@ urlpatterns = [
     # Rutas para la obtencion de datos
     path('api/v1/cache/user', UserCacheAPI.as_view(), name="user_cache"),
     path('api/v1/cache/home', HomeCacheAPI.as_view(), name="home_cache"),
+    path('api/v1/cache/subscriptions', SubscriptionsCacheAPI.as_view(), name="subscriptions_cache"),
     path('api/v1/get-merchant-plans', GetMerchantPlans.as_view(), name="get_merchant_plans"),
     path('api/v1/get-cartmaker-bank-accounts', GetCartMakerAccounts.as_view(), name='get_cartmaker_bank_accounts'),
     # Rutas para manejo de pagos

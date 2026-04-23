@@ -22,6 +22,8 @@ from datetime import datetime
 import requests
 from django.db import transaction
 from .firebase_admin import NotificationManager
+from django.utils import timezone
+from django.db.models import Count
 
 ####################################################
 ################## AUTENTICACION ###################
@@ -472,10 +474,10 @@ class UploadSubscriptionPayment(APIView):
             try:
                 merchant_plan = MerchantPlan.objects.get(id=subscription_id)
             except MerchantPlan.DoesNotExist:
-                return Response({'error':'Plan de comerciante no encontrado.'}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({'error':'Plan no encontrado.'}, status=status.HTTP_400_BAD_REQUEST)
             try:
-                merchant_subscription = MerchantSubscription.objects.get(merchant=request.user)
-                if merchant_subscription.valid_until < datetime.now():
+                merchant_subscription = MerchantSubscription.objects.only('id', 'merchant').get(merchant=request.user)
+                if merchant_subscription.valid_until and merchant_subscription.valid_until < timezone.now():
                     return Response({'error':'La suscripcion aun esta activa.'}, status=status.HTTP_406_NOT_ACCEPTABLE)
             except MerchantSubscription.DoesNotExist:
                 merchant_subscription = MerchantSubscription.objects.create(
@@ -486,25 +488,24 @@ class UploadSubscriptionPayment(APIView):
             if not bank_api_available:
                 file_obj = data['payment_proof']
                 extension = file_obj.name.split('.')[-1]
-                file_name = f"payment_proof_{merchant_subscription.id}_{datetime.now().strftime('%d-%m-%Y_%H-%M-%S')}.{extension}"
+                file_name = f"payment_proof_{merchant_subscription.id}_{timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')}.{extension}"
                 folder = f"subscriptions/merchant_plans/{merchant_plan.name}"
                 relative_path = storage_manager.save_file(file_obj, folder, file_name)
-                try:
-                    payment = MerchantPlanPayment.objects.get(subscription=merchant_subscription)
-                    payment.reference_number = data['reference_number']
-                    payment.payment_proof_url = storage_manager.get_url(relative_path)
-                    payment.amount=data['amount_sended']
-                    payment.bcv_taxes_to_day=data['dollar_bcv_tax']
-                except MerchantPlanPayment.DoesNotExist:
-                    payment = MerchantPlanPayment(
-                        subscription=merchant_subscription,
-                        reference_number = data['reference_number'],
-                        payment_proof_url = storage_manager.get_url(relative_path),
-                        amount=data['amount_sended'],
-                        bcv_taxes_to_day=data['dollar_bcv_tax'],
-                    )
-                payment.save()
-                return Response(status=status.HTTP_201_CREATED)
+                payment = MerchantPlanPayment.objects.filter(
+                    subscription=merchant_subscription,
+                    verified_at__isnull=True,
+                    status=PaymentStatus.PENDING
+                ).first()
+                if payment != None:
+                    return Response({'error':"Ya tienes un pago pendiente por verificacion por este plan."}, status=status.HTTP_406_NOT_ACCEPTABLE)
+                payment = MerchantPlanPayment.objects.create(
+                    subscription=merchant_subscription,
+                    reference_number = data['reference_number'],
+                    payment_proof_url = storage_manager.get_url(relative_path),
+                    amount=data['amount_sended'],
+                    bcv_taxes_to_day=data['dollar_bcv_tax'],
+                )
+                return Response({'payment_data':payment.get_json()}, status=status.HTTP_201_CREATED)
             else:
                 # TODO: Implementar caso para utilizar api de bancos para validar el pago.
                 pass
@@ -516,6 +517,42 @@ class UploadSubscriptionPayment(APIView):
 ###################### CACHE #######################
 ####################################################
 
+class SubscriptionsCacheAPI(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'navigation'
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """
+        Devuelve todos los datos necesarios para la cache de de las subscripciones del usuario en la app.
+        """
+        user = User.objects.select_related(
+            'subscription__plan',
+            'atlas_plan'
+        ).prefetch_related(
+            'subscription__payments',
+            'atlas_plan__payments'
+        ).get(id=request.user.id)
+        merchant_subscription = user.subscription if hasattr(user, 'subscription') else None
+        atlas_subscription = user.atlas_plan if hasattr(user, 'atlas_plan') else None
+        subscriptions_payments = {
+            'atlas':[],
+            'merchant':[]
+        }
+        if atlas_subscription:
+            subscriptions_payments['atlas'] = [atlas_payment.get_json() for atlas_payment in atlas_subscription.payments.all()]
+        if merchant_subscription:
+            subscriptions_payments['merchant'] = [merchant_payment.get_json() for merchant_payment in merchant_subscription.payments.all()]
+
+        cache = {
+            "merchant_subscription":merchant_subscription.get_json() if merchant_subscription else None,
+            "atlas_subscription":atlas_subscription.get_json() if atlas_subscription else None,
+            "subscriptions_payments":subscriptions_payments
+        }
+        return Response(cache, status=200)
+
+
+
 class UserCacheAPI(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'navigation'
@@ -523,11 +560,13 @@ class UserCacheAPI(APIView):
 
     def get(self, request):
         """
-        Devuelve todos los datos necesarios para la cache de usuario de la app.
+        Devuelve todos los datos necesarios para la cache de usuario en la app.
         """
-        user = request.user
-        locations = [location.get_json() for location in ClientLocation.objects.filter(user=user)]
-        contact_methods = [contact_method.get_json() for contact_method in ClientContactMethod.objects.filter(client=user).order_by('method_type')]
+        user = User.objects.prefetch_related('locations', 'contact_methods').get(id=request.user.id)
+
+        locations = [location.get_json() for location in user.locations.all()]
+        contact_methods = [contact_method.get_json() for contact_method in user.contact_methods.all().order_by('method_type')]
+
         cache = {
             "user_id":user.id,
             "email":user.email,
@@ -544,7 +583,7 @@ class UserCacheAPI(APIView):
             "gender":user.gender,
             "locations":locations,
             "is_external_account":user.is_external_account,
-            'contact_methods':contact_methods
+            'contact_methods':contact_methods,
         }
         return Response(cache, status=200)
     
@@ -571,6 +610,58 @@ class HomeCacheAPI(APIView):
 ####################################################
 #################### VIEW SETS #####################
 ####################################################
+
+class NotificationViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
+    serializer_class = NotificationSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        # IMPORTANTE: Ordenamos para que las más nuevas salgan primero
+        return Notification.objects.filter(user=self.request.user).order_by('-created_at')
+
+    # -------------------------------------------------------------------------
+    # ENDPOINT 1: Obtener TODAS las notificaciones agrupadas por sección (KISS)
+    # -------------------------------------------------------------------------
+    @action(detail=False, methods=['get'], url_path="all-grouped")
+    def all_grouped(self, request):
+        """
+        Devuelve todas las notificaciones del usuario en un diccionario:
+        { "0": [{...}, {...}], "1": [{...}] }
+        Ideal para llenar el Provider en una sola petición al inicio.
+        """
+        notifications = self.get_queryset()
+        
+        grouped_data = {}
+        for notif in notifications:
+            sec_str = str(notif.section)
+            if sec_str not in grouped_data:
+                grouped_data[sec_str] = []
+            
+            # Usamos el get_json() que ya tienes implementado
+            grouped_data[sec_str].append(notif.get_json())
+            
+        return Response(grouped_data, status=status.HTTP_200_OK)
+
+    # -------------------------------------------------------------------------
+    # ENDPOINT 2: Marcar UNA notificación como leída (Eliminar)
+    # -------------------------------------------------------------------------
+    @action(detail=True, methods=['post'], url_path="mark-as-read")
+    def mark_as_read(self, request, pk=None):
+        notification = self.get_object()
+        notification.delete()
+        return Response({"detail": "Notificación eliminada."}, status=status.HTTP_200_OK)
+
+    # -------------------------------------------------------------------------
+    # ENDPOINT 3: Limpiar TODA una sección
+    # -------------------------------------------------------------------------
+    @action(detail=False, methods=['post'], url_path="clear-section")
+    def clear_section(self, request):
+        section = request.data.get('section')
+        if section is None:
+            return Response({"detail": "Falta la sección."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        deleted_count, _ = self.get_queryset().filter(section=section).delete()
+        return Response({"deleted_count": deleted_count}, status=status.HTTP_200_OK)
 
 class ClientContactMethodViewSet(viewsets.ModelViewSet):
     serializer_class = ClientContactMethodSerializer
@@ -618,7 +709,7 @@ class UserViewSet(mixins.RetrieveModelMixin,
             return Response({"error": "No se envió ninguna imagen"}, status=400)
         user = request.user
         extension = file_obj.name.split('.')[-1]
-        file_name = f"avatar_{user.id}_{datetime.now().strftime('%d-%m-%Y_%H-%M-%S')}.{extension}"
+        file_name = f"avatar_{user.id}_{timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')}.{extension}"
         folder = "profiles/avatars"
         relative_path = storage_manager.save_file(file_obj, folder, file_name)
         if relative_path:
