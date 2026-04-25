@@ -60,15 +60,21 @@ class NotificationManager:
     # =====================================================================
 
     @classmethod
-    def notify_payment_check(cls, user_id:int, subscription_name:str, approved:bool, payment_id:id, rejection_reason="") -> None:
+    def notify_payment_check(cls, user_id:int, subscription_name:str, approved:bool, payment_id:id, rejection_reason="", surplus_amount:float=0.0) -> None:
         """
         Notifica al usuario si su pago ha sido validado o no por un supervisor.
         """
         try:
             if approved:
                 title = '¡Pago Validado!'
-                body = f'Hemos aprobado el pago por la suscripción <b>{subscription_name}</b>. Ya puedes registrar tus productos en CartMaker.'
-                Notification.objects.create(
+                
+                # Lógica del Saldo a Favor
+                if surplus_amount > 0:
+                    body = f'Hemos aprobado el pago por la suscripción <b>{subscription_name}</b> y acreditamos tu excedente de <b>{surplus_amount} Bs</b> a tu billetera. Ya puedes configurar tu comercio.'
+                else:
+                    body = f'Hemos aprobado el pago por la suscripción <b>{subscription_name}</b>. Ya puedes registrar tus productos en CartMaker.'
+                    
+                notification = Notification.objects.create(
                     user_id=user_id,
                     section=NotificationSection.HOME,
                     title=title,
@@ -77,9 +83,10 @@ class NotificationManager:
                     metadata={'payment_id':str(payment_id)}
                 )
             else:
+                # Lógica de rechazo (se mantiene igual)
                 title = 'Pago Rechazado'
                 body = f'El pago por la suscripción <b>{subscription_name}</b> ha sido rechazado por el siguiente motivo: <b>{rejection_reason}</b>'
-                Notification.objects.create(
+                notification = Notification.objects.create(
                     user_id=user_id,
                     section=NotificationSection.HOME,
                     title=title,
@@ -87,16 +94,20 @@ class NotificationManager:
                     category=NotificationCategory.PAYMENT_REJECTED,
                     metadata={'payment_id':str(payment_id)}
                 )
-
+            
             data = {
                 'type': 'merchant_payment_checked',
+                'notification_id':f"{notification.id}",
+                'status':'approved' if approved else 'rejected'
             }
         except Exception as e:
             print(f"Error armando las notificaciones: {e}")
             raise e
+            
         try:
             user = User.objects.prefetch_related('fcm_tokens').get(id=user_id)
         except User.DoesNotExists:
             print("Error en Notification Manager -> No se encontro el usuario con id: ", user_id)
             raise User.DoesNotExist
-        cls._send_multicast(user=user, title=title, body=body, data_payload=data)
+            
+        cls._send_multicast(user=user, title=title, body=body.replace('<b>', '').replace('</b>', ''), data_payload=data)

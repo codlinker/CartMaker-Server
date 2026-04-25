@@ -10,6 +10,7 @@ from colorfield.fields import ColorField
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from django.utils.html import mark_safe
+from decimal import Decimal
 
 # ==========================================
 # ENUMS (Para validación automática en DRF)
@@ -127,10 +128,35 @@ class RejectionReason(models.IntegerChoices):
     ENUM Motivos de rechazo del pago.
     """
     INVALID_REFERENCE = 1, _('Referencia inválida o no encontrada')
-    INSUFFICIENT_AMOUNT = 2, _('Monto insuficiente')
-    INVALID_DATE = 3, _('Fecha de transferencia incorrecta')
-    FAKE_PROOF = 4, _('Comprobante falso o ilegible')
-    OTHER = 5, _('Otro motivo no especificado')
+    INVALID_DATE = 2, _('Fecha de transferencia incorrecta')
+    FAKE_PROOF = 3, _('Comprobante falso o ilegible')
+    OTHER = 4, _('Otro motivo no especificado')
+    NOT_ENOUGH_AMOUNT = 5, _('Monto incompleto')
+
+class RejectionHelpText(models.IntegerChoices):
+    """
+    ENUM Textos de ayuda/instrucciones según el motivo de rechazo.
+    """
+    INVALID_REFERENCE = 1, _(
+        'El número de referencia ingresado no coincide con nuestros registros bancarios. '
+        'Por favor, verifique los dígitos y vuelva a intentarlo.'
+    )
+    INVALID_DATE = 2, _(
+        'La fecha indicada en el formulario no coincide con la del comprobante. '
+        'Por favor, seleccione la fecha exacta en la que realizó la operación.'
+    )
+    FAKE_PROOF = 3, _(
+        'La imagen adjunta no es legible, está borrosa o no corresponde a un comprobante válido. '
+        'Suba una captura de pantalla clara donde se vean todos los datos de la operación.'
+    )
+    OTHER = 4, _(
+        'Su pago ha sido rechazado por un motivo no listado. '
+        'Por favor, póngase en contacto con soporte técnico para más detalles.'
+    )
+    NOT_ENOUGH_AMOUNT = 5, _(
+        'Su pago ha sido abonado a su cuenta. '
+        'Por favor, realice el reporte de pago del monto restante para continuar con la activación de su suscripción.'
+    )
 
 class NotificationSection(models.IntegerChoices):
     """
@@ -239,7 +265,6 @@ class User(AbstractBaseUser, PermissionsMixin):
     REQUIRED_FIELDS = ['first_name', 'last_name', 'password']
 
     class Meta:
-        # Aquí sumamos, no restamos.
         indexes = [
             HnswIndex(
                 name='user_biometric_hsnw_idx',
@@ -259,6 +284,53 @@ class User(AbstractBaseUser, PermissionsMixin):
         """
         return self.profile_picture if self.profile_picture.startswith('http')\
               else storage_manager.get_url(self.profile_picture)
+
+class UserWallet(models.Model):
+    """
+    Billetera digital del usuario. Se utiliza para almacenar montos a favor al
+    pagar suscripciones en los casos en el que el usuario paga un monto inferior o superior.
+    """
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='wallet')
+    balance = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    history = models.JSONField(default=list, blank=True)
+
+    def get_json(self) -> dict:
+        return {
+            'balance': float(self.balance),
+            'history': self.history
+        }
+
+    def regist_transaction(self, amount: float | Decimal, sub_type: str, description: str = "",
+            transaction="add"):
+        """
+        Agrega un registro al historial de la billetera y actualiza el saldo.
+        
+        :param amount: El monto a agregar (positivo) o descontar (negativo).
+        :param sub_type: Tipo de suscripción ('merchant' o 'atlas').
+        :param description: Texto opcional para mostrarle al usuario (ej: "Abono por pago incompleto").
+        """
+        amount_decimal = Decimal(str(amount)).quantize(Decimal('0.00'))
+        
+        if transaction == 'add':
+            self.balance += amount_decimal
+        elif transaction == 'substract':
+            if self.balance < amount_decimal:
+                print("Error: Intento de dejar la cuenta en negativo")
+                return self.balance
+            self.balance -= amount_decimal
+
+        transaction_record = {
+            'timestamp': timezone.now().isoformat(),
+            'subscription_type': sub_type,
+            'amount': float(amount_decimal),
+            'action': 'credit' if amount_decimal > 0 else 'debit',
+            'description': description,
+            'resulting_balance': float(self.balance)
+        }
+        if not isinstance(self.history, list):
+            self.history = []
+        self.history.append(transaction_record)
+        self.save()
 
 class DeviceToken(models.Model):
     """
@@ -940,9 +1012,10 @@ class MerchantSubscription(models.Model):
         company_document_url (str): URL del registro mercantil.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    merchant = models.OneToOneField(User, on_delete=models.CASCADE, related_name='subscription' )
+    merchant = models.OneToOneField(User, on_delete=models.CASCADE, related_name='subscription')
     plan = models.ForeignKey(MerchantPlan, on_delete=models.PROTECT)
     valid_until = models.DateTimeField(null=True, default=None)
+    adquired_at = models.DateTimeField(auto_now_add=True)
     merchant_type = models.IntegerField(choices=MerchantType.choices)
     rif_number = models.CharField(max_length=50, null=True, blank=True)
     company_document_url = models.CharField(max_length=500, null=True, blank=True)
@@ -952,6 +1025,7 @@ class MerchantSubscription(models.Model):
             'id':self.id,
             'plan':self.plan.name,
             'valid_until':self.valid_until.strftime("%d/%m/%Y, %H:%M:%S") if self.valid_until else None,
+            'adquired_at':self.adquired_at.strftime("%d/%m/%Y, %H:%M:%S"),
             'merchant_type':self.get_merchant_type_display(),
             'rif_number':self.rif_number,
         }
@@ -960,7 +1034,7 @@ class MerchantPlanPayment(models.Model):
     """
     Registro de pagos de suscripción.
     """
-    subscription = models.ForeignKey('MerchantSubscription', on_delete=models.CASCADE, related_name='payments')
+    subscription = models.ForeignKey(MerchantSubscription, on_delete=models.CASCADE, related_name='payments')
     reference_number = models.CharField(max_length=100)
     payment_proof_url = models.CharField(max_length=500, null=True, blank=True)
     amount = models.DecimalField(max_digits=12, decimal_places=2)
@@ -968,6 +1042,7 @@ class MerchantPlanPayment(models.Model):
     status = models.IntegerField(choices=PaymentStatus.choices, default=PaymentStatus.PENDING)
     verified_at = models.DateTimeField(null=True, blank=True)
     rejection_reason = models.IntegerField(choices=RejectionReason.choices, null=True, blank=True)
+    rejection_help = models.IntegerField(choices=RejectionHelpText.choices, null=True, blank=True)
     creation = models.DateTimeField(auto_now_add=True)
 
     def clean(self):
@@ -992,7 +1067,6 @@ class MerchantPlanPayment(models.Model):
     payment_proof_preview.fget.short_description = "Comprobante de Pago"
 
     def get_json(self) -> dict:
-        rejection_text = self.get_rejection_reason_display() if self.rejection_reason else ""
         
         return {
             'id': self.id,
@@ -1003,7 +1077,8 @@ class MerchantPlanPayment(models.Model):
             'bcv_taxes_to_day': float(self.bcv_taxes_to_day),
             'status': self.status,
             'verified_at': self.verified_at.strftime("%d/%m/%Y, %H:%M:%S") if self.verified_at else None,
-            'rejection_reason': rejection_text,
+            'rejection_reason': self.get_rejection_reason_display() if self.rejection_reason else "",
+            'rejection_help': self.get_rejection_help_display() if self.rejection_help else "",
             'creation': self.creation.strftime("%d/%m/%Y, %H:%M:%S") if self.creation else None
         }
 
@@ -1043,7 +1118,8 @@ class AtlasPlusPlanPayment(models.Model):
         bcv_taxes_to_day (Decimal): Tasa oficial de cambio.
         status (int): Estado de verificación.
         verified_at (datetime): Fecha de aprobación.
-        rejection_reason (str): Solo se utiliza si el pago fue rechazado.
+        rejection_reason (int): Solo se utiliza si el pago fue rechazado.
+        rejection_help (int): Texto de ayuda para el usuario para saber que hacer en caso de pago rechazado.
     """
     plan = models.ForeignKey(AtlasPlusPlan, on_delete=models.CASCADE, related_name='payments')
     reference_number = models.CharField(max_length=100)
@@ -1052,7 +1128,8 @@ class AtlasPlusPlanPayment(models.Model):
     bcv_taxes_to_day = models.DecimalField(max_digits=10, decimal_places=4)
     status = models.IntegerField(choices=PaymentStatus.choices, default=PaymentStatus.PENDING)
     verified_at = models.DateTimeField(null=True, blank=True)
-    rejection_reason = models.CharField(blank=True, default="")
+    rejection_reason = models.IntegerField(choices=RejectionReason.choices, null=True, blank=True)
+    rejection_help = models.IntegerField(choices=RejectionHelpText.choices, null=True, blank=True)
     creation = models.DateTimeField(auto_now_add=True)
 
     def clean(self):
@@ -1066,6 +1143,14 @@ class AtlasPlusPlanPayment(models.Model):
                     })
         super().clean()
 
+    @property
+    def payment_proof_preview(self):
+        if self.payment_proof_url:
+            return mark_safe(f'<img src="{self.payment_proof_url}" style="max-height: 400px; max-width: 300px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" />')
+        return "Sin comprobante"
+    
+    payment_proof_preview.fget.short_description = "Comprobante de Pago"
+
     def get_json(self)->dict:
         return {
             'id':self.id,
@@ -1076,6 +1161,7 @@ class AtlasPlusPlanPayment(models.Model):
             'status':self.status,
             'verified_at':self.verified_at.strftime("%d/%m/%Y, %H:%M:%S") if self.verified_at else None,
             'rejection_reason':self.rejection_reason,
+            'rejection_help': self.get_rejection_help_display() if self.rejection_help else "",
             'creation':self.creation.strftime("%d/%m/%Y, %H:%M:%S") if self.creation else None
         }
 

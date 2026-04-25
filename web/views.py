@@ -1,3 +1,4 @@
+from dateutil.relativedelta import relativedelta
 from rest_framework.views import APIView
 from rest_framework.renderers import TemplateHTMLRenderer
 from rest_framework.response import Response
@@ -23,7 +24,7 @@ import requests
 from django.db import transaction
 from .firebase_admin import NotificationManager
 from django.utils import timezone
-from django.db.models import Count
+from .tasks import *
 
 ####################################################
 ################## AUTENTICACION ###################
@@ -66,12 +67,8 @@ class BiometricLoginView(APIView):
                 {"error": "Vector biométrico inválido o incompleto."}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
-
-        # 1. Definimos el umbral de seguridad
-        THRESHOLD = 0.50
-
-        # 2. Búsqueda vectorial ultra rápida con HNSW
-        # Filtramos por usuarios verificados y que tengan vector
+        THRESHOLD_PERFECT = 0.55
+        THRESHOLD_ACCEPTABLE = 0.75
         closest_user = User.objects.filter(
             cedula_verified=True,
             biometric_vector__isnull=False,
@@ -80,18 +77,17 @@ class BiometricLoginView(APIView):
             distance=CosineDistance('biometric_vector', vector)
         ).order_by('distance').first()
 
-        if (closest_user is None):
+        if closest_user is None:
             return Response({
                 'error':"Identidad biométrica no reconocida o no registrada."}, 
                 status=status.HTTP_401_UNAUTHORIZED)
 
-        # 3. Verificamos el veredicto del "Juez" (Distancia del Coseno)
         print("USUARIO OBTENIDO: ", closest_user)
         print("CLOSEST USER DISTANCE: ", closest_user.distance)
-        if closest_user and closest_user.distance <= THRESHOLD:
-            # ✅ ÉXITO: Generamos tokens manualmente
+        if closest_user.distance <= THRESHOLD_ACCEPTABLE:
+            if closest_user.distance > THRESHOLD_PERFECT:
+                update_rolling_template.delay(closest_user.id, vector)
             refresh = RefreshToken.for_user(closest_user)
-            # Construimos la respuesta con la misma metadata que tu CartMakerTokenSerializer
             return Response({
                 'refresh': str(refresh),
                 'access': str(refresh.access_token),
@@ -103,10 +99,8 @@ class BiometricLoginView(APIView):
                 'email_verified': closest_user.email_verified,
                 'gender': closest_user.gender,
             }, status=status.HTTP_200_OK)
-
-        # ❌ FALLO: No se reconoce el rostro o está fuera del umbral
         return Response(
-            {"error": "Identidad biométrica no reconocida o no registrada."}, 
+            {"error": "Identidad no verificada. Por favor, asegúrese de tener buena iluminación o no usar accesorios."}, 
             status=status.HTTP_401_UNAUTHORIZED
         )
 
@@ -491,12 +485,11 @@ class UploadSubscriptionPayment(APIView):
                 file_name = f"payment_proof_{merchant_subscription.id}_{timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')}.{extension}"
                 folder = f"subscriptions/merchant_plans/{merchant_plan.name}"
                 relative_path = storage_manager.save_file(file_obj, folder, file_name)
-                payment = MerchantPlanPayment.objects.filter(
+                if MerchantPlanPayment.objects.filter(
                     subscription=merchant_subscription,
                     verified_at__isnull=True,
                     status=PaymentStatus.PENDING
-                ).first()
-                if payment != None:
+                    ).exists():
                     return Response({'error':"Ya tienes un pago pendiente por verificacion por este plan."}, status=status.HTTP_406_NOT_ACCEPTABLE)
                 payment = MerchantPlanPayment.objects.create(
                     subscription=merchant_subscription,
@@ -505,13 +498,126 @@ class UploadSubscriptionPayment(APIView):
                     amount=data['amount_sended'],
                     bcv_taxes_to_day=data['dollar_bcv_tax'],
                 )
-                return Response({'payment_data':payment.get_json()}, status=status.HTTP_201_CREATED)
+                return Response({'payment_data':payment.get_json(), 'subscription_data':merchant_subscription.get_json()}, status=status.HTTP_201_CREATED)
             else:
                 # TODO: Implementar caso para utilizar api de bancos para validar el pago.
                 pass
             return Response(status=status.HTTP_200_OK)
         else:
             return Response({'error':'Tipo de subscripcion no valida.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+class FullPaySubscriptionWithWalletView(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'actions'
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        try:
+            with transaction.atomic():
+                print("REQUEST DATA: ", request.data)
+                # 1. Obtener el plan y crear la subscripcion u obtenerla si ya existe
+                merchant_plan = MerchantPlan.objects.only('price', 'name').get(id=request.data.get('plan_id'))
+                try:
+                    merchant_subscription = MerchantSubscription.objects.select_related('plan').get(
+                        merchant=request.user
+                    )
+                except MerchantSubscription.DoesNotExist:
+                    merchant_subscription = MerchantSubscription(
+                        merchant=request.user,
+                        merchant_type=MerchantType.BUSINESS if merchant_plan.requires_business else MerchantType.ENTREPRENEUR,
+                        plan=merchant_plan
+                    )
+
+                plan_price_usd = Decimal(str(merchant_plan.price))
+
+                # 2. Obtener la billetera del usuario
+                wallet = UserWallet.objects.select_for_update().get(user=request.user)
+
+                # 3. Validar si tiene saldo suficiente
+                if wallet.balance < plan_price_usd:
+                    return Response({
+                        'success': False,
+                        'message': 'Saldo insuficiente en la billetera.'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+                # 4. Descontar el dinero de la billetera
+                wallet.regist_transaction(
+                    amount=plan_price_usd,
+                    sub_type='merchant',
+                    description=f"Pago de suscripción con saldo: {merchant_plan.name}",
+                    transaction='substract'
+                )
+
+                # 5. Activar la suscripción
+                merchant_subscription.valid_until = timezone.now() + relativedelta(months=1)
+                merchant_subscription.save()
+
+                dollar_bcv_tax = 1.0
+                try:
+                    response = requests.get('https://ve.dolarapi.com/v1/estado')
+                    response.raise_for_status()
+                    data = response.json()
+                    api_available = data.get('estado') == 'Disponible' if data.get('estado') else False
+                    if api_available:
+                        response = requests.get('https://ve.dolarapi.com/v1/dolares/oficial')
+                        response.raise_for_status()
+                        data = response.json()
+                        dollar_bcv_tax = data.get('promedio', 1.0)
+                except Exception as e:
+                    print(f"Error obteniendo el precio del dolar bcv: {e}")
+
+                # 6. Dejar un registro en el historial de pagos
+                # Lo creamos directamente como APROBADO
+                merchant_payment = MerchantPlanPayment.objects.create(
+                    subscription=merchant_subscription,
+                    reference_number=f"WALLET-{uuid.uuid4().hex[:8].upper()}",
+                    amount=0,
+                    bcv_taxes_to_day=dollar_bcv_tax,
+                    status=PaymentStatus.APPROVED,
+                    verified_at=timezone.now()
+                )
+
+                title = '¡Pago Validado!'
+                
+                # 7. Crear la notificacion
+                body = f'Hemos aprobado el pago por la suscripción <b>{merchant_plan.name}</b>. Ya puedes registrar tus productos en CartMaker.'
+                    
+                Notification.objects.create(
+                    user=request.user,
+                    section=NotificationSection.HOME,
+                    title=title,
+                    body=body,
+                    category=NotificationCategory.PAYMENT_APPROVED,
+                    metadata={'payment_id':str(merchant_payment.id)}
+                )
+
+                return Response({
+                    'success': True,
+                    'message': '¡Suscripción renovada exitosamente usando tu saldo a favor!',
+                    'data': {
+                        'new_balance': float(wallet.balance - plan_price_usd),
+                        'valid_until': merchant_subscription.valid_until.strftime("%d/%m/%Y, %H:%M:%S")
+                    }
+                }, status=status.HTTP_200_OK)
+
+        except MerchantPlan.DoesNotExist:
+            return Response({
+                'success': False, 
+                'message': 'Suscripción no encontrada.'
+            }, status=status.HTTP_404_NOT_FOUND)
+            
+        except UserWallet.DoesNotExist:
+            return Response({
+                'success': False, 
+                'message': 'No se encontró la billetera del usuario.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+        except Exception as e:
+            print("ERROR INTERNO EN EL SERVIDOR: ", e)
+            return Response({
+                'success': False, 
+                'message': f'Ocurrió un error al procesar el pago: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 ####################################################
 ###################### CACHE #######################
@@ -528,10 +634,11 @@ class SubscriptionsCacheAPI(APIView):
         """
         user = User.objects.select_related(
             'subscription__plan',
-            'atlas_plan'
+            'atlas_plan',
         ).prefetch_related(
             'subscription__payments',
-            'atlas_plan__payments'
+            'atlas_plan__payments',
+            'wallet'
         ).get(id=request.user.id)
         merchant_subscription = user.subscription if hasattr(user, 'subscription') else None
         atlas_subscription = user.atlas_plan if hasattr(user, 'atlas_plan') else None
@@ -539,6 +646,7 @@ class SubscriptionsCacheAPI(APIView):
             'atlas':[],
             'merchant':[]
         }
+        wallet_data = user.wallet.get_json()
         if atlas_subscription:
             subscriptions_payments['atlas'] = [atlas_payment.get_json() for atlas_payment in atlas_subscription.payments.all()]
         if merchant_subscription:
@@ -547,7 +655,8 @@ class SubscriptionsCacheAPI(APIView):
         cache = {
             "merchant_subscription":merchant_subscription.get_json() if merchant_subscription else None,
             "atlas_subscription":atlas_subscription.get_json() if atlas_subscription else None,
-            "subscriptions_payments":subscriptions_payments
+            "subscriptions_payments":subscriptions_payments,
+            "wallet":wallet_data
         }
         return Response(cache, status=200)
 
@@ -649,7 +758,7 @@ class NotificationViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
     def mark_as_read(self, request, pk=None):
         notification = self.get_object()
         notification.delete()
-        return Response({"detail": "Notificación eliminada."}, status=status.HTTP_200_OK)
+        return Response({"detail": "Notificación leida."}, status=status.HTTP_200_OK)
 
     # -------------------------------------------------------------------------
     # ENDPOINT 3: Limpiar TODA una sección

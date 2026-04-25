@@ -41,6 +41,10 @@ class UserAdmin(ModelAdmin):
     @display(description="Nombres")
     def full_name(self, obj):
         return f"{obj.first_name} {obj.last_name}"
+    
+@admin.register(UserWallet)
+class UserWalletAdmin(ModelAdmin):
+    list_display = ('id', 'balance')
 
 # --- MÓDULO 2 & 3: COMERCIO E INVENTARIO ---
 
@@ -114,10 +118,10 @@ class MerchantSubscriptionAdmin(ModelAdmin):
     list_display = ("merchant", "plan", "valid_until", "merchant_type")
     list_filter = ("plan", "merchant_type")
 
-@admin.register(MerchantPlanPayment)
+@admin.register(MerchantPlanPayment, AtlasPlusPlanPayment)
 class PaymentAdmin(ModelAdmin):
     list_display = ("reference_number", "amount", "status", 'bcv_taxes_to_day', 'creation')
-    readonly_fields = ('reference_number', 'amount', 'bcv_taxes_to_day', "verified_at", 'payment_proof_preview', 'creation')
+    readonly_fields = ('reference_number', 'amount', 'bcv_taxes_to_day', "verified_at", 'payment_proof_preview', 'creation', 'rejection_help')
     list_filter = ("status", "rejection_reason")
     fieldsets = (
         ('Detalles del Pago', {
@@ -128,15 +132,18 @@ class PaymentAdmin(ModelAdmin):
         }),
     )
 
-@admin.register(AtlasPlusPlanPayment)
-class PaymentAdmin(ModelAdmin):
-    list_display = ("reference_number", "amount", "status_label", "verified_at", 'bcv_taxes_to_day', 'creation')
-    readonly_fields = ('reference_number', 'amount', 'bcv_taxes_to_day', 'payment_proof_url', 'creation')
-    list_filter = ("status",)
+    class Media:
+        js = ('js/admin/subscriptions_payment.js',)
 
-    @display(description="Estado Pago", label=True)
-    def status_label(self, obj):
-        return obj.get_status_display()
+    def formfield_for_choice_field(self, db_field, request, **kwargs):
+        if db_field.name == 'rejection_reason':
+            kwargs['choices'] = [
+                choice for choice in RejectionReason.choices 
+                if choice[0] != RejectionReason.NOT_ENOUGH_AMOUNT
+            ]
+            kwargs['choices'].insert(0, ('', '---------'))
+            
+        return super().formfield_for_choice_field(db_field, request, **kwargs)
 
 @admin.register(AtlasPlusPlan)
 class AtlasPlusPlanAdmin(ModelAdmin):

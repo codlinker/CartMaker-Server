@@ -212,6 +212,7 @@ UNFOLD = {
                 "title": "Manejo de Usuarios",
                 "items": [
                     {"title": "Usuarios", "link": "/admin/web/user/", "icon": "account_circle"},
+                    {'title': "Billeteras", "link":'/admin/web/userwallet/', "icon":"wallet"},
                     {"title": "Notificaciones", "link": "/admin/web/notification/", "icon": "notification_important"},
                     {"title":"Ubicaciones", "link":"/admin/web/clientlocation/", "icon":"location_on"},
                     {'title':"Métodos de contacto", "link":"/admin/web/clientcontactmethod/", "icon":"call"},
@@ -306,6 +307,14 @@ CACHES = {
         'LOCATION': 'cartmaker-cache',
     }
 }
+
+# CELERY Y REDIS
+CELERY_BROKER_URL = 'redis://127.0.0.1:6379/0'
+CELERY_RESULT_BACKEND = 'redis://127.0.0.1:6379/0'
+
+CELERY_ACCEPT_CONTENT = ['application/json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
 
 # FIREBASE
 path_to_json = os.path.join(BASE_DIR, '.', 'firebase-adminsdk.json')
