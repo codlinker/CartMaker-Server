@@ -623,6 +623,28 @@ class FullPaySubscriptionWithWalletView(APIView):
 ###################### CACHE #######################
 ####################################################
 
+class StoreCacheAPI(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'navigation'
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """
+        Devuelve los datos de la compania creada pot el usuario.
+        """
+        if MerchantSubscription.objects.filter(merchant=request.user, valid_until__gt=timezone.now()).exists():
+            try:
+                company = Company.objects.get(owner=request.user).get_json()
+                stores = [company_store.get_json() for company_store in CompanyStore.filter(company=company, is_active=True)]
+                return Response({
+                    'company':company,
+                    'stores':stores
+                }, status=status.HTTP_200_OK)
+            except Company.DoesNotExist:
+                return Response({'message':"No ha configurado su tienda."}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            return Response({'message':"La suscripcion del comerciante expiro o no ha sido adquirida."}, status=status.HTTP_406_NOT_ACCEPTABLE)
+
 class SubscriptionsCacheAPI(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'navigation'

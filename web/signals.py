@@ -95,5 +95,5 @@ def on_user_created(sender, created, instance: User, **kwargs):
     """
     Signal encargada de manejar el post de la creacion de un usuario.
     """
-    if instance.pk:
+    if created:
         UserWallet.objects.create(user=instance)

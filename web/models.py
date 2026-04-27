@@ -441,6 +441,12 @@ class ClientContactMethod(models.Model):
 # MÓDULO 2: COMPAÑÍA Y TIENDAS
 # ==========================================
 
+class Mall(models.Model):
+    """
+    """
+    name = models.CharField(max_length=60)
+    location = gis_models.PointField()
+    
 class CompanyCategory(models.Model):
     """
     Categoría legal o comercial de una empresa.
@@ -467,6 +473,14 @@ class Company(models.Model):
     creation = models.DateTimeField(auto_now_add=True)
     category = models.ForeignKey(CompanyCategory, on_delete=models.SET_NULL, null=True)
 
+    def get_json(self)->dict:
+        return {
+            'id':self.id,
+            'name':self.name,
+            'creation':timezone.localtime(self.creation).strftime("%d/%m/%Y, %H:%M:%S"),
+            'category':self.category.name
+        }
+
 class CompanyStore(models.Model):
     """
     Sucursal física o virtual de una compañía.
@@ -486,18 +500,30 @@ class CompanyStore(models.Model):
     business_hours = models.JSONField(default=dict)
     image = models.CharField(max_length=500, null=True, blank=True)
 
+    def get_json(self)->dict:
+        url = f"{settings.DOMAIN}/{self.image}" if not self.image.startswith('http') else self.image
+        return {
+            'id':self.id,
+            'name':self.name,
+            'creation':timezone.localtime(self.creation).strftime("%d/%m/%Y, %H:%M:%S"),
+            'business_hours':self.business_hours,
+            'image':url
+        }
+
 class StoreLocation(models.Model):
     """
     Ubicación geográfica de una sucursal.
 
     Attributes:
         store (OneToOne): Tienda asociada.
+        mall (ForeignKey): Si no es null significa que la tienda esta dentro de un cc.
         coordinates (Point): Punto geográfico para mapas.
         name (str): Dirección legible.
         details (str): Referencias adicionales de la ubicación.
         creation (datetime): Fecha de registro de la ubicación.
     """
     store = models.OneToOneField(CompanyStore, on_delete=models.CASCADE, related_name='location')
+    mall = models.ForeignKey(Mall, on_delete=models.SET_NULL, null=True, blank=True, related_name='stores')
     coordinates = gis_models.PointField()
     name = models.CharField(max_length=255)
     details = models.TextField(null=True, blank=True)

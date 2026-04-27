@@ -3,7 +3,8 @@
 Este repositorio contiene el núcleo lógico de CartMaker, incluyendo el sistema de autenticación biométrica basado en vectores y la gestión de tareas asíncronas.
 
 ## 📋 Requisitos del Sistema
-* **Python:** `3.14.3`
+* **OS:** `Ubuntu`
+* **Python:** `3.14`
 * **Base de Datos:** PostgreSQL con extensión `pgvector`.
 * **Broker:** Redis Server (Obligatorio para tareas asíncronas).
 * **Uvicorn:** Para ejecutar el proyecto en su servidor ASGI.
@@ -21,14 +22,30 @@ Debes colocar estos archivos en la ruta raíz del proyecto:
 Desde la ruta raíz del proyecto, ejecuta:
 
 ```bash
+# Actualizar el entorno de ubuntu
+sudo apt update
+
+# Instalar postgresql
+sudo apt install postgresql postgresql-contrib
+
+# Actualizar repositorio de dependencias de pgvector
+sudo apt install build-essential postgresql-server-dev-all
+
+# Instalar pgvector
+cd /tmp
+git clone --branch v0.8.2 https://github.com/pgvector/pgvector.git
+cd pgvector
+make
+sudo make install
+
+# Instalar postgis
+sudo apt install postgresql-16-postgis-3
+
 # Crear el entorno virtual
-python3 -m venv venv
+python3.14 -m venv venv
 
 # Activar el entorno
-# En Linux/AWS EC2:
 source venv/bin/activate
-# En Windows:
-# .\venv\Scripts\activate
 
 pip install --upgrade pip
 pip install -r requirements.txt
