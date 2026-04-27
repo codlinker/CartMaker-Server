@@ -499,6 +499,7 @@ class CompanyStore(models.Model):
     creation = models.DateTimeField(auto_now_add=True)
     business_hours = models.JSONField(default=dict)
     image = models.CharField(max_length=500, null=True, blank=True)
+    is_active = models.BooleanField(default=True)
 
     def get_json(self)->dict:
         url = f"{settings.DOMAIN}/{self.image}" if not self.image.startswith('http') else self.image
@@ -507,7 +508,8 @@ class CompanyStore(models.Model):
             'name':self.name,
             'creation':timezone.localtime(self.creation).strftime("%d/%m/%Y, %H:%M:%S"),
             'business_hours':self.business_hours,
-            'image':url
+            'image':url,
+            'location':self.location.get_json()
         }
 
 class StoreLocation(models.Model):
@@ -528,6 +530,15 @@ class StoreLocation(models.Model):
     name = models.CharField(max_length=255)
     details = models.TextField(null=True, blank=True)
     creation = models.DateTimeField(auto_now_add=True)
+
+    def get_json(self)->dict:
+        return {
+            'mall_id':self.mall.id if self.mall else None,
+            'coordinates':self.coordinates,
+            'name':self.name,
+            'details':self.details,
+            'creation':timezone.localtime(self.creation).strftime("%d/%m/%Y, %H:%M:%S")
+        }
 
 class StoreContactMethod(models.Model):
     """
