@@ -6,6 +6,7 @@ def poblar_datos(apps, schema_editor):
     # Modelos necesarios para cargar los datos iniciales
     Category = apps.get_model('web', 'Category')
     MerchantPlan = apps.get_model('web', 'MerchantPlan')
+    Announcement = apps.get_model('web', 'Announcement')
     # Crear datos iniciales
     Category.objects.bulk_create([
         Category(name='Comida', img_url='img/categories/category_comida.jpg'),
@@ -63,6 +64,20 @@ def poblar_datos(apps, schema_editor):
             label_border_color = "#F2ED49",
             label_text_color = "#F2ED49",
             requires_business= True
+        )
+    ])
+    Announcement.objects.bulk_create([
+        Announcement(
+            banner_img='/static/img/third_banner_test.png',
+            navigate_to='home',
+        ),
+        Announcement(
+            banner_img='/static/img/2_banner_test.png',
+            navigate_to='home',
+        ),
+        Announcement(
+            banner_img='/static/img/first_banner_test.png',
+            navigate_to='home',
         )
     ])
 
