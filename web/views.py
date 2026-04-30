@@ -25,6 +25,7 @@ from django.db import transaction
 from .firebase_admin import NotificationManager
 from django.utils import timezone
 from .tasks import *
+from django.contrib.gis.geos import Polygon, Point
 
 ####################################################
 ################## AUTENTICACION ###################
@@ -619,11 +620,171 @@ class FullPaySubscriptionWithWalletView(APIView):
                 'message': f'Ocurrió un error al procesar el pago: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+class CreateCompanyAPI(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'actions'
+    permission_classes = [IsAuthenticated]
+    
+    """
+    CASO DE CENTRO COMERCIAL:
+    {'name': 'Sony', 'comercial_entity_type': 0, 'store_type': 0, 'selected_mall_id': 14, 'selected_mall_floor': 4, 'lat': None, 'lng': None, 'address': 'Plaza Las Americas'}
+    """
+
+    """
+    CASO DE TIENDA NORMAL:
+    {'name': 'Sony', 'comercial_entity_type': 0, 'store_type': 5, 'selected_mall_id': None, 'selected_mall_floor': 3, 'lat': 10.470663199999994, 'lng': -66.59848720000001, 'address': 'Plaza, Miranda, 12, Venezuela'}
+    """
+
+    def post(self, request):
+        data = request.data
+        name = request.data.get('name')
+        comercial_entity_type = request.data.get('comercial_entity_type')
+        store_type = request.data.get('store_type')
+        selected_mall_id = request.data.get('selected_mall_id')
+        selected_mall_floor = request.data.get('selected_mall_floor')
+        company_category = request.data.get('company_category')
+        lat = request.data.get('lat')
+        lng = request.data.get('lng')
+        address = request.data.get('address')
+        try:
+            store_type = StoreType(store_type)
+        except ValueError:
+            return Response({'error':"Tipo de tienda no reconocido."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            merchant_type = MerchantType(comercial_entity_type)
+        except ValueError:
+            return Response({'error':"Tipo de entidad comercial no reconocido."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            company_category = CompanyCategory.objects.get(id=int(company_category))
+        except CompanyCategory.DoesNotExist:
+            return Response({'error':"No existe la categoria de la tienda."}, status=status.HTTP_400_BAD_REQUEST)
+        if Company.objects.only('name').filter(name=name).exists():
+            return Response({'error':"Ya existe una tienda con ese nombre."}, status=status.HTTP_406_NOT_ACCEPTABLE)
+        try:
+            merchant_subscription = MerchantSubscription.objects.only('plan', 'merchant_type').select_related('plan').get(merchant=request.user)
+        except MerchantSubscription.DoesNotExist:
+            return Response({'error':"Usted no esta asociado a una suscripcion de comerciante.."}, status=status.HTTP_406_NOT_ACCEPTABLE)
+        if selected_mall_id != None:
+            # Flujo para tienda en centro comercial
+            try:
+                mall = Mall.objects.get(id=int(selected_mall_id))
+            except Mall.DoesNotExist:
+                return Response({'error':"No encontramos ese centro comercial."}, status=status.HTTP_400_BAD_REQUEST)
+            if selected_mall_floor > mall.floors_quantity:
+                return Response({'error':"El centro comercial no tiene esa cantidad de pisos."}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                with transaction.atomic:
+                    if not merchant_subscription.plan.requires_business and merchant_subscription.merchant_type != merchant_type:
+                        merchant_subscription.merchant_type = merchant_type
+                        merchant_subscription.save()
+                    company = Company.objects.create(
+                        name=name,
+                        owner=request.user,
+                        category=company_category
+                    )
+                    company_store = CompanyStore.objects.create(
+                        company=company,
+                        name=name, # Por defecto la primera sucursal tiene el nombre de la empresa
+                        store_type=store_type
+                    )
+                    StoreLocation.objects.create(
+                        store=company_store,
+                        mall=mall,
+                        coordinates=mall.coordinates,
+                        name=address
+                    )
+            except Exception as e:
+                return Response({'error':f"{e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        else:
+            # Flujo para tienda de otro tipo
+            try:
+                with transaction.atomic:
+                    if not merchant_subscription.plan.requires_business and merchant_subscription.merchant_type != merchant_type:
+                        merchant_subscription.merchant_type = merchant_type
+                        merchant_subscription.save()
+                    company = Company.objects.create(
+                        name=name,
+                        owner=request.user,
+                        category=company_category
+                    )
+                    company_store = CompanyStore.objects.create(
+                        company=company,
+                        name=name, # Por defecto la primera sucursal tiene el nombre de la empresa
+                        store_type=store_type
+                    )
+                    StoreLocation.objects.create(
+                        store=company_store,
+                        coordinates=Point(lat, lng),
+                        name=address
+                    )
+            except Exception as e:
+                return Response({'error':f"{e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({"data":"Compañía registrada exitosamente."}, status=status.HTTP_201_CREATED)
+
+class CheckCompanyNameAvailableAPI(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'actions'
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, name:str):
+        return Response(status=status.HTTP_202_ACCEPTED) if Company.objects.only('name').filter(name=name).exists()\
+            == False else Response(status=status.HTTP_406_NOT_ACCEPTABLE)
+
+#########################################################
+#################### MANEJO DE MAPAS ####################
+#########################################################
+
+class GetStoresLocations(APIView):
+    """
+    Endpoint optimizado para cargar tiendas basadas en el área visible del mapa.
+    """
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'actions'
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            # Obtención de parámetros del BBOX
+            bbox_coords = (
+                float(request.query_params.get('min_lng')),
+                float(request.query_params.get('min_lat')),
+                float(request.query_params.get('max_lng')),
+                float(request.query_params.get('max_lat'))
+            )
+            bbox = Polygon.from_bbox(bbox_coords)
+            bbox.srid = 4326
+
+            # Filtro optimizado
+            stores = StoreLocation.objects.filter(
+                coordinates__coveredby=bbox
+            ).only('id', 'coordinates', 'name', 'mall_id')
+
+            features = [s.get_json() for s in stores]
+            return Response({'data': features}, status=status.HTTP_200_OK)
+        except (ValueError, TypeError, AttributeError):
+            return Response({'error': 'Parámetros inválidos'}, status=status.HTTP_400_BAD_REQUEST)
+
 ####################################################
 ###################### CACHE #######################
 ####################################################
 
-class StoreCacheAPI(APIView):
+class GetMallsCache(APIView):
+    """
+    Devuelve todos los centros comerciales registrados para mapeo local.
+    """
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'actions'
+    permission_classes = [IsAuthenticated]
+
+    def get(selmalls_dataf, request):
+        malls = Mall.objects.all()
+        malls_data = [m.get_json() for m in malls]
+        data = {
+            'malls':malls_data
+        }
+        return Response(data, status=status.HTTP_200_OK)
+
+class CompanyCacheAPI(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'navigation'
     permission_classes = [IsAuthenticated]
@@ -732,9 +893,13 @@ class HomeCacheAPI(APIView):
             category.get_json() 
             for category in Category.objects.prefetch_related('subcategories').all()
         ]
+        company_categories = [
+            category.get_json() for category in CompanyCategory.objects.all()
+        ]
         cache = {
             "announcements":announcements,
-            "categories":categories
+            "categories":categories,
+            'company_categories':company_categories
         }
         return Response(cache, status=200)
 

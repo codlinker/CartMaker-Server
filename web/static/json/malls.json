@@ -1,0 +1,319 @@
+{
+  "Miranda": {
+    "Chacao": [
+      {
+        "name": "Sambil Chacao",
+        "lat": "10.489980468654917",
+        "lng": "-66.85406587992803",
+        "floors_quantity": 5,
+        "img_url": "static/img/malls/sambil_chacao.jpg"
+      },
+      {
+        "name": "Centro Comercial Ciudad Tamanaco (CCCT)",
+        "lat": "10.484812218429303",
+        "lng": "-66.85447210909787",
+        "floors_quantity": 4,
+        "img_url": "static/img/malls/cct.jpg"
+      },
+      {
+        "name": "Centro San Ignacio",
+        "lat": "10.49772732237703",
+        "lng": "-66.85653003947779",
+        "floors_quantity": 5,
+        "img_url": "static/img/malls/san_ignacio.jpg"
+      },
+      {
+        "name": "Centro Plaza",
+        "lat": "10.496584135093093",
+        "lng": "-66.84563798015736",
+        "floors_quantity": 4,
+        "img_url": "static/img/malls/centro_plaza.jpg"
+      },
+      {
+        "name": "Centro Comercial Lido",
+        "lat": "10.491217494897336",
+        "lng": "-66.8626636789676",
+        "floors_quantity": 3,
+        "img_url": "static/img/malls/centro_lido.jpg"
+      },
+      {
+        "name": "Merpoeste",
+        "lat": "10.489233794407975",
+        "lng": "-66.8555390537725",
+        "floors_quantity": 3,
+        "img_url": "static/img/malls/merpoeste.jpg"
+      }
+    ],
+    "Baruta": [
+      {
+        "name": "Tolón",
+        "lat": "10.480605640072188",
+        "lng": "-66.86077528166803",
+        "floors_quantity": 5,
+        "img_url": "static/img/malls/tolon.jpg"
+      },
+      {
+        "name": "Paseo Las Mercedes",
+        "lat": "10.477684445330555",
+        "lng": "-66.85821647102968",
+        "floors_quantity": 4,
+        "img_url": "static/img/malls/paseo_las_mercedes.jpg"
+      },
+      {
+        "name": "Plaza Las Americas",
+        "lat": "10.457999163485496",
+        "lng": "-66.82901501027237",
+        "floors_quantity": 4,
+        "img_url": "static/img/malls/plaza_las_americas.jpg"
+      },
+      {
+        "name": "Centro Comercial Concresa",
+        "lat": "10.451922867503862",
+        "lng": "-66.87266028323576",
+        "floors_quantity": 2,
+        "img_url": "static/img/malls/concresa.jpg"
+      },
+      {
+        "name": "Galerías Prados del Este",
+        "lat": "10.449675753730748",
+        "lng": "-66.88068305204473",
+        "floors_quantity": 3,
+        "img_url": "static/img/malls/galerias_prados_del_este.png"
+      },
+      {
+        "name": "Valle Arriba",
+        "lat": "10.467337786472742",
+        "lng": "-66.86620447975324",
+        "floors_quantity": 3,
+        "img_url": "static/img/malls/valle_arriba.jpg"
+      },
+      {
+        "name": "Terras Plaza",
+        "lat": "10.446669533972775",
+        "lng": "-66.87079905341544",
+        "floors_quantity": 3,
+        "img_url": "static/img/malls/terras_plaza.jpg"
+      },
+      {
+        "name": "Manzanares Plaza",
+        "lat": "10.433458341111585",
+        "lng": "-66.88324727386885",
+        "floors_quantity": 2,
+        "img_url": "static/img/malls/manzanares_plaza.jpg"
+      }
+    ],
+    "Sucre": [
+      {
+        "name": "Centro Comercial Líder",
+        "lat": "10.485725220447426",
+        "lng": "-66.82158661506078",
+        "floors_quantity": 6,
+        "img_url": "static/img/malls/lider.jpg"
+      },
+      {
+        "name": "Millennium Mall",
+        "lat": "10.495401477811262",
+        "lng": "-66.83291992187954",
+        "floors_quantity": 6,
+        "img_url": "static/img/malls/millenium.jpg"
+      },
+      {
+        "name": "Unicentro El Marqués",
+        "lat": "10.483120371160636",
+        "lng": "-66.81853910276696",
+        "floors_quantity": 2,
+        "img_url": "static/img/malls/unicentro_el_marques.jpeg"
+      },
+      {
+        "name": "Boleíta Center",
+        "lat": "10.498981017075407",
+        "lng": "-66.82287229629317",
+        "floors_quantity": 5,
+        "img_url": "static/img/malls/boleita_center.jpg"
+      },
+      {
+        "name": "Macaracuay Plaza",
+        "lat": "10.467781543387146",
+        "lng": "-66.8197257045268",
+        "floors_quantity": 3,
+        "img_url": "static/img/malls/macaracuay_plaza.jpg"
+      },
+      {
+        "name": "Centro Comercial Xpress",
+        "lat": "10.455796379263084",
+        "lng": "-66.8178894572209",
+        "floors_quantity": 2,
+        "img_url": "static/img/malls/xpress.jpg"
+      }
+    ],
+    "El Hatillo": [
+      {
+        "name": "Paseo El Hatillo",
+        "lat": "10.42365858402046",
+        "lng": "-66.82406890631981",
+        "floors_quantity": 7,
+        "img_url": "static/img/malls/paseo_el_hatillo.jpg"
+      },
+      {
+        "name": "Parque Cerro Verde",
+        "lat": "10.450666529887801",
+        "lng": "-66.83082659281303",
+        "floors_quantity": 4,
+        "img_url": "static/img/malls/parque_cerro_verde.jpg"
+      },
+      {
+        "name": "Galerías Los Naranjos",
+        "lat": "10.441924200827792",
+        "lng": "-66.83404666288045",
+        "floors_quantity": 4,
+        "img_url": "static/img/malls/galerias_los_naranjos.jpg"
+      }
+    ],
+    "Guatire": [
+      {
+        "name": "Centro Comercial Buenaventura",
+        "lat": "10.465915981457806",
+        "lng": "-66.57542467200567",
+        "floors_quantity": 2,
+        "img_url": "static/img/malls/buenaventura.jpg"
+      },
+      {
+        "name": "Vista Place",
+        "lat": "10.464505873082741",
+        "lng": "-66.57398908363587",
+        "floors_quantity": 3,
+        "img_url": "static/img/malls/vista_place.jpg"
+      },
+      {
+        "name": "Centro Comercial Castillejo",
+        "lat": "10.47001707840883",
+        "lng": "-66.54764331959207",
+        "floors_quantity": 2,
+        "img_url": "static/img/malls/castillejo.jpg"
+      },
+      {
+        "name": "La Parada",
+        "lat": "10.465407683620146",
+        "lng": "-66.56911530536313",
+        "floors_quantity": 2,
+        "img_url": "static/img/malls/la_parada.jpg"
+      },
+      {
+        "name": "Oasis Center",
+        "lat": "10.465324967532563",
+        "lng": "-66.5710044159407",
+        "floors_quantity": 3,
+        "img_url": "static/img/malls/oasis_center.jpg"
+      },
+      {
+        "name": "Centro Comercial Daymar",
+        "lat": "10.466364975284879",
+        "lng": "-66.5343386423517",
+        "floors_quantity": 2,
+        "img_url": "static/img/malls/daymar.jpg"
+      },
+      {
+        "name": "Guatire Plaza",
+        "lat": "10.469534707168432",
+        "lng": "-66.54720769107769",
+        "floors_quantity": 2,
+        "img_url": "static/img/malls/guatire_plaza.jpg"
+      },
+      {
+        "name": "Centro Comercial Palo Alto",
+        "lat": "10.476148129840668",
+        "lng": "-66.56042719346758",
+        "floors_quantity": 2,
+        "img_url": "static/img/no_image.jpg"
+      },
+      {
+        "name": "Parque Esmeralda",
+        "lat": "10.475637689395619",
+        "lng": "-66.5593086166213",
+        "floors_quantity": 2,
+        "img_url": "static/img/malls/parque_esmeralda.jpg"
+      },
+      {
+        "name":"Mega Center",
+        "lat":"10.465244320950328",
+        "lng":"-66.57373785048165",
+        "floors_quantity":4,
+        "img_url":"static/img/malls/mega_center.jpg"
+      }
+    ]
+  },
+  "Distrito Capital": {
+    "Caracas": [
+      {
+        "name": "Sambil La Candelaria",
+        "lat": "10.50492299257681",
+        "lng": "-66.9018926750558",
+        "floors_quantity": 6,
+        "img_url": "static/img/malls/sambil_la_candelaria.jpg"
+      },
+      {
+        "name": "Centro Comercial El Recreo",
+        "lat": "10.491644187812247",
+        "lng": "-66.87725336164561",
+        "floors_quantity": 6,
+        "img_url": "static/img/malls/el_recreo.jpg"
+      },
+      {
+        "name": "City Market",
+        "lat": "10.494514184587342",
+        "lng": "-66.87768440925916",
+        "floors_quantity": 5,
+        "img_url": "static/img/malls/city_market.jpg"
+      },
+      {
+        "name": "Galerías Ávila",
+        "lat": "10.506613938588657",
+        "lng": "-66.90260099013099",
+        "floors_quantity": 4,
+        "img_url": "static/img/malls/galerias_avila.jpg"
+      },
+      {
+        "name": "Galerías Paraíso",
+        "lat": "10.474921039559323",
+        "lng": "-66.94579310362289",
+        "floors_quantity": 3,
+        "img_url": "static/img/malls/galerias_el_paraiso.jpg"
+      },
+      {
+        "name": "Multiplaza Paraíso",
+        "lat": "10.485546039327197",
+        "lng": "-66.9343321747867",
+        "floors_quantity": 4,
+        "img_url": "static/img/malls/multiplaza_paraiso.jpg"
+      },
+      {
+        "name": "Centro Comercial Uslar",
+        "lat": "10.475701495143111",
+        "lng": "-66.94940726947266",
+        "floors_quantity": 2,
+        "img_url": "static/img/malls/uslar.jpg"
+      },
+      {
+        "name": "Centro Comercial Los Molinos",
+        "lat": "10.491285576464698",
+        "lng": "-66.94174116545204",
+        "floors_quantity": 3,
+        "img_url": "static/img/malls/los_molinos.jpg"
+      },
+      {
+        "name": "Centro Comercial Propatria",
+        "lat": "10.503753538689045",
+        "lng": "-66.95292990362255",
+        "floors_quantity": 4,
+        "img_url": "static/img/malls/propatria.jpg"
+      },
+      {
+        "name": "Metrocenter",
+        "lat": "10.504516340609484",
+        "lng": "-66.91686027478657",
+        "floors_quantity": 3,
+        "img_url": "static/img/malls/metrocenter.jpg"
+      }
+    ]
+  }
+}

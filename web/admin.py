@@ -185,6 +185,24 @@ class GeoAdmin(GISModelAdmin, ModelAdmin):
             'all': ('css/admin_map_fix.css',)
         }
 
+@admin.register(Mall)
+class MallAdmin(GISModelAdmin, ModelAdmin):
+    gis_widget_kwargs = {
+        'attrs': {
+            'default_lon': -66.6115, 
+            'default_lat': 10.4686,  
+            'default_zoom': 14,      
+        }
+    }
+
+    list_display = ("name", 'floors_quantity', "coordinates", 'img_url')
+    search_fields = ('name',)
+    
+    class Media:
+        css = {
+            'all': ('css/admin_map_fix.css',)
+        }
+
 @admin.register(Announcement)
 class AnnouncementAdmin(ModelAdmin):
     list_display = ("active", "banner_img", "navigate_to", "creation")
@@ -211,9 +229,13 @@ class CartMakerBankAccountAdmin(ModelAdmin):
 class DeviceTokenAdmin(ModelAdmin):
     list_display = ('user', 'token', 'creation', 'platform')
 
+@admin.register(CompanyCategory)
+class CompanyCategoryAdmin(ModelAdmin):
+    list_display = ('id', 'name')
+
 # Modelos de Soporte y Configuración (Registro Simple con Estilo Unfold)
 others = [
-    CompanyCategory, InventoryItemOffer, 
+    InventoryItemOffer, 
     InventoryItemTransaction, InventoryItemQuestion, OrderCancellationTopic, 
     TokenWalletTransaction, StoreCalification, ProductCalification, 
     MerchantCalification, SupportTicket, AtlasMessage, 

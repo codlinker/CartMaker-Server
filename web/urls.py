@@ -22,10 +22,15 @@ urlpatterns = [
     # Rutas para la obtencion de datos
     path('api/v1/cache/user', UserCacheAPI.as_view(), name="user_cache"),
     path('api/v1/cache/home', HomeCacheAPI.as_view(), name="home_cache"),
+    path('api/v1/cache/company', CompanyCacheAPI.as_view(), name='company_cache'),
+    path('api/v1/cache/maps', GetMallsCache.as_view(), name='get_malls'),
     path('api/v1/cache/subscriptions', SubscriptionsCacheAPI.as_view(), name="subscriptions_cache"),
     path('api/v1/get-merchant-plans', GetMerchantPlans.as_view(), name="get_merchant_plans"),
     path('api/v1/full-pay-subscription', FullPaySubscriptionWithWalletView.as_view(), name='full_pay_subscription'),
     path('api/v1/get-cartmaker-bank-accounts', GetCartMakerAccounts.as_view(), name='get_cartmaker_bank_accounts'),
+    path('api/v1/get-stores-locations/', GetStoresLocations.as_view(), name='get_stores_locations'),
+    path('api/v1/check-company-name-available/<str:name>/', CheckCompanyNameAvailableAPI.as_view(), name='check_company_name_available'),
+    path('api/v1/create-company', CreateCompanyAPI.as_view(), name='create_company'),
     # Rutas para manejo de pagos
     path('api/v1/upload-subscription-payment', UploadSubscriptionPayment.as_view(), name='upload_subscription_payment'),
     # Rutas para la autenticacion

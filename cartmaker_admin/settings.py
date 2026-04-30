@@ -225,6 +225,7 @@ UNFOLD = {
                     {"title": "Compañías", "link": "/admin/web/company/", "icon": "business"},
                     {"title":"Categorías", 'link':"/admin/web/companycategory/", "icon":"domain_disabled"},
                     {"title": "Tiendas", "link": "/admin/web/companystore/", "icon": "storefront"},
+                    {"title": "Centros comerciales", "link": "/admin/web/mall/", "icon": "store"},
                     {"title": "Ubicaciones", "link":"/admin/web/storelocation/", "icon":"location_on"},
                     {"title": "Métodos de contacto", "link":"/admin/web/storecontactmethod/", "icon":"call"},
                     {"title":"Empleados", "link":"/admin/web/employee/", "icon":"emoji_people"},

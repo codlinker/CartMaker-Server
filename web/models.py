@@ -63,6 +63,16 @@ class OrderStatus(models.IntegerChoices):
     COMPLETED = 4, _('Completada')
     RESOLVED = 5, _('Resuelta')
 
+class StoreType(models.IntegerChoices):
+    # Ubicaciones tradicionales
+    IN_MALL = 0, _('En centro comercial')
+    STREET = 1, _('Local a pie de calle')
+    KIOSK = 2, _('Kiosco')
+    # Formatos modernos
+    ONLINE = 3, _('Tienda virtual')
+    MOBILE = 4, _('Unidad móvil / Food Truck')
+    BUHONERO = 5, _('Puesto buhonero')
+
 class WithdrawalType(models.IntegerChoices):
     """
     ENUM Tipo de retiro de la orden.
@@ -407,6 +417,12 @@ class ClientLocation(models.Model):
     name = models.CharField(max_length=255)
     is_default = models.BooleanField(default=False)
 
+    class Meta:
+        indexes = [
+            # Esto crea el índice GIST sobre la columna de coordenadas
+            models.Index(fields=['coordinates'], name='client_location_gis_idx', opclasses=['gist_geometry_ops_2d']),
+        ]
+
     def get_json(self)->dict:
         return {
             'id':self.id,
@@ -442,10 +458,35 @@ class ClientContactMethod(models.Model):
 # ==========================================
 
 class Mall(models.Model):
-    """
-    """
     name = models.CharField(max_length=60)
-    location = gis_models.PointField()
+    coordinates = gis_models.PointField()
+    floors_quantity = models.IntegerField(default=1)
+    img_url = models.CharField(default="static/img/no_image.jpg")
+
+    class Meta:
+        indexes = [
+            # Esto crea el índice GIST sobre la columna de coordenadas
+            models.Index(fields=['coordinates'], name='mall_location_gis_idx', opclasses=['gist_geometry_ops_2d']),
+        ]
+
+    def get_img_url(self) -> str:
+        """
+        Retorna la URL publica de la imagen del centro comercial.
+        """
+        return self.img_url if self.img_url.startswith('http')\
+              else f"{settings.DOMAIN}/{self.img_url}"
+
+    def get_json(self) -> dict:
+        return {
+            'id': self.id,
+            'name': self.name,
+            'lat': self.coordinates.y,
+            'lng': self.coordinates.x,
+            # Solo devolvemos los IDs de las ubicaciones asociadas
+            'store_location_ids': list(self.stores.values_list('id', flat=True)),
+            'floors_quantity':self.floors_quantity,
+            'img_url':self.get_img_url()
+        }
     
 class CompanyCategory(models.Model):
     """
@@ -455,6 +496,12 @@ class CompanyCategory(models.Model):
         name (str): Nombre de la categoría (ej: 'Farmacia', 'Supermercado').
     """
     name = models.CharField(max_length=255)
+
+    def get_json(self)->dict:
+        return {
+            'id':self.id,
+            'name':self.name
+        }
 
 class Company(models.Model):
     """
@@ -500,6 +547,7 @@ class CompanyStore(models.Model):
     business_hours = models.JSONField(default=dict)
     image = models.CharField(max_length=500, null=True, blank=True)
     is_active = models.BooleanField(default=True)
+    store_type = models.IntegerField(choices=StoreType.choices, default=StoreType.STREET)
 
     def get_json(self)->dict:
         url = f"{settings.DOMAIN}/{self.image}" if not self.image.startswith('http') else self.image
@@ -531,15 +579,23 @@ class StoreLocation(models.Model):
     details = models.TextField(null=True, blank=True)
     creation = models.DateTimeField(auto_now_add=True)
 
-    def get_json(self)->dict:
-        return {
-            'mall_id':self.mall.id if self.mall else None,
-            'coordinates':self.coordinates,
-            'name':self.name,
-            'details':self.details,
-            'creation':timezone.localtime(self.creation).strftime("%d/%m/%Y, %H:%M:%S")
-        }
+    class Meta:
+        indexes = [
+            # Esto crea el índice GIST sobre la columna de coordenadas
+            models.Index(fields=['coordinates'], name='store_location_gis_idx', opclasses=['gist_geometry_ops_2d']),
+        ]
 
+    def get_json(self) -> dict:
+        return {
+            'id': self.id,
+            'mall_id': self.mall_id,  # mall_id es directo, evita una query extra al objeto mall
+            'lat': self.coordinates.y,
+            'lng': self.coordinates.x,
+            'store_type': self.store.store_type,
+            'name': self.name,
+            'details': self.details,
+            'creation': timezone.localtime(self.creation).strftime("%d/%m/%Y, %H:%M:%S")
+        }
 class StoreContactMethod(models.Model):
     """
     Canales de comunicación directa de una tienda.
@@ -599,11 +655,11 @@ class Category(models.Model):
         return {
             "id": self.id,
             "name": self.name,
-            "img_url": f"{settings.DOMAIN}/{self.img_url}",
+            "img_url": self.get_img_url(),
             "sub_categories": [{
                 "id": sub.id,
                 "name": sub.name,
-                "img_url": self.get_img_url()
+                "img_url": sub.get_img_url()
             } for sub in self.subcategories.all()] 
         }
     
@@ -612,7 +668,7 @@ class Category(models.Model):
         Retorna la URL publica de la imagen de la categoria.
         """
         return self.img_url if self.img_url.startswith('http')\
-              else storage_manager.get_url(self.img_url)
+              else f"{settings.DOMAIN}/{self.img_url}"
 
 class SubCategory(models.Model):
     """
@@ -639,7 +695,7 @@ class SubCategory(models.Model):
         Retorna la URL publica de la imagen de la sub-categoria.
         """
         return self.img_url if self.img_url.startswith('http')\
-              else storage_manager.get_url(self.img_url)
+              else f"{settings.DOMAIN}/{self.img_url}"
 
 class Product(models.Model):
     """
@@ -1065,6 +1121,7 @@ class MerchantSubscription(models.Model):
             'adquired_at':self.adquired_at.strftime("%d/%m/%Y, %H:%M:%S"),
             'merchant_type':self.get_merchant_type_display(),
             'rif_number':self.rif_number,
+            'business_required':self.plan.requires_business
         }
 
 class MerchantPlanPayment(models.Model):
@@ -1289,7 +1346,7 @@ class Announcement(models.Model):
         creation (datetime): Fecha de lanzamiento.
     """
     banner_img = models.CharField(max_length=500, help_text="La imagen debe ser de 1920px x 1080px. Los primeros 180px de arriba estaran tapados por el AppBar del home. \
-                                 Si la imagen esta en el servidor, solo especificar la ruta en la carpeta static, ej: static/img/banner_1_test.png")
+                                 Si la imagen esta en el servidor, solo especificar la ruta en la carpeta static, ej: img/banner_1_test.png")
     navigate_to = models.CharField(max_length=255)
     active = models.BooleanField(default=True)
     creation = models.DateTimeField(auto_now_add=True)
