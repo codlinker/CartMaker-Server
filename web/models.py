@@ -550,7 +550,10 @@ class CompanyStore(models.Model):
     store_type = models.IntegerField(choices=StoreType.choices, default=StoreType.STREET)
 
     def get_json(self)->dict:
-        url = f"{settings.DOMAIN}/{self.image}" if not self.image.startswith('http') else self.image
+        if self.image:
+            url = f"{settings.DOMAIN}/{self.image}" if not self.image.startswith('http') else self.image
+        else:
+            url = None
         return {
             'id':self.id,
             'name':self.name,

@@ -624,16 +624,6 @@ class CreateCompanyAPI(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'actions'
     permission_classes = [IsAuthenticated]
-    
-    """
-    CASO DE CENTRO COMERCIAL:
-    {'name': 'Sony', 'comercial_entity_type': 0, 'store_type': 0, 'selected_mall_id': 14, 'selected_mall_floor': 4, 'lat': None, 'lng': None, 'address': 'Plaza Las Americas'}
-    """
-
-    """
-    CASO DE TIENDA NORMAL:
-    {'name': 'Sony', 'comercial_entity_type': 0, 'store_type': 5, 'selected_mall_id': None, 'selected_mall_floor': 3, 'lat': 10.470663199999994, 'lng': -66.59848720000001, 'address': 'Plaza, Miranda, 12, Venezuela'}
-    """
 
     def post(self, request):
         data = request.data
@@ -646,6 +636,7 @@ class CreateCompanyAPI(APIView):
         lat = request.data.get('lat')
         lng = request.data.get('lng')
         address = request.data.get('address')
+        print("DATA: ", data)
         try:
             store_type = StoreType(store_type)
         except ValueError:
@@ -673,7 +664,7 @@ class CreateCompanyAPI(APIView):
             if selected_mall_floor > mall.floors_quantity:
                 return Response({'error':"El centro comercial no tiene esa cantidad de pisos."}, status=status.HTTP_400_BAD_REQUEST)
             try:
-                with transaction.atomic:
+                with transaction.atomic():
                     if not merchant_subscription.plan.requires_business and merchant_subscription.merchant_type != merchant_type:
                         merchant_subscription.merchant_type = merchant_type
                         merchant_subscription.save()
@@ -698,7 +689,7 @@ class CreateCompanyAPI(APIView):
         else:
             # Flujo para tienda de otro tipo
             try:
-                with transaction.atomic:
+                with transaction.atomic():
                     if not merchant_subscription.plan.requires_business and merchant_subscription.merchant_type != merchant_type:
                         merchant_subscription.merchant_type = merchant_type
                         merchant_subscription.save()
@@ -718,6 +709,7 @@ class CreateCompanyAPI(APIView):
                         name=address
                     )
             except Exception as e:
+                print("Error: ", e)
                 return Response({'error':f"{e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         return Response({"data":"Compañía registrada exitosamente."}, status=status.HTTP_201_CREATED)
 
@@ -796,7 +788,7 @@ class CompanyCacheAPI(APIView):
         if MerchantSubscription.objects.filter(merchant=request.user, valid_until__gt=timezone.now()).exists():
             try:
                 company = Company.objects.get(owner=request.user).get_json()
-                stores = [company_store.get_json() for company_store in CompanyStore.filter(company=company, is_active=True)]
+                stores = [company_store.get_json() for company_store in CompanyStore.objects.filter(company_id=company['id'], is_active=True)]
                 return Response({
                     'company':company,
                     'stores':stores
