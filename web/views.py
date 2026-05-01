@@ -495,7 +495,7 @@ class UploadSubscriptionPayment(APIView):
                 payment = MerchantPlanPayment.objects.create(
                     subscription=merchant_subscription,
                     reference_number = data['reference_number'],
-                    payment_proof_url = storage_manager.get_url(relative_path),
+                    payment_proof_url = relative_path,
                     amount=data['amount_sended'],
                     bcv_taxes_to_day=data['dollar_bcv_tax'],
                 )
@@ -888,10 +888,27 @@ class HomeCacheAPI(APIView):
         company_categories = [
             category.get_json() for category in CompanyCategory.objects.all()
         ]
+        company_section_images = {
+            "administrar_inventario": storage_manager.get_url('static/img/company_section_buttons/administrar_inventario.jpg', True),
+            "administrar_suscripcion": storage_manager.get_url('static/img/company_section_buttons/administrar_suscripcion.jpg', True),
+            "analiticas": storage_manager.get_url('static/img/company_section_buttons/analiticas.jpg', True),
+            "empleados": storage_manager.get_url('static/img/company_section_buttons/empleados.jpg', True),
+            "gamificacion": storage_manager.get_url('static/img/company_section_buttons/gamificacion.jpg', True),
+            "mi_tienda": storage_manager.get_url('static/img/company_section_buttons/mi_tienda.jpg', True),
+            "pedidos": storage_manager.get_url('static/img/company_section_buttons/pedidos.jpg', True),
+            "preguntas_de_clientes": storage_manager.get_url('static/img/company_section_buttons/preguntas_de_clientes.jpg', True),
+        }
+        search_stores_at_zone = {
+            # TODO: Implementar funcionalidad para obtener el mensaje de Atlas
+            "atlas_message":"Detecto varias ofertas de ortalizas en el Kiosco de DonAmigo.",
+            "image_background":storage_manager.get_url('static/img/tiendas_en_la_zona_background.jpg', True)
+        }
         cache = {
             "announcements":announcements,
             "categories":categories,
-            'company_categories':company_categories
+            'company_categories':company_categories,
+            'company_section_images':company_section_images,
+            'search_stores_at_zone':search_stores_at_zone
         }
         return Response(cache, status=200)
 

@@ -1158,7 +1158,7 @@ class MerchantPlanPayment(models.Model):
     @property
     def payment_proof_preview(self):
         if self.payment_proof_url:
-            return mark_safe(f'<img src="{self.payment_proof_url}" style="max-height: 400px; max-width: 300px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" />')
+            return mark_safe(f'<img src="{storage_manager.get_url(self.payment_proof_url)}" style="max-height: 400px; max-width: 300px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" />')
         return "Sin comprobante"
     
     payment_proof_preview.fget.short_description = "Comprobante de Pago"
@@ -1169,7 +1169,7 @@ class MerchantPlanPayment(models.Model):
             'id': self.id,
             'subscription': self.subscription.id,
             'reference_number': self.reference_number,
-            'payment_proof_url': self.payment_proof_url,
+            'payment_proof_url': storage_manager.get_url(self.payment_proof_url),
             'amount': float(self.amount),
             'bcv_taxes_to_day': float(self.bcv_taxes_to_day),
             'status': self.status,

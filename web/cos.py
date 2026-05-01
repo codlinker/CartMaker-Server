@@ -60,7 +60,7 @@ class COS:
             
             return full_path
 
-    def get_url(self, relative_path:str):
+    def get_url(self, relative_path:str, skip_media=False):
         """
         Devuelve la URL absoluta para acceder al recurso.
         """
@@ -71,7 +71,7 @@ class COS:
             return f"https://{self.bucket_name}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{relative_path}"
         else:
             # Asegura que MEDIA_URL termine en /
-            base_url = f"{settings.DOMAIN}{settings.MEDIA_URL}"
+            base_url = f"{settings.DOMAIN}{settings.MEDIA_URL}" if not skip_media else settings.DOMAIN
             if not base_url.endswith('/') and not relative_path.startswith('/'):
                 base_url += "/"
             return f"{base_url}{relative_path}"
