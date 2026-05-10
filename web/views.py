@@ -68,8 +68,8 @@ class BiometricLoginView(APIView):
                 {"error": "Vector biométrico inválido o incompleto."}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
-        THRESHOLD_PERFECT = 0.55
-        THRESHOLD_ACCEPTABLE = 0.75
+        THRESHOLD_PERFECT = 0.35
+        THRESHOLD_ACCEPTABLE = 0.45
         closest_user = User.objects.filter(
             cedula_verified=True,
             biometric_vector__isnull=False,
@@ -684,6 +684,8 @@ class CreateCompanyAPI(APIView):
                         coordinates=mall.coordinates,
                         name=address
                     )
+                    request.user.user_type = UserType.MERCHANT
+                    request.user.save()
             except Exception as e:
                 return Response({'error':f"{e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         else:
@@ -708,6 +710,8 @@ class CreateCompanyAPI(APIView):
                         coordinates=Point(lat, lng),
                         name=address
                     )
+                    request.user.user_type = UserType.MERCHANT
+                    request.user.save()
             except Exception as e:
                 print("Error: ", e)
                 return Response({'error':f"{e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -721,6 +725,237 @@ class CheckCompanyNameAvailableAPI(APIView):
     def get(self, request, name:str):
         return Response(status=status.HTTP_202_ACCEPTED) if Company.objects.only('name').filter(name=name).exists()\
             == False else Response(status=status.HTTP_406_NOT_ACCEPTABLE)
+
+class UpdateCompanyAPI(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'actions'
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = UpdateCompanySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        try:
+            company = Company.objects.get(id=data['company_id'])
+        except Company.DoesNotExist:
+            return Response({'No se encontro la compania.'}, status=status.HTTP_404_NOT_FOUND)
+        
+        first_store = company.stores.all().order_by('-creation').first()
+        if first_store == None:
+            return Response({'No hay una tienda configurada'}, status=status.HTTP_409_CONFLICT)
+        
+        profile_img = data.get('profile_img')
+        main_store_img = data.get('main_store_img')
+        presentation_video = data.get('presentation_video')
+        presentation_video_thumbnail = data.get('presentation_video_thumbnail')
+        category_id = data.get('category_id')
+        name = data.get('name')
+        gamification_enabled = data.get('gamification_enabled')
+        gamification_tokens_per_dollar = data.get('gamification_tokens_per_dollar')
+        work_hours = data.get('work_hours')
+        whatsapp_number = data.get('whatsapp_number')
+        instagram_handle = data.get('instagram_handle')
+        phone_number = data.get('phone_number')
+        
+        # Extracción de campos de ubicación
+        store_type = data.get('store_type')
+        is_mall = data.get('is_mall')
+        lat = data.get('lat')
+        lng = data.get('lng')
+        address = data.get('address')
+        selected_mall_id = data.get('selected_mall_id')
+        selected_mall_floor = data.get('selected_mall_floor')
+        print("DATA QUE LLEGA DEL REQUEST: ", data)
+        company_has_changed = False
+        store_has_changed = False
+
+        with transaction.atomic():
+            dtnow_str = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
+            
+            # ===============================
+            # 1. MANEJO DE ARCHIVOS (MULTIMEDIA)
+            # ===============================
+            if profile_img:
+                # NUEVO: Limpiamos la imagen de perfil anterior
+                if company.image:
+                    try:
+                        storage_manager.delete_file(company.image)
+                    except Exception as e:
+                        print(f"Error borrando img vieja: {e}")
+
+                extension = profile_img.name.split('.')[-1]
+                file_name = f"{company.id}_{dtnow_str}.{extension}"
+                folder = "company_profile_pictures"
+                relative_path = storage_manager.save_file(profile_img, folder, file_name)
+                
+                if relative_path:
+                    company.image = relative_path
+                    company_has_changed = True
+                else:
+                    raise Exception("Error al guardar la imagen de perfil en el storage.")
+            
+            if main_store_img:
+                # NUEVO: Limpiamos la foto de tienda anterior
+                if first_store.store_img_url:
+                    try:
+                        storage_manager.delete_file(first_store.store_img_url)
+                    except Exception as e:
+                        print(f"Error borrando img de tienda vieja: {e}")
+
+                extension = main_store_img.name.split('.')[-1]
+                file_name = f"{dtnow_str}.{extension}"
+                folder = f"store_pictures/{first_store.id}"
+                relative_path = storage_manager.save_file(main_store_img, folder, file_name)
+                
+                if relative_path:
+                    first_store.store_img_url = relative_path
+                    store_has_changed = True
+                else:
+                    raise Exception("Error al guardar la imagen de la tienda en el storage.")
+            
+            if presentation_video:
+                # NUEVO: ¡Aquí matamos el video viejo!
+                if company.presentation_video_url:
+                    try:
+                        storage_manager.delete_file(company.presentation_video_url)
+                    except Exception as e:
+                        # Hacemos un print/log pero NO detenemos la ejecución si falla
+                        # (es mejor dejar un archivo huérfano que bloquearle la app al usuario)
+                        print(f"Atención: No se pudo borrar el video anterior en {company.presentation_video_url}. Error: {e}")
+
+                extension = presentation_video.name.split('.')[-1]
+                file_name = f"{company.id}_video_{dtnow_str}.{extension}"
+                folder = "company_presentation_videos"
+                relative_path = storage_manager.save_file(presentation_video, folder, file_name)
+                
+                if relative_path:
+                    company.presentation_video_url = relative_path
+                    company_has_changed = True
+                else:
+                    raise Exception("Error al guardar el video en el storage.")
+            
+            if presentation_video_thumbnail:
+                # NUEVO: Limpiamos la miniatura vieja
+                if company.presentation_video_thumbnail:
+                    try:
+                        storage_manager.delete_file(company.presentation_video_thumbnail)
+                    except Exception as e:
+                        print(f"Error borrando thumbnail viejo: {e}")
+
+                extension = presentation_video_thumbnail.name.split('.')[-1]
+                file_name = f"{company.id}_thumbnail_{dtnow_str}.{extension}"
+                folder = "company_presentation_videos"
+                relative_path = storage_manager.save_file(presentation_video_thumbnail, folder, file_name)
+                
+                if relative_path:
+                    company.presentation_video_thumbnail = relative_path
+                    company_has_changed = True
+                else:
+                    raise Exception("Error al guardar el thumbnail del video en el storage.")
+
+            
+            # =========================
+            # 2. ACTUALIZACIÓN DE DATOS (Empresa)
+            # =========================
+            if name:
+                company.name = name
+                company_has_changed = True
+            
+            if category_id:
+                company.category_id = category_id
+                company_has_changed = True
+                
+            if gamification_enabled is not None:
+                company.gamification_enabled = gamification_enabled
+                company_has_changed = True
+                
+            if gamification_tokens_per_dollar is not None:
+                company.gamification_tokens_per_dollar = gamification_tokens_per_dollar
+                company_has_changed = True
+
+            if work_hours:
+                company.main_work_hours = work_hours 
+                company_has_changed = True
+                
+            # Métodos de contacto
+            contact_data = [
+                (whatsapp_number, ContactMethodType.WHATSAPP),
+                (instagram_handle, ContactMethodType.INSTAGRAM),
+                (phone_number, ContactMethodType.PHONE),
+            ]
+            for value, method_type in contact_data:
+                if value is not None:
+                    StoreContactMethod.objects.update_or_create(
+                        store=first_store,
+                        method_type=method_type,
+                        defaults={'value': value}
+                    )
+
+            # =========================
+            # 3. ACTUALIZACIÓN DE UBICACIÓN
+            # =========================
+            if store_type is not None:
+                first_store.store_type = store_type
+                store_has_changed = True
+
+            if is_mall is not None:
+                location, _ = StoreLocation.objects.get_or_create(store=first_store)
+                
+                if is_mall:
+                    try:
+                        mall = Mall.objects.get(id=selected_mall_id)
+                        location.mall = mall
+                        location.coordinates = mall.coordinates
+                        location.name = address  # Nombre del C.C.
+                        
+                        # NUEVO: Guardamos el piso en su campo dedicado
+                        if selected_mall_floor is not None:
+                            location.mall_floor = selected_mall_floor
+                        
+                        location.save()
+                    except Mall.DoesNotExist:
+                        return Response({'error': "El centro comercial seleccionado no existe."}, status=status.HTTP_400_BAD_REQUEST)
+                else:
+                    # Si ya no está en un mall, limpiamos los campos
+                    location.mall = None
+                    location.mall_floor = None 
+                    location.details = None
+                    if lat is not None and lng is not None:
+                        location.coordinates = Point(x=lng, y=lat)
+                    if address:
+                        location.name = address
+                    location.save()
+
+            # ===============================
+            # 4. GUARDADO FINAL
+            # ===============================
+            if company_has_changed:
+                company.save()
+            
+            if store_has_changed:
+                first_store.save()
+                
+        return Response({'message': 'Compañía actualizada exitosamente'}, status=status.HTTP_200_OK)
+
+class DeleteStoreContactMethodAPI(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'actions'
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, method_id:int):
+        try:
+            contact_method = StoreContactMethod.objects.prefetch_related('store__company__owner').get(id=method_id)
+            if not request.user.id == contact_method.store.company.owner.id:
+                return Response({'Usted no es propietario de esta compania.'}, status=status.HTTP_406_NOT_ACCEPTABLE)
+        except StoreContactMethod.DoesNotExist:
+            return Response({'No existe ese metodo de contacto.'}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            contact_method.delete()
+        except Exception as e:
+            print(f"Error al eliminar el metodo de contacto: {e}")
+            return Response({f"{e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({'text':"Exito"}, status=status.HTTP_204_NO_CONTENT)
+
 
 #########################################################
 #################### MANEJO DE MAPAS ####################
@@ -788,7 +1023,7 @@ class CompanyCacheAPI(APIView):
         if MerchantSubscription.objects.filter(merchant=request.user, valid_until__gt=timezone.now()).exists():
             try:
                 company = Company.objects.get(owner=request.user).get_json()
-                stores = [company_store.get_json() for company_store in CompanyStore.objects.filter(company_id=company['id'], is_active=True)]
+                stores = [company_store.get_json() for company_store in CompanyStore.objects.filter(company_id=company['id'], is_active=True).order_by('creation')]
                 return Response({
                     'company':company,
                     'stores':stores
@@ -826,7 +1061,6 @@ class SubscriptionsCacheAPI(APIView):
             subscriptions_payments['atlas'] = [atlas_payment.get_json() for atlas_payment in atlas_subscription.payments.all()]
         if merchant_subscription:
             subscriptions_payments['merchant'] = [merchant_payment.get_json() for merchant_payment in merchant_subscription.payments.all()]
-
         cache = {
             "merchant_subscription":merchant_subscription.get_json() if merchant_subscription else None,
             "atlas_subscription":atlas_subscription.get_json() if atlas_subscription else None,

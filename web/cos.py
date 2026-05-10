@@ -72,6 +72,7 @@ class COS:
         else:
             # Asegura que MEDIA_URL termine en /
             base_url = f"{settings.DOMAIN}{settings.MEDIA_URL}" if not skip_media else settings.DOMAIN
+            print("BASE URL:  ", base_url)
             if not base_url.endswith('/') and not relative_path.startswith('/'):
                 base_url += "/"
             return f"{base_url}{relative_path}"

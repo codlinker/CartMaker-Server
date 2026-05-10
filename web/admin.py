@@ -50,7 +50,7 @@ class UserWalletAdmin(ModelAdmin):
 
 @admin.register(Company)
 class CompanyAdmin(ModelAdmin):
-    list_display = ("name", "owner", "category", "creation")
+    list_display = ("name", "owner", "category", "main_work_hours", "creation")
     inlines = [StoreInline]
 
 @admin.register(CompanyStore)

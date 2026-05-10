@@ -12,6 +12,11 @@ from django.utils import timezone
 from django.utils.html import mark_safe
 from decimal import Decimal
 
+# FUNCIONES PARA JSON Fields por default
+
+def get_default_work_hours():
+    return {"start": "08:00 AM", "end": "06:30 PM"}
+
 # ==========================================
 # ENUMS (Para validación automática en DRF)
 # ==========================================
@@ -68,10 +73,11 @@ class StoreType(models.IntegerChoices):
     IN_MALL = 0, _('En centro comercial')
     STREET = 1, _('Local a pie de calle')
     KIOSK = 2, _('Kiosco')
+    OFFICE = 3, _('Oficina')
     # Formatos modernos
-    ONLINE = 3, _('Tienda virtual')
-    MOBILE = 4, _('Unidad móvil / Food Truck')
-    BUHONERO = 5, _('Puesto buhonero')
+    ONLINE = 4, _('Tienda virtual')
+    MOBILE = 5, _('Unidad móvil / Food Truck')
+    BUHONERO = 6, _('Puesto buhonero')
 
 class WithdrawalType(models.IntegerChoices):
     """
@@ -513,19 +519,42 @@ class Company(models.Model):
         owner (ForeignKey): Usuario dueño de la empresa.
         creation (datetime): Fecha de registro de la empresa.
         category (ForeignKey): Rubro al que pertenece.
+        image (str): Imagen de perfil de la empresa.
     """
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255)
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='companies')
     creation = models.DateTimeField(auto_now_add=True)
     category = models.ForeignKey(CompanyCategory, on_delete=models.SET_NULL, null=True)
+    image = models.CharField(null=True, blank=True)
+    presentation_video_url = models.CharField(null=True, default=None)
+    presentation_video_thumbnail = models.CharField(null=True, default=None)
+    gamification_enabled = models.BooleanField(default=False)
+    gamification_tokens_per_dollar = models.IntegerField(default=0)
+    main_work_hours = models.JSONField(default=get_default_work_hours)
 
     def get_json(self)->dict:
+        url = ""
+        if self.image:
+            url = storage_manager.get_url(self.image) 
+        presentation_url = ""
+        if self.presentation_video_url:
+            presentation_url = storage_manager.get_url(self.presentation_video_url) 
+        presentation_video_thumbnail = ""
+        if self.presentation_video_thumbnail:
+            presentation_video_thumbnail = storage_manager.get_url(self.presentation_video_thumbnail)
         return {
             'id':self.id,
             'name':self.name,
             'creation':timezone.localtime(self.creation).strftime("%d/%m/%Y, %H:%M:%S"),
-            'category':self.category.name
+            'category':self.category.name,
+            'image':url,
+            'presentation_video_url':presentation_url,
+            "gamification_enabled":self.gamification_enabled,
+            "gamification_tokens_per_dollar":self.gamification_tokens_per_dollar,
+            "main_work_hours":self.main_work_hours,
+            "presentation_video_thumbnail":presentation_video_thumbnail
         }
 
 class CompanyStore(models.Model):
@@ -537,30 +566,35 @@ class CompanyStore(models.Model):
         company (ForeignKey): Compañía a la que pertenece.
         name (str): Nombre de la sucursal.
         creation (datetime): Fecha de apertura en la plataforma.
-        business_hours (json): Horarios de atención por día.
-        image (str): URL de la imagen de fachada o logo de la tienda.
+        work_hours (json): Horarios de atención por día.
+        store_img_url (str): Url de la imagen de la tienda.
+        store_type (int): Tipo de tienda.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='stores')
     name = models.CharField(max_length=255)
     creation = models.DateTimeField(auto_now_add=True)
-    business_hours = models.JSONField(default=dict)
-    image = models.CharField(max_length=500, null=True, blank=True)
+    store_img_url = models.CharField(default=None, null=True)
+    work_hours = models.JSONField(default=get_default_work_hours)
     is_active = models.BooleanField(default=True)
     store_type = models.IntegerField(choices=StoreType.choices, default=StoreType.STREET)
 
     def get_json(self)->dict:
-        if self.image:
-            url = f"{settings.DOMAIN}/{self.image}" if not self.image.startswith('http') else self.image
-        else:
-            url = None
+        url = ""
+        if self.store_img_url:
+            url = storage_manager.get_url(self.store_img_url)
+        contact_methods_dict = {
+            ContactMethodType(contact.method_type).name.lower(): contact.get_json()
+            for contact in self.contact_methods.all()
+        }
         return {
             'id':self.id,
             'name':self.name,
             'creation':timezone.localtime(self.creation).strftime("%d/%m/%Y, %H:%M:%S"),
-            'business_hours':self.business_hours,
-            'image':url,
-            'location':self.location.get_json()
+            'store_img_url':url,
+            'work_hours':self.work_hours,
+            'location':self.location.get_json(),
+            'contact_methods':contact_methods_dict
         }
 
 class StoreLocation(models.Model):
@@ -577,6 +611,7 @@ class StoreLocation(models.Model):
     """
     store = models.OneToOneField(CompanyStore, on_delete=models.CASCADE, related_name='location')
     mall = models.ForeignKey(Mall, on_delete=models.SET_NULL, null=True, blank=True, related_name='stores')
+    mall_floor = models.IntegerField(null=True, blank=True)
     coordinates = gis_models.PointField()
     name = models.CharField(max_length=255)
     details = models.TextField(null=True, blank=True)
@@ -591,7 +626,8 @@ class StoreLocation(models.Model):
     def get_json(self) -> dict:
         return {
             'id': self.id,
-            'mall_id': self.mall_id,  # mall_id es directo, evita una query extra al objeto mall
+            'mall_id': self.mall_id,
+            'mall_floor':self.mall_floor,
             'lat': self.coordinates.y,
             'lng': self.coordinates.x,
             'store_type': self.store.store_type,
@@ -599,6 +635,7 @@ class StoreLocation(models.Model):
             'details': self.details,
             'creation': timezone.localtime(self.creation).strftime("%d/%m/%Y, %H:%M:%S")
         }
+    
 class StoreContactMethod(models.Model):
     """
     Canales de comunicación directa de una tienda.
@@ -611,6 +648,22 @@ class StoreContactMethod(models.Model):
     store = models.ForeignKey(CompanyStore, on_delete=models.CASCADE, related_name='contact_methods')
     method_type = models.IntegerField(choices=ContactMethodType.choices)
     value = models.CharField(max_length=255)
+
+    class Meta:
+        # Aquí definimos la restricción de unicidad
+        constraints = [
+            models.UniqueConstraint(
+                fields=['store', 'method_type'], 
+                name='unique_contact_method_per_store'
+            )
+        ]
+
+    def get_json(self) -> dict:
+        return {
+            'id': self.id,
+            'method_type': self.get_method_type_display(),
+            'value': self.value
+        }
 
 class Employee(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="employment_records")

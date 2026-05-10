@@ -261,3 +261,40 @@ class UploadSubscriptionPaymentSerializer(serializers.Serializer):
 class RegistDeviceSerializer(serializers.Serializer):
     fcm_token = serializers.CharField(required=True)
     platform = serializers.CharField(required=True)
+
+MAX_IMAGE_SIZE_MB = 10
+MAX_VIDEO_SIZE_MB = 25
+
+def validate_image_size(file):
+    if file.size > MAX_IMAGE_SIZE_MB * 1024 * 1024:
+        raise serializers.ValidationError(f"La imagen no puede pesar más de {MAX_IMAGE_SIZE_MB}MB.")
+    return file
+
+def validate_video_size(file):
+    if file.size > MAX_VIDEO_SIZE_MB * 1024 * 1024:
+        raise serializers.ValidationError(f"El video no puede pesar más de {MAX_VIDEO_SIZE_MB}MB.")
+    return file
+
+class UpdateCompanySerializer(serializers.Serializer):
+    company_id = serializers.CharField(required=True)
+    name = serializers.CharField(required=False)
+    profile_img = serializers.ImageField(required=False, validators=[validate_image_size])
+    main_store_img = serializers.ImageField(required=False, validators=[validate_image_size])
+    presentation_video_thumbnail = serializers.FileField(required=False, validators=[validate_image_size])
+    presentation_video = serializers.FileField(required=False, validators=[validate_video_size])
+    
+    gamification_enabled = serializers.BooleanField(required=False, allow_null=True)
+    gamification_tokens_per_dollar = serializers.IntegerField(required=False)
+    category_id = serializers.IntegerField(required=False)
+    work_hours = serializers.JSONField(required=False)
+    whatsapp_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    instagram_handle = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    phone_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    store_type = serializers.IntegerField(required=False, allow_null=True)
+    is_mall = serializers.BooleanField(required=False, allow_null=True)
+    lat = serializers.FloatField(required=False, allow_null=True)
+    lng = serializers.FloatField(required=False, allow_null=True)
+    address = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    selected_mall_id = serializers.IntegerField(required=False, allow_null=True)
+    selected_mall_floor = serializers.IntegerField(required=False, allow_null=True)
