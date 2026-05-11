@@ -55,8 +55,8 @@ class CompanyAdmin(ModelAdmin):
 
 @admin.register(CompanyStore)
 class CompanyStoreAdmin(ModelAdmin):
-    list_display = ("name", "company", "creation")
-    filter_horizontal = () 
+    list_display = ("id", "name", "company", "creation")
+    list_filter = ('company',)
 
 @admin.register(Product)
 class ProductAdmin(ModelAdmin):
@@ -233,14 +233,17 @@ class DeviceTokenAdmin(ModelAdmin):
 class CompanyCategoryAdmin(ModelAdmin):
     list_display = ('id', 'name')
 
+@admin.register(StoreContactMethod)
+class StoreContactMethodAdmin(ModelAdmin):
+    list_display = ('id', 'store', 'method_type','value')
+
 # Modelos de Soporte y Configuración (Registro Simple con Estilo Unfold)
 others = [
     InventoryItemOffer, 
     InventoryItemTransaction, InventoryItemQuestion, OrderCancellationTopic, 
     TokenWalletTransaction, StoreCalification, ProductCalification, 
     MerchantCalification, SupportTicket, AtlasMessage, 
-    SystemConfig, UserNavigationLog, ClientContactMethod, 
-    StoreContactMethod
+    SystemConfig, UserNavigationLog, ClientContactMethod
 ]
 
 for m in others:

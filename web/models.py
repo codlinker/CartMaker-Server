@@ -556,6 +556,9 @@ class Company(models.Model):
             "main_work_hours":self.main_work_hours,
             "presentation_video_thumbnail":presentation_video_thumbnail
         }
+    
+    def __str__(self):
+        return self.name
 
 class CompanyStore(models.Model):
     """
@@ -569,6 +572,7 @@ class CompanyStore(models.Model):
         work_hours (json): Horarios de atención por día.
         store_img_url (str): Url de la imagen de la tienda.
         store_type (int): Tipo de tienda.
+        is_active (bool): Indica si la tienda esta activa.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='stores')
@@ -594,8 +598,12 @@ class CompanyStore(models.Model):
             'store_img_url':url,
             'work_hours':self.work_hours,
             'location':self.location.get_json(),
-            'contact_methods':contact_methods_dict
+            'contact_methods':contact_methods_dict,
+            'is_active':self.is_active
         }
+    
+    def __str__(self):
+        return f"{self.name} ({self.company.name})"
 
 class StoreLocation(models.Model):
     """

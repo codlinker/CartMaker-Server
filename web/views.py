@@ -936,6 +936,254 @@ class UpdateCompanyAPI(APIView):
                 first_store.save()
                 
         return Response({'message': 'Compañía actualizada exitosamente'}, status=status.HTTP_200_OK)
+    
+class CreateStoreAPI(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'actions'
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = CreateStoreSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({
+                'success': False, 
+                'error': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+        d = serializer.validated_data
+        
+        try:
+            with transaction.atomic():
+                # 1. Verificar propiedad de la compañía
+                try:
+                    company = Company.objects.get(id=d['company_id'], owner=request.user)
+                except Company.DoesNotExist:
+                    return Response({
+                        'success': False, 
+                        'error': "La compañía no existe o no tienes permisos."
+                    }, status=status.HTTP_404_NOT_FOUND)
+
+                # 2. Crear instancia de Sucursal (primero sin imagen para obtener el ID)
+                store = CompanyStore.objects.create(
+                    company=company,
+                    name=d['name'],
+                    work_hours=d['work_hours'],
+                    store_type=d['store_type'],
+                    is_active=True
+                )
+
+                # 3. Manejo de Imagen de la Sucursal (Storage)
+                store_img = d.get('store_img')
+                if store_img:
+                    dtnow_str = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
+                    extension = store_img.name.split('.')[-1]
+                    # Usamos el ID de la nueva sucursal para la carpeta
+                    file_name = f"store_{store.id}_{dtnow_str}.{extension}"
+                    folder = f"store_pictures/{store.id}"
+                    
+                    relative_path = storage_manager.save_file(store_img, folder, file_name)
+                    
+                    if relative_path:
+                        store.store_img_url = relative_path
+                        store.save()
+                    else:
+                        raise Exception("Error al guardar la imagen de la sucursal en el storage.")
+
+                # 4. Crear Ubicación (StoreLocation)
+                is_mall = d['is_mall']
+                location = StoreLocation(store=store)
+                
+                if is_mall:
+                    selected_mall_id = d.get('selected_mall_id')
+                    try:
+                        mall = Mall.objects.get(id=selected_mall_id)
+                        location.mall = mall
+                        location.coordinates = mall.coordinates
+                        location.name = d['address'] # Usualmente el nombre del local o C.C.
+                        location.mall_floor = d.get('selected_mall_floor')
+                    except Mall.DoesNotExist:
+                        raise Exception("El centro comercial seleccionado no existe.")
+                else:
+                    # Ubicación de calle
+                    location.coordinates = Point(x=d['lng'], y=d['lat'])
+                    location.name = d['address']
+                
+                location.save()
+
+                # 5. Crear Métodos de Contacto Iniciales
+                # Mapeo de campos del serializer a tipos de contacto
+                contacts_to_create = [
+                    (d.get('whatsapp_number'), ContactMethodType.WHATSAPP),
+                    (d.get('instagram_handle'), ContactMethodType.INSTAGRAM),
+                    (d.get('phone_number'), ContactMethodType.PHONE),
+                ]
+
+                for value, method_type in contacts_to_create:
+                    if value: # Solo si el valor no es None o vacío
+                        StoreContactMethod.objects.create(
+                            store=store,
+                            method_type=method_type,
+                            value=value
+                        )
+
+                # 6. Respuesta Exitosa
+                return Response({
+                    'success': True, 
+                    'message': 'Sucursal creada exitosamente.',
+                    'data': store.get_json() 
+                }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            # Si algo falla, el transaction.atomic() hará rollback de todo
+            return Response({
+                'success': False, 
+                'error': f"Error interno: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+class UpdateStoreAPI(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'actions'
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, store_id=None):
+        try:
+            store = CompanyStore.objects.prefetch_related('company__owner').only('id', 'company').get(id=store_id)
+            if request.user.id != store.company.owner_id:
+                return Response({"Usted no tiene permisos para eliminar esta tienda."}, status=status.HTTP_406_NOT_ACCEPTABLE)
+            store.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except CompanyStore.DoesNotExist:
+            return Response({"La tienda que tratas de eliminar no existe."}, status=status.HTTP_404_NOT_FOUND)
+
+    def post(self, request, store_id=None):
+        serializer = UpdateStoreSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        
+        try:
+            # Obtenemos la tienda directamente por su ID
+            store = CompanyStore.objects.get(id=data['store_id'])
+        except CompanyStore.DoesNotExist:
+            return Response({'error': 'No se encontró la sucursal.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if store.company.owner != request.user:
+            return Response({'error': 'No tienes permisos para editar esta sucursal.'}, status=status.HTTP_403_FORBIDDEN)
+        
+        store_img = data.get('store_img')
+        name = data.get('name')
+        is_active = data.get('is_active')
+        work_hours = data.get('work_hours')
+        
+        whatsapp_number = data.get('whatsapp_number')
+        instagram_handle = data.get('instagram_handle')
+        phone_number = data.get('phone_number')
+        
+        # Extracción de campos de ubicación
+        store_type = data.get('store_type')
+        is_mall = data.get('is_mall')
+        lat = data.get('lat')
+        lng = data.get('lng')
+        address = data.get('address')
+        selected_mall_id = data.get('selected_mall_id')
+        selected_mall_floor = data.get('selected_mall_floor')
+        
+        store_has_changed = False
+
+        with transaction.atomic():
+            dtnow_str = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
+            
+            # ===============================
+            # 1. MANEJO DE ARCHIVOS (FOTO SUCURSAL)
+            # ===============================
+            if store_img:
+                # Limpiamos la foto de tienda anterior
+                if store.store_img_url:
+                    try:
+                        storage_manager.delete_file(store.store_img_url)
+                    except Exception as e:
+                        print(f"Error borrando img de tienda vieja: {e}")
+
+                extension = store_img.name.split('.')[-1]
+                file_name = f"{dtnow_str}.{extension}"
+                folder = f"store_pictures/{store.id}"
+                relative_path = storage_manager.save_file(store_img, folder, file_name)
+                
+                if relative_path:
+                    store.store_img_url = relative_path
+                    store_has_changed = True
+                else:
+                    raise Exception("Error al guardar la imagen de la tienda en el storage.")
+            
+            # =========================
+            # 2. ACTUALIZACIÓN DE DATOS
+            # =========================
+            if name:
+                store.name = name
+                store_has_changed = True
+                
+            if is_active is not None:
+                store.is_active = is_active
+                store_has_changed = True
+
+            if work_hours:
+                store.work_hours = work_hours
+                store_has_changed = True
+                
+            # Métodos de contacto (específicos de esta tienda)
+            contact_data = [
+                (whatsapp_number, ContactMethodType.WHATSAPP),
+                (instagram_handle, ContactMethodType.INSTAGRAM),
+                (phone_number, ContactMethodType.PHONE),
+            ]
+            for value, method_type in contact_data:
+                if value is not None: # Si mandan "" se actualizará a vacío, respetando tu frontend
+                    StoreContactMethod.objects.update_or_create(
+                        store=store,
+                        method_type=method_type,
+                        defaults={'value': value}
+                    )
+
+            # =========================
+            # 3. ACTUALIZACIÓN DE UBICACIÓN
+            # =========================
+            if store_type is not None:
+                store.store_type = store_type
+                store_has_changed = True
+
+            if is_mall is not None:
+                location, _ = StoreLocation.objects.get_or_create(store=store)
+                
+                if is_mall:
+                    try:
+                        mall = Mall.objects.get(id=selected_mall_id)
+                        location.mall = mall
+                        location.coordinates = mall.coordinates
+                        location.name = address  # Nombre del C.C.
+                        
+                        if selected_mall_floor is not None:
+                            location.mall_floor = selected_mall_floor
+                        
+                        location.save()
+                    except Mall.DoesNotExist:
+                        return Response({'error': "El centro comercial seleccionado no existe."}, status=status.HTTP_400_BAD_REQUEST)
+                else:
+                    # Si ya no está en un mall, limpiamos los campos del CC
+                    location.mall = None
+                    location.mall_floor = None 
+                    location.details = None
+                    if lat is not None and lng is not None:
+                        location.coordinates = Point(x=lng, y=lat)
+                    if address:
+                        location.name = address
+                    location.save()
+
+            # ===============================
+            # 4. GUARDADO FINAL
+            # ===============================
+            if store_has_changed:
+                store.save()
+                
+        return Response({'message': 'Sucursal actualizada exitosamente'}, status=status.HTTP_200_OK)
 
 class DeleteStoreContactMethodAPI(APIView):
     throttle_classes = [ScopedRateThrottle]
@@ -980,13 +1228,23 @@ class GetStoresLocations(APIView):
             )
             bbox = Polygon.from_bbox(bbox_coords)
             bbox.srid = 4326
-
-            # Filtro optimizado
             stores = StoreLocation.objects.filter(
                 coordinates__coveredby=bbox
-            ).only('id', 'coordinates', 'name', 'mall_id')
-
-            features = [s.get_json() for s in stores]
+            ).values(
+                'id', 
+                'coordinates', 
+                'name', 
+                'mall_id', 
+                'store__store_type'
+            )[:500] # MAXIMO 500 TIENDAS A LA VISTA EN EL MAPA
+            features = [{
+                "id": s['id'],
+                "lat": s['coordinates'].y,
+                "lng": s['coordinates'].x,
+                "mall_id": s['mall_id'],
+                "name": s['name'],
+                "type": s['store__store_type']
+            } for s in stores]
             return Response({'data': features}, status=status.HTTP_200_OK)
         except (ValueError, TypeError, AttributeError):
             return Response({'error': 'Parámetros inválidos'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1023,7 +1281,7 @@ class CompanyCacheAPI(APIView):
         if MerchantSubscription.objects.filter(merchant=request.user, valid_until__gt=timezone.now()).exists():
             try:
                 company = Company.objects.get(owner=request.user).get_json()
-                stores = [company_store.get_json() for company_store in CompanyStore.objects.filter(company_id=company['id'], is_active=True).order_by('creation')]
+                stores = [company_store.get_json() for company_store in CompanyStore.objects.filter(company_id=company['id']).order_by('creation')]
                 return Response({
                     'company':company,
                     'stores':stores

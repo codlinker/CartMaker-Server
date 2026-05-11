@@ -32,6 +32,9 @@ urlpatterns = [
     path('api/v1/check-company-name-available/<str:name>/', CheckCompanyNameAvailableAPI.as_view(), name='check_company_name_available'),
     path('api/v1/create-company', CreateCompanyAPI.as_view(), name='create_company'),
     path('api/v1/update-company', UpdateCompanyAPI.as_view(), name="update_company"),
+    path('api/v1/create-store', CreateStoreAPI.as_view(), name="create_store"),
+    path('api/v1/update-store', UpdateStoreAPI.as_view(), name="update_store"),
+    path('api/v1/delete-store/<uuid:store_id>/', UpdateStoreAPI.as_view(), name="delete_store"),
     path('api/v1/delete-store-contact-method/<int:method_id>/', DeleteStoreContactMethodAPI.as_view(), name='delete_contact_method'),
     # Rutas para manejo de pagos
     path('api/v1/upload-subscription-payment', UploadSubscriptionPayment.as_view(), name='upload_subscription_payment'),

@@ -263,7 +263,7 @@ class RegistDeviceSerializer(serializers.Serializer):
     platform = serializers.CharField(required=True)
 
 MAX_IMAGE_SIZE_MB = 10
-MAX_VIDEO_SIZE_MB = 25
+MAX_VIDEO_SIZE_MB = 40
 
 def validate_image_size(file):
     if file.size > MAX_IMAGE_SIZE_MB * 1024 * 1024:
@@ -298,3 +298,45 @@ class UpdateCompanySerializer(serializers.Serializer):
     address = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     selected_mall_id = serializers.IntegerField(required=False, allow_null=True)
     selected_mall_floor = serializers.IntegerField(required=False, allow_null=True)
+
+class UpdateStoreSerializer(serializers.Serializer):
+    store_id = serializers.CharField(required=True) # ID de la sucursal
+    name = serializers.CharField(required=False)
+    is_active = serializers.BooleanField(required=False, allow_null=True)
+    store_img = serializers.ImageField(required=False, validators=[validate_image_size])
+    
+    work_hours = serializers.JSONField(required=False)
+    whatsapp_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    instagram_handle = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    phone_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    # Campos de Ubicación
+    store_type = serializers.IntegerField(required=False, allow_null=True)
+    is_mall = serializers.BooleanField(required=False, allow_null=True)
+    lat = serializers.FloatField(required=False, allow_null=True)
+    lng = serializers.FloatField(required=False, allow_null=True)
+    address = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    selected_mall_id = serializers.IntegerField(required=False, allow_null=True)
+    selected_mall_floor = serializers.IntegerField(required=False, allow_null=True)
+
+class CreateStoreSerializer(serializers.Serializer):
+    company_id = serializers.UUIDField(required=True)
+    name = serializers.CharField(required=True, max_length=255)
+    store_img = serializers.ImageField(required=False)
+    work_hours = serializers.JSONField(required=True)
+    
+    # Ubicación (Obligatorios)
+    store_type = serializers.IntegerField(required=True)
+    is_mall = serializers.BooleanField(required=True)
+    lat = serializers.FloatField(required=True)
+    lng = serializers.FloatField(required=True)
+    address = serializers.CharField(required=True)
+    
+    # Mall (Opcionales dependiendo de is_mall)
+    selected_mall_id = serializers.IntegerField(required=False, allow_null=True)
+    selected_mall_floor = serializers.IntegerField(required=False, allow_null=True)
+    
+    # Contactos iniciales (Opcionales)
+    whatsapp_number = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    instagram_handle = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    phone_number = serializers.CharField(required=False, allow_null=True, allow_blank=True)
