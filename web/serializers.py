@@ -340,3 +340,23 @@ class CreateStoreSerializer(serializers.Serializer):
     whatsapp_number = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     instagram_handle = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     phone_number = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+
+class ProductSerializer(serializers.ModelSerializer):
+    category_id = serializers.IntegerField(write_only=True)
+    # DRF convertirá los "true"/"false" de MultipartFormData a booleanos automáticamente
+    discounts_by_tokens_active = serializers.BooleanField(default=False, required=False)
+
+    class Meta:
+        model = Product
+        fields = [
+            'id', 
+            'name', 
+            'price', 
+            'description', 
+            'category_id', 
+            'discounts_by_tokens_active'
+        ]
+
+    def to_representation(self, instance):
+        # Delegamos la serialización de salida a tu método del modelo
+        return instance.get_json()

@@ -788,20 +788,31 @@ class Product(models.Model):
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='products')
     images = models.JSONField(default=list)
     # Ejemplo de 'images':
-    # [
-    #     {
-    #         "image_url": "https://...",
-    #         "idx": 0,
-    #         "apply_transparency": true,
-    #         "transparency_color": "#00FF00"
-    #     },
-    #     {
-    #         "image_url": "https://...",
-    #         "idx": 1,
-    #         "apply_transparency": false,
-    #         "transparency_color": null
-    #     }
+    # ["https://...", "https://...",
     # ]
+
+
+    def get_json(self)->dict:
+        images = []
+        for img_url in self.images:
+            images.append(storage_manager.get_url(img_url))
+        data = {
+            "id":self.id,
+            "name":self.name,
+            "price":self.price,
+            "creation":timezone.localtime(self.creation),
+            "category":{
+                'id':self.category_id,
+                'name':self.category.name
+            },
+            "description":self.description,
+            "discounts_by_tokens_active":self.discounts_by_tokens_active,
+            "discounts_data":self.discounts_data,
+            "company_id":self.company_id,
+            "images":images
+        }
+        return data
+
 
 class InventoryItem(models.Model):
     """
@@ -820,6 +831,7 @@ class InventoryItem(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='inventory_items')
     stock = models.IntegerField(default=0)
+    store = models.ForeignKey(CompanyStore, on_delete=models.CASCADE, related_name='product_items')
     creation = models.DateTimeField(auto_now_add=True)
     sold_out_time = models.DateTimeField(null=True, blank=True)
     expiration_date = models.DateTimeField(null=True, blank=True)
@@ -1154,6 +1166,40 @@ class MerchantPlan(models.Model):
                 'label_text_color':self.label_text_color
             }
         }
+    
+    def get_benefits_json(self) -> dict:
+        return {
+        'inventory_capacity': {
+            "value": self.inventory_capacity
+        },
+        'products_registration_with_ia': {
+            "value": self.products_registration_with_ia
+        },
+        'profile_histories': {
+            "value": self.profile_histories
+        },
+        'gamification_system': {
+            "value": self.gamification_system
+        },
+        'gamification_analytics': {
+            "value": self.gamification_analytics
+        },
+        'digital_performance_analytics': {
+            "value": self.digital_performance_analytics
+        },
+        'clients_behavior_analytics': {
+            "value": self.clients_behavior_analytics
+        },
+        'operative_management_analytics': {
+            "value": self.operative_management_analytics
+        },
+        'company_branches': {
+            "value": self.company_branches
+        },
+        'company_employees': {
+            "value": self.company_employees
+        },
+    }
 
 class MerchantSubscription(models.Model):
     """
@@ -1185,6 +1231,7 @@ class MerchantSubscription(models.Model):
             'adquired_at':self.adquired_at.strftime("%d/%m/%Y, %H:%M:%S"),
             'merchant_type':self.get_merchant_type_display(),
             'rif_number':self.rif_number,
+            'benefits':self.plan.get_benefits_json(),
             'business_required':self.plan.requires_business
         }
 

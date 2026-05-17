@@ -1,4 +1,7 @@
+import json
+
 from dateutil.relativedelta import relativedelta
+from rest_framework import parsers
 from rest_framework.views import APIView
 from rest_framework.renderers import TemplateHTMLRenderer
 from rest_framework.response import Response
@@ -26,6 +29,7 @@ from .firebase_admin import NotificationManager
 from django.utils import timezone
 from .tasks import *
 from django.contrib.gis.geos import Polygon, Point
+from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 
 ####################################################
 ################## AUTENTICACION ###################
@@ -405,6 +409,93 @@ class VerifyUser(APIView):
 ######################################################
 ###################### ACTIONS #######################
 ######################################################
+
+class GetCompanyProducts(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'actions'
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, company_id=None):
+        """
+        Devuelve SOLO el catálogo maestro de productos paginado.
+        """
+        try:
+            company = Company.objects.get(id=company_id)
+            if company.owner.id != request.user.id:
+                return Response({'error': 'Usted no es el propietario de la compania.'}, status=status.HTTP_406_NOT_ACCEPTABLE)
+            
+            page = request.GET.get('page', 1)
+            products_query = company.products.all().order_by('-creation')
+            paginator = Paginator(products_query, 10)
+            
+            try:
+                current_products = paginator.page(page)
+            except PageNotAnInteger:
+                current_products = paginator.page(1)
+            except EmptyPage:
+                current_products = []
+
+            products = [product.get_json() for product in current_products]
+            return Response({
+                'products': products,
+                'pagination': {
+                    'has_next': current_products.has_next() if current_products else False,
+                    'current_page': int(page),
+                    'total_pages': paginator.num_pages
+                }
+            }, status=status.HTTP_200_OK)
+
+        except Company.DoesNotExist:
+            return Response({'error': 'No existe la compania especificada.'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': f'Error interno: {e}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class GetStoreInventoryItems(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'actions'
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, store_id=None):
+        """
+        Devuelve SOLO los lotes de inventario de una sucursal paginados.
+        """
+        try:
+            # Asegúrate de importar CompanyStore si no lo has hecho
+            store = CompanyStore.objects.get(id=store_id)
+            if store.company.owner.id != request.user.id:
+                return Response({'error': 'No tiene permisos para esta sucursal.'}, status=status.HTTP_406_NOT_ACCEPTABLE)
+
+            page = request.GET.get('page', 1)
+            
+            # Filtramos los items por la sucursal y los ordenamos
+            items_query = InventoryItem.objects.filter(store=store).order_by('-creation')
+            paginator = Paginator(items_query, 10)
+            
+            try:
+                current_items = paginator.page(page)
+            except PageNotAnInteger:
+                current_items = paginator.page(1)
+            except EmptyPage:
+                current_items = []
+
+            # Nota: Asegúrate de que el modelo InventoryItem tenga su método get_json()
+            # que incluya los datos relevantes del producto padre si es necesario mostrarlo en la UI.
+            items = [item.get_json() for item in current_items]
+
+            return Response({
+                'items': items,
+                'pagination': {
+                    'has_next': current_items.has_next() if current_items else False,
+                    'current_page': int(page),
+                    'total_pages': paginator.num_pages
+                }
+            }, status=status.HTTP_200_OK)
+
+        except CompanyStore.DoesNotExist:
+            return Response({'error': 'No existe la sucursal especificada.'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': f'Error interno: {e}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class GetCartMakerAccounts(APIView):
     throttle_classes = [ScopedRateThrottle]
@@ -1407,6 +1498,185 @@ class HomeCacheAPI(APIView):
 ####################################################
 #################### VIEW SETS #####################
 ####################################################
+
+class ProductViewSet(viewsets.ModelViewSet):
+    serializer_class = ProductSerializer
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'navigation'
+    
+    # Fundamental para recibir tanto el JSON de datos como las imágenes físicas
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser]
+
+    def get_queryset(self):
+        # Aseguramos que el usuario solo pueda interactuar con los productos de su compañía
+        return Product.objects.filter(company__owner=self.request.user).order_by('-creation')
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({'success': False, 'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+            
+        d = serializer.validated_data
+        
+        try:
+            with transaction.atomic():
+                company_id = request.data.get('company_id')
+                try:
+                    company = Company.objects.get(id=company_id, owner=request.user)
+                except Company.DoesNotExist:
+                    return Response({'error': 'Compañía no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+                category = SubCategory.objects.get(id=d['category_id'])
+                raw_discounts = request.data.get('discounts_data')
+                discounts_data = json.loads(raw_discounts) if raw_discounts else []
+
+                product = Product.objects.create(
+                    company=company,
+                    name=d['name'],
+                    price=d['price'],
+                    description=d['description'],
+                    category=category,
+                    discounts_by_tokens_active=d.get('discounts_by_tokens_active', False),
+                    discounts_data=discounts_data,
+                    images=[] # Lo llenamos en el siguiente paso
+                )
+
+                # ===============================
+                # MANEJO DE IMÁGENES (Array de Strings)
+                # ===============================
+                raw_image_order = request.data.get('image_order', '[]')
+                image_order = json.loads(raw_image_order)
+                
+                final_images = []
+                dtnow_str = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
+                
+                for index, item in enumerate(image_order):
+                    # Si el string dice "new_image_X", buscamos el archivo y lo subimos
+                    if item.startswith('new_image_') and item in request.FILES:
+                        file = request.FILES[item]
+                        extension = file.name.split('.')[-1]
+                        file_name = f"prod_{product.id}_{index}_{dtnow_str}.{extension}"
+                        folder = f"product_pictures/{product.id}"
+                        
+                        relative_path = storage_manager.save_file(file, folder, file_name)
+                        if relative_path:
+                            final_images.append(relative_path)
+                        else:
+                            raise Exception(f"Error guardando la imagen {file.name}.")
+                    else:
+                        # Si no es un archivo nuevo, asumimos que es una URL existente
+                        final_images.append(item)
+
+                product.images = final_images
+                product.save()
+
+                return Response({'success': True, 'data': product.get_json()}, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def update(self, request, *args, **kwargs):
+        product = self.get_object()
+        serializer = self.get_serializer(product, data=request.data, partial=True)
+        if not serializer.is_valid():
+            return Response({'success': False, 'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+            
+        d = serializer.validated_data
+
+        try:
+            with transaction.atomic():
+                product.name = d.get('name', product.name)
+                product.price = d.get('price', product.price)
+                product.description = d.get('description', product.description)
+                product.discounts_by_tokens_active = d.get('discounts_by_tokens_active', product.discounts_by_tokens_active)
+                
+                if 'category_id' in d:
+                    product.category_id = d['category_id']
+
+                raw_discounts = request.data.get('discounts_data')
+                if raw_discounts is not None:
+                    product.discounts_data = json.loads(raw_discounts)
+
+                # ===============================
+                # MANEJO DE IMÁGENES CORREGIDO
+                # ===============================
+                raw_image_order = request.data.get('image_order', '[]')
+                image_order_from_frontend = json.loads(raw_image_order)
+                
+                processed_image_order = []
+
+                # 1. TRADUCIR URLs ABSOLUTAS A RELATIVAS
+                for item in image_order_from_frontend:
+                    if item.startswith('new_image_'):
+                        processed_image_order.append(item)
+                    else:
+                        # El item es una URL con 'http://...'. Buscamos a qué ruta relativa de la BD pertenece.
+                        found = False
+                        for old_relative_url in product.images:
+                            if old_relative_url in item: # Magia aquí: buscamos "product_pictures/..." dentro de "http://..."
+                                processed_image_order.append(old_relative_url)
+                                found = True
+                                break
+                        
+                        if not found:
+                            # Fallback de seguridad por si la URL llega extraña
+                            clean_path = item.split('/media/')[-1] if '/media/' in item else item
+                            processed_image_order.append(clean_path)
+                
+                # 2. BORRAR IMÁGENES DESCARTADAS (Ahora sí comparamos manzanas con manzanas)
+                for old_url in product.images:
+                    if old_url not in processed_image_order:
+                        try:
+                            storage_manager.delete_file(old_url)
+                        except Exception as e:
+                            print(f"Error borrando img descartada: {e}")
+
+                final_images = []
+                dtnow_str = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
+
+                # 3. CONSTRUIR NUEVO ARRAY (Subiendo nuevas y manteniendo las viejas)
+                for index, item in enumerate(processed_image_order):
+                    if item.startswith('new_image_') and item in request.FILES:
+                        file = request.FILES[item]
+                        extension = file.name.split('.')[-1]
+                        file_name = f"prod_{product.id}_{index}_{dtnow_str}.{extension}"
+                        folder = f"product_pictures/{product.id}"
+                        
+                        relative_path = storage_manager.save_file(file, folder, file_name)
+                        if relative_path:
+                            final_images.append(relative_path)
+                        else:
+                            raise Exception(f"Error guardando nueva imagen.")
+                    else:
+                        # Si no es nueva, ya es una ruta relativa limpia gracias al paso 1
+                        final_images.append(item)
+
+                # Guardamos las rutas limpias en la base de datos
+                product.images = final_images
+                product.save()
+
+            return Response({'success': True, 'data': product.get_json()}, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def destroy(self, request, *args, **kwargs):
+        product = self.get_object()
+        try:
+            # Primero borramos las imágenes del storage
+            for img in product.images:
+                try:
+                    storage_manager.delete_file(img)
+                except Exception as e:
+                    print(f"Error borrando imagen al eliminar producto: {e}")
+            
+            # Luego eliminamos el registro de la DB
+            product.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+            
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class NotificationViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
     serializer_class = NotificationSerializer

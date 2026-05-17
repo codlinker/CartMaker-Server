@@ -13,6 +13,7 @@ router.register(r'locations', ClientLocationViewSet, basename='client-locations'
 router.register(r'user', UserViewSet, basename='user')
 router.register(r'client-contact-methods', ClientContactMethodViewSet, basename='client-contact-methods')
 router.register(r'notifications', NotificationViewSet, basename='notifications')
+router.register(r'products', ProductViewSet, basename='products')
 
 # --- DEFINICIÓN DE RUTAS (URLS) ---
 urlpatterns = [
@@ -36,6 +37,9 @@ urlpatterns = [
     path('api/v1/update-store', UpdateStoreAPI.as_view(), name="update_store"),
     path('api/v1/delete-store/<uuid:store_id>/', UpdateStoreAPI.as_view(), name="delete_store"),
     path('api/v1/delete-store-contact-method/<int:method_id>/', DeleteStoreContactMethodAPI.as_view(), name='delete_contact_method'),
+    path('api/v1/delete-store/<uuid:store_id>/', UpdateStoreAPI.as_view(), name="delete_store"),
+    path('api/v1/get-company-products/<uuid:company_id>/', GetCompanyProducts.as_view(), name="get_company_products"),
+    path('api/v1/get-store-inventory-items/<uuid:store_id>/', GetStoreInventoryItems.as_view(), name="get_store_inventory_items"),
     # Rutas para manejo de pagos
     path('api/v1/upload-subscription-payment', UploadSubscriptionPayment.as_view(), name='upload_subscription_payment'),
     # Rutas para la autenticacion

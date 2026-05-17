@@ -4,7 +4,8 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.contrib.gis.geos import Point
-from web.models import Category, MerchantPlan, Announcement, Mall, CompanyCategory
+# Importante: Añadimos SubCategory a la importación
+from web.models import Category, SubCategory, MerchantPlan, Announcement, Mall, CompanyCategory
 
 class Command(BaseCommand):
     help = "Puebla la base de datos con registros por defecto optimizados con bulk_create sin duplicar datos."
@@ -42,7 +43,6 @@ class Command(BaseCommand):
     def _poblar_categorias_empresa(self):
         self.stdout.write("Verificando CompanyCategories (Rubros comerciales)...")
         
-        # Lista extendida de rubros comerciales
         company_categories_data = [
             # --- Sector Automotriz ---
             {'name': 'Repuestos Automotrices'},
@@ -91,13 +91,125 @@ class Command(BaseCommand):
         self._bulk_create_if_not_exists(CompanyCategory, company_categories_data, unique_field='name')
 
     def _poblar_categorias(self):
-        self.stdout.write("Verificando Categories...")
+        self.stdout.write("Verificando Categories y SubCategories de Productos...")
+        
+        # Estructura centralizada con rutas completamente hardcodeadas para fácil edición futura.
+        catalogo_estructura = {
+            'Alimentos y Bebidas': {
+                'img_url': 'static/img/categories/alimentos_y_bebidas.jpg',
+                'subcategories': [
+                    {'name': 'Víveres y Despensa', 'img_url': 'static/img/categories/sub_categories/viveres_y_despensa.jpg'},
+                    {'name': 'Carnes y Aves', 'img_url': 'static/img/categories/sub_categories/carnes_y_aves.jpg'},
+                    {'name': 'Frutas y Verduras', 'img_url': 'static/img/categories/sub_categories/frutas_y_verduras.jpg'},
+                    {'name': 'Charcutería', 'img_url': 'static/img/categories/sub_categories/charcuteria.jpg'},
+                    {'name': 'Licores y Bebidas', 'img_url': 'static/img/categories/sub_categories/licores_y_bebidas.jpg'},
+                    {'name': 'Snacks y Dulces', 'img_url': 'static/img/categories/sub_categories/snacks_y_dulces.jpg'},
+                ]
+            },
+            'Moda y Textil': {
+                'img_url': 'static/img/categories/moda_y_textil.jpg',
+                'subcategories': [
+                    {'name': 'Ropa Femenina', 'img_url': 'static/img/categories/sub_categories/ropa_femenina.jpg'},
+                    {'name': 'Ropa Masculina', 'img_url': 'static/img/categories/sub_categories/ropa_masculina.jpg'},
+                    {'name': 'Moda Infantil', 'img_url': 'static/img/categories/sub_categories/moda_infantil.jpg'},
+                    {'name': 'Calzado', 'img_url': 'static/img/categories/sub_categories/calzado.jpg'},
+                    {'name': 'Accesorios de Moda', 'img_url': 'static/img/categories/sub_categories/accesorios_de_moda.jpg'},
+                ]
+            },
+            'Tecnología': {
+                'img_url': 'static/img/categories/tecnologia.jpg',
+                'subcategories': [
+                    {'name': 'Teléfonos y Tablets', 'img_url': 'static/img/categories/sub_categories/telefonos_y_tablets.jpg'},
+                    {'name': 'Computación', 'img_url': 'static/img/categories/sub_categories/computacion.jpg'},
+                    {'name': 'Audio y Video', 'img_url': 'static/img/categories/sub_categories/audio_y_video.jpg'},
+                    {'name': 'Smartwatches', 'img_url': 'static/img/categories/sub_categories/smartwatches.jpg'},
+                    {'name': 'Accesorios Tecnológicos', 'img_url': 'static/img/categories/sub_categories/accesorios_tecnologicos.jpg'},
+                ]
+            },
+            'Salud y Belleza': {
+                'img_url': 'static/img/categories/salud_y_belleza.jpg',
+                'subcategories': [
+                    {'name': 'Medicamentos y Farmacia', 'img_url': 'static/img/categories/sub_categories/medicamentos_y_farmacia.jpg'},
+                    {'name': 'Cuidado Personal', 'img_url': 'static/img/categories/sub_categories/cuidado_personal.jpg'},
+                    {'name': 'Maquillaje y Cosméticos', 'img_url': 'static/img/categories/sub_categories/maquillaje_y_cosmeticos.jpg'},
+                    {'name': 'Perfumería', 'img_url': 'static/img/categories/sub_categories/perfumeria.jpg'},
+                ]
+            },
+            'Hogar y Decoración': {
+                'img_url': 'static/img/categories/hogar_y_decoracion.jpg',
+                'subcategories': [
+                    {'name': 'Electrodomésticos', 'img_url': 'static/img/categories/sub_categories/electrodomesticos.jpg'},
+                    {'name': 'Muebles', 'img_url': 'static/img/categories/sub_categories/muebles.jpg'},
+                    {'name': 'Artículos de Dormitorio', 'img_url': 'static/img/categories/sub_categories/articulos_de_dormitorio.jpg'},
+                    {'name': 'Artículos de Baño', 'img_url': 'static/img/categories/sub_categories/articulos_de_bano.jpg'},
+                    {'name': 'Artículos de Limpieza', 'img_url': 'static/img/categories/sub_categories/articulos_de_limpieza.jpg'},
+                ]
+            },
+            'Ferretería y Construcción': {
+                'img_url': 'static/img/categories/ferreteria_y_construccion.jpg',
+                'subcategories': [
+                    {'name': 'Herramientas', 'img_url': 'static/img/categories/sub_categories/herramientas.jpg'},
+                    {'name': 'Materiales Eléctricos', 'img_url': 'static/img/categories/sub_categories/materiales_electricos.jpg'},
+                    {'name': 'Plomería', 'img_url': 'static/img/categories/sub_categories/plomeria.jpg'},
+                    {'name': 'Pinturas y Acabados', 'img_url': 'static/img/categories/sub_categories/pinturas_y_acabados.jpg'},
+                ]
+            },
+            'Automotriz': {
+                'img_url': 'static/img/categories/automotriz.jpg',
+                'subcategories': [
+                    {'name': 'Repuestos', 'img_url': 'static/img/categories/sub_categories/repuestos.jpg'},
+                    {'name': 'Lubricantes y Fluidos', 'img_url': 'static/img/categories/sub_categories/lubricantes_y_fluidos.jpg'},
+                    {'name': 'Neumáticos', 'img_url': 'static/img/categories/sub_categories/neumaticos.jpg'},
+                ]
+            },
+            'Deportes y Entretenimiento': {
+                'img_url': 'static/img/categories/deportes_y_entretenimiento.jpg',
+                'subcategories': [
+                    {'name': 'Ropa Deportiva', 'img_url': 'static/img/categories/sub_categories/ropa_deportiva.jpg'},
+                    {'name': 'Equipos de Ejercicio', 'img_url': 'static/img/categories/sub_categories/equipos_de_ejercicio.jpg'},
+                    {'name': 'Juguetes', 'img_url': 'static/img/categories/sub_categories/juguetes.jpg'},
+                    {'name': 'Libros y Papelería', 'img_url': 'static/img/categories/sub_categories/libros_y_papeleria.jpg'},
+                ]
+            },
+            'Mascotas': {
+                'img_url': 'static/img/categories/mascotas.jpg',
+                'subcategories': [
+                    {'name': 'Alimentos para Mascotas', 'img_url': 'static/img/categories/sub_categories/alimentos_para_mascotas.jpg'},
+                    {'name': 'Higiene Animal', 'img_url': 'static/img/categories/sub_categories/higiene_animal.jpg'},
+                    {'name': 'Accesorios para Mascotas', 'img_url': 'static/img/categories/sub_categories/accesorios_para_mascotas.jpg'},
+                ]
+            }
+        }
+
+        # 1. Preparar y crear Categorías Principales
         categories_data = [
-            {'name': 'Comida', 'img_url': 'img/categories/category_comida.jpg'},
-            {'name': 'Ropa', 'img_url': 'img/categories/category_ropa.jpg'},
-            {'name': 'Tecnología', 'img_url': 'img/categories/category_tecnologia.jpg'},
+            {'name': cat_name, 'img_url': cat_info['img_url']} 
+            for cat_name, cat_info in catalogo_estructura.items()
         ]
         self._bulk_create_if_not_exists(Category, categories_data, unique_field='name')
+
+        # 2. Extraer instancias de la BD para asociar los ForeignKeys
+        db_categories = {
+            cat.name: cat 
+            for cat in Category.objects.filter(name__in=catalogo_estructura.keys())
+        }
+
+        # 3. Preparar Subcategorías iterando la estructura
+        subcategories_data = []
+        for cat_name, cat_info in catalogo_estructura.items():
+            parent_instance = db_categories.get(cat_name)
+            
+            if parent_instance:
+                for sub in cat_info['subcategories']:
+                    subcategories_data.append({
+                        'name': sub['name'],
+                        'parent_category': parent_instance,
+                        'img_url': sub['img_url']
+                    })
+
+        # 4. Crear Subcategorías
+        self.stdout.write("Verificando SubCategories...")
+        self._bulk_create_if_not_exists(SubCategory, subcategories_data, unique_field='name')
 
     def _poblar_planes(self):
         self.stdout.write("Verificando MerchantPlans...")
@@ -163,7 +275,6 @@ class Command(BaseCommand):
             {'banner_img': 'static/img/2_banner_test.png', 'navigate_to': 'home'},
             {'banner_img': 'static/img/first_banner_test.png', 'navigate_to': 'home'}
         ]
-        # Aquí usamos 'banner_img' como identificador único para saber si ya existe
         self._bulk_create_if_not_exists(Announcement, announcements_data, unique_field='banner_img')
 
     def _poblar_malls(self):
