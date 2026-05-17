@@ -3,3 +3,4 @@ variables.sh
 *__pycache__
 media/
 firebase-adminsdk.json
+celery*

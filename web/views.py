@@ -31,6 +31,8 @@ from .tasks import *
 from django.contrib.gis.geos import Polygon, Point
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 
+from .utils import _parse_flexible_date
+
 ####################################################
 ################## AUTENTICACION ###################
 ####################################################
@@ -1498,6 +1500,71 @@ class HomeCacheAPI(APIView):
 ####################################################
 #################### VIEW SETS #####################
 ####################################################
+
+class InventoryItemViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'actions'
+
+    def get_queryset(self):
+        return InventoryItem.objects.filter(store__company__owner=self.request.user).order_by('-creation')
+
+    def create(self, request, *args, **kwargs):
+        try:
+            with transaction.atomic():
+                store_id = request.data.get('store_id')
+                product_id = request.data.get('product_id')
+                stock = request.data.get('stock', 0)
+                expiration_date_raw = request.data.get('expiration_date')
+                custom_price = request.data.get('custom_price')
+
+                store = CompanyStore.objects.get(id=store_id, company__owner=request.user)
+                product = Product.objects.get(id=product_id, company__owner=request.user)
+
+                # Procesamos la fecha de caducidad usando nuestra función flexible
+                exp_datetime = None
+                if expiration_date_raw:
+                    parsed_date = _parse_flexible_date(expiration_date_raw)
+                    if parsed_date:
+                        # Lo hacemos consciente de la zona horaria y lo seteamos al final del día
+                        exp_datetime = timezone.make_aware(datetime.combine(parsed_date.date(), datetime.max.time()))
+
+                item = InventoryItem.objects.create(
+                    store=store,
+                    product=product,
+                    stock=int(stock),
+                    expiration_date=exp_datetime,
+                    custom_price=custom_price if custom_price else None
+                )
+
+                return Response({'success': True, 'data': item.get_json()}, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=['post'])
+    def apply_offer(self, request, pk=None):
+        item = self.get_object()
+        percentage = request.data.get('percentage')
+        valid_until_raw = request.data.get('valid_until')
+
+        try:
+            # Procesamos la fecha de la oferta
+            parsed_date = _parse_flexible_date(valid_until_raw)
+            if not parsed_date:
+                return Response({'error': 'La fecha de validez es obligatoria'}, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Seteamos la expiración a las 23:59:59 de ese día con su Timezone
+            valid_datetime = timezone.make_aware(datetime.combine(parsed_date.date(), datetime.max.time()))
+
+            InventoryItemOffer.objects.update_or_create(
+                product_item=item,
+                defaults={'percentage': int(percentage), 'valid_until': valid_datetime}
+            )
+            
+            item.refresh_from_db()
+            return Response({'success': True, 'data': item.get_json()}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class ProductViewSet(viewsets.ModelViewSet):
     serializer_class = ProductSerializer

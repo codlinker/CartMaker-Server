@@ -1,6 +1,9 @@
 from celery import shared_task
 from django.contrib.auth import get_user_model
 import logging
+from django.utils import timezone
+
+from web.models import InventoryItemOffer
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -26,3 +29,25 @@ def update_rolling_template(user_id, new_vector):
         pass 
     except Exception as e:
         logger.error(f"❌ Error en update_rolling_template: {e}")
+
+@shared_task(ignore_result=True)
+def cleanup_expired_offers():
+    """
+    Busca y elimina todas las ofertas de inventario cuya 
+    fecha de validez ya haya pasado.
+    """
+    try:
+        now = timezone.now()
+        
+        # Filtramos las ofertas donde 'valid_until' es menor estricto que la hora actual
+        expired_offers = InventoryItemOffer.objects.filter(valid_until__lt=now)
+        
+        # Guardamos la cantidad antes de borrar para el log
+        count = expired_offers.count()
+        
+        if count > 0:
+            expired_offers.delete()
+            logger.info(f"✅ Se eliminaron {count} ofertas expiradas del inventario.")
+        
+    except Exception as e:
+        logger.error(f"❌ Error en cleanup_expired_offers: {e}")

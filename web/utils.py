@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from django.core.cache import cache
 import random
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -37,3 +39,25 @@ def get_email_otp(user_email) -> str:
 def activate_pgvector(sender, **kwargs):
     with connection.cursor() as cursor:
         cursor.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+
+# ==========================================
+# FUNCIÓN AUXILIAR PARA PARSEAR FECHAS FLEXIBLES
+# ==========================================
+def _parse_flexible_date(date_str):
+    if not date_str:
+        return None
+    # 1. Quitamos cualquier hora extraña que mande Flutter (Ej: "2026-10-25 00:00:00.000" -> "2026-10-25")
+    clean_str = str(date_str).split(' ')[0].split('T')[0]
+    try:
+        # 2. Intentar formato estándar YYYY-MM-DD
+        return datetime.strptime(clean_str, '%Y-%m-%d')
+    except ValueError:
+        try:
+            # 3. Intentar formato latino DD/MM/YYYY
+            return datetime.strptime(clean_str, '%d/%m/%Y')
+        except ValueError:
+            try:
+                # 4. Intentar formato DD-MM-YYYY
+                return datetime.strptime(clean_str, '%d-%m-%Y')
+            except ValueError:
+                raise ValueError(f"Formato de fecha no reconocido: {date_str}")

@@ -838,6 +838,20 @@ class InventoryItem(models.Model):
     custom_price = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     paused = models.BooleanField(default=False)
 
+    def get_json(self) -> dict:
+        return {
+            "id": self.id,
+            "product": self.product.get_json(), # Anidamos la info del producto maestro
+            "stock": self.stock,
+            "store_id": self.store_id,
+            "creation": timezone.localtime(self.creation) if self.creation else None,
+            "sold_out_time": timezone.localtime(self.sold_out_time) if self.sold_out_time else None,
+            "expiration_date": timezone.localtime(self.expiration_date) if self.expiration_date else None,
+            "custom_price": self.custom_price,
+            "paused": self.paused,
+            "offer": self.offer.get_json() if hasattr(self, 'offer') else None
+        }
+
 class InventoryItemOffer(models.Model):
     """
     Promociones temporales aplicadas a ítems específicos.
@@ -850,6 +864,12 @@ class InventoryItemOffer(models.Model):
     product_item = models.OneToOneField(InventoryItem, on_delete=models.CASCADE, related_name='offer')
     valid_until = models.DateTimeField()
     percentage = models.IntegerField()
+
+    def get_json(self) -> dict:
+        return {
+            "valid_until": timezone.localtime(self.valid_until),
+            "percentage": self.percentage
+        }
 
 class InventoryItemTransaction(models.Model):
     """

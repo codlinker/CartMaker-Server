@@ -97,7 +97,7 @@ que acciones pesadas bloqueen la velocidad de respuesta del servidor,
 mejorando la UX.
 
 ```bash
-celery -A cartmaker_admin worker --loglevel=info --concurrency=2 # 2 o cantidad de nucleos a utilizar del procesador.
+celery -A cartmaker_admin worker -B --loglevel=info --concurrency=2 # 2 o cantidad de nucleos a utilizar del procesador.
 ```
 
 > **Nota:** Si agregas nuevas funciones a `tasks.py`, recuerda reiniciar el proceso de Celery para que las reconozca.

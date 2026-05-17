@@ -14,6 +14,7 @@ router.register(r'user', UserViewSet, basename='user')
 router.register(r'client-contact-methods', ClientContactMethodViewSet, basename='client-contact-methods')
 router.register(r'notifications', NotificationViewSet, basename='notifications')
 router.register(r'products', ProductViewSet, basename='products')
+router.register(r'inventory-items', InventoryItemViewSet, basename='inventory-items')
 
 # --- DEFINICIÓN DE RUTAS (URLS) ---
 urlpatterns = [

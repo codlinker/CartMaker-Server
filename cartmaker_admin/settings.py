@@ -18,6 +18,7 @@ from django.templatetags.static import static
 import firebase_admin
 from firebase_admin import credentials
 import os
+from celery.schedules import crontab
 
 env_manager = EnviromentManager()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -316,6 +317,17 @@ CELERY_RESULT_BACKEND = 'redis://127.0.0.1:6379/0'
 CELERY_ACCEPT_CONTENT = ['application/json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'America/Caracas' 
+CELERY_ENABLE_UTC = False
+
+# Celery Beat Settings
+CELERY_BEAT_SCHEDULE = {
+    # Tarea 1: Limpiar ofertas de descuento expiradas en items. Todos los dias a las 12:02 AM
+    'cleanup-expired-offers-midnight': {
+        'task': 'web.tasks.cleanup_expired_offers', 
+        'schedule': crontab(minute=2, hour=0), 
+    },
+}
 
 # FIREBASE
 path_to_json = os.path.join(BASE_DIR, '.', 'firebase-adminsdk.json')
