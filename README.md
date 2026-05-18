@@ -4,7 +4,7 @@ Este repositorio contiene el núcleo lógico de CartMaker, incluyendo el sistema
 
 ## 📋 Requisitos del Sistema
 * **OS:** `Ubuntu`
-* **Python:** `3.14`
+* **Python:** `3.12`
 * **Base de Datos:** PostgreSQL con extensión `pgvector`.
 * **Broker:** Redis Server (Obligatorio para tareas asíncronas).
 * **Uvicorn:** Para ejecutar el proyecto en su servidor ASGI.

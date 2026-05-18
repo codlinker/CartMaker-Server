@@ -30,8 +30,9 @@ from django.utils import timezone
 from .tasks import *
 from django.contrib.gis.geos import Polygon, Point
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
-
+from .atlas import AtlasManager
 from .utils import _parse_flexible_date
+from asgiref.sync import sync_to_async, async_to_sync
 
 ####################################################
 ################## AUTENTICACION ###################
@@ -1306,8 +1307,6 @@ class GetStoresLocations(APIView):
     """
     Endpoint optimizado para cargar tiendas basadas en el área visible del mapa.
     """
-    throttle_classes = [ScopedRateThrottle]
-    throttle_scope = 'actions'
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -1501,6 +1500,111 @@ class HomeCacheAPI(APIView):
 #################### VIEW SETS #####################
 ####################################################
 
+class AtlasViewSet(viewsets.ViewSet):
+    """
+    API integral para todas las interacciones con Atlas (IA de CartMaker).
+    """
+    permission_classes = [IsAuthenticated]
+
+    # Al ser una vista síncrona de DRF, el ORM se usa de forma normal y limpia
+    def _get_user_plan(self, user):
+        try:
+            return user.atlas_plan
+        except AtlasPlusPlan.DoesNotExist:
+            return None
+
+    def _create_thread(self, plan):
+        return AtlasThread.objects.create(plan=plan)
+
+    # ------------------------------------------------------------------------
+    # ENDPOINT: POST /api/atlas/scan_image/
+    # ------------------------------------------------------------------------
+    @action(detail=False, methods=['post'])
+    def scan_image(self, request):
+        image_file = request.FILES.get('image')
+        if not image_file:
+            return Response(
+                {'error': 'No se proporcionó ninguna imagen. Asegúrate de enviarla como multipart/form-data con la clave "image".'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        image_bytes = image_file.read()
+        mime_type = image_file.content_type
+        
+        atlas = AtlasManager()
+        
+        # LA MAGIA: Ejecutamos el método asíncrono de Atlas dentro de nuestra vista síncrona.
+        # Uvicorn mantendrá esto en un hilo secundario sin bloquear la app.
+        resultado = async_to_sync(atlas.analyze_image_for_products_async)(image_bytes, mime_type)
+        
+        if "error" in resultado and not resultado.get("products"):
+            return Response(resultado, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+            
+        return Response(resultado, status=status.HTTP_200_OK)
+    
+    # ------------------------------------------------------------------------
+    # ENDPOINT: POST /api/v1/atlas/scan_image_multiple/
+    # ------------------------------------------------------------------------
+    @action(detail=False, methods=['post'])
+    def scan_image_multiple(self, request):
+        image_file = request.FILES.get('image')
+        if not image_file:
+            return Response(
+                {'error': 'No se proporcionó ninguna imagen para el escaneo masivo.'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        image_bytes = image_file.read()
+        mime_type = image_file.content_type
+        
+        atlas = AtlasManager()
+        
+        # Ejecutamos la versión plural
+        resultado = async_to_sync(atlas.analyze_image_for_multiple_products_async)(image_bytes, mime_type)
+        
+        if "error" in resultado and not resultado.get("products"):
+            return Response(resultado, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+            
+        return Response(resultado, status=status.HTTP_200_OK)
+
+    # ------------------------------------------------------------------------
+    # ENDPOINT: POST /api/atlas/thread/
+    # ------------------------------------------------------------------------
+    @action(detail=False, methods=['post'])
+    def thread(self, request):
+        plan = self._get_user_plan(request.user)
+        if not plan:
+            return Response({'error': 'Debes tener una suscripción activa a Atlas Plus.'}, status=status.HTTP_403_FORBIDDEN)
+            
+        new_thread = self._create_thread(plan)
+        return Response({'thread_id': new_thread.id}, status=status.HTTP_201_CREATED)
+
+    # ------------------------------------------------------------------------
+    # ENDPOINT: POST /api/atlas/{id}/message/
+    # ------------------------------------------------------------------------
+    @action(detail=True, methods=['post'])
+    def message(self, request, pk=None):
+        text = request.data.get('text')
+        if not text:
+            return Response({'error': 'El texto del mensaje es obligatorio.'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        plan = self._get_user_plan(request.user)
+        if not plan:
+            return Response({'error': 'Debes tener una suscripción activa a Atlas Plus.'}, status=status.HTTP_403_FORBIDDEN)
+            
+        atlas = AtlasManager()
+        
+        # Llamamos al chat asíncrono con async_to_sync
+        resultado = async_to_sync(atlas.send_chat_message_async)(thread_id=pk, user_text=text)
+        
+        if not resultado.get('success'):
+            return Response({'error': resultado.get('error')}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+        return Response({
+            'response': resultado['response'],
+            'message_id': resultado['message_id']
+        }, status=status.HTTP_200_OK)
+
 class InventoryItemViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     throttle_classes = [ScopedRateThrottle]
@@ -1578,6 +1682,80 @@ class ProductViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         # Aseguramos que el usuario solo pueda interactuar con los productos de su compañía
         return Product.objects.filter(company__owner=self.request.user).order_by('-creation')
+    
+    @action(detail=False, methods=['post'])
+    def bulk_create(self, request):
+        """
+        Recibe un lote de productos y los guarda todos de golpe usando una transacción.
+        """
+        company_id = request.data.get('company_id')
+        try:
+            company = Company.objects.get(id=company_id, owner=request.user)
+        except Company.DoesNotExist:
+            return Response({'error': 'Compañía no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        raw_products = request.data.get('products_data')
+        if not raw_products:
+            return Response({'error': 'Faltan los datos de los productos.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            products_list = json.loads(raw_products)
+        except json.JSONDecodeError:
+            return Response({'error': 'El formato de products_data es inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        created_products = []
+
+        try:
+            # Usamos atomic para que, si explota una imagen, no guarde productos a medias
+            with transaction.atomic():
+                for prod_index, prod_data in enumerate(products_list):
+                    
+                    category = SubCategory.objects.get(id=prod_data['category_id'])
+                    discounts_data = prod_data.get('discounts_data', [])
+
+                    # 1. Creamos el registro base
+                    product = Product.objects.create(
+                        company=company,
+                        name=prod_data['name'],
+                        price=prod_data['price'],
+                        description=prod_data['description'],
+                        category=category,
+                        discounts_by_tokens_active=prod_data.get('discounts_by_tokens_active', False),
+                        discounts_data=discounts_data,
+                        images=[]
+                    )
+
+                    # 2. Manejo de imágenes indexadas
+                    image_order = prod_data.get('image_order', [])
+                    final_images = []
+                    dtnow_str = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
+
+                    for img_index, item in enumerate(image_order):
+                        # item llegará como "new_image_0_0" (producto 0, imagen 0)
+                        if item.startswith('new_image_') and item in request.FILES:
+                            file = request.FILES[item]
+                            extension = file.name.split('.')[-1]
+                            file_name = f"prod_{product.id}_{img_index}_{dtnow_str}.{extension}"
+                            folder = f"product_pictures/{product.id}"
+                            
+                            relative_path = storage_manager.save_file(file, folder, file_name)
+                            if relative_path:
+                                final_images.append(relative_path)
+                            else:
+                                raise Exception(f"Error guardando la imagen {file.name}.")
+                        else:
+                            final_images.append(item)
+
+                    # 3. Guardamos las URLs definitivas en el array de Postgres
+                    product.images = final_images
+                    product.save()
+                    
+                    created_products.append(product.get_json())
+
+            return Response({'success': True, 'data': created_products}, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -1634,7 +1812,6 @@ class ProductViewSet(viewsets.ModelViewSet):
                     else:
                         # Si no es un archivo nuevo, asumimos que es una URL existente
                         final_images.append(item)
-
                 product.images = final_images
                 product.save()
 

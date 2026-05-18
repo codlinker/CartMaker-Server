@@ -4,3 +4,4 @@ variables.sh
 media/
 firebase-adminsdk.json
 celery*
+venv

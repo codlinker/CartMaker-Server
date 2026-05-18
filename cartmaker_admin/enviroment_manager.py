@@ -24,7 +24,11 @@ class EnviromentManager:
         "AWS_ACCESS_KEY_ID":"Acces key id del bucket de AWS.",
         "AWS_SECRET_ACCESS_KEY":"Secret key del bucket de AWS.",
         "AWS_STORAGE_BUCKET_NAME":"Nombre del bucket de AWS.",
-        "AWS_S3_REGION_NAME":"Region del bucket de AWS."
+        "AWS_S3_REGION_NAME":"Region del bucket de AWS.",
+        "CEDULAS_API_APP_ID":"App id de la api de consulta de cedulas.",
+        "CEDULAS_API_ACCESS_TOKEN":"Access token de la api de consulta de cedulas.",
+        "USE_CEDULAS_API":"Indica si se debe usar la api de consulta de cedulas al verificar identidades.",
+        "GEMINI_API_KEY":"API Key de Gemini."
     }
 
     def __init__(self):
@@ -48,6 +52,7 @@ class EnviromentManager:
         self._cedulas_api_app_id = None
         self._cedulas_api_access_token = None
         self._use_cedulas_api = None
+        self._gemini_api_key = None
         self.__execute_sh_file()
         self.__load_enviroment_variables()
 
@@ -175,6 +180,13 @@ class EnviromentManager:
         """
         return self._use_cedulas_api
     
+    @property
+    def GEMINI_API_KEY(self) -> str:
+        """
+        API Key de Gemini.
+        """
+        return self._gemini_api_key
+    
     def __get_env_variable_description(self, env_variable_name:str)->str:
         """
         Retorna una descripcion para la variable indicada.
@@ -235,6 +247,7 @@ class EnviromentManager:
             "CEDULAS_API_APP_ID":os.environ.get("CEDULAS_API_APP_ID"),
             "CEDULAS_API_ACCESS_TOKEN":os.environ.get("CEDULAS_API_ACCESS_TOKEN"),
             "USE_CEDULAS_API":self.__process_boolean_env_variable(os.environ.get('USE_CEDULAS_API')),
+            "GEMINI_API_KEY":os.environ.get("GEMINI_API_KEY"),
         }
         self.__check_variables(env_variables)
         self._db_name = env_variables['DB_NAME']
@@ -257,6 +270,7 @@ class EnviromentManager:
         self._cedulas_api_app_id = env_variables['CEDULAS_API_APP_ID']
         self._cedulas_api_access_token = env_variables['CEDULAS_API_ACCESS_TOKEN']
         self._use_cedulas_api = env_variables['USE_CEDULAS_API']
+        self._gemini_api_key = env_variables['GEMINI_API_KEY']
 
     def __process_boolean_env_variable(self, variable:str)->bool:
         """Procesa la variable indicada en el parametro. Se espera
