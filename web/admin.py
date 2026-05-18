@@ -169,7 +169,7 @@ class StoreViewLogAdmin(ModelAdmin):
 # --- REGISTRO DE TODAS LAS TABLAS RESTANTES ---
 
 # Modelos Geográficos
-@admin.register(ClientLocation, StoreLocation)
+@admin.register(ClientLocation)
 class GeoAdmin(GISModelAdmin, ModelAdmin):
     gis_widget_kwargs = {
         'attrs': {
@@ -178,7 +178,23 @@ class GeoAdmin(GISModelAdmin, ModelAdmin):
             'default_zoom': 14,      
         }
     }
-    list_display = ("coordinates", "name")
+    list_display = ("user", "coordinates", "name")
+    
+    class Media:
+        css = {
+            'all': ('css/admin_map_fix.css',)
+        }
+
+@admin.register(StoreLocation)
+class GeoAdmin(GISModelAdmin, ModelAdmin):
+    gis_widget_kwargs = {
+        'attrs': {
+            'default_lon': -66.6115, 
+            'default_lat': 10.4686,  
+            'default_zoom': 14,      
+        }
+    }
+    list_display = ("store", "coordinates", "name")
     
     class Media:
         css = {

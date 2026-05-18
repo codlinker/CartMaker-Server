@@ -72,7 +72,7 @@ class ClientLocationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ClientLocation
-        fields = ['id', 'name', 'latitude', 'longitude', "is_default"] 
+        fields = ['id', 'name', 'latitude', 'longitude', "description", "is_default"] 
         read_only_fields = ['id']
 
     def create(self, validated_data):
@@ -95,12 +95,16 @@ class ClientLocationSerializer(serializers.ModelSerializer):
         lon = validated_data.pop('longitude')
         validated_data['coordinates'] = Point(lon, lat, srid=4326)
         return super().create(validated_data)
+    
+    def update(self, instance, validated_data):
+        lat = validated_data.pop('latitude', None)
+        lon = validated_data.pop('longitude', None)
+        if lat is not None and lon is not None:
+            validated_data['coordinates'] = Point(lon, lat, srid=4326)
+        return super().update(instance, validated_data)
 
     def to_representation(self, instance):
-        representation = super().to_representation(instance)
-        representation['latitude'] = instance.coordinates.y
-        representation['longitude'] = instance.coordinates.x
-        return representation
+        return instance.get_json()
     
 class ClientContactMethodSerializer(serializers.ModelSerializer):
     class Meta:

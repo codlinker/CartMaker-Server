@@ -416,11 +416,13 @@ class ClientLocation(models.Model):
         user (ForeignKey): Referencia al usuario dueño de la ubicación.
         coordinates (Point): Coordenadas espaciales (Lat, Lon).
         name (str): Etiqueta de la ubicación (ej: 'Casa', 'Trabajo').
+        description (str): Descripcion de la ubicacion.
         is_default (str): Indica si esta es la ubicacion seleccionada por el usuario como predeterminada.
     """
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='locations')
     coordinates = gis_models.PointField()
     name = models.CharField(max_length=255)
+    description = models.CharField(max_length=600)
     is_default = models.BooleanField(default=False)
 
     class Meta:
@@ -435,6 +437,7 @@ class ClientLocation(models.Model):
             'latitude':self.coordinates.y,
             'longitude':self.coordinates.x,
             'name':self.name,
+            'description':self.description,
             'is_default':self.is_default
         }
 

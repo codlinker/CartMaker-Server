@@ -1998,6 +1998,24 @@ class ClientLocationViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
 
+    @action(detail=True, methods=['patch'], url_path='select-location')
+    def select_location(self, request, pk=None):
+        try:
+            location = self.get_object()
+            ClientLocation.objects.filter(
+                user=request.user, 
+                is_default=True
+            ).exclude(pk=location.pk).update(is_default=False)
+            location.is_default = True
+            location.save()
+            serializer = self.get_serializer(location)
+            return Response({
+                "message": "Ubicación activada correctamente.",
+                "data": serializer.data
+            }, status=200)
+        except Exception as e:
+            return Response({"error": f"Error al seleccionar la ubicación: {e}"}, status=500)
+
 class UserViewSet(mixins.RetrieveModelMixin,
                   mixins.UpdateModelMixin,
                   viewsets.GenericViewSet):
