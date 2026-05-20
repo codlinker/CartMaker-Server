@@ -2,7 +2,7 @@ from celery import shared_task
 from django.contrib.auth import get_user_model
 import logging
 from django.utils import timezone
-
+from .core.platinum_manager import PlatinumEvaluator
 from web.models import InventoryItemOffer
 
 logger = logging.getLogger(__name__)
@@ -51,3 +51,18 @@ def cleanup_expired_offers():
         
     except Exception as e:
         logger.error(f"❌ Error en cleanup_expired_offers: {e}")
+
+@shared_task(ignore_result=True)
+def evaluate_platinum_status():
+    """
+    Tarea nocturna para evaluar el desempeño de todas las tiendas
+    y otorgar/revocar el estatus Platinum para el motor de búsqueda.
+    """
+    try:
+        logger.info("⏳ Iniciando evaluación nocturna de estatus Platinum...")
+        
+        PlatinumEvaluator.evaluate_all_companies()
+        
+        logger.info("✅ Evaluación Platinum completada con éxito.")
+    except Exception as e:
+        logger.error(f"❌ Error en evaluate_platinum_status: {e}")

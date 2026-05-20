@@ -1,11 +1,11 @@
 import math
-
+from .utils import *
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.tokens import RefreshToken
 from .models import *
-from web.utils import *
+from web.core import *
 from django.contrib.gis.geos import Point
 from pgvector.django import CosineDistance
 

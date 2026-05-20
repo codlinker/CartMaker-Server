@@ -327,6 +327,11 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'web.tasks.cleanup_expired_offers', 
         'schedule': crontab(minute=2, hour=0), 
     },
+    # Tarea 2: Evaluar comerciantes Platinum. Todos los días a las 3:00 AM
+    'evaluate-platinum-status-nightly': {
+        'task': 'web.tasks.evaluate_platinum_status', 
+        'schedule': crontab(minute=0, hour=3), 
+    },
 }
 
 # FIREBASE

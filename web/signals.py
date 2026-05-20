@@ -1,10 +1,11 @@
-from django.db.models.signals import post_save, pre_save
+from django.db.models.signals import post_save, pre_save, post_delete
 from django.dispatch import receiver
-from .firebase_admin import NotificationManager
+from .core.firebase_admin import NotificationManager
 from .models import *
 from django.utils import timezone
 from dateutil.relativedelta import relativedelta
 from django.db import transaction
+from .utils import *
 
 @receiver(pre_save, sender=MerchantPlanPayment)
 def on_payment_created(sender, instance: MerchantPlanPayment, **kwargs):
@@ -97,3 +98,18 @@ def on_user_created(sender, created, instance: User, **kwargs):
     """
     if created:
         UserWallet.objects.create(user=instance)
+
+@receiver(post_save, sender=ProductViewLog)
+def on_view_log_saved(sender, instance, **kwargs):
+    """
+    Se dispara cuando se registra una nueva vista o se actualiza 
+    (ej: el usuario lo agregó al carrito minutos después de verlo).
+    """
+    recalculate_item_popularity(instance.inventory_item_id)
+
+@receiver(post_delete, sender=ProductViewLog)
+def on_view_log_deleted(sender, instance, **kwargs):
+    """
+    Se dispara si por alguna razón se elimina un log (limpieza de BD, etc).
+    """
+    recalculate_item_popularity(instance.inventory_item_id)

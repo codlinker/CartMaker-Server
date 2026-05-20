@@ -536,6 +536,11 @@ class Company(models.Model):
     gamification_enabled = models.BooleanField(default=False)
     gamification_tokens_per_dollar = models.IntegerField(default=0)
     main_work_hours = models.JSONField(default=get_default_work_hours)
+    is_platinum = models.BooleanField(
+        default=False, 
+        db_index=True,
+        help_text="Si es True, la empresa tiene +4.5 estrellas y alto volumen de ventas. Recibe boost en el motor de búsqueda."
+    )
 
     def get_json(self)->dict:
         url = ""
@@ -557,7 +562,8 @@ class Company(models.Model):
             "gamification_enabled":self.gamification_enabled,
             "gamification_tokens_per_dollar":self.gamification_tokens_per_dollar,
             "main_work_hours":self.main_work_hours,
-            "presentation_video_thumbnail":presentation_video_thumbnail
+            "presentation_video_thumbnail":presentation_video_thumbnail,
+            "is_platinum":self.is_platinum
         }
     
     def __str__(self):
@@ -794,15 +800,18 @@ class Product(models.Model):
     # ["https://...", "https://...",
     # ]
 
+    def __str__(self):
+        return f"{self.name} - {self.company.name}"
+
 
     def get_json(self)->dict:
         images = []
         for img_url in self.images:
             images.append(storage_manager.get_url(img_url))
         data = {
-            "id":self.id,
+            "id":str(self.id),
             "name":self.name,
-            "price":self.price,
+            "price":float(self.price),
             "creation":timezone.localtime(self.creation),
             "category":{
                 'id':self.category_id,
@@ -840,19 +849,33 @@ class InventoryItem(models.Model):
     expiration_date = models.DateTimeField(null=True, blank=True)
     custom_price = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     paused = models.BooleanField(default=False)
+    cached_popularity_score = models.FloatField(
+        default=0.0, 
+        db_index=True,
+        help_text="Puntuación precalculada de interacciones (visitas, carritos, compras). Evita JOINs masivos. Usado por el motor de busqueda."
+    )
 
     def get_json(self) -> dict:
+        avg_rating = getattr(self, 'avg_rating', 0.0)
+        rating_count = getattr(self, 'rating_count', 0)
+        dist_obj = getattr(self, 'real_distance_meters', None)
+
         return {
-            "id": self.id,
+            "id": str(self.id),
             "product": self.product.get_json(), # Anidamos la info del producto maestro
             "stock": self.stock,
             "store_id": self.store_id,
             "creation": timezone.localtime(self.creation) if self.creation else None,
+            "company_name": self.store.company.name,
             "sold_out_time": timezone.localtime(self.sold_out_time) if self.sold_out_time else None,
             "expiration_date": timezone.localtime(self.expiration_date) if self.expiration_date else None,
-            "custom_price": self.custom_price,
+            "custom_price": float(self.custom_price) if self.custom_price else None,
             "paused": self.paused,
-            "offer": self.offer.get_json() if hasattr(self, 'offer') else None
+            "offer": self.offer.get_json() if hasattr(self, 'offer') else None,
+            "avg_rating": float(avg_rating),
+            "rating_count": int(rating_count),
+            "is_very_close": bool(getattr(self, 'is_very_close', False)),
+            "is_close": bool(getattr(self, 'is_close', False)),
         }
 
 class InventoryItemOffer(models.Model):

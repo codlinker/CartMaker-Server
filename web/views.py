@@ -9,7 +9,8 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from .serializers import *
 from .models import *
 from rest_framework.permissions import *
-from .utils import *
+from .core import atlas, firebase_admin
+from .core.product_search_engine import ProductSearchEngine
 from rest_framework import generics, status
 from rest_framework.throttling import ScopedRateThrottle
 from google.oauth2 import id_token
@@ -25,14 +26,14 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from datetime import datetime
 import requests
 from django.db import transaction
-from .firebase_admin import NotificationManager
+from .core import *
 from django.utils import timezone
 from .tasks import *
 from django.contrib.gis.geos import Polygon, Point
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
-from .atlas import AtlasManager
 from .utils import _parse_flexible_date
 from asgiref.sync import sync_to_async, async_to_sync
+from rest_framework.pagination import PageNumberPagination
 
 ####################################################
 ################## AUTENTICACION ###################
@@ -1499,6 +1500,133 @@ class HomeCacheAPI(APIView):
 ####################################################
 #################### VIEW SETS #####################
 ####################################################
+
+class SearchEnginePagination(PageNumberPagination):
+    """
+    Configuración estándar de paginación para el Feed.
+    """
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 50
+
+class ProductSearchEngineViewSet(viewsets.ViewSet):
+    """
+    API integral para la distribución algorítmica de productos hacia la App.
+    Interactúa con el ProductSearchEngine para retornar Feeds dinámicos.
+    """
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'navigation'
+    
+    # ------------------------------------------------------------------------
+    # HELPERS
+    # ------------------------------------------------------------------------
+    def _get_coordinates(self, request):
+        """Extrae de forma segura las coordenadas de los query params."""
+        try:
+            lat = float(request.query_params.get('lat'))
+            lng = float(request.query_params.get('lng'))
+            return lat, lng
+        except (TypeError, ValueError):
+            return None, None
+
+    def _get_sorting_params(self, request):
+        """Extrae los filtros de ordenamiento."""
+        sort_by = request.query_params.get('sort_by', 'relevance') # 'relevance', 'distance', 'rating'
+        price_order = request.query_params.get('price_order')      # 'asc', 'desc', None
+        return sort_by, price_order
+
+    def _paginate_and_respond(self, queryset, request):
+        """Maneja la paginación estándar de DRF para listas crudas."""
+        paginator = SearchEnginePagination()
+        paginated_qs = paginator.paginate_queryset(queryset, request)
+        
+        data = [item.get_json() for item in paginated_qs]
+        print("DATOS OBTENIDOS: ", data)
+        return paginator.get_paginated_response(data)
+
+    # ------------------------------------------------------------------------
+    # ENDPOINT: GET /api/v1/search-engine/category/
+    # ------------------------------------------------------------------------
+    @action(detail=False, methods=['get'])
+    def category(self, request):
+        """
+        Retorna el feed diversificado o filtrado explícitamente para una subcategoría.
+        QueryParams: sub_category_id, lat, lng, sort_by, price_order
+        """
+        sub_category_id = request.query_params.get('sub_category_id')
+        lat, lng = self._get_coordinates(request)
+        sort_by, price_order = self._get_sorting_params(request)
+
+        if not sub_category_id or lat is None or lng is None:
+            return Response(
+                {'error': 'Faltan parámetros obligatorios: sub_category_id, lat, lng'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        engine = ProductSearchEngine(lat, lng)
+        queryset = engine.get_category_feed(
+            sub_category_id=sub_category_id, 
+            sort_by=sort_by, 
+            price_order=price_order
+        )
+
+        print("QUERYSET OBTENIDO: ", queryset)
+        
+        return self._paginate_and_respond(queryset, request)
+
+    # ------------------------------------------------------------------------
+    # ENDPOINT: GET /api/v1/search-engine/store/
+    # ------------------------------------------------------------------------
+    @action(detail=False, methods=['get'])
+    def store(self, request):
+        """
+        Retorna TODOS los productos de una tienda, con opción de ordenar por precio.
+        QueryParams: store_id, lat, lng, price_order
+        """
+        store_id = request.query_params.get('store_id')
+        lat, lng = self._get_coordinates(request)
+        _, price_order = self._get_sorting_params(request)
+
+        if not store_id or lat is None or lng is None:
+            return Response(
+                {'error': 'Faltan parámetros obligatorios: store_id, lat, lng'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        engine = ProductSearchEngine(lat, lng)
+        queryset = engine.get_store_feed(store_id=store_id, price_order=price_order)
+        
+        return self._paginate_and_respond(queryset, request)
+
+    # ------------------------------------------------------------------------
+    # ENDPOINT: GET /api/v1/search-engine/offers/
+    # ------------------------------------------------------------------------
+    @action(detail=False, methods=['get'])
+    def offers(self, request):
+        """
+        Retorna el feed diversificado u ordenado de ofertas activas.
+        QueryParams: lat, lng, home_widget, sort_by, price_order
+        """
+        lat, lng = self._get_coordinates(request)
+        sort_by, price_order = self._get_sorting_params(request)
+        is_home_widget = request.query_params.get('home_widget', 'false').lower() == 'true'
+
+        if lat is None or lng is None:
+            return Response(
+                {'error': 'Faltan parámetros obligatorios: lat, lng'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        engine = ProductSearchEngine(lat, lng)
+        queryset = engine.get_offers_feed(sort_by=sort_by, price_order=price_order)
+
+        if is_home_widget:
+            top_10 = queryset[:10]
+            data = [item.get_json() for item in top_10]
+            print("DATAA DE LAS OFERTAS: ", data)
+            return Response({'results': data}, status=status.HTTP_200_OK)
+        return self._paginate_and_respond(queryset, request)
 
 class AtlasViewSet(viewsets.ViewSet):
     """

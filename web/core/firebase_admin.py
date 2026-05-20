@@ -2,7 +2,7 @@ import logging
 from typing import List, Dict, Optional
 from firebase_admin import messaging
 from firebase_admin.exceptions import FirebaseError
-from .models import DeviceToken, User, Notification, NotificationCategory, NotificationSection
+from ..models import DeviceToken, User, Notification, NotificationCategory, NotificationSection
 
 logger = logging.getLogger(__name__)
 

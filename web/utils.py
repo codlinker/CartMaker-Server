@@ -4,6 +4,7 @@ from django.core.cache import cache
 import random
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.db import connection
+from django.db.models import Count, Q
 
 def get_tokens_for_user(user):
     refresh = RefreshToken.for_user(user)
@@ -61,3 +62,28 @@ def _parse_flexible_date(date_str):
                 return datetime.strptime(clean_str, '%d-%m-%Y')
             except ValueError:
                 raise ValueError(f"Formato de fecha no reconocido: {date_str}")
+            
+def recalculate_item_popularity(inventory_item_id: str):
+    """
+    Función de utilidad que recalcula y actualiza la popularidad 
+    de un solo ítem específico de forma atómica.
+    """
+    from .models import ProductViewLog, InventoryItem
+    # 1. Agrupamos rápido solo para este ítem específico
+    stats = ProductViewLog.objects.filter(inventory_item_id=inventory_item_id).aggregate(
+        views=Count('id'),
+        carts=Count('id', filter=Q(added_to_cart=True)),
+        buys=Count('id', filter=Q(bought=True)) # Añadimos compras para el futuro
+    )
+    
+    # 2. Aplicamos los pesos de la fórmula comercial
+    views_score = (stats['views'] or 0) * 1.0
+    carts_score = (stats['carts'] or 0) * 5.0
+    buys_score = (stats['buys'] or 0) * 15.0 # Mayor peso si terminó en compra
+    
+    total_popularity = views_score + carts_score + buys_score
+    
+    # 3. Actualización atómica en BD sin disparar el método save() completo
+    InventoryItem.objects.filter(id=inventory_item_id).update(
+        cached_popularity_score=total_popularity
+    )

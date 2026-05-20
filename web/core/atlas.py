@@ -6,7 +6,7 @@ from django.conf import settings
 from asgiref.sync import sync_to_async
 import re
 
-from .models import SubCategory, AtlasThread, AtlasMessage
+from ..models import SubCategory, AtlasThread, AtlasMessage
 
 class AtlasManager:
     """
