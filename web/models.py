@@ -1,3 +1,4 @@
+import datetime
 import uuid
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
@@ -592,6 +593,29 @@ class CompanyStore(models.Model):
     is_active = models.BooleanField(default=True)
     store_type = models.IntegerField(choices=StoreType.choices, default=StoreType.STREET)
 
+    @property
+    def is_between_work_hours(self) -> bool:
+        """
+        Verifica si la hora actual local está dentro del horario laboral de la tienda.
+        """
+        if not self.work_hours:
+            return False
+        now_local = timezone.localtime(timezone.now())
+        current_day = now_local.strftime('%A').lower()
+        day_hours = self.work_hours.get(current_day)
+        if not day_hours or 'start' not in day_hours or 'end' not in day_hours:
+            return False 
+        try:
+            start_time = datetime.strptime(day_hours['start'].strip(), "%I:%M %p").time()
+            end_time = datetime.strptime(day_hours['end'].strip(), "%I:%M %p").time()
+            current_time = now_local.time()
+            if start_time <= end_time:
+                return start_time <= current_time <= end_time
+            else:
+                return current_time >= start_time or current_time <= end_time
+        except (ValueError, TypeError, AttributeError):
+            return False
+
     def get_json(self)->dict:
         url = ""
         if self.store_img_url:
@@ -769,6 +793,9 @@ class SubCategory(models.Model):
         """
         return self.img_url if self.img_url.startswith('http')\
               else f"{settings.DOMAIN}/{self.img_url}"
+    
+    def __str__(self) -> str:
+        return f"{self.parent_category.name} - {self.name}"
 
 class Product(models.Model):
     """

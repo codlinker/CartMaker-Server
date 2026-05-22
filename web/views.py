@@ -34,6 +34,8 @@ from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 from .utils import _parse_flexible_date
 from asgiref.sync import sync_to_async, async_to_sync
 from rest_framework.pagination import PageNumberPagination
+from django.db.models.functions import Coalesce, Round
+from django.db.models import Avg, Count
 
 ####################################################
 ################## AUTENTICACION ###################
@@ -1303,6 +1305,217 @@ class DeleteStoreContactMethodAPI(APIView):
 #########################################################
 #################### MANEJO DE MAPAS ####################
 #########################################################
+
+from pprint import pprint
+
+class CartMakerMapViewSet(viewsets.ViewSet):
+    """
+    API exclusiva para el motor de renderizado del mapa principal de CartMaker (el del Home).
+    Extrae la metadata de la 'Company' asociada a las coordenadas geográficas.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=['get'])
+    def get_locations(self, request):
+        print("\n" + "="*50)
+        print("DEBUG [get_locations]: Iniciando solicitud")
+        pprint(request.query_params)
+        print("="*50)
+
+        try:
+            # 1. Parsing del Bounding Box
+            bbox_coords = (
+                float(request.query_params.get('min_lng')),
+                float(request.query_params.get('min_lat')),
+                float(request.query_params.get('max_lng')),
+                float(request.query_params.get('max_lat'))
+            )
+            bbox = Polygon.from_bbox(bbox_coords)
+            bbox.srid = 4326
+
+            # Captura de filtros de Tiendas
+            company_category_id = request.query_params.get('company_category_id')
+            is_platinum = request.query_params.get('is_platinum') == 'true'
+
+            # --- NUEVO: Captura de filtros de Productos ---
+            product_category_id = request.query_params.get('category_id')
+            product_subcategory_id = request.query_params.get('subcategory_id')
+            min_price = request.query_params.get('min_price')
+            max_price = request.query_params.get('max_price')
+            search_query = request.query_params.get('search', '').strip()
+
+            # 2. Construcción del queryset base de ubicaciones
+            queryset = StoreLocation.objects.select_related('store', 'mall').filter(
+                coordinates__coveredby=bbox,
+                store__is_active=True
+            )
+            print(f"DEBUG: Tiendas en Bounding Box inicial: {queryset.count()}")
+
+            # 3. Aplicar filtros directos de la Tienda/Compañía
+            if company_category_id:
+                print(f"DEBUG: Filtrando por company_category_id: {company_category_id}")
+                queryset = queryset.filter(store__company__category_id=company_category_id)
+            if is_platinum:
+                print("DEBUG: Filtrando por is_platinum")
+                queryset = queryset.filter(store__company__is_platinum=True)
+
+            # 4. Aplicar filtros cruzados (Filtrar tiendas basándose en su inventario)
+            if product_category_id or product_subcategory_id or min_price or max_price:
+                print("DEBUG: Aplicando filtros de inventario (productos)")
+                # Construimos una consulta Q para buscar dentro del inventario de la tienda
+                inventory_query = Q(store__product_items__paused=False, store__product_items__stock__gt=0)
+
+                # Si el usuario eligió una subcategoría específica
+                if product_subcategory_id:
+                    print(f"DEBUG: Filtro subcategoría: {product_subcategory_id}")
+                    inventory_query &= Q(store__product_items__product__category_id=product_subcategory_id)
+                # Si solo eligió la categoría padre general
+                elif product_category_id:
+                    print(f"DEBUG: Filtro categoría padre: {product_category_id}")
+                    inventory_query &= Q(store__product_items__product__category__parent_category_id=product_category_id)
+
+                # Filtros de precio (calculando precio con descuento o normal)
+                if min_price or max_price:
+                    print(f"DEBUG: Filtro precio: Min {min_price}, Max {max_price}")
+                    if min_price:
+                        inventory_query &= (
+                            Q(store__product_items__custom_price__isnull=False, store__product_items__custom_price__gte=float(min_price)) |
+                            Q(store__product_items__custom_price__isnull=True, store__product_items__product__price__gte=float(min_price))
+                        )
+                    if max_price:
+                        inventory_query &= (
+                            Q(store__product_items__custom_price__isnull=False, store__product_items__custom_price__lte=float(max_price)) |
+                            Q(store__product_items__custom_price__isnull=True, store__product_items__product__price__lte=float(max_price))
+                        )
+
+                # Finalmente, filtramos las ubicaciones
+                queryset = queryset.filter(inventory_query).distinct()
+                
+                # --- DEBUG: LISTA DE SOBREVIVIENTES ---
+                print(f"DEBUG: Tiendas tras filtro de productos: {queryset.count()}")
+                for item in queryset:
+                    print(f"DEBUG: Tienda sobreviviente: {item.store.name} (ID: {item.store_id})")
+
+            if search_query:
+                print(f"DEBUG: Ejecutando búsqueda global para: '{search_query}'")
+                
+                # Construimos el filtro OR
+                global_search_filter = (
+                    Q(store__name__icontains=search_query) |
+                    Q(store__company__name__icontains=search_query) |
+                    Q(store__company__category__name__icontains=search_query) |
+                    Q(store__product_items__product__name__icontains=search_query, 
+                      store__product_items__paused=False, store__product_items__stock__gt=0) |
+                    Q(store__product_items__product__category__name__icontains=search_query, 
+                      store__product_items__paused=False, store__product_items__stock__gt=0) |
+                    Q(store__product_items__product__category__parent_category__name__icontains=search_query, 
+                      store__product_items__paused=False, store__product_items__stock__gt=0)
+                )
+                
+                # IMPORTANTE: Aquí NO sobrescribimos con una nueva query, 
+                # sino que añadimos el filtro al queryset existente (acumulativo)
+                queryset = queryset.filter(global_search_filter).distinct()
+
+            # 5. Extracción de valores
+            locations = queryset.values(
+                'store_id',
+                'coordinates',
+                'mall_id',
+                'mall_floor',
+                'store__store_type',
+                'store__name', 
+                'store__company__name', 
+                'store__company__image', 
+                'store__company__category__name', 
+                'store__company__is_platinum',
+                'store__work_hours'
+            )[:500]
+
+            # 6. Formateo JSON para Flutter
+            features = []
+            for loc in locations:
+                type_int = loc['store__store_type']
+                type_name = StoreType(type_int).name if type_int is not None else "STREET"
+                
+                raw_image = loc['store__company__image']
+                image_url = storage_manager.get_url(raw_image) if raw_image else "https://via.placeholder.com/150"
+
+                features.append({
+                    "store_id": str(loc['store_id']),
+                    "lat": loc['coordinates'].y,
+                    "lng": loc['coordinates'].x,
+                    "mall_id": loc['mall_id'],
+                    "floor": loc['mall_floor'] or 1,
+                    "store_type": type_name,
+                    "company_name": loc['store__company__name'],
+                    "branch_name": loc['store__name'],
+                    "category": loc['store__company__category__name'] or "General",
+                    "profile_pic": image_url,
+                    "is_platinum": loc['store__company__is_platinum'],
+                    "work_hours": loc['store__work_hours']
+                })
+
+            print(f"DEBUG: Retornando {len(features)} tiendas al mapa.")
+            print("="*50 + "\n")
+            return Response({'data': features}, status=status.HTTP_200_OK)
+
+        except (ValueError, TypeError, AttributeError) as e:
+            print(f"DEBUG ERROR [Valores]: {e}")
+            return Response({'error': f'Parámetros inválidos: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            print(f"DEBUG ERROR [Interno]: {e}")
+            return Response({'error': f'Error interno: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+    @action(detail=False, methods=['get'])
+    def store_products(self, request):
+        """
+        Retorna el catálogo activo de una tienda específica filtrado por subcategoría y rango de precios.
+        """
+        try:
+            store_id = request.query_params.get('store_id')
+            if not store_id:
+                return Response({'error': 'store_id es requerido'}, status=status.HTTP_400_BAD_REQUEST)
+
+            # --- NUEVOS: Captura de filtros para Productos ---
+            subcategory_id = request.query_params.get('subcategory_id')
+            min_price = request.query_params.get('min_price')
+            max_price = request.query_params.get('max_price')
+
+            # Queryset base optimizado con select_related
+            queryset = InventoryItem.objects.select_related(
+                'product', 'product__category', 'offer', 'store', 'store__company'
+            ).filter(
+                store_id=store_id,
+                paused=False,
+                stock__gt=0
+            ).annotate(
+                # Calculamos el promedio y lo redondeamos a 1 decimal
+                avg_rating=Round(Coalesce(Avg('product__califications__rating'), 0.0), 1),
+                rating_count=Count('product__califications')
+            )
+
+            # Aplicar filtro por SubCategoría del producto maestro
+            if subcategory_id:
+                queryset = queryset.filter(product__category_id=subcategory_id)
+
+            # Aplicar filtro de precio evaluando el precio final real
+            if min_price or max_price:
+                queryset = queryset.annotate(
+                    actual_price=Coalesce('custom_price', 'product__price')
+                )
+                if min_price:
+                    queryset = queryset.filter(actual_price__gte=float(min_price))
+                if max_price:
+                    queryset = queryset.filter(actual_price__lte=float(max_price))
+
+            items = queryset[:50] # Mantenemos el límite sano para rendimiento
+            data = [item.get_json() for item in items]
+            
+            return Response({'data': data}, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({'error': f'Error interno: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 class GetStoresLocations(APIView):
     """

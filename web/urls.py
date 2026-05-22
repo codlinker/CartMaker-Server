@@ -17,6 +17,7 @@ router.register(r'products', ProductViewSet, basename='products')
 router.register(r'inventory-items', InventoryItemViewSet, basename='inventory-items')
 router.register(r'atlas', AtlasViewSet, basename='atlas')
 router.register(r'search-engine', ProductSearchEngineViewSet, basename='search-engine')
+router.register(r'cartmaker-map', CartMakerMapViewSet, basename='cartmaker_map')
 
 # --- DEFINICIÓN DE RUTAS (URLS) ---
 urlpatterns = [
