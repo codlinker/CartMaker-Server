@@ -291,6 +291,7 @@ class UpdateCompanySerializer(serializers.Serializer):
     gamification_tokens_per_dollar = serializers.IntegerField(required=False)
     category_id = serializers.IntegerField(required=False)
     work_hours = serializers.JSONField(required=False)
+    work_days = serializers.CharField(required=False)
     whatsapp_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     instagram_handle = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     phone_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
@@ -310,6 +311,7 @@ class UpdateStoreSerializer(serializers.Serializer):
     store_img = serializers.ImageField(required=False, validators=[validate_image_size])
     
     work_hours = serializers.JSONField(required=False)
+    work_days = serializers.CharField(required=False)
     whatsapp_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     instagram_handle = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     phone_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
@@ -328,6 +330,7 @@ class CreateStoreSerializer(serializers.Serializer):
     name = serializers.CharField(required=True, max_length=255)
     store_img = serializers.ImageField(required=False)
     work_hours = serializers.JSONField(required=True)
+    work_days = serializers.CharField(required=False)
     
     # Ubicación (Obligatorios)
     store_type = serializers.IntegerField(required=True)

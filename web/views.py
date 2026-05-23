@@ -36,6 +36,9 @@ from asgiref.sync import sync_to_async, async_to_sync
 from rest_framework.pagination import PageNumberPagination
 from django.db.models.functions import Coalesce, Round
 from django.db.models import Avg, Count
+from django.contrib.gis.measure import D
+import operator
+from functools import reduce
 
 ####################################################
 ################## AUTENTICACION ###################
@@ -853,6 +856,7 @@ class UpdateCompanyAPI(APIView):
         whatsapp_number = data.get('whatsapp_number')
         instagram_handle = data.get('instagram_handle')
         phone_number = data.get('phone_number')
+        work_days = data.get('work_days')
         
         # Extracción de campos de ubicación
         store_type = data.get('store_type')
@@ -973,6 +977,23 @@ class UpdateCompanyAPI(APIView):
             if work_hours:
                 company.main_work_hours = work_hours 
                 company_has_changed = True
+
+            if work_hours:
+                company.main_work_hours = work_hours 
+                company_has_changed = True
+                
+            # <-- 2. Agrega este bloque para work_days
+            if work_days is not None: 
+                # Si llega como string (por el FormData de Flutter), lo convertimos
+                if isinstance(work_days, str):
+                    import json
+                    try:
+                        company.main_work_days = json.loads(work_days)
+                    except json.JSONDecodeError:
+                        pass
+                else:
+                    company.main_work_days = work_days
+                company_has_changed = True
                 
             # Métodos de contacto
             contact_data = [
@@ -1059,12 +1080,26 @@ class CreateStoreAPI(APIView):
                         'success': False, 
                         'error': "La compañía no existe o no tienes permisos."
                     }, status=status.HTTP_404_NOT_FOUND)
+                
+                work_days_raw = d.get('work_days')
+                parsed_work_days = [0, 1, 2, 3, 4] # Valor por defecto si no envían nada
+                
+                if work_days_raw is not None:
+                    if isinstance(work_days_raw, str):
+                        import json
+                        try:
+                            parsed_work_days = json.loads(work_days_raw)
+                        except json.JSONDecodeError:
+                            pass
+                    else:
+                        parsed_work_days = work_days_raw
 
                 # 2. Crear instancia de Sucursal (primero sin imagen para obtener el ID)
                 store = CompanyStore.objects.create(
                     company=company,
                     name=d['name'],
                     work_hours=d['work_hours'],
+                    work_days=parsed_work_days,
                     store_type=d['store_type'],
                     is_active=True
                 )
@@ -1170,6 +1205,7 @@ class UpdateStoreAPI(APIView):
         name = data.get('name')
         is_active = data.get('is_active')
         work_hours = data.get('work_hours')
+        work_days = data.get('work_days')
         
         whatsapp_number = data.get('whatsapp_number')
         instagram_handle = data.get('instagram_handle')
@@ -1224,6 +1260,17 @@ class UpdateStoreAPI(APIView):
 
             if work_hours:
                 store.work_hours = work_hours
+                store_has_changed = True
+
+            if work_days is not None:
+                if isinstance(work_days, str):
+                    import json
+                    try:
+                        store.work_days = json.loads(work_days)
+                    except json.JSONDecodeError:
+                        pass
+                else:
+                    store.work_days = work_days
                 store_has_changed = True
                 
             # Métodos de contacto (específicos de esta tienda)
@@ -1344,11 +1391,31 @@ class CartMakerMapViewSet(viewsets.ViewSet):
             max_price = request.query_params.get('max_price')
             search_query = request.query_params.get('search', '').strip()
 
-            # 2. Construcción del queryset base de ubicaciones
-            queryset = StoreLocation.objects.select_related('store', 'mall').filter(
-                coordinates__coveredby=bbox,
-                store__is_active=True
-            )
+            # Determinar si hay algún filtro activo para decidir si usar radio o BBox
+            has_filters = any([
+                company_category_id, 
+                is_platinum, 
+                product_category_id, 
+                product_subcategory_id, 
+                min_price, 
+                max_price, 
+                search_query
+            ])
+
+            # 2. Construcción del queryset base de ubicaciones (CON LOGICA DE RADIO)
+            if has_filters:
+                print("DEBUG: Filtros detectados. Buscando en radio de 200km desde el centro.")
+                queryset = StoreLocation.objects.select_related('store', 'mall').filter(
+                    coordinates__distance_lte=(bbox.centroid, D(km=200)),
+                    store__is_active=True
+                )
+            else:
+                print("DEBUG: Sin filtros. Buscando en Bounding Box estricto.")
+                queryset = StoreLocation.objects.select_related('store', 'mall').filter(
+                    coordinates__coveredby=bbox,
+                    store__is_active=True
+                )
+            
             print(f"DEBUG: Tiendas en Bounding Box inicial: {queryset.count()}")
 
             # 3. Aplicar filtros directos de la Tienda/Compañía
@@ -1399,21 +1466,39 @@ class CartMakerMapViewSet(viewsets.ViewSet):
             if search_query:
                 print(f"DEBUG: Ejecutando búsqueda global para: '{search_query}'")
                 
-                # Construimos el filtro OR
-                global_search_filter = (
-                    Q(store__name__icontains=search_query) |
-                    Q(store__company__name__icontains=search_query) |
-                    Q(store__company__category__name__icontains=search_query) |
-                    Q(store__product_items__product__name__icontains=search_query, 
-                      store__product_items__paused=False, store__product_items__stock__gt=0) |
-                    Q(store__product_items__product__category__name__icontains=search_query, 
-                      store__product_items__paused=False, store__product_items__stock__gt=0) |
-                    Q(store__product_items__product__category__parent_category__name__icontains=search_query, 
-                      store__product_items__paused=False, store__product_items__stock__gt=0)
-                )
+                # 1. Limpiamos y separamos la consulta en palabras individuales
+                search_terms = search_query.split()
+                word_queries = []
                 
-                # IMPORTANTE: Aquí NO sobrescribimos con una nueva query, 
-                # sino que añadimos el filtro al queryset existente (acumulativo)
+                for term in search_terms:
+                    # 2. Para cada palabra, buscamos si coincide en ALGUNO de estos campos
+                    term_filter = (
+                        Q(store__name__icontains=term) |
+                        Q(store__company__name__icontains=term) |
+                        Q(store__company__category__name__icontains=term) |
+                        Q(
+                            store__product_items__product__name__icontains=term, 
+                            store__product_items__paused=False, 
+                            store__product_items__stock__gt=0
+                        ) |
+                        Q(
+                            store__product_items__product__category__name__icontains=term, 
+                            store__product_items__paused=False, 
+                            store__product_items__stock__gt=0
+                        ) |
+                        Q(
+                            store__product_items__product__category__parent_category__name__icontains=term, 
+                            store__product_items__paused=False, 
+                            store__product_items__stock__gt=0
+                        )
+                    )
+                    word_queries.append(term_filter)
+                
+                # 3. Combinamos todas las palabras con el operador AND (&)
+                # Si el usuario busca "Autopartes KRP", DEBE existir "Autopartes" Y "KRP" 
+                # en alguna parte de la data relacionada a la tienda.
+                global_search_filter = reduce(operator.and_, word_queries)
+                
                 queryset = queryset.filter(global_search_filter).distinct()
 
             # 5. Extracción de valores
@@ -1428,7 +1513,10 @@ class CartMakerMapViewSet(viewsets.ViewSet):
                 'store__company__image', 
                 'store__company__category__name', 
                 'store__company__is_platinum',
-                'store__work_hours'
+                'store__work_hours',
+                'store__work_days',
+                'store__company__main_work_hours',
+                'store__company__main_work_days'
             )[:500]
 
             # 6. Formateo JSON para Flutter
@@ -1439,6 +1527,21 @@ class CartMakerMapViewSet(viewsets.ViewSet):
                 
                 raw_image = loc['store__company__image']
                 image_url = storage_manager.get_url(raw_image) if raw_image else "https://via.placeholder.com/150"
+
+                # 👇 LÓGICA DE FALLBACK PARA LOS HORARIOS (WORK_HOURS)
+                work_hours = loc['store__work_hours']
+                # Si es None o un diccionario vacío {}
+                if not work_hours: 
+                    work_hours = loc['store__company__main_work_hours']
+
+                # 👇 LÓGICA DE FALLBACK PARA LOS DÍAS (WORK_DAYS)
+                work_days = loc['store__work_days']
+                # Si es None o una lista vacía []
+                if not work_days: 
+                    work_days = loc['store__company__main_work_days']
+                # Si la compañía tampoco tiene (por seguridad)
+                if not work_days: 
+                    work_days = [0, 1, 2, 3, 4] # Lunes a viernes por defecto
 
                 features.append({
                     "store_id": str(loc['store_id']),
@@ -1452,7 +1555,9 @@ class CartMakerMapViewSet(viewsets.ViewSet):
                     "category": loc['store__company__category__name'] or "General",
                     "profile_pic": image_url,
                     "is_platinum": loc['store__company__is_platinum'],
-                    "work_hours": loc['store__work_hours']
+                    # 👇 PASAMOS LAS VARIABLES YA RESUELTAS
+                    "work_hours": work_hours, 
+                    "work_days": work_days 
                 })
 
             print(f"DEBUG: Retornando {len(features)} tiendas al mapa.")
@@ -1840,6 +1945,38 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
             print("DATAA DE LAS OFERTAS: ", data)
             return Response({'results': data}, status=status.HTTP_200_OK)
         return self._paginate_and_respond(queryset, request)
+    
+    @action(detail=False, methods=['get'])
+    def item_details(self, request):
+        """
+        Retorna la información completa de un lote/producto público para la vista de detalles.
+        QueryParam: item_id (UUID)
+        """
+        item_id = request.query_params.get('item_id')
+
+        if not item_id:
+            return Response(
+                {'error': 'Falta el parámetro obligatorio: item_id'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        try:
+            # Buscamos el ítem asegurándonos de que no esté pausado
+            item = InventoryItem.objects.select_related(
+                'product', 'store__company'
+            ).prefetch_related('product__califications').annotate(
+                # Calculamos el promedio y lo redondeamos a 1 decimal
+                avg_rating=Round(Coalesce(Avg('product__califications__rating'), 0.0), 1),
+                rating_count=Count('product__califications')
+            ).get(id=item_id, paused=False)
+            
+            data = item.get_json()
+            return Response({'success': True, 'data': data}, status=status.HTTP_200_OK)
+            
+        except InventoryItem.DoesNotExist:
+            return Response(
+                {'error': 'El producto no existe o fue retirado.'}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
 
 class AtlasViewSet(viewsets.ViewSet):
     """
@@ -1872,7 +2009,7 @@ class AtlasViewSet(viewsets.ViewSet):
         image_bytes = image_file.read()
         mime_type = image_file.content_type
         
-        atlas = AtlasManager()
+        atlas = atlas.AtlasManager()
         
         # LA MAGIA: Ejecutamos el método asíncrono de Atlas dentro de nuestra vista síncrona.
         # Uvicorn mantendrá esto en un hilo secundario sin bloquear la app.
@@ -1898,7 +2035,7 @@ class AtlasViewSet(viewsets.ViewSet):
         image_bytes = image_file.read()
         mime_type = image_file.content_type
         
-        atlas = AtlasManager()
+        atlas = atlas.AtlasManager()
         
         # Ejecutamos la versión plural
         resultado = async_to_sync(atlas.analyze_image_for_multiple_products_async)(image_bytes, mime_type)
@@ -1933,7 +2070,7 @@ class AtlasViewSet(viewsets.ViewSet):
         if not plan:
             return Response({'error': 'Debes tener una suscripción activa a Atlas Plus.'}, status=status.HTTP_403_FORBIDDEN)
             
-        atlas = AtlasManager()
+        atlas = atlas.AtlasManager()
         
         # Llamamos al chat asíncrono con async_to_sync
         resultado = async_to_sync(atlas.send_chat_message_async)(thread_id=pk, user_text=text)

@@ -18,6 +18,10 @@ from decimal import Decimal
 def get_default_work_hours():
     return {"start": "08:00 AM", "end": "06:30 PM"}
 
+# Función para el default de los días (Lun a Vie)
+def get_default_work_days():
+    return [0, 1, 2, 3, 4]
+
 # ==========================================
 # ENUMS (Para validación automática en DRF)
 # ==========================================
@@ -537,6 +541,7 @@ class Company(models.Model):
     gamification_enabled = models.BooleanField(default=False)
     gamification_tokens_per_dollar = models.IntegerField(default=0)
     main_work_hours = models.JSONField(default=get_default_work_hours)
+    main_work_days = models.JSONField(default=get_default_work_days)
     is_platinum = models.BooleanField(
         default=False, 
         db_index=True,
@@ -563,6 +568,7 @@ class Company(models.Model):
             "gamification_enabled":self.gamification_enabled,
             "gamification_tokens_per_dollar":self.gamification_tokens_per_dollar,
             "main_work_hours":self.main_work_hours,
+            "main_work_days":self.main_work_days,
             "presentation_video_thumbnail":presentation_video_thumbnail,
             "is_platinum":self.is_platinum
         }
@@ -590,49 +596,81 @@ class CompanyStore(models.Model):
     creation = models.DateTimeField(auto_now_add=True)
     store_img_url = models.CharField(default=None, null=True)
     work_hours = models.JSONField(default=get_default_work_hours)
+    work_days = models.JSONField(default=list, blank=True)
     is_active = models.BooleanField(default=True)
     store_type = models.IntegerField(choices=StoreType.choices, default=StoreType.STREET)
 
     @property
+    def is_between_work_days(self) -> bool:
+        """Verifica únicamente si hoy es un día laborable."""
+        days_to_check = self.work_days if self.work_days else self.company.main_work_days
+        now_local = timezone.localtime(timezone.now())
+        return now_local.weekday() in days_to_check
+
+    @property
     def is_between_work_hours(self) -> bool:
         """
-        Verifica si la hora actual local está dentro del horario laboral de la tienda.
+        Verifica si la hora actual local está dentro del horario laboral.
+        El horario aplica por igual a todos los días laborables definidos.
+        Si la tienda no tiene horario propio, usa el de la compañía.
         """
-        if not self.work_hours:
-            return False
-        now_local = timezone.localtime(timezone.now())
-        current_day = now_local.strftime('%A').lower()
-        day_hours = self.work_hours.get(current_day)
-        if not day_hours or 'start' not in day_hours or 'end' not in day_hours:
+        # 1. Aplicamos la regla del fallback
+        hours_to_use = self.work_hours if self.work_hours else self.company.main_work_hours
+        
+        if not hours_to_use or 'start' not in hours_to_use or 'end' not in hours_to_use:
             return False 
+            
         try:
-            start_time = datetime.strptime(day_hours['start'].strip(), "%I:%M %p").time()
-            end_time = datetime.strptime(day_hours['end'].strip(), "%I:%M %p").time()
+            now_local = timezone.localtime(timezone.now())
+            start_time = datetime.strptime(hours_to_use['start'].strip(), "%I:%M %p").time()
+            end_time = datetime.strptime(hours_to_use['end'].strip(), "%I:%M %p").time()
             current_time = now_local.time()
+            
             if start_time <= end_time:
                 return start_time <= current_time <= end_time
             else:
+                # Para horarios que cruzan la medianoche (ej. 10:00 PM a 02:00 AM)
                 return current_time >= start_time or current_time <= end_time
         except (ValueError, TypeError, AttributeError):
             return False
+        
+    @property # <-- 1. Agregamos el decorador para acceder como atributo
+    def is_currently_open(self) -> bool:
+        """Función pública que combina ambas validaciones."""
+        return self.is_between_work_days and self.is_between_work_hours
 
-    def get_json(self)->dict:
+    def get_json(self) -> dict:
         url = ""
         if self.store_img_url:
             url = storage_manager.get_url(self.store_img_url)
+            
         contact_methods_dict = {
             ContactMethodType(contact.method_type).name.lower(): contact.get_json()
             for contact in self.contact_methods.all()
         }
+        
+        # 2. Blindamos el fallback asegurando que sea una lista/dict y que tenga elementos
+        has_valid_hours = self.work_hours and isinstance(self.work_hours, dict) and 'start' in self.work_hours
+        effective_work_hours = self.work_hours if has_valid_hours else self.company.main_work_hours
+        
+        has_valid_days = self.work_days and isinstance(self.work_days, list) and len(self.work_days) > 0
+        effective_work_days = self.work_days if has_valid_days else self.company.main_work_days
+        print("====== DEBUG GET_JSON ======")
+        print(f"Tienda ({self.name}): work_days crudo -> {repr(self.work_days)}")
+        print(f"Compañía ({self.company.name}): main_work_days crudo -> {repr(self.company.main_work_days)}")
+        print(f"Resultado efectivo enviado a Flutter -> {repr(effective_work_days)}")
+        print("============================")
         return {
-            'id':self.id,
-            'name':self.name,
-            'creation':timezone.localtime(self.creation).strftime("%d/%m/%Y, %H:%M:%S"),
-            'store_img_url':url,
-            'work_hours':self.work_hours,
-            'location':self.location.get_json(),
-            'contact_methods':contact_methods_dict,
-            'is_active':self.is_active
+            'id': self.id,
+            'name': self.name,
+            'creation': timezone.localtime(self.creation).strftime("%d/%m/%Y, %H:%M:%S"),
+            'store_img_url': url,
+            'work_hours': effective_work_hours,
+            'work_days': effective_work_days,
+            'is_currently_open': self.is_currently_open, # Ahora esto se evaluará correctamente gracias al @property
+            'location': self.location.get_json() if hasattr(self, 'location') else None,
+            'contact_methods': contact_methods_dict,
+            'is_active': self.is_active
         }
     
     def __str__(self):
@@ -885,11 +923,24 @@ class InventoryItem(models.Model):
     def get_json(self) -> dict:
         avg_rating = getattr(self, 'avg_rating', 0.0)
         rating_count = getattr(self, 'rating_count', 0)
-        dist_obj = getattr(self, 'real_distance_meters', None)
+        
+        # 1. Blindar el fallback para work_hours
+        store_hours = self.store.work_hours
+        has_valid_hours = store_hours and isinstance(store_hours, dict) and 'start' in store_hours
+        effective_work_hours = store_hours if has_valid_hours else self.store.company.main_work_hours
+        
+        # 2. Agregar y blindar el fallback para work_days
+        store_days = self.store.work_days
+        has_valid_days = store_days and isinstance(store_days, list) and len(store_days) > 0
+        effective_work_days = store_days if has_valid_days else self.store.company.main_work_days
+
+        # 👇 EL SEGURO FINAL: Si la compañía tampoco tiene días, asumimos Lunes a Viernes
+        if not effective_work_days:
+            effective_work_days = [0, 1, 2, 3, 4]
 
         return {
             "id": str(self.id),
-            "product": self.product.get_json(), # Anidamos la info del producto maestro
+            "product": self.product.get_json(), 
             "stock": self.stock,
             "store_id": self.store_id,
             "creation": timezone.localtime(self.creation) if self.creation else None,
@@ -903,6 +954,11 @@ class InventoryItem(models.Model):
             "rating_count": int(rating_count),
             "is_very_close": bool(getattr(self, 'is_very_close', False)),
             "is_close": bool(getattr(self, 'is_close', False)),
+            
+            # 3. Enviamos la data completa y usamos la validación unificada
+            "work_hours": effective_work_hours,
+            "work_days": effective_work_days, 
+            "is_open_now": self.store.is_currently_open, 
         }
 
 class InventoryItemOffer(models.Model):
