@@ -27,6 +27,7 @@ urlpatterns = [
     # Rutas para la obtencion de datos
     path('api/v1/cache/user', UserCacheAPI.as_view(), name="user_cache"),
     path('api/v1/cache/home', HomeCacheAPI.as_view(), name="home_cache"),
+    path('api/v1/cache/search', SearchCacheAPI.as_view(), name="search_cache"),
     path('api/v1/cache/company', CompanyCacheAPI.as_view(), name='company_cache'),
     path('api/v1/cache/maps', GetMallsCache.as_view(), name='get_malls'),
     path('api/v1/cache/subscriptions', SubscriptionsCacheAPI.as_view(), name="subscriptions_cache"),

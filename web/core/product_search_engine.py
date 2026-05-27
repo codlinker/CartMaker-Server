@@ -2,7 +2,7 @@ from datetime import datetime
 from django.utils import timezone
 from django.contrib.gis.geos import Point
 from django.contrib.gis.db.models.functions import Distance
-from django.db.models import F, FloatField, ExpressionWrapper, Avg
+from django.db.models import F, Q, FloatField, ExpressionWrapper, Avg
 from django.db.models.expressions import Window
 from django.db.models.functions import RowNumber, Coalesce
 from django.db.models import Case, When, Value, Count, BooleanField
@@ -194,3 +194,34 @@ class ProductSearchEngine:
             # Orden por defecto de la tienda: Popularidad
             qs = qs.annotate(ranking_score=F('cached_popularity_score'))
             return qs.order_by('-ranking_score')
+        
+    def get_text_search_feed(self, search_query: str, sort_by: str = 'relevance', price_order: str = None, max_distance_meters: float = 10000):
+        """
+        Retorna productos que coincidan con un texto de búsqueda, cruzado con el filtro hiperlocal.
+        Busca coincidencias en el nombre del producto, la categoría, y el nombre de la tienda.
+        """
+        qs = self._get_base_active_queryset()
+        qs = self._annotate_proximity_flag(qs)
+        
+        # 1. Filtro Geográfico y disponibilidad base
+        qs = qs.filter(
+            store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters))
+        )
+
+        # 2. Búsqueda de Texto Flexible
+        if search_query:
+            # Limpiamos espacios en blanco extra
+            clean_query = search_query.strip()
+            
+            # Filtramos usando el objeto Q para abarcar múltiples campos.
+            # Nota: __icontains es funcional, pero si usas PostgreSQL, puedes migrar esto a 
+            # SearchVector o TrigramSimilarity para mejor tolerancia a errores ortográficos.
+            qs = qs.filter(
+                Q(product__name__icontains=clean_query) | 
+                Q(product__description__icontains=clean_query) |
+                Q(product__category__name__icontains=clean_query) |
+                Q(product__company__name__icontains=clean_query)
+            ).distinct() # Agregamos distinct() por si los JOINs del 'OR' generan duplicados
+
+        # 3. Aplicamos las reglas de ordenamiento o anti-monopolio
+        return self._apply_feed_sorting(qs, sort_by, price_order)

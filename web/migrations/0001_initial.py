@@ -9,6 +9,7 @@ import uuid
 import web.models
 from decimal import Decimal
 from django.conf import settings
+from django.contrib.postgres.operations import CreateExtension
 from django.db import migrations, models
 
 
@@ -21,6 +22,7 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        CreateExtension('vector'),
         migrations.CreateModel(
             name='Announcement',
             fields=[

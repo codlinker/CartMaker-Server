@@ -781,6 +781,7 @@ class CreateCompanyAPI(APIView):
                     StoreLocation.objects.create(
                         store=company_store,
                         mall=mall,
+                        mall_floor=selected_mall_floor,
                         coordinates=mall.coordinates,
                         name=address
                     )
@@ -1781,13 +1782,9 @@ class HomeCacheAPI(APIView):
 
     def get(self, request):
         """
-        Devuelve todos los datos necesarios para la cache de la home screen de la app.
+        Devuelve los datos necesarios para la cache de la home screen (Red Social / Feed).
         """
         announcements = [announcement.get_json() for announcement in Announcement.objects.filter(active=True).order_by('-creation')]
-        categories = [
-            category.get_json() 
-            for category in Category.objects.prefetch_related('subcategories').all()
-        ]
         company_categories = [
             category.get_json() for category in CompanyCategory.objects.all()
         ]
@@ -1801,17 +1798,35 @@ class HomeCacheAPI(APIView):
             "pedidos": storage_manager.get_url('static/img/company_section_buttons/pedidos.jpg', True),
             "preguntas_de_clientes": storage_manager.get_url('static/img/company_section_buttons/preguntas_de_clientes.jpg', True),
         }
-        search_stores_at_zone = {
-            # TODO: Implementar funcionalidad para obtener el mensaje de Atlas
-            "atlas_message":"Detecto varias ofertas de ortalizas en el Kiosco de DonAmigo.",
-            "image_background":storage_manager.get_url('static/img/tiendas_en_la_zona_background.jpg', True)
-        }
+        
         cache = {
-            "announcements":announcements,
-            "categories":categories,
-            'company_categories':company_categories,
-            'company_section_images':company_section_images,
-            'search_stores_at_zone':search_stores_at_zone
+            "announcements": announcements,
+            'company_categories': company_categories,
+            'company_section_images': company_section_images,
+        }
+        return Response(cache, status=200)
+
+class SearchCacheAPI(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'navigation'
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """
+        Devuelve los datos necesarios para la vista de Búsqueda y Exploración.
+        """
+        categories = [
+            category.get_json() 
+            for category in Category.objects.prefetch_related('subcategories').all()
+        ]
+        search_stores_at_zone = {
+            "atlas_message": "Detecto varias ofertas de hortalizas en el Kiosco de DonAmigo.",
+            "image_background": storage_manager.get_url('static/img/tiendas_en_la_zona_background.jpg', True)
+        }
+        
+        cache = {
+            "categories": categories,
+            'search_stores_at_zone': search_stores_at_zone
         }
         return Response(cache, status=200)
 
@@ -1977,6 +1992,45 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
                 {'error': 'El producto no existe o fue retirado.'}, 
                 status=status.HTTP_404_NOT_FOUND
             )
+        
+    # ------------------------------------------------------------------------
+    # ENDPOINT: GET /api/v1/search-engine/text_search/
+    # ------------------------------------------------------------------------
+    @action(detail=False, methods=['get'])
+    def text_search(self, request):
+        """
+        Endpoint global para la barra de búsqueda de texto de la aplicación.
+        QueryParams: q (texto a buscar), lat, lng, sort_by, price_order, max_distance
+        """
+        search_query = request.query_params.get('q', '')
+        lat, lng = self._get_coordinates(request)
+        sort_by, price_order = self._get_sorting_params(request)
+        
+        # Extraemos max_distance de los params, si no existe asume 10km
+        try:
+            max_distance = float(request.query_params.get('max_distance', 10000))
+        except ValueError:
+            max_distance = 10000
+
+        if not search_query or lat is None or lng is None:
+            return Response(
+                {'error': 'Faltan parámetros obligatorios: q, lat, lng'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Inicializamos el motor
+        engine = ProductSearchEngine(lat, lng)
+        
+        # Ejecutamos la búsqueda de texto completo
+        queryset = engine.get_text_search_feed(
+            search_query=search_query,
+            sort_by=sort_by,
+            price_order=price_order,
+            max_distance_meters=max_distance
+        )
+
+        # Usamos tu paginador existente para mantener la consistencia
+        return self._paginate_and_respond(queryset, request)
 
 class AtlasViewSet(viewsets.ViewSet):
     """
@@ -2009,11 +2063,11 @@ class AtlasViewSet(viewsets.ViewSet):
         image_bytes = image_file.read()
         mime_type = image_file.content_type
         
-        atlas = atlas.AtlasManager()
+        atlas_manager = atlas.AtlasManager()
         
         # LA MAGIA: Ejecutamos el método asíncrono de Atlas dentro de nuestra vista síncrona.
         # Uvicorn mantendrá esto en un hilo secundario sin bloquear la app.
-        resultado = async_to_sync(atlas.analyze_image_for_products_async)(image_bytes, mime_type)
+        resultado = async_to_sync(atlas_manager.analyze_image_for_products_async)(image_bytes, mime_type)
         
         if "error" in resultado and not resultado.get("products"):
             return Response(resultado, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
@@ -2035,10 +2089,10 @@ class AtlasViewSet(viewsets.ViewSet):
         image_bytes = image_file.read()
         mime_type = image_file.content_type
         
-        atlas = atlas.AtlasManager()
+        atlas_manager = atlas.AtlasManager()
         
         # Ejecutamos la versión plural
-        resultado = async_to_sync(atlas.analyze_image_for_multiple_products_async)(image_bytes, mime_type)
+        resultado = async_to_sync(atlas_manager.analyze_image_for_multiple_products_async)(image_bytes, mime_type)
         
         if "error" in resultado and not resultado.get("products"):
             return Response(resultado, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
@@ -2070,10 +2124,10 @@ class AtlasViewSet(viewsets.ViewSet):
         if not plan:
             return Response({'error': 'Debes tener una suscripción activa a Atlas Plus.'}, status=status.HTTP_403_FORBIDDEN)
             
-        atlas = atlas.AtlasManager()
+        atlas_manager = atlas.AtlasManager()
         
         # Llamamos al chat asíncrono con async_to_sync
-        resultado = async_to_sync(atlas.send_chat_message_async)(thread_id=pk, user_text=text)
+        resultado = async_to_sync(atlas_manager.send_chat_message_async)(thread_id=pk, user_text=text)
         
         if not resultado.get('success'):
             return Response({'error': resultado.get('error')}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
