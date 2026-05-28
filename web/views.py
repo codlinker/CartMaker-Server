@@ -35,7 +35,7 @@ from .utils import _parse_flexible_date
 from asgiref.sync import sync_to_async, async_to_sync
 from rest_framework.pagination import PageNumberPagination
 from django.db.models.functions import Coalesce, Round
-from django.db.models import Avg, Count
+from django.db.models import Avg, Count, Sum
 from django.contrib.gis.measure import D
 import operator
 from functools import reduce
@@ -1819,6 +1819,90 @@ class HomeCacheAPI(APIView):
 #################### VIEW SETS #####################
 ####################################################
 
+class ClientCompanyViewSet(viewsets.ViewSet):
+    """
+    API dedicada a la obtención de perfiles públicos de tiendas y compañías
+    desde la perspectiva del cliente final.
+    """
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'navigation'
+
+    @action(detail=False, methods=['get'])
+    def profile(self, request):
+        """
+        Retorna la metadata pública de la tienda y su compañía (estadísticas, horarios, info).
+        QueryParam: store_id o company_id
+        """
+        store_id = request.query_params.get('store_id')
+        company_id = request.query_params.get('company_id')
+
+        if not store_id and not company_id:
+            return Response(
+                {'error': 'Debe proveer store_id o company_id'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # 1. Determinar qué tienda consultar
+            if company_id:
+                store = CompanyStore.objects.select_related('company', 'company__category').filter(
+                    company_id=company_id, is_active=True
+                ).first()
+                if not store:
+                    return Response({'error': 'La compañía no tiene tiendas activas.'}, status=status.HTTP_404_NOT_FOUND)
+                company = store.company
+            else:
+                store = CompanyStore.objects.select_related('company', 'company__category').get(id=store_id)
+                company = store.company
+            
+            # =======================================================
+            # 2. CÁLCULO DE MÉTRICAS GLOBALES DE LA COMPAÑÍA
+            # =======================================================
+            
+            # A) Promedio de calificación
+            rating_aggr = MerchantCalification.objects.filter(merchant=company).aggregate(Avg('rating'))
+            avg_rating = round(rating_aggr['rating__avg'] or 0.0, 2)
+            
+            # B) Total de ventas de TODAS las sucursales
+            # Asumiendo que 1 = Venta (Reemplaza con tu TransactionType.SALE)
+            sales_aggr = InventoryItemTransaction.objects.filter(
+                item__store__company=company,
+                transaction_type=1 
+            ).aggregate(Sum('units'))
+            total_sales = sales_aggr['units__sum'] or 0
+            formatted_sales = f"{total_sales // 1000}k" if total_sales >= 1000 else str(total_sales)
+
+            # C) Categorías disponibles para esta compañía (Solo las que tienen productos activos en inventario)
+            available_categories = SubCategory.objects.filter(
+                product__inventory_items__store__company=company,
+                product__inventory_items__paused=False
+            ).distinct().values('id', 'name')
+
+            merchant_subscription = MerchantSubscription.objects.get(merchant=company.owner)
+
+            # =======================================================
+            # 3. CONSTRUCCIÓN DE LA RESPUESTA
+            # =======================================================
+            company_metadata = company.get_json()
+            company_metadata['avg_rating'] = avg_rating
+            company_metadata['total_sales'] = formatted_sales
+            company_metadata['total_sales_raw'] = total_sales
+            company_metadata['merchant_type'] = merchant_subscription.get_merchant_type_display()
+            
+            store_metadata = store.get_json()
+
+            return Response({
+            'store_metadata': store_metadata,
+            'company_metadata': company_metadata,
+            'available_categories': list(available_categories)
+            }, status=status.HTTP_200_OK)
+
+        except CompanyStore.DoesNotExist:
+            return Response({'error': 'La tienda solicitada no existe o fue eliminada.'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': f'Error interno: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 class SearchEnginePagination(PageNumberPagination):
     """
     Configuración estándar de paginación para el Feed.
@@ -1903,17 +1987,27 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
         QueryParams: store_id, lat, lng, price_order
         """
         store_id = request.query_params.get('store_id')
+        company_id = request.query_params.get('company_id')
+        category_id = request.query_params.get('category_id') # 💡 NUEVO
         lat, lng = self._get_coordinates(request)
         _, price_order = self._get_sorting_params(request)
 
-        if not store_id or lat is None or lng is None:
+        if (not store_id and not company_id) or lat is None or lng is None:
             return Response(
-                {'error': 'Faltan parámetros obligatorios: store_id, lat, lng'}, 
+                {'error': 'Faltan parámetros obligatorios: store_id o company_id, lat, lng'}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         engine = ProductSearchEngine(lat, lng)
-        queryset = engine.get_store_feed(store_id=store_id, price_order=price_order)
+        
+        # 💡 Asegúrate de adaptar tu engine.get_store_feed para que reciba y filtre
+        # por company_id (si store_id no viene) y por category_id.
+        queryset = engine.get_store_feed(
+            store_id=store_id, 
+            company_id=company_id,
+            category_id=category_id,
+            price_order=price_order
+        )
         
         return self._paginate_and_respond(queryset, request)
 
@@ -2009,11 +2103,11 @@ class AtlasViewSet(viewsets.ViewSet):
         image_bytes = image_file.read()
         mime_type = image_file.content_type
         
-        atlas = atlas.AtlasManager()
+        atlas_manager = atlas.AtlasManager()
         
         # LA MAGIA: Ejecutamos el método asíncrono de Atlas dentro de nuestra vista síncrona.
         # Uvicorn mantendrá esto en un hilo secundario sin bloquear la app.
-        resultado = async_to_sync(atlas.analyze_image_for_products_async)(image_bytes, mime_type)
+        resultado = async_to_sync(atlas_manager.analyze_image_for_products_async)(image_bytes, mime_type)
         
         if "error" in resultado and not resultado.get("products"):
             return Response(resultado, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
@@ -2035,10 +2129,10 @@ class AtlasViewSet(viewsets.ViewSet):
         image_bytes = image_file.read()
         mime_type = image_file.content_type
         
-        atlas = atlas.AtlasManager()
+        atlas_manager = atlas.AtlasManager()
         
         # Ejecutamos la versión plural
-        resultado = async_to_sync(atlas.analyze_image_for_multiple_products_async)(image_bytes, mime_type)
+        resultado = async_to_sync(atlas_manager.analyze_image_for_multiple_products_async)(image_bytes, mime_type)
         
         if "error" in resultado and not resultado.get("products"):
             return Response(resultado, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
@@ -2070,10 +2164,10 @@ class AtlasViewSet(viewsets.ViewSet):
         if not plan:
             return Response({'error': 'Debes tener una suscripción activa a Atlas Plus.'}, status=status.HTTP_403_FORBIDDEN)
             
-        atlas = atlas.AtlasManager()
+        atlas_manager = atlas.AtlasManager()
         
         # Llamamos al chat asíncrono con async_to_sync
-        resultado = async_to_sync(atlas.send_chat_message_async)(thread_id=pk, user_text=text)
+        resultado = async_to_sync(atlas_manager.send_chat_message_async)(thread_id=pk, user_text=text)
         
         if not resultado.get('success'):
             return Response({'error': resultado.get('error')}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

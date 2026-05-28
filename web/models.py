@@ -945,6 +945,7 @@ class InventoryItem(models.Model):
             "store_id": self.store_id,
             "creation": timezone.localtime(self.creation) if self.creation else None,
             "company_name": self.store.company.name,
+            "store_id": self.store.id,
             "sold_out_time": timezone.localtime(self.sold_out_time) if self.sold_out_time else None,
             "expiration_date": timezone.localtime(self.expiration_date) if self.expiration_date else None,
             "custom_price": float(self.custom_price) if self.custom_price else None,
@@ -960,6 +961,9 @@ class InventoryItem(models.Model):
             "work_days": effective_work_days, 
             "is_open_now": self.store.is_currently_open, 
         }
+    
+    def __str__(self):
+        return self.product.name
 
 class InventoryItemOffer(models.Model):
     """

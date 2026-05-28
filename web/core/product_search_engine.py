@@ -178,15 +178,25 @@ class ProductSearchEngine:
         
         return self._apply_feed_sorting(qs, sort_by, price_order)
 
-    def get_store_feed(self, store_id: str, price_order: str = None):
+    def get_store_feed(self, store_id: str = None, company_id: str = None, category_id: int = None, price_order: str = None):
         """
-        Retorna TODOS los productos de una tienda.
-        Soporta ordenamiento por precio o por popularidad (por defecto).
+        Retorna TODOS los productos de una tienda o de todas las tiendas de una compañía.
+        Soporta filtrado por categoría y ordenamiento por precio o por popularidad (por defecto).
         """
         qs = self._get_base_active_queryset()
         qs = self._annotate_proximity_flag(qs)
-        qs = qs.filter(store_id=store_id)
         
+        # 1. Filtramos por la tienda específica o por toda la compañía
+        if store_id:
+            qs = qs.filter(store_id=store_id)
+        elif company_id:
+            qs = qs.filter(store__company_id=company_id)
+            
+        # 2. Si el usuario seleccionó una categoría en el frontend, aplicamos el filtro
+        if category_id:
+            qs = qs.filter(product__category_id=category_id)
+        
+        # 3. Aplicamos el ordenamiento
         if price_order in ['asc', 'desc']:
             qs = qs.annotate(effective_price=Coalesce('custom_price', 'product__price'))
             return qs.order_by('effective_price' if price_order == 'asc' else '-effective_price')
