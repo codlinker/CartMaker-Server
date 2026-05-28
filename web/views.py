@@ -2031,6 +2031,18 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
 
         # Usamos tu paginador existente para mantener la consistencia
         return self._paginate_and_respond(queryset, request)
+    
+    @action(detail=False, methods=['get'])
+    def home_feed(self, request):
+        try:
+            lat = float(request.query_params.get('lat'))
+            lng = float(request.query_params.get('lng'))
+        except (TypeError, ValueError):
+            return Response({'error': 'Faltan coordenadas'}, status=status.HTTP_400_BAD_REQUEST)
+
+        engine = ProductSearchEngine(lat, lng)
+        queryset = engine.get_home_feed(user=request.user)
+        return self._paginate_and_respond(queryset, request)
 
 class AtlasViewSet(viewsets.ViewSet):
     """

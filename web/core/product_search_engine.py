@@ -2,14 +2,14 @@ from datetime import datetime
 from django.utils import timezone
 from django.contrib.gis.geos import Point
 from django.contrib.gis.db.models.functions import Distance
-from django.db.models import F, Q, FloatField, ExpressionWrapper, Avg
+from django.db.models import F, Q, Exists, FloatField, ExpressionWrapper, Avg, OuterRef
 from django.db.models.expressions import Window
 from django.db.models.functions import RowNumber, Coalesce
 from django.db.models import Case, When, Value, Count, BooleanField
 from django.contrib.gis.measure import D
 
 # Ajusta las importaciones según la ruta real de tu proyecto
-from web.models import InventoryItem, MerchantSubscription
+from web.models import InventoryItem, MerchantSubscription, ProductLike
 
 class ProductSearchEngine:
     """
@@ -225,3 +225,23 @@ class ProductSearchEngine:
 
         # 3. Aplicamos las reglas de ordenamiento o anti-monopolio
         return self._apply_feed_sorting(qs, sort_by, price_order)
+    
+    def get_home_feed(self, user, max_distance_meters: float = 15000):
+        qs = self._get_base_active_queryset()
+        
+        # 1. ANOTAMOS EL "IS_LIKED" (Esto es extremadamente rápido)
+        # Comprobamos si existe un registro en ProductLike donde el usuario sea el actual
+        # y el producto sea el que estamos iterando (OuterRef('pk'))
+        is_liked_subquery = ProductLike.objects.filter(
+            user=user, 
+            product=OuterRef('pk')
+        )
+        qs = qs.annotate(is_liked=Exists(is_liked_subquery))
+        
+        # 2. Resto de tu lógica
+        qs = self._annotate_proximity_flag(qs)
+        qs = qs.filter(
+            store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters))
+        )
+        qs = self._annotate_ranking_score(qs)
+        return self._apply_monopoly_prevention(qs)

@@ -959,6 +959,7 @@ class InventoryItem(models.Model):
             "work_hours": effective_work_hours,
             "work_days": effective_work_days, 
             "is_open_now": self.store.is_currently_open, 
+            "is_liked": bool(getattr(self, 'is_liked', False)),
         }
 
 class InventoryItemOffer(models.Model):
@@ -1660,3 +1661,12 @@ class UserNavigationLog(models.Model):
     navigation_record = models.JSONField(default=dict)
     login_time = models.DateTimeField()
     logout_time = models.DateTimeField(null=True, blank=True)
+
+# ==========================================
+# MÓDULO 10: RED SOCIAL
+# ==========================================
+
+class ProductLike(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    product = models.ForeignKey(InventoryItem, on_delete=models.CASCADE, related_name="likes")
+    creation = models.DateTimeField(auto_now_add=True)
