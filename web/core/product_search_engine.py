@@ -245,3 +245,26 @@ class ProductSearchEngine:
         )
         qs = self._annotate_ranking_score(qs)
         return self._apply_monopoly_prevention(qs)
+    
+    def get_favorites_feed(self, user, sort_by: str = 'relevance', price_order: str = None, max_distance_meters: float = 10000):
+        """
+        Retorna los productos que el usuario ha guardado como favoritos en la zona seleccionada.
+        """
+        qs = self._get_base_active_queryset()
+        qs = self._annotate_proximity_flag(qs)
+        
+        # Filtramos explícitamente por los likes del usuario activo
+        qs = qs.filter(
+            likes__user=user,
+            store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters))
+        )
+        
+        # Opcional pero recomendado: Aseguramos que la UI reciba 'is_liked' en True para estos ítems
+        qs = qs.annotate(is_liked=Value(True, output_field=BooleanField()))
+        
+        # Si el orden es 'relevance', en lugar de usar score, ordenamos por fecha de Like descendente (más recientes primero)
+        if sort_by == 'relevance' and not price_order:
+            qs = qs.annotate(like_date=F('likes__creation')).order_by('-like_date')
+            return qs
+            
+        return self._apply_feed_sorting(qs, sort_by, price_order)

@@ -1834,6 +1834,156 @@ class SearchCacheAPI(APIView):
 #################### VIEW SETS #####################
 ####################################################
 
+class ProductConversationPagination(PageNumberPagination):
+    """
+    Configuración de paginación para las preguntas y respuestas.
+    Trae 15 por página por defecto para que el modal cargue rápido en la App.
+    """
+    page_size = 15
+    page_size_query_param = 'page_size'
+    max_page_size = 30
+
+
+class ProductConversationViewSet(viewsets.ViewSet):
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'navigation'
+
+    # ------------------------------------------------------------------------
+    # ENDPOINT: GET /api/v1/product-conversation/item_questions/
+    # ------------------------------------------------------------------------
+    @action(detail=False, methods=['get'])
+    def item_questions(self, request):
+        """
+        Retorna la lista de preguntas y respuestas de un lote de forma paginada.
+        """
+        item_id = request.query_params.get('item_id')
+
+        if not item_id:
+            return Response(
+                {'error': 'Falta el parámetro obligatorio: item_id'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Query optimizado con select_related para evitar el N+1 al traer el cliente
+        questions = InventoryItemQuestion.objects.filter(
+            item_id=item_id
+        ).select_related(
+            'client', 
+            'item__store__company' # 👈 Esto trae toda la info de la empresa en un solo viaje
+        ).order_by('-question_creation')
+
+        paginator = ProductConversationPagination()
+        paginated_qs = paginator.paginate_queryset(questions, request)
+
+        # Mapeamos usando tu get_json() maestro
+        data = [q.get_json() for q in paginated_qs]
+
+        return paginator.get_paginated_response(data)
+
+    # ------------------------------------------------------------------------
+    # ENDPOINT: POST /api/v1/product-conversation/ask_question/
+    # ------------------------------------------------------------------------
+    @action(detail=False, methods=['post'])
+    def ask_question(self, request):
+        """
+        Crea una pregunta y devuelve el objeto formateado con get_json().
+        """
+        item_id = request.data.get('item_id')
+        question_text = request.data.get('question_text')
+
+        if not item_id or not question_text:
+            return Response(
+                {'error': 'Faltan parámetros obligatorios.'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        clean_text = question_text.strip()
+        if not clean_text:
+            return Response(
+                {'error': 'La pregunta no puede estar vacía.'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            item = InventoryItem.objects.get(id=item_id, paused=False)
+        except InventoryItem.DoesNotExist:
+            return Response(
+                {'error': 'El producto no existe o fue retirado.'}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        question = InventoryItemQuestion.objects.create(
+            client=request.user,
+            item=item,
+            question_text=clean_text
+        )
+
+        return Response({
+            'success': True,
+            'message': 'Pregunta enviada con éxito.',
+            'data': question.get_json() # 💡 Devolvemos exactamente la misma estructura
+        }, status=status.HTTP_201_CREATED)
+
+    # ------------------------------------------------------------------------
+    # ENDPOINT: POST /api/v1/product-conversation/answer_question/
+    # ------------------------------------------------------------------------
+    @action(detail=False, methods=['post'])
+    def answer_question(self, request):
+        """
+        Permite al dueño del comercio responder una pregunta.
+        """
+        question_id = request.data.get('question_id')
+        answer_text = request.data.get('answer_text')
+
+        if not question_id or not answer_text:
+            return Response(
+                {'error': 'Faltan parámetros obligatorios.'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        clean_text = answer_text.strip()
+        if not clean_text:
+            return Response(
+                {'error': 'La respuesta no puede estar vacía.'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # Traemos la pregunta con sus relaciones para verificar permisos eficientemente
+            question = InventoryItemQuestion.objects.select_related(
+                'item__store__company__owner'
+            ).get(id=question_id)
+        except InventoryItemQuestion.DoesNotExist:
+            return Response(
+                {'error': 'La pregunta no existe.'}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # 🔒 VERIFICACIÓN DE SEGURIDAD: ¿El usuario que dispara el endpoint es el dueño de la empresa?
+        if question.item.store.company.owner != request.user:
+            return Response(
+                {'error': 'No tienes permisos para responder en nombre de este comercio.'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # 🔒 Evitar re-escribir respuestas si ya se respondió (opcional, pero buena práctica)
+        if question.answer_text is not None:
+            return Response(
+                {'error': 'Esta pregunta ya fue respondida.'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        question.answer_text = clean_text
+        question.answer_creation = timezone.now()
+        question.save()
+
+        return Response({
+            'success': True,
+            'message': 'Respuesta enviada con éxito.',
+            'data': question.get_json()
+        }, status=status.HTTP_200_OK)
+
 class SearchEnginePagination(PageNumberPagination):
     """
     Configuración estándar de paginación para el Feed.
@@ -2042,7 +2192,78 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
 
         engine = ProductSearchEngine(lat, lng)
         queryset = engine.get_home_feed(user=request.user)
+        return self._paginate_and_respond(queryset.order_by('-creation'), request)
+        
+    # ------------------------------------------------------------------------
+    # ENDPOINT: GET /api/v1/search-engine/favorites/
+    # ------------------------------------------------------------------------
+    @action(detail=False, methods=['get'])
+    def favorites(self, request):
+        """
+        Retorna el feed de productos marcados como favoritos por el usuario.
+        QueryParams: lat, lng, home_widget, sort_by, price_order
+        """
+        lat, lng = self._get_coordinates(request)
+        sort_by, price_order = self._get_sorting_params(request)
+        is_home_widget = request.query_params.get('home_widget', 'false').lower() == 'true'
+
+        if lat is None or lng is None:
+            return Response(
+                {'error': 'Faltan parámetros obligatorios: lat, lng'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        engine = ProductSearchEngine(lat, lng)
+        queryset = engine.get_favorites_feed(user=request.user, sort_by=sort_by, price_order=price_order)
+
+        if is_home_widget:
+            # Traemos solo los 10 primeros para el scroll horizontal
+            top_10 = queryset[:10]
+            data = [item.get_json() for item in top_10]
+            return Response({'data': {'results': data}}, status=status.HTTP_200_OK)
+            
         return self._paginate_and_respond(queryset, request)
+
+    # ------------------------------------------------------------------------
+    # ENDPOINT: POST /api/v1/search-engine/toggle_like/
+    # ------------------------------------------------------------------------
+    @action(detail=False, methods=['post'])
+    def toggle_like(self, request):
+        """
+        Alterna el estado de 'Me gusta' de un lote de inventario (InventoryItem).
+        Si ya tiene like, lo quita. Si no, lo agrega.
+        """
+        item_id = request.data.get('item_id')
+
+        if not item_id:
+            return Response(
+                {'error': 'Falta el parámetro obligatorio: item_id'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # Validamos que el ítem exista y no esté pausado
+            item = InventoryItem.objects.get(id=item_id, paused=False)
+        except InventoryItem.DoesNotExist:
+            return Response(
+                {'error': 'El producto no existe o está inactivo.'}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # get_or_create devuelve una tupla: (objeto, creado_boolean)
+        # Nota: 'product' en ProductLike apunta a InventoryItem según tu modelo
+        like, created = ProductLike.objects.get_or_create(
+            user=request.user,
+            product=item
+        )
+
+        if not created:
+            # Si no fue creado, significa que ya existía, así que lo eliminamos (Unlike)
+            like.delete()
+            return Response({'success': True, 'is_liked': False}, status=status.HTTP_200_OK)
+        
+        # Si fue creado, es un (Like)
+        return Response({'success': True, 'is_liked': True}, status=status.HTTP_200_OK)
 
 class AtlasViewSet(viewsets.ViewSet):
     """

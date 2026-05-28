@@ -1015,6 +1015,33 @@ class InventoryItemQuestion(models.Model):
     answer_text = models.TextField(null=True, blank=True)
     answer_creation = models.DateTimeField(null=True, blank=True)
 
+    def get_json(self):
+        # 💡 Navegamos las relaciones para obtener la compañía
+        company = self.item.store.company
+        
+        # Resolvimos la URL de la misma forma que en Company.get_json()
+        company_image_url = ""
+        if company.image:
+            company_image_url = storage_manager.get_url(company.image)
+
+        return {
+            "id": self.id,
+            "client_data": {
+                "id": self.client.id,
+                "name": f"{self.client.first_name} {self.client.last_name}",
+                "profile_picture": self.client.get_profile_picture_url()
+            },
+            # 💡 NUEVO: Agregamos la data del vendedor
+            "seller_data": {
+                "name": company.name,
+                "profile_picture": company_image_url
+            },
+            "question_text": self.question_text,
+            "question_creation": timezone.localtime(self.question_creation).strftime('%d/%m/%Y, %H:%M:%S'),
+            "answer_text": self.answer_text,
+            "answer_creation": timezone.localtime(self.answer_creation).strftime('%d/%m/%Y, %H:%M:%S') if self.answer_creation else None
+        }
+
 
 # ==========================================
 # MÓDULO 4: VENTAS Y FIDELIZACIÓN
