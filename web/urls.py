@@ -19,6 +19,7 @@ router.register(r'atlas', AtlasViewSet, basename='atlas')
 router.register(r'search-engine', ProductSearchEngineViewSet, basename='search-engine')
 router.register(r'cartmaker-map', CartMakerMapViewSet, basename='cartmaker_map')
 router.register(r'client-company', ClientCompanyViewSet, basename="client_company")
+router.register(r'product-conversation', ProductConversationViewSet, basename="product_conversation")
 
 # --- DEFINICIÓN DE RUTAS (URLS) ---
 urlpatterns = [
@@ -28,6 +29,7 @@ urlpatterns = [
     # Rutas para la obtencion de datos
     path('api/v1/cache/user', UserCacheAPI.as_view(), name="user_cache"),
     path('api/v1/cache/home', HomeCacheAPI.as_view(), name="home_cache"),
+    path('api/v1/cache/search', SearchCacheAPI.as_view(), name="search_cache"),
     path('api/v1/cache/company', CompanyCacheAPI.as_view(), name='company_cache'),
     path('api/v1/cache/maps', GetMallsCache.as_view(), name='get_malls'),
     path('api/v1/cache/subscriptions', SubscriptionsCacheAPI.as_view(), name="subscriptions_cache"),
