@@ -32,8 +32,8 @@ def on_payment_created(sender, instance: MerchantPlanPayment, **kwargs):
                     if instance.status == PaymentStatus.REJECTED:
                         if instance.rejection_reason == RejectionReason.FAKE_PROOF:
                             instance.rejection_help = RejectionHelpText.FAKE_PROOF
-                        elif instance.rejection_reason == RejectionReason.INSUFFICIENT_AMOUNT:
-                            instance.rejection_help = RejectionHelpText.INSUFFICIENT_AMOUNT
+                        elif instance.rejection_reason == RejectionReason.NOT_ENOUGH_AMOUNT:
+                            instance.rejection_help = RejectionHelpText.NOT_ENOUGH_AMOUNT
                         elif instance.rejection_reason == RejectionReason.INVALID_DATE:
                             instance.rejection_help = RejectionHelpText.INVALID_DATE
                         elif instance.rejection_reason == RejectionReason.INVALID_REFERENCE:

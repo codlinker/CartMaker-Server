@@ -138,8 +138,7 @@ class PaymentAdmin(ModelAdmin):
     def formfield_for_choice_field(self, db_field, request, **kwargs):
         if db_field.name == 'rejection_reason':
             kwargs['choices'] = [
-                choice for choice in RejectionReason.choices 
-                if choice[0] != RejectionReason.NOT_ENOUGH_AMOUNT
+                choice for choice in RejectionReason.choices
             ]
             kwargs['choices'].insert(0, ('', '---------'))
             

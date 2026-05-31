@@ -151,8 +151,8 @@ class RejectionReason(models.IntegerChoices):
     INVALID_REFERENCE = 1, _('Referencia inválida o no encontrada')
     INVALID_DATE = 2, _('Fecha de transferencia incorrecta')
     FAKE_PROOF = 3, _('Comprobante falso o ilegible')
-    OTHER = 4, _('Otro motivo no especificado')
     NOT_ENOUGH_AMOUNT = 5, _('Monto incompleto')
+    OTHER = 4, _('Otro motivo no especificado')
 
 class RejectionHelpText(models.IntegerChoices):
     """
@@ -180,23 +180,36 @@ class RejectionHelpText(models.IntegerChoices):
     )
 
 class NotificationSection(models.IntegerChoices):
-    """
-    ENUM Tipo de notificacion.
-    """
+    # Clientes
     HOME = 0, _('Home')
-    ORDERS = 1, _('Ordenes')
+    ORDERS = 1, _('Ordenes Cliente')
     CART = 2, _('Carrito')
     SEARCH = 3, _('Buscador')
     ATLAS = 4, _('Atlas')
     SETTINGS = 5, _('Ajustes')
     HELP = 6, _('Ayuda')
-    
+    MERCHANT_SUBSCRIPTION = 12, _('Suscripción Negocio')
+    MY_COMPANY = 13, _('Mi Negocio')
+    MANAGE_STORAGE = 15, _('Inventario')
+    MERCHANT_ORDERS = 28, _('Pedidos del Negocio')
+    MERCHANT_QUESTIONS = 29, _('Preguntas al Vendedor')
+    MERCHANT_ANALYTICS = 30, _('Analíticas')
+    MERCHANT_GAMIFICATION = 31, _('Gamificación')
+    MERCHANT_EMPLOYEES = 32, _('Empleados')
+
 class NotificationCategory(models.IntegerChoices):
-    # Usamos un rango distinto o simplemente empezamos desde 0
+    # Existentes
     NEW_PAYMENT = 0, _('Nuevo pago recibido.')
     PAYMENT_APPROVED = 1, _('Pago aprobado.')
     PAYMENT_REJECTED = 2, _('Pago rechazado.')
     SUBSCRIPTION_EXPIRED = 3, _('Suscripción expirada.')
+    NEW_QUESTION = 4, _('Nueva pregunta de cliente.')
+    NEW_ORDER = 5, _('Nuevo pedido recibido.')
+    NEW_ANSWER = 6, _('Nueva respuesta recibida.')
+    LOW_INVENTORY = 7, _('Stock bajo de producto.')
+    OUT_OF_STOCK = 8, _('Producto agotado.')
+    ANALYTICS_REPORT = 9, _('Reporte de métricas listo.')
+    GAMIFICATION_ALERT = 10, _('Alerta de tokens/gamificación.')
 
 class MessageOrigin(models.IntegerChoices):
     """

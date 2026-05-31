@@ -808,7 +808,7 @@ class CreateCompanyAPI(APIView):
                     )
                     StoreLocation.objects.create(
                         store=company_store,
-                        coordinates=Point(lat, lng),
+                        coordinates=Point(x=lng, y=lat),
                         name=address
                     )
                     request.user.user_type = UserType.MERCHANT
@@ -1995,26 +1995,33 @@ class ProductConversationViewSet(viewsets.ViewSet):
                 {'error': 'La pregunta no puede estar vacía.'}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
+        with transaction.atomic():
+            try:
+                item = InventoryItem.objects.prefetch_related('store__company__owner', 'product').get(id=item_id, paused=False)
+            except InventoryItem.DoesNotExist:
+                return Response(
+                    {'error': 'El producto no existe o fue retirado.'}, 
+                    status=status.HTTP_404_NOT_FOUND
+                )
 
-        try:
-            item = InventoryItem.objects.get(id=item_id, paused=False)
-        except InventoryItem.DoesNotExist:
-            return Response(
-                {'error': 'El producto no existe o fue retirado.'}, 
-                status=status.HTTP_404_NOT_FOUND
+            question = InventoryItemQuestion.objects.create(
+                client=request.user,
+                item=item,
+                question_text=clean_text
             )
 
-        question = InventoryItemQuestion.objects.create(
-            client=request.user,
-            item=item,
-            question_text=clean_text
-        )
-
+            firebase_admin.NotificationManager.notify_new_question(
+                merchant_user_id=item.store.company.owner.id,
+                item_name=item.product.name,
+                item_id=item.id
+            )
+            return Response({
+                'message': 'Pregunta enviada con éxito.',
+                'data': question.get_json() # 💡 Devolvemos exactamente la misma estructura
+            }, status=status.HTTP_201_CREATED)
         return Response({
-            'success': True,
-            'message': 'Pregunta enviada con éxito.',
-            'data': question.get_json() # 💡 Devolvemos exactamente la misma estructura
-        }, status=status.HTTP_201_CREATED)
+            'error':"No se pudo crear la pregunta."
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     # ------------------------------------------------------------------------
     # ENDPOINT: POST /api/v1/product-conversation/answer_question/
@@ -2039,41 +2046,50 @@ class ProductConversationViewSet(viewsets.ViewSet):
                 {'error': 'La respuesta no puede estar vacía.'}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
+        with transaction.atomic():
+            try:
+                # Traemos la pregunta con sus relaciones para verificar permisos eficientemente
+                question = InventoryItemQuestion.objects.select_related(
+                    'item__store__company__owner'
+                ).get(id=question_id)
+            except InventoryItemQuestion.DoesNotExist:
+                return Response(
+                    {'error': 'La pregunta no existe.'}, 
+                    status=status.HTTP_404_NOT_FOUND
+                )
 
-        try:
-            # Traemos la pregunta con sus relaciones para verificar permisos eficientemente
-            question = InventoryItemQuestion.objects.select_related(
-                'item__store__company__owner'
-            ).get(id=question_id)
-        except InventoryItemQuestion.DoesNotExist:
-            return Response(
-                {'error': 'La pregunta no existe.'}, 
-                status=status.HTTP_404_NOT_FOUND
+            # 🔒 VERIFICACIÓN DE SEGURIDAD: ¿El usuario que dispara el endpoint es el dueño de la empresa?
+            if question.item.store.company.owner != request.user:
+                return Response(
+                    {'error': 'No tienes permisos para responder en nombre de este comercio.'}, 
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            # 🔒 Evitar re-escribir respuestas si ya se respondió (opcional, pero buena práctica)
+            if question.answer_text is not None:
+                return Response(
+                    {'error': 'Esta pregunta ya fue respondida.'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            question.answer_text = clean_text
+            question.answer_creation = timezone.now()
+            question.save()
+            firebase_admin.NotificationManager.notify_new_answer(
+                user_id=question.client.id,
+                company_name=question.item.store.company.name,
+                item_name=question.item.product.name,
+                item_id=question.item.id
             )
 
-        # 🔒 VERIFICACIÓN DE SEGURIDAD: ¿El usuario que dispara el endpoint es el dueño de la empresa?
-        if question.item.store.company.owner != request.user:
-            return Response(
-                {'error': 'No tienes permisos para responder en nombre de este comercio.'}, 
-                status=status.HTTP_403_FORBIDDEN
-            )
-
-        # 🔒 Evitar re-escribir respuestas si ya se respondió (opcional, pero buena práctica)
-        if question.answer_text is not None:
-            return Response(
-                {'error': 'Esta pregunta ya fue respondida.'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        question.answer_text = clean_text
-        question.answer_creation = timezone.now()
-        question.save()
-
+            return Response({
+                'success': True,
+                'message': 'Respuesta enviada con éxito.',
+                'data': question.get_json()
+            }, status=status.HTTP_200_OK)
         return Response({
-            'success': True,
-            'message': 'Respuesta enviada con éxito.',
-            'data': question.get_json()
-        }, status=status.HTTP_200_OK)
+            'error':"No se pudo crear la respuesta."
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
 class SearchEnginePagination(PageNumberPagination):
     """
@@ -2116,7 +2132,6 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
         paginated_qs = paginator.paginate_queryset(queryset, request)
         
         data = [item.get_json() for item in paginated_qs]
-        print("DATOS OBTENIDOS: ", data)
         return paginator.get_paginated_response(data)
 
     # ------------------------------------------------------------------------
@@ -2293,7 +2308,7 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
 
         engine = ProductSearchEngine(lat, lng)
         queryset = engine.get_home_feed(user=request.user)
-        return self._paginate_and_respond(queryset.order_by('-creation'), request)
+        return self._paginate_and_respond(queryset, request)
         
     # ------------------------------------------------------------------------
     # ENDPOINT: GET /api/v1/search-engine/favorites/
@@ -2943,7 +2958,7 @@ class SendNotificationToUser(APIView):
     Prueba de envio de notificacion a traves de Firebase.
     """
     def post(self, request):
-        NotificationManager._send_multicast(
+        firebase_admin.NotificationManager._send_multicast(
             User.objects.get(id=request.data.get('user_id')),
             request.data.get('title'),
             request.data.get('message'),

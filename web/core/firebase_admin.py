@@ -111,3 +111,57 @@ class NotificationManager:
             raise User.DoesNotExist
             
         cls._send_multicast(user=user, title=title, body=body.replace('<b>', '').replace('</b>', ''), data_payload=data)
+
+    @classmethod
+    def notify_new_question(cls, merchant_user_id: int, item_name: str, item_id:int) -> None:
+        """ Notifica al dueño del comercio que tiene una nueva pregunta en su producto. """
+        title = 'Tienes una nueva duda'
+        body = f'Un cliente acaba de preguntar sobre tu producto: {item_name}.'
+        
+        notification = Notification.objects.create(
+            user_id=merchant_user_id,
+            section=NotificationSection.MERCHANT_QUESTIONS,
+            title=title,
+            body=body,
+            category=NotificationCategory.NEW_QUESTION,
+            metadata={
+                'type': 'new_question',
+                "item_id":f"{item_id}"
+            }
+        )
+        
+        # Le decimos a Flutter que tipo de alerta es. 'generic_refresh' obligará a Flutter a recargar la caché de alertas.
+        data = {'type': 'generic_refresh'} 
+        
+        try:
+            user = User.objects.prefetch_related('fcm_tokens').get(id=merchant_user_id)
+            cls._send_multicast(user=user, title=title, body=body, data_payload=data)
+        except Exception as e:
+            logger.error(f"Fallo al notificar pregunta: {e}")
+
+    @classmethod
+    def notify_new_answer(cls, user_id: int, company_name:str, item_name: str, item_id:int) -> None:
+        """ Notifica al cliente del producto que el comercio le respondio. """
+        title = f'Te respondieron'
+        body = f'{company_name} acaba de responderte sobre el producto: {item_name}.'
+        
+        notification = Notification.objects.create(
+            user_id=user_id,
+            section=NotificationSection.HOME,
+            title=title,
+            body=body,
+            category=NotificationCategory.NEW_ANSWER,
+            metadata={
+                'type': 'new_answer',
+                "item_id":f"{item_id}"
+            }
+        )
+        
+        # Le decimos a Flutter que tipo de alerta es. 'generic_refresh' obligará a Flutter a recargar la caché de alertas.
+        data = {'type': 'generic_refresh'} 
+        
+        try:
+            user = User.objects.prefetch_related('fcm_tokens').get(id=user_id)
+            cls._send_multicast(user=user, title=title, body=body, data_payload=data)
+        except Exception as e:
+            logger.error(f"Fallo al notificar pregunta: {e}")

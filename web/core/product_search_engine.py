@@ -92,16 +92,16 @@ class ProductSearchEngine:
 
     def _apply_monopoly_prevention(self, queryset):
         """
-        El algoritmo mágico que evita que una sola tienda acapare los resultados.
+        El algoritmo mágico que evita que una sola compañía acapare los resultados.
         """
         qs = queryset.annotate(
-            store_rank=Window(
+            company_rank=Window(
                 expression=RowNumber(),
-                partition_by=[F('store_id')],
-                order_by=F('ranking_score').desc()
+                partition_by=[F('store__company_id')],
+                order_by=[F('ranking_score').desc(), F('id').asc()]
             )
         )
-        return qs.order_by('store_rank', '-ranking_score')
+        return qs.order_by('company_rank', '-ranking_score', 'id')
 
     def _apply_feed_sorting(self, qs, sort_by: str, price_order: str):
         """
