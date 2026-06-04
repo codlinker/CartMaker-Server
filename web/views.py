@@ -1,3 +1,5 @@
+import csv
+import io
 import json
 
 from dateutil.relativedelta import relativedelta
@@ -10,6 +12,7 @@ from .serializers import *
 from .models import *
 from rest_framework.permissions import *
 from .core import atlas, firebase_admin
+import mimetypes
 from .core.product_search_engine import ProductSearchEngine
 from rest_framework import generics, status
 from rest_framework.throttling import ScopedRateThrottle
@@ -17,6 +20,7 @@ from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 from django.conf import settings
 from rest_framework.permissions import IsAuthenticated
+import openpyxl
 from rest_framework import viewsets, mixins
 from rest_framework.decorators import action
 import secrets
@@ -426,15 +430,29 @@ class GetCompanyProducts(APIView):
 
     def get(self, request, company_id=None):
         """
-        Devuelve SOLO el catálogo maestro de productos paginado.
+        Devuelve el catálogo maestro de productos paginado + las categorías de la empresa.
         """
         try:
             company = Company.objects.get(id=company_id)
             if company.owner.id != request.user.id:
                 return Response({'error': 'Usted no es el propietario de la compania.'}, status=status.HTTP_406_NOT_ACCEPTABLE)
             
+            # Categorías globales de la empresa (siempre se devuelven todas)
+            company_categories = SubCategory.objects.filter(
+                product__company=company
+            ).distinct().values('id', 'name')
+            
+            # 💡 NUEVO: Recibimos el parámetro del frontend
+            category_id = request.GET.get('category_id')
             page = request.GET.get('page', 1)
-            products_query = company.products.all().order_by('-creation')
+            
+            # 💡 NUEVO: Filtramos el queryset si viene el category_id
+            products_query = company.products.all()
+            if category_id:
+                products_query = products_query.filter(category_id=category_id)
+                
+            products_query = products_query.order_by('-creation')
+            
             paginator = Paginator(products_query, 10)
             
             try:
@@ -445,20 +463,46 @@ class GetCompanyProducts(APIView):
                 current_products = []
 
             products = [product.get_json() for product in current_products]
+            
             return Response({
                 'products': products,
+                'company_categories': list(company_categories),
                 'pagination': {
                     'has_next': current_products.has_next() if current_products else False,
                     'current_page': int(page),
                     'total_pages': paginator.num_pages
                 }
             }, status=status.HTTP_200_OK)
-
         except Company.DoesNotExist:
             return Response({'error': 'No existe la compania especificada.'}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({'error': f'Error interno: {e}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+class GetCompanySubCategories(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'actions'
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, company_id=None):
+        """
+        Devuelve todas las subcategorías únicas que tienen productos registrados en la compañía.
+        """
+        try:
+            company = Company.objects.get(id=company_id)
+            if company.owner.id != request.user.id:
+                return Response({'error': 'No autorizado.'}, status=status.HTTP_406_NOT_ACCEPTABLE)
+            
+            # ORM Mágico: Filtra las subcategorías cruzándolas con los productos de esta empresa
+            company_categories = SubCategory.objects.filter(
+                product__company=company
+            ).distinct().values('id', 'name')
+            
+            return Response({'categories': list(company_categories)}, status=status.HTTP_200_OK)
+
+        except Company.DoesNotExist:
+            return Response({'error': 'Compañía no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': f'Error interno: {e}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class GetStoreInventoryItems(APIView):
     throttle_classes = [ScopedRateThrottle]
@@ -466,19 +510,26 @@ class GetStoreInventoryItems(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, store_id=None):
-        """
-        Devuelve SOLO los lotes de inventario de una sucursal paginados.
-        """
         try:
-            # Asegúrate de importar CompanyStore si no lo has hecho
             store = CompanyStore.objects.get(id=store_id)
             if store.company.owner.id != request.user.id:
                 return Response({'error': 'No tiene permisos para esta sucursal.'}, status=status.HTTP_406_NOT_ACCEPTABLE)
 
+            # 💡 1. ORM MÁGICO: Categorías únicas del inventario de ESTA sucursal
+            store_categories = SubCategory.objects.filter(
+                product__inventory_items__store=store
+            ).distinct().values('id', 'name')
+
+            category_id = request.GET.get('category_id')
             page = request.GET.get('page', 1)
             
-            # Filtramos los items por la sucursal y los ordenamos
-            items_query = InventoryItem.objects.filter(store=store).order_by('-creation')
+            # 💡 2. Filtramos el queryset de lotes si viene el parámetro
+            items_query = InventoryItem.objects.filter(store=store)
+            if category_id:
+                items_query = items_query.filter(product__category_id=category_id)
+                
+            items_query = items_query.order_by('-creation')
+            
             paginator = Paginator(items_query, 10)
             
             try:
@@ -488,12 +539,11 @@ class GetStoreInventoryItems(APIView):
             except EmptyPage:
                 current_items = []
 
-            # Nota: Asegúrate de que el modelo InventoryItem tenga su método get_json()
-            # que incluya los datos relevantes del producto padre si es necesario mostrarlo en la UI.
             items = [item.get_json() for item in current_items]
 
             return Response({
                 'items': items,
+                'store_categories': list(store_categories), # 👈 3. Lo devolvemos
                 'pagination': {
                     'has_next': current_items.has_next() if current_items else False,
                     'current_page': int(page),
@@ -2442,6 +2492,52 @@ class AtlasViewSet(viewsets.ViewSet):
         
         # Ejecutamos la versión plural
         resultado = async_to_sync(atlas_manager.analyze_image_for_multiple_products_async)(image_bytes, mime_type)
+        
+        if "error" in resultado and not resultado.get("products"):
+            return Response(resultado, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+            
+        return Response(resultado, status=status.HTTP_200_OK)
+
+    # ------------------------------------------------------------------------
+    # ENDPOINT: POST /api/v1/atlas/scan_excel_multiple/
+    # ------------------------------------------------------------------------
+    @action(detail=False, methods=['post'])
+    def scan_excel_multiple(self, request):
+        excel_file = request.FILES.get('file')
+        if not excel_file:
+            return Response({'error': 'No se proporcionó ningún archivo.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        filename = excel_file.name.lower()
+        raw_rows = []
+
+        try:
+            # 1. Extraemos las celdas limpias usando Python a la velocidad de la luz
+            if filename.endswith('.xlsx') or filename.endswith('.xls'):
+                wb = openpyxl.load_workbook(io.BytesIO(excel_file.read()), data_only=True)
+                sheet = wb.active
+                headers = [str(cell.value) if cell.value is not None else f"Col_{idx}" for idx, cell in enumerate(sheet[1])]
+                
+                for row in sheet.iter_rows(min_row=2, values_only=True):
+                    if any(cell is not None for cell in row):
+                        row_dict = {headers[idx]: str(val) if val is not None else "" for idx, val in enumerate(row) if idx < len(headers)}
+                        raw_rows.append(row_dict)
+            else:
+                # Flujo CSV estándar
+                decoded_file = excel_file.read().decode('utf-8-sig').splitlines()
+                reader = csv.DictReader(decoded_file)
+                for row in reader:
+                    raw_rows.append(dict(row))
+
+            # 4. Control de seguridad: Si el archivo es ridículamente enorme, limitamos el lote inicial
+            raw_rows = raw_rows[:50] 
+
+        except Exception as e:
+            print(f"[PARSING ERROR]: {e}")
+            return Response({'error': 'Error al procesar la estructura del archivo.'}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+        # 5. Ejecutamos Atlas pasándole el JSON nativo de Python
+        atlas_manager = atlas.AtlasManager()
+        resultado = async_to_sync(atlas_manager.analyze_processed_json_products_async)(raw_rows)
         
         if "error" in resultado and not resultado.get("products"):
             return Response(resultado, status=status.HTTP_422_UNPROCESSABLE_ENTITY)

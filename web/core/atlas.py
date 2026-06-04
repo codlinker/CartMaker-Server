@@ -26,8 +26,8 @@ class AtlasManager:
         self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
         
         # Guardamos el nombre del modelo que usaremos en las llamadas
-        # self.model_name = 'gemini-flash-latest'
-        self.model_name = "gemini-2.5-flash"
+        self.model_name = 'gemini-flash-latest'
+        # self.model_name = "gemini-2.5-flash"
         # self.model_name = 'gemini-2.5-flash-exp'
         
         # 2. System Prompt General para darle personalidad a Atlas en el chat
@@ -202,6 +202,48 @@ class AtlasManager:
         except Exception as e:
             print(f"[ATLAS VISION ERROR]: {e}")
             return {"products": [], "error": "Error de conexión con el núcleo visual de Atlas."}
+        
+    def _build_excel_json_prompt(self, subcategories: List[Dict[str, Any]]) -> str:
+        """Prompt ultra optimizado para procesar JSON estructurado a alta velocidad."""
+        categories_str = json.dumps(subcategories, ensure_ascii=False)
+        return f"""
+        Eres 'Atlas', el motor de IA de inventario de CartMaker.
+        Tu única tarea es mapear un listado de productos rústicos al formato oficial del sistema.
+        
+        REGLAS DE RENDIMIENTO CRÍTICAS:
+        1. Responde EXCLUSIVAMENTE con el objeto JSON solicitado, sin bloques de código Markdown.
+        2. Mapea la columna que mejor represente el nombre, descripción y precio de venta.
+        3. Si no hay descripción en el origen, redacta una estrictamente corta (MÁXIMO 120 caracteres, un solo párrafo). NO te extiendas.
+        4. Asigna el subcategory_id correcto usando el catálogo suministrado.
+        
+        ESTRUCTURA:
+        {{
+            "products": [
+                {{"name": "Nombre", "description": "Texto corto.", "price": 10.5, "subcategory_id": 1}}
+            ]
+        }}
+        
+        CATÁLOGO DE CATEGORÍAS VÁLIDAS:
+        {categories_str}
+        """
+
+    async def analyze_processed_json_products_async(self, raw_products_json: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Procesa datos pre-formateados por Python a velocidad relámpago."""
+        try:
+            subcategories = await self._get_available_subcategories()
+            prompt = self._build_excel_json_prompt(subcategories)
+            
+            # Pasamos los datos como texto JSON compacto estructurado, no como archivo adjunto visual
+            data_payload = json.dumps(raw_products_json, ensure_ascii=False)
+            
+            response = await self.client.aio.models.generate_content(
+                model=self.model_name,
+                contents=[prompt, f"DATASET A PROCESAR:\n{data_payload}"]
+            )
+            return self._parse_gemini_json_response(response.text)
+        except Exception as e:
+            print(f"[ATLAS FAST-EXCEL ERROR]: {e}")
+            return {"products": [], "error": "Atlas tardó demasiado en responder."}
 
     # =========================================================================
     # SECCIÓN 2: CHAT CONTEXTUAL (NLP)
