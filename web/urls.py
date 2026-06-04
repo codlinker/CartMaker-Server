@@ -20,6 +20,7 @@ router.register(r'search-engine', ProductSearchEngineViewSet, basename='search-e
 router.register(r'cartmaker-map', CartMakerMapViewSet, basename='cartmaker_map')
 router.register(r'client-company', ClientCompanyViewSet, basename="client_company")
 router.register(r'product-conversation', ProductConversationViewSet, basename="product_conversation")
+router.register(r'logs', InteractionLogViewSet, basename="logs")
 
 # --- DEFINICIÓN DE RUTAS (URLS) ---
 urlpatterns = [

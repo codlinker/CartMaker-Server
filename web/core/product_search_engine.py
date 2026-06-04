@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from django.utils import timezone
 from django.contrib.gis.geos import Point
 from django.contrib.gis.db.models.functions import Distance
@@ -9,34 +9,76 @@ from django.db.models import Case, When, Value, Count, BooleanField
 from django.contrib.gis.measure import D
 
 # Ajusta las importaciones según la ruta real de tu proyecto
-from web.models import InventoryItem, MerchantSubscription, ProductLike
+from web.models import InventoryItem, MerchantSubscription, ProductLike, ProductViewLog
 
 class ProductSearchEngine:
     """
-    Motor centralizado para la búsqueda, filtrado y ranking de productos en CartMaker.
-    Maneja la lógica espacial (PostGIS), verificación de suscripciones, filtros de 
-    ordenamiento dinámico y el algoritmo de diversificación (Anti-Monopolio).
+    Motor Híbrido de CartMaker.
+    Combina geolocalización, prevención de monopolios, popularidad global 
+    y filtrado basado en contenido (afinidad del usuario) en tiempo real.
     """
 
-    def __init__(self, lat: float, lng: float):
-        """
-        Inicializa el motor con la ubicación actual del usuario.
-        """
+    def __init__(self, lat: float, lng: float, user=None):
         self.user_location = Point(lng, lat, srid=4326)
+        self.user = user
+        
+        # Al instanciar, construimos su huella digital de intereses
+        self.user_top_categories = self._build_user_affinity_profile()
     
+    def _build_user_affinity_profile(self):
+        """
+        Lee el historial de interacciones explícitas (Likes) e implícitas (Vistas largas/Carritos)
+        y devuelve una lista con los IDs de sus categorías preferidas.
+        """
+        if not self.user or not self.user.is_authenticated:
+            return []
+
+        # Analizamos los últimos 30 días para mantener la relevancia fresca
+        date_threshold = timezone.now() - timedelta(days=30)
+
+        # 1. Señales Explícitas (Likes)
+        liked_categories = ProductLike.objects.filter(
+            user=self.user,
+            creation__gte=date_threshold
+        ).values_list('product__product__category_id', flat=True)
+
+        # 2. Señales Implícitas de Alta Intención (Agregó al carrito, compró, o lo miró mucho)
+        viewed_categories = ProductViewLog.objects.filter(
+            client=self.user,
+            start_time__gte=date_threshold
+        ).filter(
+            Q(added_to_cart=True) | Q(bought=True) | Q(end_time__isnull=False)
+        ).values_list('inventory_item__product__category_id', flat=True)
+
+        # Unimos, contamos las frecuencias y sacamos el Top 5 de categorías
+        all_categories = list(liked_categories) + list(viewed_categories)
+        
+        if not all_categories:
+            return []
+
+        # Contamos la frecuencia de cada categoría de forma eficiente en Python
+        # para no recargar la BD con agregaciones complejas en tablas de logs enormes
+        frequency = {}
+        for cat_id in all_categories:
+            if cat_id:
+                frequency[cat_id] = frequency.get(cat_id, 0) + 1
+
+        # Ordenamos de mayor a menor y extraemos los IDs
+        sorted_categories = sorted(frequency.items(), key=lambda x: x[1], reverse=True)
+        top_5_category_ids = [cat[0] for cat in sorted_categories[:5]]
+
+        return top_5_category_ids
+
     def _get_base_active_queryset(self):
-        """
-        Aplica los filtros CRÍTICOS del negocio y pre-carga relaciones
-        para evitar el problema de consultas N+1 durante la serialización JSON.
-        """
         now = timezone.now()
         
         return InventoryItem.objects.select_related(
             'product',
             'product__category',
-            'offer'
+            'offer',
+            'store',
+            'store__company'
         ).annotate(
-            # 💡 ANOTACIÓN MASIVA: Calculamos el promedio y el total de reviews en una sola consulta SQL
             avg_rating=Coalesce(Avg('product__califications__rating'), Value(0.0), output_field=FloatField()),
             rating_count=Count('product__califications')
         ).filter(
@@ -48,12 +90,6 @@ class ProductSearchEngine:
         )
     
     def _annotate_proximity_flag(self, queryset):
-        """
-        Anota dos banderas:
-        - is_very_close: <= 599.99m
-        - is_close: 600m a 1.2 km
-        """
-        # Definimos la distancia para cálculos, con spheroid=True para precisión en metros
         dist_expr = Distance('store__location__coordinates', self.user_location, spheroid=True)
         
         return queryset.annotate(
@@ -76,24 +112,35 @@ class ProductSearchEngine:
 
     def _annotate_ranking_score(self, queryset):
         """
-        Calcula el 'Score' basándose ÚNICAMENTE en la competencia comercial.
-        Asigna un boost del 10% de prioridad a vendedores platinium.
+        Calcula el Score cruzando Popularidad + Platinum + Perfil de Afinidad Personal.
         """
+        # Multiplicador Platino (Estático del vendedor)
         platinum_multiplier = Case(
             When(store__company__is_platinum=True, then=Value(1.10)),
             default=Value(1.0),
             output_field=FloatField()
         )
+
+        # Multiplicador de Afinidad (Dinámico del usuario)
+        # Si el producto pertenece al Top 5 de gustos del usuario, le damos un boost del 30%
+        if self.user_top_categories:
+            affinity_multiplier = Case(
+                When(product__category_id__in=self.user_top_categories, then=Value(1.30)),
+                default=Value(1.0),
+                output_field=FloatField()
+            )
+        else:
+            affinity_multiplier = Value(1.0, output_field=FloatField())
+
+        # Cálculo matemático final dentro de la BD
         score_expression = ExpressionWrapper(
-            F('cached_popularity_score') * platinum_multiplier,
+            F('cached_popularity_score') * platinum_multiplier * affinity_multiplier,
             output_field=FloatField()
         )
+        
         return queryset.annotate(ranking_score=score_expression)
 
     def _apply_monopoly_prevention(self, queryset):
-        """
-        El algoritmo mágico que evita que una sola compañía acapare los resultados.
-        """
         qs = queryset.annotate(
             company_rank=Window(
                 expression=RowNumber(),
@@ -104,33 +151,23 @@ class ProductSearchEngine:
         return qs.order_by('company_rank', '-ranking_score', 'id')
 
     def _apply_feed_sorting(self, qs, sort_by: str, price_order: str):
-        """
-        Aplica las reglas de ordenamiento solicitadas por el usuario.
-        Si no hay ordenamiento explícito, aplica el flujo de relevancia y anti-monopolio.
-        """
-        # 1. CASO POR DEFECTO: Relevancia (Anti-monopolio)
         if sort_by == 'relevance' and not price_order:
             qs = self._annotate_ranking_score(qs)
             return self._apply_monopoly_prevention(qs)
 
-        # 2. CASOS DE ORDENAMIENTO EXPLÍCITO
         order_params = []
 
-        # -- Orden Primario --
         if sort_by == 'distance':
             qs = qs.annotate(distance_to_user=Distance('store__location__coordinates', self.user_location))
-            order_params.append('distance_to_user') # Ascendente: los más cercanos primero
+            order_params.append('distance_to_user') 
 
         elif sort_by == 'rating':
-            # Anotamos el promedio de calificación del producto (Si no tiene, asume 0.0)
             qs = qs.annotate(
                 avg_rating=Coalesce(Avg('product__califications__rating'), Value(0.0), output_field=FloatField())
             )
-            order_params.append('-avg_rating') # Descendente: los mejor calificados primero
+            order_params.append('-avg_rating')
 
-        # -- Orden Secundario (Precio) --
         if price_order in ['asc', 'desc']:
-            # Calculamos el precio real (Si hay custom_price en el lote, lo usa, si no, usa el del producto)
             qs = qs.annotate(effective_price=Coalesce('custom_price', 'product__price'))
             
             if price_order == 'asc':
@@ -145,110 +182,79 @@ class ProductSearchEngine:
     # =========================================================================
 
     def get_category_feed(self, sub_category_id: int, sort_by: str = 'relevance', price_order: str = None, max_distance_meters: float = 10000):
-        """
-        Retorna productos de una subcategoría, ordenados de forma dinámica.
-        """
         qs = self._get_base_active_queryset()
         qs = self._annotate_proximity_flag(qs)
         
-        # Barrera de entrada estricta
         qs = qs.filter(
             product__category_id=sub_category_id,
-            # Corregido: Agregamos D(m=...) para acotar la distancia en metros
             store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters))
         )
         
         return self._apply_feed_sorting(qs, sort_by, price_order)
 
     def get_offers_feed(self, sort_by: str = 'relevance', price_order: str = None, max_distance_meters: float = 10000):
-        """
-        Retorna productos en oferta, ordenados de forma dinámica.
-        """
         now = timezone.now()
         qs = self._get_base_active_queryset()
         qs = self._annotate_proximity_flag(qs)
         
-        # Barrera de entrada y vigencia de la oferta
         qs = qs.filter(
             offer__isnull=False,
             offer__valid_until__gte=now,
-            # Corregido: Agregamos D(m=...) para acotar la distancia en metros
             store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters))
         )
         
         return self._apply_feed_sorting(qs, sort_by, price_order)
 
     def get_store_feed(self, store_id: str = None, company_id: str = None, category_id: int = None, price_order: str = None):
-        """
-        Retorna TODOS los productos de una tienda o de todas las tiendas de una compañía.
-        Soporta filtrado por categoría y ordenamiento por precio o por popularidad (por defecto).
-        """
         qs = self._get_base_active_queryset()
         qs = self._annotate_proximity_flag(qs)
         
-        # 1. Filtramos por la tienda específica o por toda la compañía
         if store_id:
             qs = qs.filter(store_id=store_id)
         elif company_id:
             qs = qs.filter(store__company_id=company_id)
             
-        # 2. Si el usuario seleccionó una categoría en el frontend, aplicamos el filtro
         if category_id:
             qs = qs.filter(product__category_id=category_id)
         
-        # 3. Aplicamos el ordenamiento
         if price_order in ['asc', 'desc']:
             qs = qs.annotate(effective_price=Coalesce('custom_price', 'product__price'))
             return qs.order_by('effective_price' if price_order == 'asc' else '-effective_price')
         else:
-            # Orden por defecto de la tienda: Popularidad
             qs = qs.annotate(ranking_score=F('cached_popularity_score'))
             return qs.order_by('-ranking_score')
         
     def get_text_search_feed(self, search_query: str, sort_by: str = 'relevance', price_order: str = None, max_distance_meters: float = 10000):
-        """
-        Retorna productos que coincidan con un texto de búsqueda, cruzado con el filtro hiperlocal.
-        Busca coincidencias en el nombre del producto, la categoría, y el nombre de la tienda.
-        """
         qs = self._get_base_active_queryset()
         qs = self._annotate_proximity_flag(qs)
         
-        # 1. Filtro Geográfico y disponibilidad base
         qs = qs.filter(
             store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters))
         )
 
-        # 2. Búsqueda de Texto Flexible
         if search_query:
-            # Limpiamos espacios en blanco extra
             clean_query = search_query.strip()
-            
-            # Filtramos usando el objeto Q para abarcar múltiples campos.
-            # Nota: __icontains es funcional, pero si usas PostgreSQL, puedes migrar esto a 
-            # SearchVector o TrigramSimilarity para mejor tolerancia a errores ortográficos.
             qs = qs.filter(
                 Q(product__name__icontains=clean_query) | 
                 Q(product__description__icontains=clean_query) |
                 Q(product__category__name__icontains=clean_query) |
                 Q(product__company__name__icontains=clean_query)
-            ).distinct() # Agregamos distinct() por si los JOINs del 'OR' generan duplicados
+            ).distinct()
 
-        # 3. Aplicamos las reglas de ordenamiento o anti-monopolio
         return self._apply_feed_sorting(qs, sort_by, price_order)
     
-    def get_home_feed(self, user, max_distance_meters: float = 15000):
+    def get_home_feed(self, max_distance_meters: float = 15000):
         qs = self._get_base_active_queryset()
         
-        # 1. ANOTAMOS EL "IS_LIKED" (Esto es extremadamente rápido)
-        # Comprobamos si existe un registro en ProductLike donde el usuario sea el actual
-        # y el producto sea el que estamos iterando (OuterRef('pk'))
-        is_liked_subquery = ProductLike.objects.filter(
-            user=user, 
-            product=OuterRef('pk')
-        )
-        qs = qs.annotate(is_liked=Exists(is_liked_subquery))
+        if self.user and self.user.is_authenticated:
+            is_liked_subquery = ProductLike.objects.filter(
+                user=self.user, 
+                product=OuterRef('pk')
+            )
+            qs = qs.annotate(is_liked=Exists(is_liked_subquery))
+        else:
+            qs = qs.annotate(is_liked=Value(False, output_field=BooleanField()))
         
-        # 2. Resto de tu lógica
         qs = self._annotate_proximity_flag(qs)
         qs = qs.filter(
             store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters))
@@ -256,23 +262,20 @@ class ProductSearchEngine:
         qs = self._annotate_ranking_score(qs)
         return self._apply_monopoly_prevention(qs)
     
-    def get_favorites_feed(self, user, sort_by: str = 'relevance', price_order: str = None, max_distance_meters: float = 10000):
-        """
-        Retorna los productos que el usuario ha guardado como favoritos en la zona seleccionada.
-        """
+    def get_favorites_feed(self, sort_by: str = 'relevance', price_order: str = None, max_distance_meters: float = 10000):
+        if not self.user or not self.user.is_authenticated:
+            return InventoryItem.objects.none()
+
         qs = self._get_base_active_queryset()
         qs = self._annotate_proximity_flag(qs)
         
-        # Filtramos explícitamente por los likes del usuario activo
         qs = qs.filter(
-            likes__user=user,
+            likes__user=self.user,
             store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters))
         )
         
-        # Opcional pero recomendado: Aseguramos que la UI reciba 'is_liked' en True para estos ítems
         qs = qs.annotate(is_liked=Value(True, output_field=BooleanField()))
         
-        # Si el orden es 'relevance', en lugar de usar score, ordenamos por fecha de Like descendente (más recientes primero)
         if sort_by == 'relevance' and not price_order:
             qs = qs.annotate(like_date=F('likes__creation')).order_by('-like_date')
             return qs

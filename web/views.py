@@ -43,6 +43,7 @@ from django.db.models import Avg, Count, Sum
 from django.contrib.gis.measure import D
 import operator
 from functools import reduce
+from django.utils.dateparse import parse_datetime
 
 ####################################################
 ################## AUTENTICACION ###################
@@ -1884,6 +1885,130 @@ class SearchCacheAPI(APIView):
 #################### VIEW SETS #####################
 ####################################################
 
+class InteractionLogViewSet(viewsets.ViewSet):
+    """
+    API dedicada a registrar silenciosamente la telemetría del usuario en la App.
+    Alimenta los modelos de Machine Learning y el Algoritmo de Recomendación.
+    """
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'actions'
+
+    # ==========================================
+    # HELPER: Procesador de Fechas
+    # ==========================================
+    def _parse_aware_datetime(self, datetime_raw):
+        """
+        Toma un string ISO, lo convierte a objeto datetime y se asegura
+        de que sea 'aware' (consciente de la zona horaria del servidor)
+        para evitar RuntimeWarnings de Django.
+        """
+        if not datetime_raw:
+            return None
+        
+        parsed = parse_datetime(str(datetime_raw))
+        if parsed and timezone.is_naive(parsed):
+            return timezone.make_aware(parsed)
+        return parsed
+
+    # ==========================================
+    # ENDPOINTS
+    # ==========================================
+    @action(detail=False, methods=['post'])
+    def product_view(self, request):
+        """
+        Registra el Dwell Time (tiempo en pantalla) e interacciones con un producto.
+        """
+        data = request.data
+        item_id = data.get('item_id')
+        start_time_raw = data.get('start_time')
+
+        if not item_id or not start_time_raw:
+            return Response({'error': 'item_id y start_time son obligatorios.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            item = InventoryItem.objects.only('id').get(id=item_id)
+            
+            # Usamos el helper para sanitizar las fechas
+            start_time = self._parse_aware_datetime(start_time_raw)
+            end_time = self._parse_aware_datetime(data.get('end_time'))
+
+            ProductViewLog.objects.create(
+                client=request.user,
+                inventory_item=item,
+                added_to_cart=data.get('added_to_cart', False),
+                bought=data.get('bought', False),
+                start_time=start_time,
+                end_time=end_time
+            )
+            return Response(status=status.HTTP_201_CREATED)
+        except InventoryItem.DoesNotExist:
+            return Response({'error': 'El producto no existe.'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['post'])
+    def store_view(self, request):
+        """
+        Registra el comportamiento del usuario dentro del perfil de una tienda.
+        """
+        data = request.data
+        store_id = data.get('store_id')
+        join_time_raw = data.get('join_time')
+
+        if not store_id or not join_time_raw:
+            return Response({'error': 'store_id y join_time son obligatorios.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            store = CompanyStore.objects.only('id').get(id=store_id)
+            
+            # Usamos el helper para sanitizar las fechas
+            join_time = self._parse_aware_datetime(join_time_raw)
+            exit_time = self._parse_aware_datetime(data.get('exit_time'))
+
+            StoreViewLog.objects.create(
+                client=request.user,
+                join_time=join_time,
+                exit_time=exit_time,
+                location_watched=data.get('location_watched', False),
+                presentation_video_watched=data.get('presentation_video_watched', False),
+                stories_watched=data.get('stories_watched', False),
+                products_watched=data.get('products_watched', False),
+                tryed_to_contact=data.get('tryed_to_contact', False)
+            )
+            return Response(status=status.HTTP_201_CREATED)
+        except CompanyStore.DoesNotExist:
+            return Response({'error': 'La tienda no existe.'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['post'])
+    def navigation(self, request):
+        """
+        Registra el mapa de pantallas que el usuario visitó durante su sesión.
+        """
+        data = request.data
+        navigation_record = data.get('navigation_record', {})
+        login_time_raw = data.get('login_time')
+
+        if not login_time_raw:
+            return Response({'error': 'login_time es obligatorio.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # Usamos el helper para sanitizar las fechas
+            login_time = self._parse_aware_datetime(login_time_raw)
+            logout_time = self._parse_aware_datetime(data.get('logout_time'))
+
+            UserNavigationLog.objects.create(
+                user=request.user,
+                navigation_record=navigation_record,
+                login_time=login_time,
+                logout_time=logout_time
+            )
+            return Response(status=status.HTTP_201_CREATED)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 # ============================================================================
 # 1. MÓDULO DE PERFILES DE EMPRESA
 # ============================================================================
@@ -2203,7 +2328,7 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        engine = ProductSearchEngine(lat, lng)
+        engine = ProductSearchEngine(lat, lng, user=request.user)
         queryset = engine.get_category_feed(
             sub_category_id=sub_category_id, 
             sort_by=sort_by, 
@@ -2235,7 +2360,7 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        engine = ProductSearchEngine(lat, lng)
+        engine = ProductSearchEngine(lat, lng, user=request.user)
         
         # 💡 Asegúrate de adaptar tu engine.get_store_feed para que reciba y filtre
         # por company_id (si store_id no viene) y por category_id.
@@ -2267,7 +2392,7 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        engine = ProductSearchEngine(lat, lng)
+        engine = ProductSearchEngine(lat, lng, user=request.user)
         queryset = engine.get_offers_feed(sort_by=sort_by, price_order=price_order)
 
         if is_home_widget:
@@ -2335,7 +2460,7 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
             )
 
         # Inicializamos el motor
-        engine = ProductSearchEngine(lat, lng)
+        engine = ProductSearchEngine(lat, lng, user=request.user)
         
         # Ejecutamos la búsqueda de texto completo
         queryset = engine.get_text_search_feed(
@@ -2356,8 +2481,8 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
         except (TypeError, ValueError):
             return Response({'error': 'Faltan coordenadas'}, status=status.HTTP_400_BAD_REQUEST)
 
-        engine = ProductSearchEngine(lat, lng)
-        queryset = engine.get_home_feed(user=request.user)
+        engine = ProductSearchEngine(lat, lng, user=request.user)
+        queryset = engine.get_home_feed()
         return self._paginate_and_respond(queryset, request)
         
     # ------------------------------------------------------------------------
@@ -2379,8 +2504,8 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        engine = ProductSearchEngine(lat, lng)
-        queryset = engine.get_favorites_feed(user=request.user, sort_by=sort_by, price_order=price_order)
+        engine = ProductSearchEngine(lat, lng, user=request.user)
+        queryset = engine.get_favorites_feed(sort_by=sort_by, price_order=price_order)
 
         if is_home_widget:
             # Traemos solo los 10 primeros para el scroll horizontal
