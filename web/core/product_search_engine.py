@@ -71,8 +71,7 @@ class ProductSearchEngine:
 
     def _get_base_active_queryset(self):
         now = timezone.now()
-        
-        return InventoryItem.objects.select_related(
+        qs = InventoryItem.objects.select_related(
             'product',
             'product__category',
             'offer',
@@ -85,9 +84,26 @@ class ProductSearchEngine:
             paused=False,
             stock__gt=0,
             store__is_active=True,
+            # Regla global: El vendedor de este producto DEBE tener suscripción activa
             store__company__owner__subscription__isnull=False,
             store__company__owner__subscription__valid_until__gte=now
         )
+        # =====================================================================
+        # 💡 NUEVO: Filtro Anti-Auto-Compra / Anti-Auto-Recomendación
+        # =====================================================================
+        if self.user and self.user.is_authenticated:
+            # Comprobamos si el usuario actual es un comerciante con suscripción vigente.
+            # Usamos .exists() para que sea una consulta SQL súper ligera (1ms) sin 
+            # traernos todo el objeto a la memoria RAM de Python.
+            is_active_merchant = MerchantSubscription.objects.filter(
+                merchant=self.user,
+                valid_until__gte=now
+            ).exists()
+            if is_active_merchant:
+                # Excluimos todos los productos que vengan de una tienda 
+                # cuya compañía sea propiedad de este usuario.
+                qs = qs.exclude(store__company__owner=self.user)
+        return qs
     
     def _annotate_proximity_flag(self, queryset):
         dist_expr = Distance('store__location__coordinates', self.user_location, spheroid=True)
@@ -159,21 +175,22 @@ class ProductSearchEngine:
 
         if sort_by == 'distance':
             qs = qs.annotate(distance_to_user=Distance('store__location__coordinates', self.user_location))
-            order_params.append('distance_to_user') 
+            # 💡 IMPORTANTE: Siempre añade 'id' al final para desempatar
+            order_params.extend(['distance_to_user', 'id']) 
 
         elif sort_by == 'rating':
             qs = qs.annotate(
                 avg_rating=Coalesce(Avg('product__califications__rating'), Value(0.0), output_field=FloatField())
             )
-            order_params.append('-avg_rating')
+            order_params.extend(['-avg_rating', 'id'])
 
         if price_order in ['asc', 'desc']:
             qs = qs.annotate(effective_price=Coalesce('custom_price', 'product__price'))
             
             if price_order == 'asc':
-                order_params.append('effective_price')
+                order_params.extend(['effective_price', 'id'])
             else:
-                order_params.append('-effective_price')
+                order_params.extend(['-effective_price', 'id'])
 
         return qs.order_by(*order_params)
 

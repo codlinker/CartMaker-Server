@@ -12,6 +12,7 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 from django.utils.html import mark_safe
 from decimal import Decimal
+from django.contrib.postgres.indexes import GinIndex
 
 # FUNCIONES PARA JSON Fields por default
 
@@ -878,6 +879,22 @@ class Product(models.Model):
     # ["https://...", "https://...",
     # ]
 
+    class Meta:
+        indexes = [
+            # Índice para la búsqueda rápida por nombre
+            GinIndex(
+                name='product_name_gin_idx', 
+                fields=['name'], 
+                opclasses=['gin_trgm_ops']
+            ),
+            # Índice opcional si también buscas mucho por descripción
+            GinIndex(
+                name='product_desc_gin_idx', 
+                fields=['description'], 
+                opclasses=['gin_trgm_ops']
+            ),
+        ]
+
     def __str__(self):
         return f"{self.name} - {self.company.name}"
 
@@ -932,6 +949,15 @@ class InventoryItem(models.Model):
         db_index=True,
         help_text="Puntuación precalculada de interacciones (visitas, carritos, compras). Evita JOINs masivos. Usado por el motor de busqueda."
     )
+
+    class Meta:
+         indexes = [
+            GinIndex(
+                name='subcategory_name_gin_idx', 
+                fields=['name'], 
+                opclasses=['gin_trgm_ops']
+            ),
+         ]
 
     def get_json(self) -> dict:
         avg_rating = getattr(self, 'avg_rating', 0.0)

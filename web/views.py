@@ -13,6 +13,7 @@ from .models import *
 from rest_framework.permissions import *
 from .core import atlas, firebase_admin
 import mimetypes
+from rest_framework.pagination import CursorPagination
 from .core.product_search_engine import ProductSearchEngine
 from rest_framework import generics, status
 from rest_framework.throttling import ScopedRateThrottle
@@ -2266,13 +2267,16 @@ class ProductConversationViewSet(viewsets.ViewSet):
             'error':"No se pudo crear la respuesta."
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
-class SearchEnginePagination(PageNumberPagination):
+class SearchEngineCursorPagination(CursorPagination):
     """
-    Configuración estándar de paginación para el Feed.
+    Paginación ultrarrápida (O(1)) para feeds infinitos.
+    Requiere que el queryset esté siempre ordenado de forma determinista.
     """
     page_size = 20
     page_size_query_param = 'page_size'
     max_page_size = 50
+    # Usamos la fecha de creación como cursor por defecto, pero el motor lo sobrescribirá
+    ordering = '-creation'
 
 class ProductSearchEngineViewSet(viewsets.ViewSet):
     """
@@ -2302,11 +2306,20 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
         return sort_by, price_order
 
     def _paginate_and_respond(self, queryset, request):
-        """Maneja la paginación estándar de DRF para listas crudas."""
-        paginator = SearchEnginePagination()
+        """Maneja la paginación O(1) con Cursor."""
+        paginator = SearchEngineCursorPagination()
+        
+        # Le decimos al paginador qué orden está usando el QuerySet
+        # Extraemos el primer campo por el que se ordenó el QS
+        ordering = queryset.query.order_by
+        if ordering:
+            paginator.ordering = ordering
+
         paginated_qs = paginator.paginate_queryset(queryset, request)
         
         data = [item.get_json() for item in paginated_qs]
+        
+        # Para CursorPagination, DRF devuelve 'next' y 'previous' como URLs con el cursor
         return paginator.get_paginated_response(data)
 
     # ------------------------------------------------------------------------
@@ -2788,7 +2801,7 @@ class ProductViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def bulk_create(self, request):
         """
-        Recibe un lote de productos y los guarda todos de golpe usando una transacción.
+        Recibe un lote de productos y los guarda todos de golpe usando bulk_create.
         """
         company_id = request.data.get('company_id')
         try:
@@ -2805,18 +2818,20 @@ class ProductViewSet(viewsets.ModelViewSet):
         except json.JSONDecodeError:
             return Response({'error': 'El formato de products_data es inválido.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        created_products = []
+        created_products_json = []
+        dtnow_str = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
 
         try:
-            # Usamos atomic para que, si explota una imagen, no guarde productos a medias
             with transaction.atomic():
-                for prod_index, prod_data in enumerate(products_list):
-                    
+                # 1. Preparar las instancias en memoria
+                product_instances = []
+                
+                for prod_data in products_list:
                     category = SubCategory.objects.get(id=prod_data['category_id'])
                     discounts_data = prod_data.get('discounts_data', [])
 
-                    # 1. Creamos el registro base
-                    product = Product.objects.create(
+                    # Instanciamos sin guardar en BD todavía
+                    product = Product(
                         company=company,
                         name=prod_data['name'],
                         price=prod_data['price'],
@@ -2826,14 +2841,19 @@ class ProductViewSet(viewsets.ModelViewSet):
                         discounts_data=discounts_data,
                         images=[]
                     )
+                    product_instances.append(product)
 
-                    # 2. Manejo de imágenes indexadas
+                # 2. BULK CREATE REAL (Un solo viaje a la BD)
+                # OJO: bulk_create en Postgres sí retorna los IDs generados si pasas los objetos.
+                created_products = Product.objects.bulk_create(product_instances)
+
+                # 3. Manejo de imágenes (Requiere los IDs que acabamos de generar)
+                for prod_index, product in enumerate(created_products):
+                    prod_data = products_list[prod_index]
                     image_order = prod_data.get('image_order', [])
                     final_images = []
-                    dtnow_str = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
 
                     for img_index, item in enumerate(image_order):
-                        # item llegará como "new_image_0_0" (producto 0, imagen 0)
                         if item.startswith('new_image_') and item in request.FILES:
                             file = request.FILES[item]
                             extension = file.name.split('.')[-1]
@@ -2848,13 +2868,13 @@ class ProductViewSet(viewsets.ModelViewSet):
                         else:
                             final_images.append(item)
 
-                    # 3. Guardamos las URLs definitivas en el array de Postgres
+                    # 4. Actualizamos el array de imágenes (Bulk Update opcional, pero aquí update normal está bien)
                     product.images = final_images
-                    product.save()
+                    product.save(update_fields=['images'])
                     
-                    created_products.append(product.get_json())
+                    created_products_json.append(product.get_json())
 
-            return Response({'success': True, 'data': created_products}, status=status.HTTP_201_CREATED)
+            return Response({'success': True, 'data': created_products_json}, status=status.HTTP_201_CREATED)
 
         except Exception as e:
             return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -3056,13 +3076,14 @@ class NotificationViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
         return Response(grouped_data, status=status.HTTP_200_OK)
 
     # -------------------------------------------------------------------------
-    # ENDPOINT 2: Marcar UNA notificación como leída (Eliminar)
+    # ENDPOINT 2: Marcar UNA notificación como leída (Conservar en historial)
     # -------------------------------------------------------------------------
     @action(detail=True, methods=['post'], url_path="mark-as-read")
     def mark_as_read(self, request, pk=None):
         notification = self.get_object()
-        notification.delete()
-        return Response({"detail": "Notificación leida."}, status=status.HTTP_200_OK)
+        notification.is_read = True
+        notification.save(update_fields=['is_read'])
+        return Response({"detail": "Notificación marcada como leída.", "id": notification.id}, status=status.HTTP_200_OK)
 
     # -------------------------------------------------------------------------
     # ENDPOINT 3: Limpiar TODA una sección
@@ -3075,6 +3096,15 @@ class NotificationViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
             
         deleted_count, _ = self.get_queryset().filter(section=section).delete()
         return Response({"deleted_count": deleted_count}, status=status.HTTP_200_OK)
+    
+    # -------------------------------------------------------------------------
+    # ENDPOINT 4: Eliminar UNA notificación permanentemente
+    # -------------------------------------------------------------------------
+    @action(detail=True, methods=['delete'], url_path="delete")
+    def delete_notification(self, request, pk=None):
+        notification = self.get_object()
+        notification.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 class ClientContactMethodViewSet(viewsets.ModelViewSet):
     serializer_class = ClientContactMethodSerializer
