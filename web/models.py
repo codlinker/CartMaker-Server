@@ -1429,16 +1429,27 @@ class MerchantSubscription(models.Model):
     rif_number = models.CharField(max_length=50, null=True, blank=True)
     company_document_url = models.CharField(max_length=500, null=True, blank=True)
 
-    def get_json(self)->dict:
+    def get_json(self) -> dict:
+        prorated_remanent_usd = 0.0
+        now = timezone.now()
+        
+        # 💡 LÓGICA DE PRORRATEO: Calculamos el valor del tiempo no consumido
+        if self.valid_until and self.valid_until > now:
+            days_left = (self.valid_until - now).total_seconds() / 86400.0
+            daily_rate = float(self.plan.price) / 30.0
+            # Redondeamos a 2 decimales para formato de moneda
+            prorated_remanent_usd = round(days_left * daily_rate, 2)
+
         return {
-            'id':self.id,
-            'plan':self.plan.name,
-            'valid_until':self.valid_until.strftime("%d/%m/%Y, %H:%M:%S") if self.valid_until else None,
-            'adquired_at':self.adquired_at.strftime("%d/%m/%Y, %H:%M:%S"),
-            'merchant_type':self.get_merchant_type_display(),
-            'rif_number':self.rif_number,
-            'benefits':self.plan.get_benefits_json(),
-            'business_required':self.plan.requires_business
+            'id': str(self.id),
+            'plan': self.plan.name,
+            'valid_until': self.valid_until.strftime("%d/%m/%Y, %H:%M:%S") if self.valid_until else None,
+            'adquired_at': self.adquired_at.strftime("%d/%m/%Y, %H:%M:%S"),
+            'merchant_type': self.get_merchant_type_display(),
+            'rif_number': self.rif_number,
+            'benefits': self.plan.get_benefits_json(),
+            'business_required': self.plan.requires_business,
+            'prorated_remanent_usd': prorated_remanent_usd
         }
 
 class MerchantPlanPayment(models.Model):
@@ -1455,6 +1466,7 @@ class MerchantPlanPayment(models.Model):
     rejection_reason = models.IntegerField(choices=RejectionReason.choices, null=True, blank=True)
     rejection_help = models.IntegerField(choices=RejectionHelpText.choices, null=True, blank=True)
     creation = models.DateTimeField(auto_now_add=True)
+    target_plan = models.ForeignKey(MerchantPlan, on_delete=models.SET_NULL, null=True, blank=True)
 
     def clean(self):
         if self.pk:

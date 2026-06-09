@@ -732,6 +732,7 @@ class UploadSubscriptionPayment(APIView):
         # TODO: Implementar chequeo de disponibilidad de api de bancos.
         subscription_type = data['subscription_type']
         subscription_id = data['subscription_id']
+        
         if subscription_type == 1:
             # TODO: Subscripciones de Atlas Plus
             pass
@@ -740,40 +741,49 @@ class UploadSubscriptionPayment(APIView):
                 merchant_plan = MerchantPlan.objects.get(id=subscription_id)
             except MerchantPlan.DoesNotExist:
                 return Response({'error':'Plan no encontrado.'}, status=status.HTTP_400_BAD_REQUEST)
+                
             try:
                 merchant_subscription = MerchantSubscription.objects.only('id', 'merchant', 'valid_until').get(merchant=request.user)
                 print("MERCHANT SUBSCRIPTION VALID UNTIL: ", merchant_subscription.valid_until)
                 print("NOW: ", timezone.now())
-                if merchant_subscription.valid_until and merchant_subscription.valid_until > timezone.now():
-                    return Response({'error':'La suscripcion aun esta activa.'}, status=status.HTTP_406_NOT_ACCEPTABLE)
+                
+                # 💡 ELIMINADO EL BLOQUEO: Ya no bloqueamos si valid_until > now. 
+                # El usuario TIENE DERECHO a cambiarse de plan a mitad de mes.
+                # La protección contra spam de pagos la hace la tabla MerchantPlanPayment más abajo.
+                
             except MerchantSubscription.DoesNotExist:
                 merchant_subscription = MerchantSubscription.objects.create(
                     merchant=request.user,
                     merchant_type = MerchantType.BUSINESS if merchant_plan.requires_business else MerchantType.ENTREPRENEUR,
                     plan = merchant_plan
                 )
+                
             if not bank_api_available:
                 file_obj = data['payment_proof']
                 extension = file_obj.name.split('.')[-1]
                 file_name = f"payment_proof_{merchant_subscription.id}_{timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')}.{extension}"
                 folder = f"subscriptions/merchant_plans/{merchant_plan.name}"
                 relative_path = storage_manager.save_file(file_obj, folder, file_name)
+                
                 if MerchantPlanPayment.objects.filter(
                     subscription=merchant_subscription,
                     verified_at__isnull=True,
                     status=PaymentStatus.PENDING
                     ).exists():
                     return Response({'error':"Ya tienes un pago pendiente por verificacion por este plan."}, status=status.HTTP_406_NOT_ACCEPTABLE)
+                    
                 payment = MerchantPlanPayment.objects.create(
                     subscription=merchant_subscription,
+                    target_plan=merchant_plan, # 💡 NUEVO: Guardamos a qué plan quiere ir (Requiere agregarlo en models.py)
                     reference_number = data['reference_number'],
                     payment_proof_url = relative_path,
                     amount=data['amount_sended'],
                     bcv_taxes_to_day=data['dollar_bcv_tax'],
                 )
-                if merchant_plan.id != merchant_subscription.plan.id:
-                    merchant_subscription.plan = merchant_plan
-                    merchant_subscription.save()
+                
+                # 💡 ELIMINADO EL BUG: Ya no hacemos "merchant_subscription.plan = merchant_plan" aquí. 
+                # El plan de la tienda NO SE CAMBIA hasta que un administrador apruebe el pago en signals.py.
+                
                 return Response({'payment_data':payment.get_json(), 'subscription_data':merchant_subscription.get_json()}, status=status.HTTP_201_CREATED)
             else:
                 # TODO: Implementar caso para utilizar api de bancos para validar el pago.
@@ -781,7 +791,8 @@ class UploadSubscriptionPayment(APIView):
             return Response(status=status.HTTP_200_OK)
         else:
             return Response({'error':'Tipo de subscripcion no valida.'}, status=status.HTTP_400_BAD_REQUEST)
-        
+
+
 class FullPaySubscriptionWithWalletView(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'actions'
@@ -792,6 +803,7 @@ class FullPaySubscriptionWithWalletView(APIView):
             with transaction.atomic():
                 print("REQUEST DATA: ", request.data)
                 plan_id = request.data.get('plan_id')
+                
                 # 1. Obtener el plan y crear la subscripcion u obtenerla si ya existe
                 merchant_plan = MerchantPlan.objects.only('price', 'name').get(id=plan_id)
                 try:
@@ -810,6 +822,25 @@ class FullPaySubscriptionWithWalletView(APIView):
                 # 2. Obtener la billetera del usuario
                 wallet = UserWallet.objects.select_for_update().get(user=request.user)
 
+                # =======================================================
+                # 💡 LÓGICA DE PRORRATEO (Split de saldos a favor)
+                # =======================================================
+                is_plan_change = merchant_subscription.plan.id != int(plan_id)
+                current_plan_name = merchant_subscription.plan.name
+
+                if is_plan_change and merchant_subscription.valid_until and merchant_subscription.valid_until > timezone.now():
+                    days_left = (merchant_subscription.valid_until - timezone.now()).total_seconds() / 86400.0
+                    daily_rate = float(merchant_subscription.plan.price) / 30.0
+                    remanent_usd = Decimal(str(round(days_left * daily_rate, 2)))
+                    
+                    if remanent_usd > 0:
+                        wallet.regist_transaction(
+                            amount=remanent_usd,
+                            sub_type='merchant',
+                            description=f"Reintegro por tiempo no consumido del plan anterior ({current_plan_name})",
+                            transaction='add'
+                        )
+
                 # 3. Validar si tiene saldo suficiente
                 if wallet.balance < plan_price_usd:
                     return Response({
@@ -825,10 +856,9 @@ class FullPaySubscriptionWithWalletView(APIView):
                     transaction='substract'
                 )
 
-                if merchant_subscription.plan.id != int(plan_id):
+                if is_plan_change:
                     merchant_subscription.plan = merchant_plan
-                    merchant_subscription.save()
-
+                
                 # 5. Activar la suscripción
                 merchant_subscription.valid_until = timezone.now() + relativedelta(months=1)
                 merchant_subscription.save()
@@ -848,9 +878,9 @@ class FullPaySubscriptionWithWalletView(APIView):
                     print(f"Error obteniendo el precio del dolar bcv: {e}")
 
                 # 6. Dejar un registro en el historial de pagos
-                # Lo creamos directamente como APROBADO
                 merchant_payment = MerchantPlanPayment.objects.create(
                     subscription=merchant_subscription,
+                    target_plan=merchant_plan, # 💡 NUEVO: Dejamos el rastro del plan pagado
                     reference_number=f"WALLET-{uuid.uuid4().hex[:8].upper()}",
                     amount=0,
                     bcv_taxes_to_day=dollar_bcv_tax,
@@ -858,10 +888,13 @@ class FullPaySubscriptionWithWalletView(APIView):
                     verified_at=timezone.now()
                 )
 
-                title = '¡Pago Validado!'
-                
                 # 7. Crear la notificacion
-                body = f'Hemos aprobado el pago por la suscripción <b>{merchant_plan.name}</b>. Ya puedes registrar tus productos en CartMaker.'
+                if is_plan_change:
+                    title = '¡Plan Actualizado!'
+                    body = f'Has cambiado exitosamente al <b>{merchant_plan.name}</b>. El remanente de tu plan anterior fue reintegrado.'
+                else:
+                    title = '¡Pago Validado!'
+                    body = f'Hemos aprobado el pago por la suscripción <b>{merchant_plan.name}</b>. Ya puedes registrar tus productos en CartMaker.'
                     
                 Notification.objects.create(
                     user=request.user,
@@ -872,11 +905,12 @@ class FullPaySubscriptionWithWalletView(APIView):
                     metadata={'payment_id':str(merchant_payment.id)}
                 )
 
+                # Mantengo tu cálculo de new_balance exacto (Aunque gracias al Prorrateo, la variable wallet.balance ya lo contempla)
                 return Response({
                     'success': True,
                     'message': '¡Suscripción renovada exitosamente usando tu saldo a favor!',
                     'data': {
-                        'new_balance': float(wallet.balance - plan_price_usd),
+                        'new_balance': float(wallet.balance),
                         'valid_until': merchant_subscription.valid_until.strftime("%d/%m/%Y, %H:%M:%S")
                     }
                 }, status=status.HTTP_200_OK)

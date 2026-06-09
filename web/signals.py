@@ -12,25 +12,24 @@ from django.core.cache import cache
 def on_payment_created(sender, instance: MerchantPlanPayment, **kwargs):
     if instance.pk:
         try:
+            # Traemos las relaciones necesarias, incluyendo el target_plan
             old_instance = sender.objects.select_related(
-                'subscription__merchant', 'subscription__plan', 'subscription__merchant__wallet'
-            ).only(
-                'status', 
-                'subscription__merchant__id', 
-                'subscription__plan__name', 
-                'subscription__plan__price',
-                'subscription__valid_until',
-                'subscription__merchant__wallet'
+                'subscription__merchant', 'subscription__plan', 'subscription__merchant__wallet', 'target_plan'
             ).get(pk=instance.pk)
 
             if old_instance.status == PaymentStatus.PENDING and instance.status != old_instance.status:
                 with transaction.atomic():
                     merchant = old_instance.subscription.merchant
-                    plan_name = old_instance.subscription.plan.name
+                    current_subscription = old_instance.subscription
+                    
+                    # 💡 Identificamos el plan al que quiere suscribirse (o renovar)
+                    target_plan = old_instance.target_plan if old_instance.target_plan else current_subscription.plan
+                    plan_name = target_plan.name
                     instance.verified_at = timezone.now()
 
-                    # --- CASO RECHAZADO ---
+                    # --- CASO RECHAZADO (Mantenemos tu lógica intacta) ---
                     if instance.status == PaymentStatus.REJECTED:
+                        # ... (Todo tu bloque de RejectionReason se mantiene idéntico aquí) ...
                         if instance.rejection_reason == RejectionReason.FAKE_PROOF:
                             instance.rejection_help = RejectionHelpText.FAKE_PROOF
                         elif instance.rejection_reason == RejectionReason.NOT_ENOUGH_AMOUNT:
@@ -47,33 +46,61 @@ def on_payment_created(sender, instance: MerchantPlanPayment, **kwargs):
                             rejection_reason=instance.get_rejection_reason_display()
                         )
 
-                    # --- CASO APROBADO ---
+                    # --- CASO APROBADO (Con Prorrateo) ---
                     elif instance.status == PaymentStatus.APPROVED:
                         wallet = merchant.wallet
+                        
+                        is_plan_change = current_subscription.plan.id != target_plan.id
+                        
+                        # 1. 💡 PRORRATEO: Acreditamos el tiempo no consumido si cambia de plan
+                        if is_plan_change and current_subscription.valid_until and current_subscription.valid_until > timezone.now():
+                            days_left = (current_subscription.valid_until - timezone.now()).total_seconds() / 86400.0
+                            daily_rate = float(current_subscription.plan.price) / 30.0
+                            remanent_usd = Decimal(str(round(days_left * daily_rate, 2)))
+                            
+                            if remanent_usd > 0:
+                                wallet.regist_transaction(
+                                    amount=remanent_usd, 
+                                    sub_type='merchant', 
+                                    description=f"Reintegro por cambio de plan ({current_subscription.plan.name})", 
+                                    transaction='add'
+                                )
+
+                        # 2. ACREDITAMOS EL PAGO MÓVIL/TRANSFERENCIA
                         monto_pagado_bs = Decimal(str(instance.amount))
                         tasa_bcv = Decimal(str(instance.bcv_taxes_to_day))
                         monto_pagado_usd = monto_pagado_bs / tasa_bcv
-                        plan_price_usd = Decimal(str(old_instance.subscription.plan.price))
+                        
                         wallet.regist_transaction(
                             amount=monto_pagado_usd, 
                             sub_type='merchant', 
                             description=f"Recarga mediante transferencia (Ref: {instance.reference_number})", 
                             transaction='add'
                         )
+                        
+                        # 3. VERIFICAMOS SI ALCANZA PARA EL NUEVO PLAN
+                        plan_price_usd = Decimal(str(target_plan.price))
+                        
                         if wallet.balance >= plan_price_usd:
+                            # A) Se cobra el plan
                             excedente_usd = wallet.balance - plan_price_usd
                             excedente_bs = round(excedente_usd * tasa_bcv, 2)
+                            
                             wallet.regist_transaction(
                                 amount=plan_price_usd, 
                                 sub_type='merchant', 
                                 description=f"Cobro de suscripción: {plan_name}", 
                                 transaction='substract'
                             )
+                            
+                            # B) Se actualiza la suscripción al NUEVO plan
                             subscription_valid_until = timezone.now() + relativedelta(months=1)
-                            subscription_adquired_at = timezone.now()
-                            old_instance.subscription.__class__.objects.filter(
-                                pk=old_instance.subscription.pk
-                            ).update(valid_until=subscription_valid_until, adquired_at=subscription_adquired_at)
+                            current_subscription.__class__.objects.filter(pk=current_subscription.pk).update(
+                                plan=target_plan,  # 💡 AQUÍ ocurre el cambio real de plan
+                                valid_until=subscription_valid_until, 
+                                adquired_at=timezone.now()
+                            )
+                            
                             NotificationManager.notify_payment_check(
                                 merchant.id, 
                                 plan_name, 
@@ -82,12 +109,13 @@ def on_payment_created(sender, instance: MerchantPlanPayment, **kwargs):
                                 surplus_amount=float(excedente_bs)
                             )
                         else:
+                            # 4. SI NO ALCANZA EL DINERO A PESAR DEL REINTEGRO
                             instance.status = PaymentStatus.REJECTED
                             instance.rejection_reason = RejectionReason.NOT_ENOUGH_AMOUNT
                             instance.rejection_help = RejectionHelpText.NOT_ENOUGH_AMOUNT
                             NotificationManager.notify_payment_check(
                                 merchant.id, plan_name, False, instance.pk,
-                                rejection_reason=f"Pago recibido, pero el monto fue insuficiente. {round(float(monto_pagado_usd), 2)}$ fueron acreditados a tu saldo a favor."
+                                rejection_reason=f"Pago recibido, pero el monto total fue insuficiente para el nuevo plan. {round(float(monto_pagado_usd), 2)}$ fueron acreditados a tu saldo a favor."
                             )
 
         except sender.DoesNotExist:
