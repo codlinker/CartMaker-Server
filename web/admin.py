@@ -44,7 +44,7 @@ class UserAdmin(ModelAdmin):
     
 @admin.register(UserWallet)
 class UserWalletAdmin(ModelAdmin):
-    list_display = ('id', 'balance')
+    list_display = ('id', 'user','balance')
 
 # --- MÓDULO 2 & 3: COMERCIO E INVENTARIO ---
 
@@ -55,7 +55,7 @@ class CompanyAdmin(ModelAdmin):
 
 @admin.register(CompanyStore)
 class CompanyStoreAdmin(ModelAdmin):
-    list_display = ("id", "name", "company", "creation")
+    list_display = ("id", "name", 'is_main_store', "company", "creation")
     list_filter = ('company',)
 
 @admin.register(Product)

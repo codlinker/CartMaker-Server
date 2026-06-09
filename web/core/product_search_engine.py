@@ -8,12 +8,11 @@ from django.db.models.functions import RowNumber, Coalesce
 from django.db.models import Case, When, Value, Count, BooleanField
 from django.contrib.gis.measure import D
 
-# Ajusta las importaciones según la ruta real de tu proyecto
-from web.models import InventoryItem, MerchantSubscription, ProductLike, ProductViewLog
+from web.models import InventoryItem, MerchantSubscription, ProductLike, ProductViewLog, CompanyStore
 
 class ProductSearchEngine:
     """
-    Motor Híbrido de CartMaker.
+    Motor Híbrido de CartMaker para la busqueda de productos.
     Combina geolocalización, prevención de monopolios, popularidad global 
     y filtrado basado en contenido (afinidad del usuario) en tiempo real.
     """
@@ -26,23 +25,16 @@ class ProductSearchEngine:
         self.user_top_categories = self._build_user_affinity_profile()
     
     def _build_user_affinity_profile(self):
-        """
-        Lee el historial de interacciones explícitas (Likes) e implícitas (Vistas largas/Carritos)
-        y devuelve una lista con los IDs de sus categorías preferidas.
-        """
         if not self.user or not self.user.is_authenticated:
             return []
 
-        # Analizamos los últimos 30 días para mantener la relevancia fresca
         date_threshold = timezone.now() - timedelta(days=30)
 
-        # 1. Señales Explícitas (Likes)
         liked_categories = ProductLike.objects.filter(
             user=self.user,
             creation__gte=date_threshold
         ).values_list('product__product__category_id', flat=True)
 
-        # 2. Señales Implícitas de Alta Intención (Agregó al carrito, compró, o lo miró mucho)
         viewed_categories = ProductViewLog.objects.filter(
             client=self.user,
             start_time__gte=date_threshold
@@ -50,20 +42,16 @@ class ProductSearchEngine:
             Q(added_to_cart=True) | Q(bought=True) | Q(end_time__isnull=False)
         ).values_list('inventory_item__product__category_id', flat=True)
 
-        # Unimos, contamos las frecuencias y sacamos el Top 5 de categorías
         all_categories = list(liked_categories) + list(viewed_categories)
         
         if not all_categories:
             return []
 
-        # Contamos la frecuencia de cada categoría de forma eficiente en Python
-        # para no recargar la BD con agregaciones complejas en tablas de logs enormes
         frequency = {}
         for cat_id in all_categories:
             if cat_id:
                 frequency[cat_id] = frequency.get(cat_id, 0) + 1
 
-        # Ordenamos de mayor a menor y extraemos los IDs
         sorted_categories = sorted(frequency.items(), key=lambda x: x[1], reverse=True)
         top_5_category_ids = [cat[0] for cat in sorted_categories[:5]]
 
@@ -88,21 +76,32 @@ class ProductSearchEngine:
             store__company__owner__subscription__isnull=False,
             store__company__owner__subscription__valid_until__gte=now
         )
+
         # =====================================================================
-        # 💡 NUEVO: Filtro Anti-Auto-Compra / Anti-Auto-Recomendación
+        # 💡 NUEVO: Filtro ORTODOXO de Límite de Sucursales según Plan
+        # =====================================================================
+        qs = qs.filter(
+            # Condición A: El plan SÍ permite múltiples sucursales
+            Q(store__company__owner__subscription__plan__company_branches=True) |
+            # Condición B: El plan NO permite sucursales (pasa solo la marcada como is_main_store)
+            Q(
+                store__company__owner__subscription__plan__company_branches=False,
+                store__is_main_store=True
+            )
+        )
+
+        # =====================================================================
+        # Filtro Anti-Auto-Compra / Anti-Auto-Recomendación
         # =====================================================================
         if self.user and self.user.is_authenticated:
-            # Comprobamos si el usuario actual es un comerciante con suscripción vigente.
-            # Usamos .exists() para que sea una consulta SQL súper ligera (1ms) sin 
-            # traernos todo el objeto a la memoria RAM de Python.
             is_active_merchant = MerchantSubscription.objects.filter(
                 merchant=self.user,
                 valid_until__gte=now
             ).exists()
+            
             if is_active_merchant:
-                # Excluimos todos los productos que vengan de una tienda 
-                # cuya compañía sea propiedad de este usuario.
                 qs = qs.exclude(store__company__owner=self.user)
+                
         return qs
     
     def _annotate_proximity_flag(self, queryset):
@@ -127,18 +126,12 @@ class ProductSearchEngine:
         )
 
     def _annotate_ranking_score(self, queryset):
-        """
-        Calcula el Score cruzando Popularidad + Platinum + Perfil de Afinidad Personal.
-        """
-        # Multiplicador Platino (Estático del vendedor)
         platinum_multiplier = Case(
             When(store__company__is_platinum=True, then=Value(1.10)),
             default=Value(1.0),
             output_field=FloatField()
         )
 
-        # Multiplicador de Afinidad (Dinámico del usuario)
-        # Si el producto pertenece al Top 5 de gustos del usuario, le damos un boost del 30%
         if self.user_top_categories:
             affinity_multiplier = Case(
                 When(product__category_id__in=self.user_top_categories, then=Value(1.30)),
@@ -148,7 +141,6 @@ class ProductSearchEngine:
         else:
             affinity_multiplier = Value(1.0, output_field=FloatField())
 
-        # Cálculo matemático final dentro de la BD
         score_expression = ExpressionWrapper(
             F('cached_popularity_score') * platinum_multiplier * affinity_multiplier,
             output_field=FloatField()
@@ -175,7 +167,6 @@ class ProductSearchEngine:
 
         if sort_by == 'distance':
             qs = qs.annotate(distance_to_user=Distance('store__location__coordinates', self.user_location))
-            # 💡 IMPORTANTE: Siempre añade 'id' al final para desempatar
             order_params.extend(['distance_to_user', 'id']) 
 
         elif sort_by == 'rating':

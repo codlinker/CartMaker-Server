@@ -69,9 +69,10 @@ def on_payment_created(sender, instance: MerchantPlanPayment, **kwargs):
                                 transaction='substract'
                             )
                             subscription_valid_until = timezone.now() + relativedelta(months=1)
+                            subscription_adquired_at = timezone.now()
                             old_instance.subscription.__class__.objects.filter(
                                 pk=old_instance.subscription.pk
-                            ).update(valid_until=subscription_valid_until)
+                            ).update(valid_until=subscription_valid_until, adquired_at=subscription_adquired_at)
                             NotificationManager.notify_payment_check(
                                 merchant.id, 
                                 plan_name, 

@@ -40,7 +40,7 @@ from .utils import _parse_flexible_date
 from asgiref.sync import sync_to_async, async_to_sync
 from rest_framework.pagination import PageNumberPagination
 from django.db.models.functions import Coalesce, Round
-from django.db.models import Avg, Count, Sum
+from django.db.models import Avg, Count, Sum, Q, Subquery, OuterRef, Prefetch
 from django.contrib.gis.measure import D
 import operator
 from functools import reduce
@@ -425,6 +425,122 @@ class VerifyUser(APIView):
 ###################### ACTIONS #######################
 ######################################################
 
+class CompanyMainBranchViewSet(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'actions'
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """
+        Devuelve todas las sucursales de la compañía del usuario.
+        Incluye la foto de la sucursal y la lista de productos únicos 
+        publicados en ella, con el conteo de sus lotes (InventoryItems) activos.
+        """
+        print("LLEGO:")
+        user = request.user
+        
+        # 1. Optimizamos la consulta con Prefetch
+        # Buscamos solo los InventoryItems activos (paused=False, stock>0)
+        # y traemos el Product asociado de una vez para evitar consultas N+1
+        active_inventory_prefetch = Prefetch(
+            'product_items',
+            queryset=InventoryItem.objects.filter(
+                paused=False, 
+                stock__gt=0
+            ).select_related('product'),
+            to_attr='active_items'
+        )
+
+        # 2. Obtenemos las tiendas que le pertenecen a la compañía de este usuario
+        stores = CompanyStore.objects.filter(
+            company__owner=user
+        ).prefetch_related(active_inventory_prefetch)
+
+        data = []
+
+        # 3. Procesamos y agrupamos los datos
+        for store in stores:
+            product_map = {}
+            
+            # Iteramos sobre los ítems de inventario activos que ya trajimos a memoria
+            for item in store.active_items:
+                prod_id = str(item.product.id)
+                
+                if prod_id not in product_map:
+                    # Extraemos la primera imagen del array de imágenes del producto (si existe)
+                    prod_img = None
+                    if item.product.images and len(item.product.images) > 0:
+                        prod_img = storage_manager.get_url(item.product.images[0])
+                        
+                    # Inicializamos la estructura del Producto
+                    product_map[prod_id] = {
+                        "id": prod_id,
+                        "name": item.product.name,
+                        "image": prod_img,
+                        "active_inventory_count": 0
+                    }
+                
+                # Sumamos 1 al contador de items (lotes) activos para este producto
+                product_map[prod_id]["active_inventory_count"] += 1
+
+            # Formateamos la foto de la sucursal
+            store_image = None
+            if store.store_img_url:
+                store_image = storage_manager.get_url(store.store_img_url)
+
+            # Agregamos la sucursal a la respuesta
+            data.append({
+                "id": str(store.id),
+                "name": store.name,
+                "image": store_image,
+                "is_main_store": store.is_main_store,
+                "products": list(product_map.values()) # Convertimos el dict agrupado a lista
+            })
+
+        return Response({'data': data}, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        """
+        Recibe el id de una sucursal y la establece como la principal (is_main_store=True),
+        apagando el flag en todas las demás sucursales de la misma compañía.
+        """
+        store_id = request.data.get('store_id')
+        
+        if not store_id:
+            return Response({'error': 'El parámetro store_id es requerido.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # Buscamos la tienda y validamos estrictamente que la compañía dueña de 
+            # esta tienda le pertenezca al usuario que hace la petición
+            store = CompanyStore.objects.select_related('company').get(
+                id=store_id, 
+                company__owner=request.user
+            )
+            company = store.company
+
+            # Transacción atómica para evitar inconsistencias si algo falla en el medio
+            with transaction.atomic():
+                # Apagamos todas las sucursales de esta compañía
+                CompanyStore.objects.filter(company=company).update(is_main_store=False)
+                
+                # Encendemos solo la seleccionada
+                store.is_main_store = True
+                store.save(update_fields=['is_main_store'])
+
+            return Response({
+                'success': True, 
+                'message': f'La sucursal "{store.name}" ha sido establecida como la principal.'
+            }, status=status.HTTP_200_OK)
+
+        except CompanyStore.DoesNotExist:
+            return Response({
+                'error': 'La sucursal no existe o no tienes permisos para modificarla.'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({
+                'error': f'Error interno: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 class GetCompanyProducts(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'actions'
@@ -611,6 +727,7 @@ class UploadSubscriptionPayment(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         bank_api_available = False 
+        print(data)
         # TODO: Implementar chequeo de disponibilidad de api de bancos.
         subscription_type = data['subscription_type']
         subscription_id = data['subscription_id']
@@ -623,8 +740,10 @@ class UploadSubscriptionPayment(APIView):
             except MerchantPlan.DoesNotExist:
                 return Response({'error':'Plan no encontrado.'}, status=status.HTTP_400_BAD_REQUEST)
             try:
-                merchant_subscription = MerchantSubscription.objects.only('id', 'merchant').get(merchant=request.user)
-                if merchant_subscription.valid_until and merchant_subscription.valid_until < timezone.now():
+                merchant_subscription = MerchantSubscription.objects.only('id', 'merchant', 'valid_until').get(merchant=request.user)
+                print("MERCHANT SUBSCRIPTION VALID UNTIL: ", merchant_subscription.valid_until)
+                print("NOW: ", timezone.now())
+                if merchant_subscription.valid_until and merchant_subscription.valid_until > timezone.now():
                     return Response({'error':'La suscripcion aun esta activa.'}, status=status.HTTP_406_NOT_ACCEPTABLE)
             except MerchantSubscription.DoesNotExist:
                 merchant_subscription = MerchantSubscription.objects.create(
@@ -651,6 +770,9 @@ class UploadSubscriptionPayment(APIView):
                     amount=data['amount_sended'],
                     bcv_taxes_to_day=data['dollar_bcv_tax'],
                 )
+                if merchant_plan.id != merchant_subscription.plan.id:
+                    merchant_subscription.plan = merchant_plan
+                    merchant_subscription.save()
                 return Response({'payment_data':payment.get_json(), 'subscription_data':merchant_subscription.get_json()}, status=status.HTTP_201_CREATED)
             else:
                 # TODO: Implementar caso para utilizar api de bancos para validar el pago.
@@ -668,8 +790,9 @@ class FullPaySubscriptionWithWalletView(APIView):
         try:
             with transaction.atomic():
                 print("REQUEST DATA: ", request.data)
+                plan_id = request.data.get('plan_id')
                 # 1. Obtener el plan y crear la subscripcion u obtenerla si ya existe
-                merchant_plan = MerchantPlan.objects.only('price', 'name').get(id=request.data.get('plan_id'))
+                merchant_plan = MerchantPlan.objects.only('price', 'name').get(id=plan_id)
                 try:
                     merchant_subscription = MerchantSubscription.objects.select_related('plan').get(
                         merchant=request.user
@@ -700,6 +823,10 @@ class FullPaySubscriptionWithWalletView(APIView):
                     description=f"Pago de suscripción con saldo: {merchant_plan.name}",
                     transaction='substract'
                 )
+
+                if merchant_subscription.plan.id != int(plan_id):
+                    merchant_subscription.plan = merchant_plan
+                    merchant_subscription.save()
 
                 # 5. Activar la suscripción
                 merchant_subscription.valid_until = timezone.now() + relativedelta(months=1)
@@ -828,7 +955,8 @@ class CreateCompanyAPI(APIView):
                     company_store = CompanyStore.objects.create(
                         company=company,
                         name=name, # Por defecto la primera sucursal tiene el nombre de la empresa
-                        store_type=store_type
+                        store_type=store_type,
+                        is_main_store=True
                     )
                     StoreLocation.objects.create(
                         store=company_store,
@@ -855,8 +983,9 @@ class CreateCompanyAPI(APIView):
                     )
                     company_store = CompanyStore.objects.create(
                         company=company,
-                        name=name, # Por defecto la primera sucursal tiene el nombre de la empresa
-                        store_type=store_type
+                        name=name, 
+                        store_type=store_type,
+                        is_main_store=True 
                     )
                     StoreLocation.objects.create(
                         store=company_store,
@@ -880,6 +1009,9 @@ class CheckCompanyNameAvailableAPI(APIView):
             == False else Response(status=status.HTTP_406_NOT_ACCEPTABLE)
 
 class UpdateCompanyAPI(APIView):
+    """
+    Este endpoint solo se utiliza en los casos en los que la compania no tiene plan que permita sucursales.
+    """
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'actions'
     permission_classes = [IsAuthenticated]
@@ -892,11 +1024,14 @@ class UpdateCompanyAPI(APIView):
             company = Company.objects.get(id=data['company_id'])
         except Company.DoesNotExist:
             return Response({'No se encontro la compania.'}, status=status.HTTP_404_NOT_FOUND)
-        
-        first_store = company.stores.all().order_by('-creation').first()
-        if first_store == None:
-            return Response({'No hay una tienda configurada'}, status=status.HTTP_409_CONFLICT)
-        
+        main_store = company.stores.filter(is_main_store=True).first()
+        if main_store == None:
+            first = company.stores.all().order_by('-creation').first()
+            if first == None:
+                return Response({'No hay una tienda configurada'}, status=status.HTTP_409_CONFLICT)
+            first.is_main_store = True
+            first.save()
+            main_store = first
         profile_img = data.get('profile_img')
         main_store_img = data.get('main_store_img')
         presentation_video = data.get('presentation_video')
@@ -950,19 +1085,19 @@ class UpdateCompanyAPI(APIView):
             
             if main_store_img:
                 # NUEVO: Limpiamos la foto de tienda anterior
-                if first_store.store_img_url:
+                if main_store.store_img_url:
                     try:
-                        storage_manager.delete_file(first_store.store_img_url)
+                        storage_manager.delete_file(main_store.store_img_url)
                     except Exception as e:
                         print(f"Error borrando img de tienda vieja: {e}")
 
                 extension = main_store_img.name.split('.')[-1]
                 file_name = f"{dtnow_str}.{extension}"
-                folder = f"store_pictures/{first_store.id}"
+                folder = f"store_pictures/{main_store.id}"
                 relative_path = storage_manager.save_file(main_store_img, folder, file_name)
                 
                 if relative_path:
-                    first_store.store_img_url = relative_path
+                    main_store.store_img_url = relative_path
                     store_has_changed = True
                 else:
                     raise Exception("Error al guardar la imagen de la tienda en el storage.")
@@ -1057,7 +1192,7 @@ class UpdateCompanyAPI(APIView):
             for value, method_type in contact_data:
                 if value is not None:
                     StoreContactMethod.objects.update_or_create(
-                        store=first_store,
+                        store=main_store,
                         method_type=method_type,
                         defaults={'value': value}
                     )
@@ -1066,11 +1201,11 @@ class UpdateCompanyAPI(APIView):
             # 3. ACTUALIZACIÓN DE UBICACIÓN
             # =========================
             if store_type is not None:
-                first_store.store_type = store_type
+                main_store.store_type = store_type
                 store_has_changed = True
 
             if is_mall is not None:
-                location, _ = StoreLocation.objects.get_or_create(store=first_store)
+                location, _ = StoreLocation.objects.get_or_create(store=main_store)
                 
                 if is_mall:
                     try:
@@ -1104,9 +1239,51 @@ class UpdateCompanyAPI(APIView):
                 company.save()
             
             if store_has_changed:
-                first_store.save()
+                main_store.save()
                 
         return Response({'message': 'Compañía actualizada exitosamente'}, status=status.HTTP_200_OK)
+    
+class CompanyStoreViewSet(viewsets.ModelViewSet):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'actions'
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=True, methods=['post'])
+    def set_main_store(self, request, pk=None):
+        """
+        Setea la tienda actual como la principal y desmarca cualquier otra 
+        tienda de la misma compañía.
+        """
+        store = self.get_object()
+        company = store.company
+
+        # 1. Validar que el usuario que hace la petición es el dueño real de la compañía
+        if company.owner != request.user:
+            return Response(
+                {'error': 'No tienes permisos para modificar las sucursales de esta compañía.'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # 2. Transacción segura para hacer el "switch"
+        try:
+            with transaction.atomic():
+                # A. Apagamos el flag en todas las tiendas de esta compañía
+                CompanyStore.objects.filter(company=company).update(is_main_store=False)
+                
+                # B. Encendemos el flag SOLO en la tienda solicitada
+                store.is_main_store = True
+                store.save(update_fields=['is_main_store'])
+
+            return Response({
+                'success': True, 
+                'message': f'La sucursal "{store.name}" ha sido establecida como la principal.'
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response(
+                {'error': f'Error interno al actualizar: {str(e)}'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
     
 class CreateStoreAPI(APIView):
     throttle_classes = [ScopedRateThrottle]
@@ -1232,13 +1409,26 @@ class UpdateStoreAPI(APIView):
 
     def delete(self, request, store_id=None):
         try:
-            store = CompanyStore.objects.prefetch_related('company__owner').only('id', 'company').get(id=store_id)
+            store = CompanyStore.objects.prefetch_related('company__owner').only('id', 'company', 'is_main_store').get(id=store_id)
+            
             if request.user.id != store.company.owner_id:
-                return Response({"Usted no tiene permisos para eliminar esta tienda."}, status=status.HTTP_406_NOT_ACCEPTABLE)
-            store.delete()
+                return Response({"error": "Usted no tiene permisos para eliminar esta tienda."}, status=status.HTTP_406_NOT_ACCEPTABLE)
+            
+            is_main = store.is_main_store
+            company = store.company
+            
+            with transaction.atomic():
+                store.delete()
+                if is_main:
+                    oldest_remaining = CompanyStore.objects.filter(company=company).order_by('creation').first()
+                    if oldest_remaining:
+                        oldest_remaining.is_main_store = True
+                        oldest_remaining.save(update_fields=['is_main_store'])
+                        
             return Response(status=status.HTTP_204_NO_CONTENT)
+            
         except CompanyStore.DoesNotExist:
-            return Response({"La tienda que tratas de eliminar no existe."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"error": "La tienda que tratas de eliminar no existe."}, status=status.HTTP_404_NOT_FOUND)
 
     def post(self, request, store_id=None):
         serializer = UpdateStoreSerializer(data=request.data)
@@ -1437,7 +1627,7 @@ class CartMakerMapViewSet(viewsets.ViewSet):
             company_category_id = request.query_params.get('company_category_id')
             is_platinum = request.query_params.get('is_platinum') == 'true'
 
-            # --- NUEVO: Captura de filtros de Productos ---
+            # Captura de filtros de Productos
             product_category_id = request.query_params.get('category_id')
             product_subcategory_id = request.query_params.get('subcategory_id')
             min_price = request.query_params.get('min_price')
@@ -1482,19 +1672,15 @@ class CartMakerMapViewSet(viewsets.ViewSet):
             # 4. Aplicar filtros cruzados (Filtrar tiendas basándose en su inventario)
             if product_category_id or product_subcategory_id or min_price or max_price:
                 print("DEBUG: Aplicando filtros de inventario (productos)")
-                # Construimos una consulta Q para buscar dentro del inventario de la tienda
                 inventory_query = Q(store__product_items__paused=False, store__product_items__stock__gt=0)
 
-                # Si el usuario eligió una subcategoría específica
                 if product_subcategory_id:
                     print(f"DEBUG: Filtro subcategoría: {product_subcategory_id}")
                     inventory_query &= Q(store__product_items__product__category_id=product_subcategory_id)
-                # Si solo eligió la categoría padre general
                 elif product_category_id:
                     print(f"DEBUG: Filtro categoría padre: {product_category_id}")
                     inventory_query &= Q(store__product_items__product__category__parent_category_id=product_category_id)
 
-                # Filtros de precio (calculando precio con descuento o normal)
                 if min_price or max_price:
                     print(f"DEBUG: Filtro precio: Min {min_price}, Max {max_price}")
                     if min_price:
@@ -1508,23 +1694,18 @@ class CartMakerMapViewSet(viewsets.ViewSet):
                             Q(store__product_items__custom_price__isnull=True, store__product_items__product__price__lte=float(max_price))
                         )
 
-                # Finalmente, filtramos las ubicaciones
                 queryset = queryset.filter(inventory_query).distinct()
                 
-                # --- DEBUG: LISTA DE SOBREVIVIENTES ---
                 print(f"DEBUG: Tiendas tras filtro de productos: {queryset.count()}")
                 for item in queryset:
                     print(f"DEBUG: Tienda sobreviviente: {item.store.name} (ID: {item.store_id})")
 
             if search_query:
                 print(f"DEBUG: Ejecutando búsqueda global para: '{search_query}'")
-                
-                # 1. Limpiamos y separamos la consulta en palabras individuales
                 search_terms = search_query.split()
                 word_queries = []
                 
                 for term in search_terms:
-                    # 2. Para cada palabra, buscamos si coincide en ALGUNO de estos campos
                     term_filter = (
                         Q(store__name__icontains=term) |
                         Q(store__company__name__icontains=term) |
@@ -1547,12 +1728,30 @@ class CartMakerMapViewSet(viewsets.ViewSet):
                     )
                     word_queries.append(term_filter)
                 
-                # 3. Combinamos todas las palabras con el operador AND (&)
-                # Si el usuario busca "Autopartes KRP", DEBE existir "Autopartes" Y "KRP" 
-                # en alguna parte de la data relacionada a la tienda.
                 global_search_filter = reduce(operator.and_, word_queries)
-                
                 queryset = queryset.filter(global_search_filter).distinct()
+                
+            # 4.5. Excluir tiendas con subscripciones vencidas
+            now = timezone.now()
+            queryset = queryset.filter(
+                Q(store__company__owner__subscription__valid_until__gte=now) |
+                Q(store__company__owner__subscription__valid_until__isnull=True)
+            )
+
+            # -----------------------------------------------------------------
+            # 4.6. REGLA DE PLANES ORTODOXA: Límite de sucursales e is_main_store
+            # -----------------------------------------------------------------
+            print("DEBUG: Aplicando filtro explícito de sucursal principal.")
+            queryset = queryset.filter(
+                # Condición A: El plan de la compañía SÍ permite sucursales (pasan todas)
+                Q(store__company__owner__subscription__plan__company_branches=True) |
+                # Condición B: El plan NO permite sucursales (Solo pasa la elegida como Main Store)
+                Q(
+                    store__company__owner__subscription__plan__company_branches=False,
+                    store__is_main_store=True
+                )
+            )
+            # -----------------------------------------------------------------
 
             # 5. Extracción de valores
             locations = queryset.values(
@@ -1581,20 +1780,15 @@ class CartMakerMapViewSet(viewsets.ViewSet):
                 raw_image = loc['store__company__image']
                 image_url = storage_manager.get_url(raw_image) if raw_image else "https://via.placeholder.com/150"
 
-                # 👇 LÓGICA DE FALLBACK PARA LOS HORARIOS (WORK_HOURS)
                 work_hours = loc['store__work_hours']
-                # Si es None o un diccionario vacío {}
                 if not work_hours: 
                     work_hours = loc['store__company__main_work_hours']
 
-                # 👇 LÓGICA DE FALLBACK PARA LOS DÍAS (WORK_DAYS)
                 work_days = loc['store__work_days']
-                # Si es None o una lista vacía []
                 if not work_days: 
                     work_days = loc['store__company__main_work_days']
-                # Si la compañía tampoco tiene (por seguridad)
                 if not work_days: 
-                    work_days = [0, 1, 2, 3, 4] # Lunes a viernes por defecto
+                    work_days = [0, 1, 2, 3, 4] 
 
                 features.append({
                     "store_id": str(loc['store_id']),
@@ -1608,7 +1802,6 @@ class CartMakerMapViewSet(viewsets.ViewSet):
                     "category": loc['store__company__category__name'] or "General",
                     "profile_pic": image_url,
                     "is_platinum": loc['store__company__is_platinum'],
-                    # 👇 PASAMOS LAS VARIABLES YA RESUELTAS
                     "work_hours": work_hours, 
                     "work_days": work_days 
                 })
@@ -1634,7 +1827,6 @@ class CartMakerMapViewSet(viewsets.ViewSet):
             if not store_id:
                 return Response({'error': 'store_id es requerido'}, status=status.HTTP_400_BAD_REQUEST)
 
-            # --- NUEVOS: Captura de filtros para Productos ---
             subcategory_id = request.query_params.get('subcategory_id')
             min_price = request.query_params.get('min_price')
             max_price = request.query_params.get('max_price')
@@ -1646,8 +1838,16 @@ class CartMakerMapViewSet(viewsets.ViewSet):
                 store_id=store_id,
                 paused=False,
                 stock__gt=0
+            )
+            
+            # --- PROTECCIÓN ORTODOXA: Asegurarnos de que esta tienda no esté inhabilitada por plan ---
+            queryset = queryset.filter(
+                Q(store__company__owner__subscription__plan__company_branches=True) |
+                Q(
+                    store__company__owner__subscription__plan__company_branches=False,
+                    store__is_main_store=True
+                )
             ).annotate(
-                # Calculamos el promedio y lo redondeamos a 1 decimal
                 avg_rating=Round(Coalesce(Avg('product__califications__rating'), 0.0), 1),
                 rating_count=Count('product__califications')
             )
@@ -1666,7 +1866,7 @@ class CartMakerMapViewSet(viewsets.ViewSet):
                 if max_price:
                     queryset = queryset.filter(actual_price__lte=float(max_price))
 
-            items = queryset[:50] # Mantenemos el límite sano para rendimiento
+            items = queryset[:50] 
             data = [item.get_json() for item in items]
             
             return Response({'data': data}, status=status.HTTP_200_OK)
@@ -1692,15 +1892,24 @@ class GetStoresLocations(APIView):
             )
             bbox = Polygon.from_bbox(bbox_coords)
             bbox.srid = 4326
+            now = timezone.now()
+            
+            # Filtro combinado directo
             stores = StoreLocation.objects.filter(
-                coordinates__coveredby=bbox
+                Q(store__company__owner__subscription__valid_until__gte=now) |
+                Q(store__company__owner__subscription__valid_until__isnull=True),
+                # 💡 REGLA ORTODOXA
+                Q(store__company__owner__subscription__plan__company_branches=True) |
+                Q(store__company__owner__subscription__plan__company_branches=False, store__is_main_store=True),
+                coordinates__coveredby=bbox,
             ).values(
                 'id', 
                 'coordinates', 
                 'name', 
                 'mall_id', 
                 'store__store_type'
-            )[:500] # MAXIMO 500 TIENDAS A LA VISTA EN EL MAPA
+            )[:500] 
+
             features = [{
                 "id": s['id'],
                 "lat": s['coordinates'].y,
@@ -1709,7 +1918,9 @@ class GetStoresLocations(APIView):
                 "name": s['name'],
                 "type": s['store__store_type']
             } for s in stores]
+            
             return Response({'data': features}, status=status.HTTP_200_OK)
+            
         except (ValueError, TypeError, AttributeError):
             return Response({'error': 'Parámetros inválidos'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1740,8 +1951,10 @@ class CompanyCacheAPI(APIView):
 
     def get(self, request):
         """
-        Devuelve los datos de la compania creada pot el usuario.
+        Devuelve los datos de la compania creada por el usuario.
         """
+        # merchant_subscription = MerchantSubscription.objects.filter(merchant=request.user, valid_until__gt=timezone.now()).first()
+        # print("SUBSCRIPCION A OBTENER: ", merchant_subscription)
         if MerchantSubscription.objects.filter(merchant=request.user, valid_until__gt=timezone.now()).exists():
             try:
                 company = Company.objects.get(owner=request.user).get_json()
@@ -1778,6 +1991,11 @@ class SubscriptionsCacheAPI(APIView):
             'atlas':[],
             'merchant':[]
         }
+        pending_rejection_notif = Notification.objects.filter(
+            user=request.user,
+            category=NotificationCategory.PAYMENT_REJECTED,
+            is_read=False
+        ).first()
         wallet_data = user.wallet.get_json()
         if atlas_subscription:
             subscriptions_payments['atlas'] = [atlas_payment.get_json() for atlas_payment in atlas_subscription.payments.all()]
@@ -1787,7 +2005,8 @@ class SubscriptionsCacheAPI(APIView):
             "merchant_subscription":merchant_subscription.get_json() if merchant_subscription else None,
             "atlas_subscription":atlas_subscription.get_json() if atlas_subscription else None,
             "subscriptions_payments":subscriptions_payments,
-            "wallet":wallet_data
+            "wallet":wallet_data,
+            "pending_payment_notification_retry_id": pending_rejection_notif.id if pending_rejection_notif else None
         }
         return Response(cache, status=200)
 
@@ -2041,13 +2260,26 @@ class ClientCompanyViewSet(viewsets.ViewSet):
             # 1. Determinar qué tienda consultar
             if company_id:
                 store = CompanyStore.objects.select_related('company', 'company__category').filter(
-                    company_id=company_id, is_active=True
-                ).first()
+                    Q(company__owner__subscription__plan__company_branches=True) |
+                    Q(company__owner__subscription__plan__company_branches=False, is_main_store=True),
+                    company_id=company_id, 
+                    is_active=True
+                ).order_by('-is_main_store', 'creation').first() # 💡 Priorizamos mostrar la Main Store
+                
                 if not store:
-                    return Response({'error': 'La compañía no tiene tiendas activas.'}, status=status.HTTP_404_NOT_FOUND)
+                    return Response({'error': 'La compañía no tiene tiendas activas o visibles bajo su plan actual.'}, status=status.HTTP_404_NOT_FOUND)
                 company = store.company
             else:
-                store = CompanyStore.objects.select_related('company', 'company__category').get(id=store_id)
+                # Si piden una store_id directa, también debemos validar que sea legal mostrarla
+                store = CompanyStore.objects.select_related('company', 'company__category').filter(
+                    Q(company__owner__subscription__plan__company_branches=True) |
+                    Q(company__owner__subscription__plan__company_branches=False, is_main_store=True),
+                    id=store_id,
+                    is_active=True
+                ).first()
+
+                if not store:
+                    return Response({'error': 'La tienda solicitada no existe, fue eliminada o está inactiva por límite de plan.'}, status=status.HTTP_404_NOT_FOUND)
                 company = store.company
             
             # =======================================================

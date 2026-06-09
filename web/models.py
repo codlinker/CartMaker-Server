@@ -13,6 +13,7 @@ from django.utils import timezone
 from django.utils.html import mark_safe
 from decimal import Decimal
 from django.contrib.postgres.indexes import GinIndex
+from django.db.models import UniqueConstraint, Q
 
 # FUNCIONES PARA JSON Fields por default
 
@@ -603,6 +604,7 @@ class CompanyStore(models.Model):
         store_img_url (str): Url de la imagen de la tienda.
         store_type (int): Tipo de tienda.
         is_active (bool): Indica si la tienda esta activa.
+        is_main_store (bool): Indica si es la sucursal principal. Obligatorio si el plan no permite múltiples sucursales.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='stores')
@@ -613,6 +615,20 @@ class CompanyStore(models.Model):
     work_days = models.JSONField(default=list, blank=True)
     is_active = models.BooleanField(default=True)
     store_type = models.IntegerField(choices=StoreType.choices, default=StoreType.STREET)
+    is_main_store = models.BooleanField(
+        default=False,
+        help_text="Indica si es la sucursal principal. Obligatorio si el plan no permite múltiples sucursales."
+    )
+
+    class Meta:
+        constraints = [
+            # 💡 REGLA DE INTEGRIDAD: Solo puede haber un is_main_store=True por cada company
+            UniqueConstraint(
+                fields=['company'],
+                condition=Q(is_main_store=True),
+                name='unique_main_store_per_company'
+            )
+        ]
 
     @property
     def is_between_work_days(self) -> bool:
@@ -684,7 +700,8 @@ class CompanyStore(models.Model):
             'is_currently_open': self.is_currently_open, # Ahora esto se evaluará correctamente gracias al @property
             'location': self.location.get_json() if hasattr(self, 'location') else None,
             'contact_methods': contact_methods_dict,
-            'is_active': self.is_active
+            'is_active': self.is_active,
+            "is_main_store":self.is_main_store
         }
     
     def __str__(self):
@@ -881,13 +898,11 @@ class Product(models.Model):
 
     class Meta:
         indexes = [
-            # Índice para la búsqueda rápida por nombre
             GinIndex(
                 name='product_name_gin_idx', 
                 fields=['name'], 
                 opclasses=['gin_trgm_ops']
             ),
-            # Índice opcional si también buscas mucho por descripción
             GinIndex(
                 name='product_desc_gin_idx', 
                 fields=['description'], 
@@ -949,15 +964,6 @@ class InventoryItem(models.Model):
         db_index=True,
         help_text="Puntuación precalculada de interacciones (visitas, carritos, compras). Evita JOINs masivos. Usado por el motor de busqueda."
     )
-
-    class Meta:
-         indexes = [
-            GinIndex(
-                name='subcategory_name_gin_idx', 
-                fields=['name'], 
-                opclasses=['gin_trgm_ops']
-            ),
-         ]
 
     def get_json(self) -> dict:
         avg_rating = getattr(self, 'avg_rating', 0.0)
@@ -1476,6 +1482,7 @@ class MerchantPlanPayment(models.Model):
         return {
             'id': self.id,
             'subscription': self.subscription.id,
+            "plan_name": self.subscription.plan.name,
             'reference_number': self.reference_number,
             'payment_proof_url': storage_manager.get_url(self.payment_proof_url),
             'amount': float(self.amount),

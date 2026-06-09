@@ -49,6 +49,7 @@ urlpatterns = [
     path('api/v1/get-company-products/<uuid:company_id>/', GetCompanyProducts.as_view(), name="get_company_products"),
     path('api/v1/get-store-inventory-items/<uuid:store_id>/', GetStoreInventoryItems.as_view(), name="get_store_inventory_items"),
     path('api/v1/get-company-sub-categories/<uuid:company_id>/', GetCompanySubCategories.as_view(), name="get_company_sub_categories"),
+    path('api/v1/main-branch/', CompanyMainBranchViewSet.as_view(), name='main_branch'),
     # Rutas para manejo de pagos
     path('api/v1/upload-subscription-payment', UploadSubscriptionPayment.as_view(), name='upload_subscription_payment'),
     # Rutas para la autenticacion
