@@ -6,6 +6,7 @@ from django.utils import timezone
 from dateutil.relativedelta import relativedelta
 from django.db import transaction
 from .utils import *
+from django.core.cache import cache
 
 @receiver(pre_save, sender=MerchantPlanPayment)
 def on_payment_created(sender, instance: MerchantPlanPayment, **kwargs):
@@ -114,3 +115,134 @@ def on_view_log_deleted(sender, instance, **kwargs):
     Se dispara si por alguna razón se elimina un log (limpieza de BD, etc).
     """
     recalculate_item_popularity(instance.inventory_item_id)
+
+@receiver(post_save, sender=InventoryItem)
+def update_item_volatile_cache(sender, instance: InventoryItem, **kwargs):
+    """
+    Cada vez que el stock, precio personalizado o estado de pausa cambie en la BD,
+    actualizamos de inmediato el Nivel Volátil en Redis de forma síncrona.
+    Escribir un string/dict simple en Redis toma menos de 1ms, no bloquea el hilo.
+    """
+    cache_key = f"cartmaker:volatile:item:{instance.id}"
+    state = {
+        "stock": instance.stock,
+        "paused": instance.paused,
+        "custom_price": float(instance.custom_price) if instance.custom_price else None
+    }
+    # Lo guardamos en RAM por 24 horas. Las señales posteriores se encargan de refrescarlo.
+    cache.set(cache_key, state, timeout=86400)
+
+
+@receiver(post_delete, sender=InventoryItem)
+def delete_item_volatile_cache(sender, instance: InventoryItem, **kwargs):
+    """
+    Si un lote de inventario se elimina físicamente, limpiamos su estado volátil
+    e invalidamos el caché estructural de su zona geográfica para que desaparezca del esqueleto.
+    """
+    cache_key = f"cartmaker:volatile:item:{instance.id}"
+    cache.delete(cache_key)
+    
+    # Invalidación estructural zonal masiva
+    try:
+        location = instance.store.location
+        approx_lat = round(location.coordinates.y, 3)
+        approx_lng = round(location.coordinates.x, 3)
+        
+        # El método delete_pattern de django-redis busca y borra por comodines en una sola operación
+        cache.delete_pattern(f"cartmaker:struct:home:{approx_lat}:{approx_lng}:*")
+    except Exception:
+        # Blindaje por si la sucursal no tenía una ubicación geográfica configurada todavía
+        pass
+
+
+@receiver(post_save, sender=Product)
+def invalidate_structural_cache_on_product_change(sender, instance: Product, **kwargs):
+    """
+    Si los datos estructurales del catálogo maestro cambian (Nombre del producto, descripción, imágenes),
+    debemos invalidar el esqueleto estructural indexado en Redis de las zonas donde se venda.
+    """
+    # Buscamos todas las sucursales que tienen este producto registrado en sus inventarios
+    stores_ids = instance.inventory_items.values_list('store_id', flat=True).distinct()
+    
+    for store_id in stores_ids:
+        try:
+            store_location = StoreLocation.objects.get(store_id=store_id)
+            approx_lat = round(store_location.coordinates.y, 3)
+            approx_lng = round(store_location.coordinates.x, 3)
+            
+            # Borramos el feed estructural de esa coordenada truncada específica
+            cache.delete_pattern(f"cartmaker:struct:home:{approx_lat}:{approx_lng}:*")
+        except StoreLocation.DoesNotExist:
+            continue
+
+# ==========================================
+# INVALIDACIÓN GLOBAL (Afecta a todos)
+# ==========================================
+@receiver(post_save, sender=Mall)
+@receiver(post_delete, sender=Mall)
+def invalidate_malls_cache(sender, instance, **kwargs):
+    cache.delete("cartmaker:global:malls")
+
+@receiver(post_save, sender=Announcement)
+@receiver(post_delete, sender=Announcement)
+@receiver(post_save, sender=CompanyCategory)
+def invalidate_home_cache(sender, instance, **kwargs):
+    cache.delete("cartmaker:global:home")
+
+@receiver(post_save, sender=Category)
+@receiver(post_save, sender=SubCategory)
+def invalidate_search_cache(sender, instance, **kwargs):
+    cache.delete("cartmaker:global:search")
+
+# ==========================================
+# INVALIDACIÓN POR TENANT (Afecta solo al dueño)
+# ==========================================
+@receiver(post_save, sender=User)
+def invalidate_user_profile_cache(sender, instance: User, **kwargs):
+    """Se dispara si cambia el nombre, foto, o correo del usuario"""
+    cache.delete(f"cartmaker:tenant:{instance.id}:profile")
+
+@receiver(post_save, sender=ClientLocation)
+@receiver(post_delete, sender=ClientLocation)
+@receiver(post_save, sender=ClientContactMethod)
+@receiver(post_delete, sender=ClientContactMethod)
+def invalidate_user_relations_cache(sender, instance, **kwargs):
+    # En estos modelos, la relación hacia el usuario es 'user' o 'client'
+    user_id = getattr(instance, 'user_id', None) or getattr(instance, 'client_id', None)
+    if user_id:
+        cache.delete(f"cartmaker:tenant:{user_id}:profile")
+
+@receiver(post_save, sender=Company)
+@receiver(post_save, sender=CompanyStore)
+@receiver(post_delete, sender=CompanyStore)
+def invalidate_company_cache(sender, instance, **kwargs):
+    """Si el comerciante actualiza su empresa o agrega una sucursal"""
+    owner_id = instance.owner_id if isinstance(instance, Company) else instance.company.owner_id
+    cache.delete(f"cartmaker:tenant:{owner_id}:company")
+
+# ==========================================
+# INVALIDACIÓN DEL CACHÉ DE SUSCRIPCIONES Y BILLETERA
+# ==========================================
+@receiver(post_save, sender=UserWallet)
+@receiver(post_save, sender=MerchantSubscription)
+@receiver(post_save, sender=MerchantPlanPayment)
+@receiver(post_save, sender=Notification)
+def invalidate_subscriptions_cache(sender, instance, **kwargs):
+    """
+    Este es el caché más crítico. Si le aprueban un pago, le suman saldo a favor 
+    o le llega una notificación de rechazo de pago, debe refrescarse inmediato.
+    """
+    user_id = None
+    if isinstance(instance, UserWallet):
+        user_id = instance.user_id
+    elif isinstance(instance, MerchantSubscription):
+        user_id = instance.merchant_id
+    elif isinstance(instance, MerchantPlanPayment):
+        user_id = instance.subscription.merchant_id
+    elif isinstance(instance, Notification):
+        # Solo invalidamos si es una notificación relacionada con pagos
+        if instance.category in [NotificationCategory.PAYMENT_REJECTED, NotificationCategory.PAYMENT_APPROVED]:
+            user_id = instance.user_id
+            
+    if user_id:
+        cache.delete(f"cartmaker:tenant:{user_id}:subscriptions")

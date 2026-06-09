@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import io
 import json
 
@@ -1600,197 +1601,157 @@ from pprint import pprint
 
 class CartMakerMapViewSet(viewsets.ViewSet):
     """
-    API exclusiva para el motor de renderizado del mapa principal de CartMaker (el del Home).
-    Extrae la metadata de la 'Company' asociada a las coordenadas geográficas.
+    API exclusiva para el motor de renderizado del mapa principal de CartMaker.
+    Utiliza Grid Snapping (Alineación de Cuadrícula) y filtrado In-Memory 
+    para absorber el tráfico masivo de map panning sin golpear a PostGIS.
     """
     permission_classes = [IsAuthenticated]
 
+    def _snap_to_grid(self, val: float, step: float = 0.04) -> float:
+        """
+        Redondea una coordenada a una cuadrícula virtual determinista.
+        Un step de 0.04 grados equivale aproximadamente a bloques de 4.5 km.
+        """
+        return math.floor(val / step) * step
+
     @action(detail=False, methods=['get'])
     def get_locations(self, request):
-        print("\n" + "="*50)
-        print("DEBUG [get_locations]: Iniciando solicitud")
-        pprint(request.query_params)
-        print("="*50)
-
         try:
-            # 1. Parsing del Bounding Box
-            bbox_coords = (
-                float(request.query_params.get('min_lng')),
-                float(request.query_params.get('min_lat')),
-                float(request.query_params.get('max_lng')),
-                float(request.query_params.get('max_lat'))
-            )
-            bbox = Polygon.from_bbox(bbox_coords)
+            min_lng = float(request.query_params.get('min_lng'))
+            min_lat = float(request.query_params.get('min_lat'))
+            max_lng = float(request.query_params.get('max_lng'))
+            max_lat = float(request.query_params.get('max_lat'))
+        except (TypeError, ValueError):
+            return Response({'error': 'Parámetros de coordenadas inválidos'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Captura de Filtros
+        filters_dict = {
+            'c_cat': request.query_params.get('company_category_id'),
+            'plat': request.query_params.get('is_platinum') == 'true',
+            'p_cat': request.query_params.get('category_id'),
+            'p_sub': request.query_params.get('subcategory_id'),
+            'min_p': request.query_params.get('min_price'),
+            'max_p': request.query_params.get('max_price'),
+            'q': request.query_params.get('search', '').strip().lower()
+        }
+        
+        has_filters = any(v for v in filters_dict.values() if v is not False and v != '')
+        # Hasheamos los filtros de forma determinista para la llave de Redis
+        filters_hash = hashlib.md5(json.dumps(filters_dict, sort_keys=True).encode()).hexdigest()
+
+        # =========================================================================
+        # 1. GENERACIÓN DE LLAVE DETERMINISTA (GRID SNAPPING)
+        # =========================================================================
+        if has_filters:
+            # Si hay filtros, tu lógica original usaba un radio de 200km desde el centro.
+            # Hacemos snapping del centroide para estabilizar el caché de la búsqueda.
+            centroid_lng = self._snap_to_grid((min_lng + max_lng) / 2, step=0.1)
+            centroid_lat = self._snap_to_grid((min_lat + max_lat) / 2, step=0.1)
+            cache_key = f"map:radius:{centroid_lng:.2f}:{centroid_lat:.2f}:{filters_hash}"
+        else:
+            # Panning libre: Expandimos el BBox del usuario al bloque estático más cercano
+            grid_min_lng = self._snap_to_grid(min_lng)
+            grid_min_lat = self._snap_to_grid(min_lat)
+            grid_max_lng = self._snap_to_grid(max_lng) + 0.04
+            grid_max_lat = self._snap_to_grid(max_lat) + 0.04
+            cache_key = f"map:grid:{grid_min_lng:.2f}:{grid_min_lat:.2f}:{grid_max_lng:.2f}:{grid_max_lat:.2f}:{filters_hash}"
+
+        # Intentamos recuperar el bloque gigante de la RAM
+        cached_features = cache.get(cache_key)
+
+        # =========================================================================
+        # 2. CACHE MISS: CONSULTA PESADA A POSTGIS
+        # =========================================================================
+        if not cached_features:
+            bbox = Polygon.from_bbox((min_lng, min_lat, max_lng, max_lat))
             bbox.srid = 4326
 
-            # Captura de filtros de Tiendas
-            company_category_id = request.query_params.get('company_category_id')
-            is_platinum = request.query_params.get('is_platinum') == 'true'
-
-            # Captura de filtros de Productos
-            product_category_id = request.query_params.get('category_id')
-            product_subcategory_id = request.query_params.get('subcategory_id')
-            min_price = request.query_params.get('min_price')
-            max_price = request.query_params.get('max_price')
-            search_query = request.query_params.get('search', '').strip()
-
-            # Determinar si hay algún filtro activo para decidir si usar radio o BBox
-            has_filters = any([
-                company_category_id, 
-                is_platinum, 
-                product_category_id, 
-                product_subcategory_id, 
-                min_price, 
-                max_price, 
-                search_query
-            ])
-
-            # 2. Construcción del queryset base de ubicaciones (CON LOGICA DE RADIO)
             if has_filters:
-                print("DEBUG: Filtros detectados. Buscando en radio de 200km desde el centro.")
+                # Usamos el centroide real para la consulta (PostGIS es rápido en esto)
                 queryset = StoreLocation.objects.select_related('store', 'mall').filter(
                     coordinates__distance_lte=(bbox.centroid, D(km=200)),
                     store__is_active=True
                 )
             else:
-                print("DEBUG: Sin filtros. Buscando en Bounding Box estricto.")
+                # Usamos la cuadrícula GIGANTE redondeada para almacenar datos de sobra
+                grid_bbox = Polygon.from_bbox((grid_min_lng, grid_min_lat, grid_max_lng, grid_max_lat))
+                grid_bbox.srid = 4326
                 queryset = StoreLocation.objects.select_related('store', 'mall').filter(
-                    coordinates__coveredby=bbox,
+                    coordinates__coveredby=grid_bbox,
                     store__is_active=True
                 )
-            
-            print(f"DEBUG: Tiendas en Bounding Box inicial: {queryset.count()}")
 
-            # 3. Aplicar filtros directos de la Tienda/Compañía
-            if company_category_id:
-                print(f"DEBUG: Filtrando por company_category_id: {company_category_id}")
-                queryset = queryset.filter(store__company__category_id=company_category_id)
-            if is_platinum:
-                print("DEBUG: Filtrando por is_platinum")
+            # --- APLICACIÓN DE FILTROS ORIGINALES ---
+            if filters_dict['c_cat']:
+                queryset = queryset.filter(store__company__category_id=filters_dict['c_cat'])
+            if filters_dict['plat']:
                 queryset = queryset.filter(store__company__is_platinum=True)
 
-            # 4. Aplicar filtros cruzados (Filtrar tiendas basándose en su inventario)
-            if product_category_id or product_subcategory_id or min_price or max_price:
-                print("DEBUG: Aplicando filtros de inventario (productos)")
+            if filters_dict['p_cat'] or filters_dict['p_sub'] or filters_dict['min_p'] or filters_dict['max_p']:
                 inventory_query = Q(store__product_items__paused=False, store__product_items__stock__gt=0)
+                if filters_dict['p_sub']:
+                    inventory_query &= Q(store__product_items__product__category_id=filters_dict['p_sub'])
+                elif filters_dict['p_cat']:
+                    inventory_query &= Q(store__product_items__product__category__parent_category_id=filters_dict['p_cat'])
 
-                if product_subcategory_id:
-                    print(f"DEBUG: Filtro subcategoría: {product_subcategory_id}")
-                    inventory_query &= Q(store__product_items__product__category_id=product_subcategory_id)
-                elif product_category_id:
-                    print(f"DEBUG: Filtro categoría padre: {product_category_id}")
-                    inventory_query &= Q(store__product_items__product__category__parent_category_id=product_category_id)
-
-                if min_price or max_price:
-                    print(f"DEBUG: Filtro precio: Min {min_price}, Max {max_price}")
-                    if min_price:
-                        inventory_query &= (
-                            Q(store__product_items__custom_price__isnull=False, store__product_items__custom_price__gte=float(min_price)) |
-                            Q(store__product_items__custom_price__isnull=True, store__product_items__product__price__gte=float(min_price))
-                        )
-                    if max_price:
-                        inventory_query &= (
-                            Q(store__product_items__custom_price__isnull=False, store__product_items__custom_price__lte=float(max_price)) |
-                            Q(store__product_items__custom_price__isnull=True, store__product_items__product__price__lte=float(max_price))
-                        )
-
+                if filters_dict['min_p']:
+                    min_val = float(filters_dict['min_p'])
+                    inventory_query &= (
+                        Q(store__product_items__custom_price__isnull=False, store__product_items__custom_price__gte=min_val) |
+                        Q(store__product_items__custom_price__isnull=True, store__product_items__product__price__gte=min_val)
+                    )
+                if filters_dict['max_p']:
+                    max_val = float(filters_dict['max_p'])
+                    inventory_query &= (
+                        Q(store__product_items__custom_price__isnull=False, store__product_items__custom_price__lte=max_val) |
+                        Q(store__product_items__custom_price__isnull=True, store__product_items__product__price__lte=max_val)
+                    )
                 queryset = queryset.filter(inventory_query).distinct()
-                
-                print(f"DEBUG: Tiendas tras filtro de productos: {queryset.count()}")
-                for item in queryset:
-                    print(f"DEBUG: Tienda sobreviviente: {item.store.name} (ID: {item.store_id})")
 
-            if search_query:
-                print(f"DEBUG: Ejecutando búsqueda global para: '{search_query}'")
-                search_terms = search_query.split()
+            if filters_dict['q']:
+                search_terms = filters_dict['q'].split()
                 word_queries = []
-                
                 for term in search_terms:
                     term_filter = (
                         Q(store__name__icontains=term) |
                         Q(store__company__name__icontains=term) |
                         Q(store__company__category__name__icontains=term) |
-                        Q(
-                            store__product_items__product__name__icontains=term, 
-                            store__product_items__paused=False, 
-                            store__product_items__stock__gt=0
-                        ) |
-                        Q(
-                            store__product_items__product__category__name__icontains=term, 
-                            store__product_items__paused=False, 
-                            store__product_items__stock__gt=0
-                        ) |
-                        Q(
-                            store__product_items__product__category__parent_category__name__icontains=term, 
-                            store__product_items__paused=False, 
-                            store__product_items__stock__gt=0
-                        )
+                        Q(store__product_items__product__name__icontains=term, store__product_items__paused=False, store__product_items__stock__gt=0) |
+                        Q(store__product_items__product__category__name__icontains=term, store__product_items__paused=False, store__product_items__stock__gt=0) |
+                        Q(store__product_items__product__category__parent_category__name__icontains=term, store__product_items__paused=False, store__product_items__stock__gt=0)
                     )
                     word_queries.append(term_filter)
-                
                 global_search_filter = reduce(operator.and_, word_queries)
                 queryset = queryset.filter(global_search_filter).distinct()
-                
-            # 4.5. Excluir tiendas con subscripciones vencidas
+
             now = timezone.now()
             queryset = queryset.filter(
                 Q(store__company__owner__subscription__valid_until__gte=now) |
-                Q(store__company__owner__subscription__valid_until__isnull=True)
-            )
-
-            # -----------------------------------------------------------------
-            # 4.6. REGLA DE PLANES ORTODOXA: Límite de sucursales e is_main_store
-            # -----------------------------------------------------------------
-            print("DEBUG: Aplicando filtro explícito de sucursal principal.")
-            queryset = queryset.filter(
-                # Condición A: El plan de la compañía SÍ permite sucursales (pasan todas)
+                Q(store__company__owner__subscription__valid_until__isnull=True),
                 Q(store__company__owner__subscription__plan__company_branches=True) |
-                # Condición B: El plan NO permite sucursales (Solo pasa la elegida como Main Store)
-                Q(
-                    store__company__owner__subscription__plan__company_branches=False,
-                    store__is_main_store=True
-                )
+                Q(store__company__owner__subscription__plan__company_branches=False, store__is_main_store=True)
             )
-            # -----------------------------------------------------------------
 
-            # 5. Extracción de valores
             locations = queryset.values(
-                'store_id',
-                'coordinates',
-                'mall_id',
-                'mall_floor',
-                'store__store_type',
-                'store__name', 
-                'store__company__name', 
-                'store__company__image', 
-                'store__company__category__name', 
-                'store__company__is_platinum',
-                'store__work_hours',
-                'store__work_days',
-                'store__company__main_work_hours',
+                'store_id', 'coordinates', 'mall_id', 'mall_floor',
+                'store__store_type', 'store__name', 'store__company__name', 
+                'store__company__image', 'store__company__category__name', 
+                'store__company__is_platinum', 'store__work_hours',
+                'store__work_days', 'store__company__main_work_hours',
                 'store__company__main_work_days'
-            )[:500]
+            )[:600]
 
-            # 6. Formateo JSON para Flutter
-            features = []
+            cached_features = []
             for loc in locations:
                 type_int = loc['store__store_type']
                 type_name = StoreType(type_int).name if type_int is not None else "STREET"
-                
                 raw_image = loc['store__company__image']
                 image_url = storage_manager.get_url(raw_image) if raw_image else "https://via.placeholder.com/150"
 
-                work_hours = loc['store__work_hours']
-                if not work_hours: 
-                    work_hours = loc['store__company__main_work_hours']
+                work_hours = loc['store__work_hours'] or loc['store__company__main_work_hours']
+                work_days = loc['store__work_days'] or loc['store__company__main_work_days'] or [0, 1, 2, 3, 4]
 
-                work_days = loc['store__work_days']
-                if not work_days: 
-                    work_days = loc['store__company__main_work_days']
-                if not work_days: 
-                    work_days = [0, 1, 2, 3, 4] 
-
-                features.append({
+                cached_features.append({
                     "store_id": str(loc['store_id']),
                     "lat": loc['coordinates'].y,
                     "lng": loc['coordinates'].x,
@@ -1806,70 +1767,130 @@ class CartMakerMapViewSet(viewsets.ViewSet):
                     "work_days": work_days 
                 })
 
-            print(f"DEBUG: Retornando {len(features)} tiendas al mapa.")
-            print("="*50 + "\n")
-            return Response({'data': features}, status=status.HTTP_200_OK)
+            # Guardamos el bloque en Redis por 15 minutos
+            cache.set(cache_key, cached_features, timeout=900)
 
-        except (ValueError, TypeError, AttributeError) as e:
-            print(f"DEBUG ERROR [Valores]: {e}")
-            return Response({'error': f'Parámetros inválidos: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            print(f"DEBUG ERROR [Interno]: {e}")
-            return Response({'error': f'Error interno: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
+        # =========================================================================
+        # 3. MAP REDUCE IN-MEMORY (CACHE HIT)
+        # =========================================================================
+        # En memoria, recortamos matemáticamente los bordes del bloque gigante 
+        # para enviar a Flutter ÚNICAMENTE lo que cabe en su pantalla milimétrica.
+        exact_features = [
+            f for f in cached_features 
+            if min_lng <= f['lng'] <= max_lng and min_lat <= f['lat'] <= max_lat
+        ]
+
+        return Response({'data': exact_features}, status=status.HTTP_200_OK)
+
     @action(detail=False, methods=['get'])
     def store_products(self, request):
         """
-        Retorna el catálogo activo de una tienda específica filtrado por subcategoría y rango de precios.
+        Retorna el catálogo activo de una tienda específica filtrado por subcategoría y rango de precios,
+        preservando estrictamente la estructura de datos extendida original mediante Split Caching.
         """
         try:
             store_id = request.query_params.get('store_id')
             if not store_id:
                 return Response({'error': 'store_id es requerido'}, status=status.HTTP_400_BAD_REQUEST)
 
-            subcategory_id = request.query_params.get('subcategory_id')
-            min_price = request.query_params.get('min_price')
-            max_price = request.query_params.get('max_price')
+            subcategory_id = request.query_params.get('subcategory_id') or 'all'
+            min_price = request.query_params.get('min_price') or 'none'
+            max_price = request.query_params.get('max_price') or 'none'
 
-            # Queryset base optimizado con select_related
-            queryset = InventoryItem.objects.select_related(
-                'product', 'product__category', 'offer', 'store', 'store__company'
-            ).filter(
-                store_id=store_id,
-                paused=False,
-                stock__gt=0
-            )
-            
-            # --- PROTECCIÓN ORTODOXA: Asegurarnos de que esta tienda no esté inhabilitada por plan ---
-            queryset = queryset.filter(
-                Q(store__company__owner__subscription__plan__company_branches=True) |
-                Q(
-                    store__company__owner__subscription__plan__company_branches=False,
-                    store__is_main_store=True
+            # 1. Definir llave única estructural para esta combinación exacta de filtros en la sucursal
+            struct_cache_key = f"cartmaker:struct:map_products:{store_id}:{subcategory_id}:{min_price}:{max_price}"
+            structural_data = cache.get(struct_cache_key)
+
+            # =========================================================================
+            # CACHE MISS ESTRUCTURAL: CONSULTA OPTIMIZADA A POSTGRESQL
+            # =========================================================================
+            if not structural_data:
+                # Recuperamos tu QuerySet base original con todas sus relaciones cargadas
+                queryset = InventoryItem.objects.select_related(
+                    'product', 'product__category', 'offer', 'store', 'store__company'
+                ).filter(
+                    store_id=store_id,
+                    paused=False,
+                    stock__gt=0
                 )
-            ).annotate(
-                avg_rating=Round(Coalesce(Avg('product__califications__rating'), 0.0), 1),
-                rating_count=Count('product__califications')
-            )
-
-            # Aplicar filtro por SubCategoría del producto maestro
-            if subcategory_id:
-                queryset = queryset.filter(product__category_id=subcategory_id)
-
-            # Aplicar filtro de precio evaluando el precio final real
-            if min_price or max_price:
-                queryset = queryset.annotate(
-                    actual_price=Coalesce('custom_price', 'product__price')
+                
+                # Regla de protección ortodoxa de planes
+                queryset = queryset.filter(
+                    Q(store__company__owner__subscription__plan__company_branches=True) |
+                    Q(
+                        store__company__owner__subscription__plan__company_branches=False,
+                        store__is_main_store=True
+                    )
+                ).annotate(
+                    avg_rating=Round(Coalesce(Avg('product__califications__rating'), 0.0), 1),
+                    rating_count=Count('product__califications')
                 )
-                if min_price:
-                    queryset = queryset.filter(actual_price__gte=float(min_price))
-                if max_price:
-                    queryset = queryset.filter(actual_price__lte=float(max_price))
 
-            items = queryset[:50] 
-            data = [item.get_json() for item in items]
+                # Aplicar filtro por SubCategoría si viene en los parámetros
+                if request.query_params.get('subcategory_id'):
+                    queryset = queryset.filter(product__category_id=request.query_params.get('subcategory_id'))
+
+                # Aplicar filtro de rango de precios original evaluando el costo real
+                if request.query_params.get('min_price') or request.query_params.get('max_price'):
+                    queryset = queryset.annotate(
+                        actual_price=Coalesce('custom_price', 'product__price')
+                    )
+                    if request.query_params.get('min_price'):
+                        queryset = queryset.filter(actual_price__gte=float(request.query_params.get('min_price')))
+                    if request.query_params.get('max_price'):
+                        queryset = queryset.filter(actual_price__lte=float(request.query_params.get('max_price')))
+
+                # Evaluamos los primeros 50 ítems del catálogo de la tienda
+                items = queryset[:50]
+                
+                # CRÍTICO: Mantenemos el método get_json() original del modelo con todos sus campos extendidos
+                structural_data = [item.get_json() for item in items]
+                
+                # Almacenamos el esqueleto en RAM por 10 minutos
+                cache.set(struct_cache_key, structural_data, timeout=600)
+
+            # =========================================================================
+            # REAL-TIME STITCHING: FUSIÓN DE VOLATILIDAD DIRECTA EN LA VISTA
+            # =========================================================================
+            if not structural_data:
+                return Response({'data': []}, status=status.HTTP_200_OK)
+
+            # Extraemos los IDs de los ítems del caché estructural
+            item_ids = [item["id"] for item in structural_data]
             
-            return Response({'data': data}, status=status.HTTP_200_OK)
+            # Ejecutamos un MGET nativo por tubería mapeando las llaves volátiles generadas en signals.py
+            volatile_keys_map = {f"cartmaker:volatile:item:{uid}": uid for uid in item_ids}
+            cached_states = cache.get_many(volatile_keys_map.keys())
+
+            final_realtime_data = []
+            
+            for item_data in structural_data:
+                item_id = item_data["id"]
+                v_key = f"cartmaker:volatile:item:{item_id}"
+                state = cached_states.get(v_key)
+
+                # Fallback atómico si la llave volátil expiró en Redis
+                if not state:
+                    state = {
+                        "stock": int(item_data.get("stock", 0)),
+                        "paused": bool(item_data.get("paused", False)),
+                        "custom_price": item_data.get("custom_price")
+                    }
+                    cache.set(v_key, state, timeout=86400)
+
+                # Validación de consistencia en vivo: si se agotó el stock o se pausó, se descarta al vuelo
+                if state["paused"] or state["stock"] <= 0:
+                    continue
+
+                # Sincronizamos las propiedades mutables sobre el diccionario extendido original
+                item_data["stock"] = state["stock"]
+                item_data["paused"] = state["paused"]
+                item_data["custom_price"] = state["custom_price"]
+                
+                final_realtime_data.append(item_data)
+
+            # Retornamos la firma de respuesta idéntica a la original {'data': [...]}
+            return Response({'data': final_realtime_data}, status=status.HTTP_200_OK)
 
         except Exception as e:
             return Response({'error': f'Error interno: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -1931,17 +1952,25 @@ class GetStoresLocations(APIView):
 class GetMallsCache(APIView):
     """
     Devuelve todos los centros comerciales registrados para mapeo local.
+    Caché Global: Se invalida solo si se agrega o edita un Mall.
     """
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'actions'
     permission_classes = [IsAuthenticated]
 
-    def get(selmalls_dataf, request):
+    def get(self, request):
+        cache_key = "cartmaker:global:malls"
+        cached_data = cache.get(cache_key)
+
+        if cached_data:
+            return Response(cached_data, status=status.HTTP_200_OK)
+
+        # Cache Miss
         malls = Mall.objects.all()
         malls_data = [m.get_json() for m in malls]
-        data = {
-            'malls':malls_data
-        }
+        data = {'malls': malls_data}
+        
+        cache.set(cache_key, data, timeout=86400) # 24 horas
         return Response(data, status=status.HTTP_200_OK)
 
 class CompanyCacheAPI(APIView):
@@ -1951,22 +1980,34 @@ class CompanyCacheAPI(APIView):
 
     def get(self, request):
         """
-        Devuelve los datos de la compania creada por el usuario.
+        Caché por Usuario: Datos de la compañía del comerciante.
         """
-        # merchant_subscription = MerchantSubscription.objects.filter(merchant=request.user, valid_until__gt=timezone.now()).first()
-        # print("SUBSCRIPCION A OBTENER: ", merchant_subscription)
+        cache_key = f"cartmaker:tenant:{request.user.id}:company"
+        cached_data = cache.get(cache_key)
+
+        if cached_data:
+            # Si el caché guardó un error explícito (ej. sin suscripción), lo respetamos
+            if "error_status" in cached_data:
+                return Response({'message': cached_data["message"]}, status=cached_data["error_status"])
+            return Response(cached_data, status=status.HTTP_200_OK)
+
+        # Cache Miss
         if MerchantSubscription.objects.filter(merchant=request.user, valid_until__gt=timezone.now()).exists():
             try:
                 company = Company.objects.get(owner=request.user).get_json()
                 stores = [company_store.get_json() for company_store in CompanyStore.objects.filter(company_id=company['id']).order_by('creation')]
-                return Response({
-                    'company':company,
-                    'stores':stores
-                }, status=status.HTTP_200_OK)
+                
+                data = {'company': company, 'stores': stores}
+                cache.set(cache_key, data, timeout=3600) # 1 hora
+                return Response(data, status=status.HTTP_200_OK)
             except Company.DoesNotExist:
-                return Response({'message':"No ha configurado su tienda."}, status=status.HTTP_404_NOT_FOUND)
+                error_data = {"error_status": status.HTTP_404_NOT_FOUND, "message": "No ha configurado su tienda."}
+                cache.set(cache_key, error_data, timeout=300) # Caché corto para errores
+                return Response({'message': error_data["message"]}, status=error_data["error_status"])
         else:
-            return Response({'message':"La suscripcion del comerciante expiro o no ha sido adquirida."}, status=status.HTTP_406_NOT_ACCEPTABLE)
+            error_data = {"error_status": status.HTTP_406_NOT_ACCEPTABLE, "message": "La suscripcion del comerciante expiro o no ha sido adquirida."}
+            cache.set(cache_key, error_data, timeout=300)
+            return Response({'message': error_data["message"]}, status=error_data["error_status"])
 
 class SubscriptionsCacheAPI(APIView):
     throttle_classes = [ScopedRateThrottle]
@@ -1975,8 +2016,16 @@ class SubscriptionsCacheAPI(APIView):
 
     def get(self, request):
         """
-        Devuelve todos los datos necesarios para la cache de de las subscripciones del usuario en la app.
+        Caché por Usuario: Suscripciones, Wallet y Notificaciones.
+        Altamente dinámico: Se invalida por señales al pagar o recibir saldo.
         """
+        cache_key = f"cartmaker:tenant:{request.user.id}:subscriptions"
+        cached_data = cache.get(cache_key)
+
+        if cached_data:
+            return Response(cached_data, status=status.HTTP_200_OK)
+
+        # Cache Miss
         user = User.objects.select_related(
             'subscription__plan',
             'atlas_plan',
@@ -1985,32 +2034,35 @@ class SubscriptionsCacheAPI(APIView):
             'atlas_plan__payments',
             'wallet'
         ).get(id=request.user.id)
+
         merchant_subscription = user.subscription if hasattr(user, 'subscription') else None
         atlas_subscription = user.atlas_plan if hasattr(user, 'atlas_plan') else None
-        subscriptions_payments = {
-            'atlas':[],
-            'merchant':[]
-        }
+        
+        subscriptions_payments = {'atlas': [], 'merchant': []}
+        
         pending_rejection_notif = Notification.objects.filter(
             user=request.user,
             category=NotificationCategory.PAYMENT_REJECTED,
             is_read=False
         ).first()
+
         wallet_data = user.wallet.get_json()
+
         if atlas_subscription:
             subscriptions_payments['atlas'] = [atlas_payment.get_json() for atlas_payment in atlas_subscription.payments.all()]
         if merchant_subscription:
             subscriptions_payments['merchant'] = [merchant_payment.get_json() for merchant_payment in merchant_subscription.payments.all()]
-        cache = {
-            "merchant_subscription":merchant_subscription.get_json() if merchant_subscription else None,
-            "atlas_subscription":atlas_subscription.get_json() if atlas_subscription else None,
-            "subscriptions_payments":subscriptions_payments,
-            "wallet":wallet_data,
+        
+        data = {
+            "merchant_subscription": merchant_subscription.get_json() if merchant_subscription else None,
+            "atlas_subscription": atlas_subscription.get_json() if atlas_subscription else None,
+            "subscriptions_payments": subscriptions_payments,
+            "wallet": wallet_data,
             "pending_payment_notification_retry_id": pending_rejection_notif.id if pending_rejection_notif else None
         }
-        return Response(cache, status=200)
-
-
+        
+        cache.set(cache_key, data, timeout=3600) # 1 hora
+        return Response(data, status=status.HTTP_200_OK)
 
 class UserCacheAPI(APIView):
     throttle_classes = [ScopedRateThrottle]
@@ -2019,32 +2071,40 @@ class UserCacheAPI(APIView):
 
     def get(self, request):
         """
-        Devuelve todos los datos necesarios para la cache de usuario en la app.
+        Caché por Usuario: Perfil base.
         """
-        user = User.objects.prefetch_related('locations', 'contact_methods').get(id=request.user.id)
+        cache_key = f"cartmaker:tenant:{request.user.id}:profile"
+        cached_data = cache.get(cache_key)
 
+        if cached_data:
+            return Response(cached_data, status=status.HTTP_200_OK)
+
+        # Cache Miss
+        user = User.objects.prefetch_related('locations', 'contact_methods').get(id=request.user.id)
         locations = [location.get_json() for location in user.locations.all()]
         contact_methods = [contact_method.get_json() for contact_method in user.contact_methods.all().order_by('method_type')]
 
-        cache = {
-            "user_id":user.id,
-            "email":user.email,
-            "creation":user.creation.strftime('%d/%m/%Y, %H:%M:%S'),
-            "first_name":user.first_name,
-            "last_name":user.last_name,
-            "birth_date":user.birth_date if user.birth_date else "",
-            "email_verified":user.email_verified,
-            "user_type":user.user_type,
-            "profile_picture":user.get_profile_picture_url(),
-            "cedula_document_url":user.cedula_document if user.cedula_document else "",
-            "cedula_verified":user.cedula_verified,
-            "cedula_number":user.cedula_number if user.cedula_number else "",
-            "gender":user.gender,
-            "locations":locations,
-            "is_external_account":user.is_external_account,
-            'contact_methods':contact_methods,
+        data = {
+            "user_id": user.id,
+            "email": user.email,
+            "creation": user.creation.strftime('%d/%m/%Y, %H:%M:%S'),
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "birth_date": user.birth_date if user.birth_date else "",
+            "email_verified": user.email_verified,
+            "user_type": user.user_type,
+            "profile_picture": user.get_profile_picture_url(),
+            "cedula_document_url": user.cedula_document if user.cedula_document else "",
+            "cedula_verified": user.cedula_verified,
+            "cedula_number": user.cedula_number if user.cedula_number else "",
+            "gender": user.gender,
+            "locations": locations,
+            "is_external_account": user.is_external_account,
+            'contact_methods': contact_methods,
         }
-        return Response(cache, status=200)
+        
+        cache.set(cache_key, data, timeout=86400) # 24 horas (Cambia rara vez)
+        return Response(data, status=status.HTTP_200_OK)
     
 class HomeCacheAPI(APIView):
     throttle_classes = [ScopedRateThrottle]
@@ -2053,12 +2113,18 @@ class HomeCacheAPI(APIView):
 
     def get(self, request):
         """
-        Devuelve los datos necesarios para la cache de la home screen (Red Social / Feed).
+        Caché Global: Anuncios y UI del Home.
         """
+        cache_key = "cartmaker:global:home"
+        cached_data = cache.get(cache_key)
+
+        if cached_data:
+            return Response(cached_data, status=status.HTTP_200_OK)
+
+        # Cache Miss
         announcements = [announcement.get_json() for announcement in Announcement.objects.filter(active=True).order_by('-creation')]
-        company_categories = [
-            category.get_json() for category in CompanyCategory.objects.all()
-        ]
+        company_categories = [category.get_json() for category in CompanyCategory.objects.all()]
+        
         company_section_images = {
             "administrar_inventario": storage_manager.get_url('static/img/company_section_buttons/administrar_inventario.jpg', True),
             "administrar_suscripcion": storage_manager.get_url('static/img/company_section_buttons/administrar_suscripcion.jpg', True),
@@ -2070,12 +2136,14 @@ class HomeCacheAPI(APIView):
             "preguntas_de_clientes": storage_manager.get_url('static/img/company_section_buttons/preguntas_de_clientes.jpg', True),
         }
         
-        cache = {
+        data = {
             "announcements": announcements,
             'company_categories': company_categories,
             'company_section_images': company_section_images,
         }
-        return Response(cache, status=200)
+        
+        cache.set(cache_key, data, timeout=86400) # 24h
+        return Response(data, status=status.HTTP_200_OK)
 
 class SearchCacheAPI(APIView):
     throttle_classes = [ScopedRateThrottle]
@@ -2084,22 +2152,28 @@ class SearchCacheAPI(APIView):
 
     def get(self, request):
         """
-        Devuelve los datos necesarios para la vista de Búsqueda y Exploración.
+        Caché Global: UI del Buscador.
         """
-        categories = [
-            category.get_json() 
-            for category in Category.objects.prefetch_related('subcategories').all()
-        ]
+        cache_key = "cartmaker:global:search"
+        cached_data = cache.get(cache_key)
+
+        if cached_data:
+            return Response(cached_data, status=status.HTTP_200_OK)
+
+        # Cache Miss
+        categories = [category.get_json() for category in Category.objects.prefetch_related('subcategories').all()]
         search_stores_at_zone = {
             "atlas_message": "Detecto varias ofertas de hortalizas en el Kiosco de DonAmigo.",
             "image_background": storage_manager.get_url('static/img/tiendas_en_la_zona_background.jpg', True)
         }
         
-        cache = {
+        data = {
             "categories": categories,
             'search_stores_at_zone': search_stores_at_zone
         }
-        return Response(cache, status=200)
+        
+        cache.set(cache_key, data, timeout=86400) # 24h
+        return Response(data, status=status.HTTP_200_OK)
 
 ####################################################
 #################### VIEW SETS #####################
@@ -2499,21 +2573,11 @@ class ProductConversationViewSet(viewsets.ViewSet):
             'error':"No se pudo crear la respuesta."
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
-class SearchEngineCursorPagination(CursorPagination):
-    """
-    Paginación ultrarrápida (O(1)) para feeds infinitos.
-    Requiere que el queryset esté siempre ordenado de forma determinista.
-    """
-    page_size = 20
-    page_size_query_param = 'page_size'
-    max_page_size = 50
-    # Usamos la fecha de creación como cursor por defecto, pero el motor lo sobrescribirá
-    ordering = '-creation'
-
 class ProductSearchEngineViewSet(viewsets.ViewSet):
     """
     API integral para la distribución algorítmica de productos hacia la App.
-    Interactúa con el ProductSearchEngine para retornar Feeds dinámicos.
+    Interactúa con el ProductSearchEngine para retornar Feeds dinámicos cacheados
+    respetando exactamente las firmas de respuesta originales requeridas por Flutter.
     """
     permission_classes = [IsAuthenticated]
     throttle_classes = [ScopedRateThrottle]
@@ -2523,7 +2587,6 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
     # HELPERS
     # ------------------------------------------------------------------------
     def _get_coordinates(self, request):
-        """Extrae de forma segura las coordenadas de los query params."""
         try:
             lat = float(request.query_params.get('lat'))
             lng = float(request.query_params.get('lng'))
@@ -2532,37 +2595,54 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
             return None, None
 
     def _get_sorting_params(self, request):
-        """Extrae los filtros de ordenamiento."""
-        sort_by = request.query_params.get('sort_by', 'relevance') # 'relevance', 'distance', 'rating'
-        price_order = request.query_params.get('price_order')      # 'asc', 'desc', None
+        sort_by = request.query_params.get('sort_by', 'relevance')
+        price_order = request.query_params.get('price_order')
         return sort_by, price_order
 
-    def _paginate_and_respond(self, queryset, request):
-        """Maneja la paginación O(1) con Cursor."""
-        paginator = SearchEngineCursorPagination()
-        
-        # Le decimos al paginador qué orden está usando el QuerySet
-        # Extraemos el primer campo por el que se ordenó el QS
-        ordering = queryset.query.order_by
-        if ordering:
-            paginator.ordering = ordering
+    def _paginate_and_respond(self, data_list: list, request) -> Response:
+        """
+        Paginación O(1) en RAM que imita con precisión milimétrica la estructura 
+        de CursorPagination de DRF (next, previous, results) para mantener la 
+        compatibilidad con el controlador de scrolls infinitos en Flutter.
+        """
+        try:
+            page = int(request.query_params.get('page', 1))
+            page_size = int(request.query_params.get('page_size', 20))
+        except ValueError:
+            page = 1
+            page_size = 20
 
-        paginated_qs = paginator.paginate_queryset(queryset, request)
+        start = (page - 1) * page_size
+        end = start + page_size
         
-        data = [item.get_json() for item in paginated_qs]
+        paginated_data = data_list[start:end]
+        has_next = end < len(data_list)
+        has_previous = page > 1
+
+        url = request.build_absolute_uri()
+        import urllib.parse as urlparse
         
-        # Para CursorPagination, DRF devuelve 'next' y 'previous' como URLs con el cursor
-        return paginator.get_paginated_response(data)
+        def replace_page_param(base_url, page_num):
+            url_parts = list(urlparse.urlparse(base_url))
+            query = dict(urlparse.parse_qsl(url_parts[4]))
+            query['page'] = page_num
+            url_parts[4] = urlparse.urlencode(query)
+            return urlparse.urlunparse(url_parts)
+
+        next_url = replace_page_param(url, page + 1) if has_next else None
+        prev_url = replace_page_param(url, page - 1) if has_previous else None
+
+        return Response({
+            'next': next_url,
+            'previous': prev_url,
+            'results': paginated_data
+        }, status=status.HTTP_200_OK)
 
     # ------------------------------------------------------------------------
-    # ENDPOINT: GET /api/v1/search-engine/category/
+    # ENDPOINTS
     # ------------------------------------------------------------------------
     @action(detail=False, methods=['get'])
     def category(self, request):
-        """
-        Retorna el feed diversificado o filtrado explícitamente para una subcategoría.
-        QueryParams: sub_category_id, lat, lng, sort_by, price_order
-        """
         sub_category_id = request.query_params.get('sub_category_id')
         lat, lng = self._get_coordinates(request)
         sort_by, price_order = self._get_sorting_params(request)
@@ -2574,28 +2654,19 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
             )
 
         engine = ProductSearchEngine(lat, lng, user=request.user)
-        queryset = engine.get_category_feed(
+        data_list = engine.get_category_feed(
             sub_category_id=sub_category_id, 
             sort_by=sort_by, 
             price_order=price_order
         )
 
-        print("QUERYSET OBTENIDO: ", queryset)
-        
-        return self._paginate_and_respond(queryset, request)
+        return self._paginate_and_respond(data_list, request)
 
-    # ------------------------------------------------------------------------
-    # ENDPOINT: GET /api/v1/search-engine/store/
-    # ------------------------------------------------------------------------
     @action(detail=False, methods=['get'])
     def store(self, request):
-        """
-        Retorna TODOS los productos de una tienda, con opción de ordenar por precio.
-        QueryParams: store_id, lat, lng, price_order
-        """
         store_id = request.query_params.get('store_id')
         company_id = request.query_params.get('company_id')
-        category_id = request.query_params.get('category_id') # 💡 NUEVO
+        category_id = request.query_params.get('category_id')
         lat, lng = self._get_coordinates(request)
         _, price_order = self._get_sorting_params(request)
 
@@ -2606,66 +2677,44 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
             )
 
         engine = ProductSearchEngine(lat, lng, user=request.user)
-        
-        # 💡 Asegúrate de adaptar tu engine.get_store_feed para que reciba y filtre
-        # por company_id (si store_id no viene) y por category_id.
-        queryset = engine.get_store_feed(
+        data_list = engine.get_store_feed(
             store_id=store_id, 
             company_id=company_id,
             category_id=category_id,
             price_order=price_order
         )
         
-        return self._paginate_and_respond(queryset, request)
+        return self._paginate_and_respond(data_list, request)
 
-    # ------------------------------------------------------------------------
-    # ENDPOINT: GET /api/v1/search-engine/offers/
-    # ------------------------------------------------------------------------
     @action(detail=False, methods=['get'])
     def offers(self, request):
-        """
-        Retorna el feed diversificado u ordenado de ofertas activas.
-        QueryParams: lat, lng, home_widget, sort_by, price_order
-        """
         lat, lng = self._get_coordinates(request)
         sort_by, price_order = self._get_sorting_params(request)
         is_home_widget = request.query_params.get('home_widget', 'false').lower() == 'true'
 
         if lat is None or lng is None:
-            return Response(
-                {'error': 'Faltan parámetros obligatorios: lat, lng'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({'error': 'Faltan parámetros obligatorios: lat, lng'}, status=status.HTTP_400_BAD_REQUEST)
 
         engine = ProductSearchEngine(lat, lng, user=request.user)
-        queryset = engine.get_offers_feed(sort_by=sort_by, price_order=price_order)
+        data_list = engine.get_offers_feed(sort_by=sort_by, price_order=price_order)
 
+        # RESTRICCION DE FIRMA: Conserva el formato plano original para el widget horizontal
         if is_home_widget:
-            top_10 = queryset[:10]
-            data = [item.get_json() for item in top_10]
-            print("DATAA DE LAS OFERTAS: ", data)
-            return Response({'results': data}, status=status.HTTP_200_OK)
-        return self._paginate_and_respond(queryset, request)
-    
+            top_10 = data_list[:10]
+            return Response({'results': top_10}, status=status.HTTP_200_OK)
+            
+        return self._paginate_and_respond(data_list, request)
+        
     @action(detail=False, methods=['get'])
     def item_details(self, request):
-        """
-        Retorna la información completa de un lote/producto público para la vista de detalles.
-        QueryParam: item_id (UUID)
-        """
         item_id = request.query_params.get('item_id')
 
         if not item_id:
-            return Response(
-                {'error': 'Falta el parámetro obligatorio: item_id'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({'error': 'Falta el parámetro obligatorio: item_id'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            # Buscamos el ítem asegurándonos de que no esté pausado
             item = InventoryItem.objects.select_related(
                 'product', 'store__company'
             ).prefetch_related('product__califications').annotate(
-                # Calculamos el promedio y lo redondeamos a 1 decimal
                 avg_rating=Round(Coalesce(Avg('product__califications__rating'), 0.0), 1),
                 rating_count=Count('product__califications')
             ).get(id=item_id, paused=False)
@@ -2674,131 +2723,84 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
             return Response({'success': True, 'data': data}, status=status.HTTP_200_OK)
             
         except InventoryItem.DoesNotExist:
-            return Response(
-                {'error': 'El producto no existe o fue retirado.'}, 
-                status=status.HTTP_404_NOT_FOUND
-            )
-        
-    # ------------------------------------------------------------------------
-    # ENDPOINT: GET /api/v1/search-engine/text_search/
-    # ------------------------------------------------------------------------
+            return Response({'error': 'El producto no existe o fue retirado.'}, status=status.HTTP_404_NOT_FOUND)
+            
     @action(detail=False, methods=['get'])
     def text_search(self, request):
-        """
-        Endpoint global para la barra de búsqueda de texto de la aplicación.
-        QueryParams: q (texto a buscar), lat, lng, sort_by, price_order, max_distance
-        """
         search_query = request.query_params.get('q', '')
         lat, lng = self._get_coordinates(request)
         sort_by, price_order = self._get_sorting_params(request)
         
-        # Extraemos max_distance de los params, si no existe asume 10km
         try:
             max_distance = float(request.query_params.get('max_distance', 10000))
         except ValueError:
             max_distance = 10000
 
         if not search_query or lat is None or lng is None:
-            return Response(
-                {'error': 'Faltan parámetros obligatorios: q, lat, lng'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({'error': 'Faltan parámetros obligatorios: q, lat, lng'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Inicializamos el motor
         engine = ProductSearchEngine(lat, lng, user=request.user)
-        
-        # Ejecutamos la búsqueda de texto completo
-        queryset = engine.get_text_search_feed(
+        data_list = engine.get_text_search_feed(
             search_query=search_query,
             sort_by=sort_by,
             price_order=price_order,
             max_distance_meters=max_distance
         )
 
-        # Usamos tu paginador existente para mantener la consistencia
-        return self._paginate_and_respond(queryset, request)
+        return self._paginate_and_respond(data_list, request)
     
     @action(detail=False, methods=['get'])
     def home_feed(self, request):
-        try:
-            lat = float(request.query_params.get('lat'))
-            lng = float(request.query_params.get('lng'))
-        except (TypeError, ValueError):
+        lat, lng = self._get_coordinates(request)
+        
+        if lat is None or lng is None:
             return Response({'error': 'Faltan coordenadas'}, status=status.HTTP_400_BAD_REQUEST)
 
         engine = ProductSearchEngine(lat, lng, user=request.user)
-        queryset = engine.get_home_feed()
-        return self._paginate_and_respond(queryset, request)
+        data_list = engine.get_home_feed()
         
-    # ------------------------------------------------------------------------
-    # ENDPOINT: GET /api/v1/search-engine/favorites/
-    # ------------------------------------------------------------------------
+        return self._paginate_and_respond(data_list, request)
+        
     @action(detail=False, methods=['get'])
     def favorites(self, request):
-        """
-        Retorna el feed de productos marcados como favoritos por el usuario.
-        QueryParams: lat, lng, home_widget, sort_by, price_order
-        """
         lat, lng = self._get_coordinates(request)
         sort_by, price_order = self._get_sorting_params(request)
         is_home_widget = request.query_params.get('home_widget', 'false').lower() == 'true'
 
         if lat is None or lng is None:
-            return Response(
-                {'error': 'Faltan parámetros obligatorios: lat, lng'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({'error': 'Faltan parámetros obligatorios: lat, lng'}, status=status.HTTP_400_BAD_REQUEST)
 
         engine = ProductSearchEngine(lat, lng, user=request.user)
-        queryset = engine.get_favorites_feed(sort_by=sort_by, price_order=price_order)
+        data_list = engine.get_favorites_feed(sort_by=sort_by, price_order=price_order)
 
+        # RESTRICCION DE FIRMA: Conserva el envoltorio exacto original {'data': {'results': [...]}}
         if is_home_widget:
-            # Traemos solo los 10 primeros para el scroll horizontal
-            top_10 = queryset[:10]
-            data = [item.get_json() for item in top_10]
-            return Response({'data': {'results': data}}, status=status.HTTP_200_OK)
+            top_10 = data_list[:10]
+            return Response({'data': {'results': top_10}}, status=status.HTTP_200_OK)
             
-        return self._paginate_and_respond(queryset, request)
+        return self._paginate_and_respond(data_list, request)
 
-    # ------------------------------------------------------------------------
-    # ENDPOINT: POST /api/v1/search-engine/toggle_like/
-    # ------------------------------------------------------------------------
     @action(detail=False, methods=['post'])
     def toggle_like(self, request):
-        """
-        Alterna el estado de 'Me gusta' de un lote de inventario (InventoryItem).
-        Si ya tiene like, lo quita. Si no, lo agrega.
-        """
         item_id = request.data.get('item_id')
 
         if not item_id:
-            return Response(
-                {'error': 'Falta el parámetro obligatorio: item_id'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({'error': 'Falta el parámetro obligatorio: item_id'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            # Validamos que el ítem exista y no esté pausado
             item = InventoryItem.objects.get(id=item_id, paused=False)
         except InventoryItem.DoesNotExist:
-            return Response(
-                {'error': 'El producto no existe o está inactivo.'}, 
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({'error': 'El producto no existe o está inactivo.'}, status=status.HTTP_404_NOT_FOUND)
 
-        # get_or_create devuelve una tupla: (objeto, creado_boolean)
-        # Nota: 'product' en ProductLike apunta a InventoryItem según tu modelo
         like, created = ProductLike.objects.get_or_create(
             user=request.user,
             product=item
         )
 
         if not created:
-            # Si no fue creado, significa que ya existía, así que lo eliminamos (Unlike)
             like.delete()
             return Response({'success': True, 'is_liked': False}, status=status.HTTP_200_OK)
         
-        # Si fue creado, es un (Like)
         return Response({'success': True, 'is_liked': True}, status=status.HTTP_200_OK)
 
 class AtlasViewSet(viewsets.ViewSet):
