@@ -2213,6 +2213,88 @@ class SearchCacheAPI(APIView):
 #################### VIEW SETS #####################
 ####################################################
 
+class CartViewSet(viewsets.ViewSet):
+    """
+    API ultra-optimizada para la gestión del carrito de compras.
+    Utiliza MGET y Split Caching para resolver carritos masivos en milisegundos.
+    """
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'actions'
+
+    @action(detail=False, methods=['post'])
+    def details(self, request):
+        item_ids = request.data.get('item_ids', [])
+        
+        if not item_ids or not isinstance(item_ids, list):
+            return Response({'data': []}, status=status.HTTP_200_OK)
+
+        # =========================================================================
+        # 1. CACHÉ ESTRUCTURAL (Fotos, Nombres, Empresa)
+        # =========================================================================
+        struct_keys = {f"cartmaker:struct:item:{uid}": uid for uid in item_ids}
+        cached_structs = cache.get_many(struct_keys.keys())
+
+        missing_ids = [uid for key, uid in struct_keys.items() if key not in cached_structs]
+        struct_data_map = {uid: cached_structs[f"cartmaker:struct:item:{uid}"] for uid in item_ids if f"cartmaker:struct:item:{uid}" in cached_structs}
+
+        # RESOLUCIÓN DE CACHE MISS (Solo va a BD por los productos que no están en RAM)
+        if missing_ids:
+            qs = InventoryItem.objects.select_related(
+                'product', 'product__category', 'offer', 'store', 'store__company'
+            ).filter(id__in=missing_ids)
+            
+            new_structs_to_cache = {}
+            for item in qs:
+                item_json = item.get_json()
+                
+                # 💡 Inyección Táctica: Ponemos los datos de la empresa a mano 
+                # para que el frontend de Flutter no tenga que escarbar en el JSON
+                company = item.store.company
+                item_json['company_info'] = {
+                    'id': str(company.id),
+                    'name': company.name,
+                    'image': storage_manager.get_url(company.image) if company.image else None
+                }
+
+                struct_data_map[str(item.id)] = item_json
+                new_structs_to_cache[f"cartmaker:struct:item:{item.id}"] = item_json
+            
+            if new_structs_to_cache:
+                cache.set_many(new_structs_to_cache, timeout=86400) # Estructura cacheada por 24h
+
+        # =========================================================================
+        # 2. STITCHING VOLÁTIL EN TIEMPO REAL (Stock y Precios Exactos)
+        # =========================================================================
+        volatile_keys = {f"cartmaker:volatile:item:{uid}": uid for uid in item_ids}
+        cached_volatiles = cache.get_many(volatile_keys.keys())
+
+        final_data = []
+        for uid in item_ids:
+            item_data = struct_data_map.get(uid)
+            if not item_data:
+                continue # El ítem fue eliminado físicamente de la BD
+
+            v_key = f"cartmaker:volatile:item:{uid}"
+            state = cached_volatiles.get(v_key)
+
+            if not state:
+                state = {
+                    "stock": int(item_data.get("stock", 0)),
+                    "paused": bool(item_data.get("paused", False)),
+                    "custom_price": item_data.get("custom_price")
+                }
+                cache.set(v_key, state, timeout=86400)
+            
+            # Fusión en RAM
+            item_data["stock"] = state["stock"]
+            item_data["paused"] = state["paused"]
+            item_data["custom_price"] = state["custom_price"]
+
+            final_data.append(item_data)
+
+        return Response({'data': final_data}, status=status.HTTP_200_OK)
+
 class InteractionLogViewSet(viewsets.ViewSet):
     """
     API dedicada a registrar silenciosamente la telemetría del usuario en la App.
