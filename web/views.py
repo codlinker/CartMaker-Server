@@ -2,7 +2,7 @@ import csv
 import hashlib
 import io
 import json
-
+from django.core.exceptions import ObjectDoesNotExist
 from dateutil.relativedelta import relativedelta
 from rest_framework import parsers
 from rest_framework.views import APIView
@@ -2213,6 +2213,329 @@ class SearchCacheAPI(APIView):
 #################### VIEW SETS #####################
 ####################################################
 
+class OrderViewSet(viewsets.ViewSet):
+    """
+    API para la gestión y consulta de órdenes de compra del usuario.
+    """
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'actions'
+
+    def list(self, request):
+        # 💡 Optimizamos con select_related para traer la info de la tienda, la compañía y la ubicación de entrega de un solo golpe
+        orders = Order.objects.select_related(
+            'store__company', 
+            'store__location',
+            'delivery_location'
+        ).prefetch_related(
+            'store__contact_methods'
+        ).filter(client=request.user).order_by('-creation')
+        
+        orders_data = []
+        for order in orders:
+            company = order.store.company
+            
+            # Obtenemos el logo de la empresa usando tu storage_manager
+            store_image_url = ""
+            if company.image:
+                store_image_url = storage_manager.get_url(company.image)
+                
+            # Formateamos la fecha exacto como el Mockup: "17/01/2026 09:26 am"
+            creation_str = timezone.localtime(order.creation).strftime("%d/%m/%Y %I:%M %p").lower() if order.creation else None
+            
+            # 💡 EXTRACCIÓN DE COORDENADAS DESDE EL ONE-TO-ONE FIELD Y POINTFIELD
+            store_lat = None
+            store_lng = None
+            client_lat = None     # 💡 CORRECCIÓN: Inicializados en None para evitar UnboundLocalError
+            client_lng = None     # 💡 CORRECCIÓN: Inicializados en None para evitar UnboundLocalError
+            client_address = None
+            
+            if hasattr(order.store, 'location') and order.store.location:
+                location = order.store.location
+                if location.coordinates:
+                    store_lat = float(location.coordinates.y)  # Eje Y = Latitud
+                    store_lng = float(location.coordinates.x)  # Eje X = Longitud
+            
+            if order.delivery_location:
+                client_lat = float(order.delivery_location.coordinates.y)
+                client_lng = float(order.delivery_location.coordinates.x)
+                client_address = order.delivery_location.name
+
+            # 💡 EXTRACCIÓN DE MÉTODOS DE CONTACTO (Tienda -> Cliente)
+            contact_methods_dict = {
+                str(ContactMethodType(contact.method_type).name).lower(): contact.get_json()
+                for contact in order.store.contact_methods.all()
+            }
+
+            orders_data.append({
+                'id': order.id, 
+                'status': order.status,
+                'withdrawal_type': order.withdrawal_type,
+                'store_id': str(order.store.id),
+                'store_name': company.name,
+                'store_image': store_image_url,
+                'contact_methods': contact_methods_dict,
+                'store_lat': store_lat,
+                'store_lng': store_lng,
+                'cart': order.cart,
+                'creation': creation_str,
+                'client_lat': client_lat,
+                'client_lng': client_lng,
+                'client_address': client_address,
+            })
+
+        return Response({'data': orders_data}, status=status.HTTP_200_OK)
+    
+    @action(detail=False, methods=['get'])
+    def merchant_orders(self, request):
+        """ Retorna las órdenes pertenecientes a las tiendas del comerciante autenticado """
+        # 💡 Añadimos 'store__location' y 'delivery_location' al select_related para evitar latencia N+1 en mapas
+        orders = Order.objects.select_related(
+            'store__company', 
+            'store__location', 
+            'client',
+            'delivery_location'
+        ).prefetch_related(
+            'client__contact_methods'
+        ).filter(
+            store__company__owner=request.user
+        ).order_by('-creation')
+        
+        orders_data = []
+        for order in orders:
+            creation_str = timezone.localtime(order.creation).strftime("%d/%m/%Y %I:%M %p").lower() if order.creation else None
+            
+            # Extraemos la imagen de perfil usando tu método del modelo User
+            client_image_url = order.client.get_profile_picture_url() if order.client.profile_picture else ""
+
+            # EXTRACCIÓN DE MÉTODOS DE CONTACTO (Cliente -> Tienda)
+            contact_methods_dict = {
+                str(ContactMethodType(contact.method_type).name).lower(): contact.get_json()
+                for contact in order.client.contact_methods.all()
+            }
+
+            # =========================================================================
+            # 💡 RESOLUCIÓN DE DATA LOGÍSTICA COMPLETA PARA EL COMERCIANTE
+            # =========================================================================
+            company = order.store.company
+            
+            # Imagen corporativa de la Company
+            store_image_url = ""
+            if company.image:
+                store_image_url = storage_manager.get_url(company.image)
+
+            # Coordenadas geográficas de la sucursal emisora
+            store_lat = None
+            store_lng = None
+            if hasattr(order.store, 'location') and order.store.location and order.store.location.coordinates:
+                store_lat = float(order.store.location.coordinates.y)
+                store_lng = float(order.store.location.coordinates.x)
+
+            # Coordenadas geográficas fijas del destino del cliente
+            client_lat = None
+            client_lng = None
+            client_address = None
+            if order.delivery_location:
+                client_lat = float(order.delivery_location.coordinates.y)
+                client_lng = float(order.delivery_location.coordinates.x)
+                client_address = order.delivery_location.name
+
+            orders_data.append({
+                'id': order.id,
+                'status': order.status,
+                'withdrawal_type': order.withdrawal_type,
+                'client_name': f"{order.client.first_name} {order.client.last_name}",
+                'client_image': client_image_url,
+                'client_contact_methods': contact_methods_dict,
+                'store_name': order.store.name,
+                
+                # Datos estructurados inyectados para MerchantRouteMap
+                'store_image': store_image_url,
+                'store_lat': store_lat,
+                'store_lng': store_lng,
+                'client_lat': client_lat,
+                'client_lng': client_lng,
+                'client_address': client_address,
+                
+                'cart': order.cart,
+                'creation': creation_str,
+            })
+        return Response({'data': orders_data}, status=status.HTTP_200_OK)
+    
+    @action(detail=False, methods=['post'])
+    def merchant_ship_order(self, request):
+        """ Permite al comerciante marcar un delivery como enviado (Status 1) """
+        order_id = request.data.get('order_id')
+        try:
+            order = Order.objects.select_related('store__company').get(id=order_id, store__company__owner=request.user)
+            print("WITDRAWAL TYPE: ", order.withdrawal_type)
+            if order.withdrawal_type != WithdrawalType.DELIVERY: # DELIVERY
+                return Response({"error": "Esta orden no requiere despacho a domicilio."}, status=status.HTTP_400_BAD_REQUEST)
+                
+            if order.status != OrderStatus.WAITING: # WAITING
+                return Response({"error": "La orden ya ha cambiado de estado."}, status=status.HTTP_400_BAD_REQUEST)
+
+            order.status = OrderStatus.DELIVERY_SENT # ENVIADO / EN CAMINO
+            order.save()
+            
+            # 💡 SOLUCIÓN CASO BORDE 1: Marcamos como leídas las notificaciones previas de esta orden
+            Notification.objects.filter(metadata__order_id=str(order.id), is_read=False).update(is_read=True)
+            
+            # Notificar al cliente que su motorizado va en camino
+            NotificationManager.notify_order_status_change(
+                user_id=order.client.id,
+                order_id=order.id,
+                title="¡Tu orden va en camino!",
+                body=f"El repartidor de {order.store.company.name} ha salido con tus productos.",
+                is_merchant=False,
+                new_status=OrderStatus.DELIVERY_SENT # 💡 AÑADIDO
+            )
+            return Response({"success": True, "message": "Orden marcada como enviada."}, status=status.HTTP_200_OK)
+        except Order.DoesNotExist:
+            return Response({"error": "La orden no existe o no eres el dueño del comercio."}, status=status.HTTP_404_NOT_FOUND)
+
+    # =========================================================================
+    # 💡 OBTENER TÓPICOS DIRECTO DEL CÓDIGO (Sin tocar la BD)
+    # =========================================================================
+    @action(detail=False, methods=['get'])
+    def cancellation_topics(self, request):
+        try:
+            # Transformamos el Enum de Django en una lista de diccionarios para Flutter
+            topics = [{'id': choice[0], 'name': str(choice[1])} for choice in CancellationReason.choices]
+            return Response({'data': topics}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"error": f"Error obteniendo tópicos: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    # =========================================================================
+    # 💡 CANCELAR ORDEN
+    # =========================================================================
+    @action(detail=False, methods=['post'])
+    def cancel_order(self, request):
+        order_id = request.data.get('order_id')
+        topic_id = request.data.get('cancellation_topic_id') 
+
+        if not order_id or not topic_id:
+            return Response({"error": "Se requiere order_id y cancellation_topic_id."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Validamos que el topic_id exista en nuestro Enum
+        try:
+            topic_id = int(topic_id)
+            if topic_id not in dict(CancellationReason.choices):
+                raise ValueError
+        except (TypeError, ValueError):
+            return Response({"error": "El motivo de cancelación seleccionado no es válido."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            with transaction.atomic():
+                order = Order.objects.select_for_update().get(id=order_id, client=request.user)
+
+                if order.status != OrderStatus.WAITING: 
+                    return Response({"error": "Solo puedes cancelar órdenes pendientes."}, status=status.HTTP_400_BAD_REQUEST)
+
+                # Reintegro atómico de stock físico
+                cart_items = order.cart.get('items', [])
+                for item in cart_items:
+                    inv_item_id = item.get('inventory_item_id')
+                    qty = int(item.get('quantity', 0))
+                    if inv_item_id and qty > 0:
+                        try:
+                            inv_item = InventoryItem.objects.select_for_update().get(id=inv_item_id)
+                            inv_item.stock += qty
+                            inv_item.save()
+                        except InventoryItem.DoesNotExist:
+                            pass 
+
+                # Actualizamos la orden
+                order.status = OrderStatus.CANCELLED # CANCELLED
+                order.cancellation_topic = topic_id # 💡 Guardamos el Entero del Enum
+                order.end_time = timezone.now()
+                order.save()
+
+                Notification.objects.filter(metadata__order_id=str(order.id), is_read=False).update(is_read=True)
+                NotificationManager.notify_order_status_change(
+                    user_id=order.store.company.owner.id,
+                    order_id=order.id,
+                    title="Orden Cancelada",
+                    body=f"El cliente ha cancelado la orden N° {order.id}.",
+                    is_merchant=True,
+                    new_status=OrderStatus.CANCELLED # 💡 AÑADIDO
+                )
+
+            return Response({"success": True, "message": "Orden cancelada exitosamente y stock devuelto."}, status=status.HTTP_200_OK)
+        except Order.DoesNotExist:
+            return Response({"error": "La orden no existe."}, status=status.HTTP_404_NOT_FOUND)
+
+    # =========================================================================
+    # 💡 MARCAR ORDEN COMO RECIBIDA Y CALIFICAR (TODO EN 1)
+    # =========================================================================
+    @action(detail=False, methods=['post'])
+    def complete_order(self, request):
+        """ Endpoint unificado de finalización con lógica de cross-notification """
+        order_id = request.data.get('order_id')
+        merchant_rating = request.data.get('merchant_rating', 0)
+        product_ratings = request.data.get('product_ratings', [])
+
+        try:
+            # Buscamos si quien ejecuta es el cliente o el comerciante
+            order = Order.objects.select_related('store__company').get(id=order_id)
+            is_client = order.client == request.user
+            is_merchant = order.store.company.owner == request.user
+
+            if not is_client and not is_merchant:
+                return Response({"error": "No tienes permisos sobre esta orden."}, status=status.HTTP_403_FORBIDDEN)
+
+            if order.status == OrderStatus.COMPLETED: # COMPLETED
+                return Response({"error": "Esta orden ya se encuentra completada."}, status=status.HTTP_400_BAD_REQUEST)
+
+            with transaction.atomic():
+                order.status = OrderStatus.COMPLETED # COMPLETED
+                order.end_time = timezone.now()
+                order.save()
+
+                Notification.objects.filter(metadata__order_id=str(order.id), is_read=False).update(is_read=True)
+
+                # El cliente califica (Solo si la petición viene del cliente real)
+                if is_client:
+                    if merchant_rating and float(merchant_rating) > 0:
+                        MerchantCalification.objects.create(merchant=order.store.company, client=request.user, rating=float(merchant_rating))
+                    for pr in product_ratings:
+                        rating_val = pr.get('rating', 0)
+                        product_id = pr.get('product_id')
+                        if product_id and float(rating_val) > 0:
+                            ProductCalification.objects.create(product_id=product_id, client=request.user, rating=float(rating_val))
+
+            if is_client:
+                NotificationManager.notify_order_status_change(
+                    user_id=order.store.company.owner.id,
+                    order_id=order.id,
+                    title="Cliente confirmó entrega",
+                    body=f"El cliente de la orden N° {order.id} la ha marcado como completada.",
+                    is_merchant=True,
+                    new_status=OrderStatus.COMPLETED # 💡 AÑADIDO
+                )
+            elif is_merchant:
+                NotificationManager.notify_order_status_change(
+                    user_id=order.client.id,
+                    order_id=order.id,
+                    title="Tu orden fue completada",
+                    body=f"{order.store.company.name} ha marcado tu pedido como completado exitosamente.",
+                    is_merchant=False,
+                    new_status=OrderStatus.COMPLETED # 💡 AÑADIDO
+                )
+
+            return Response({"success": True, "tokens_earned": 20 if is_client else 0, "message": "Orden completada con éxito."}, status=status.HTTP_200_OK)
+        except Order.DoesNotExist:
+            return Response({"error": "La orden no existe."}, status=status.HTTP_404_NOT_FOUND)
+
+# TODO: 
+
+# YA SE INTEGRARON EL ENVIO DE NOTIFICACIONES Y MOSTRAR LOS METODOS DE CONTACTO EN LA ORDEN
+# AHORA TENEMOS QUE IMPLEMENTAR EL CHAT EN TIEMPO REAL DE LA ORDEN. ES LO MEJOR QUE PODEMOS HACER
+# PORQUE SI NO, NOS VAMOS A QUEDAR ATRAS DE PEDIDOS YA, YUMMY RIDES, MERCADOLIBRE, FACEBOOK, ETC.
+
+# TENER QUE DEPENDER DE WHATSAPP, INSTAGRAM, LLAMADAS TELEFONICAS U OTROS MEDIOS DE CONTACTO EXTERNOS
+# NOS DEJA FUERA DEL MERCADO.
+
 class CartViewSet(viewsets.ViewSet):
     """
     API ultra-optimizada para la gestión del carrito de compras.
@@ -2241,7 +2564,7 @@ class CartViewSet(viewsets.ViewSet):
         # RESOLUCIÓN DE CACHE MISS (Solo va a BD por los productos que no están en RAM)
         if missing_ids:
             qs = InventoryItem.objects.select_related(
-                'product', 'product__category', 'offer', 'store', 'store__company'
+                'product', 'offer', 'store__company__owner__subscription__plan'
             ).filter(id__in=missing_ids)
             
             new_structs_to_cache = {}
@@ -2251,6 +2574,7 @@ class CartViewSet(viewsets.ViewSet):
                 # 💡 Inyección Táctica: Ponemos los datos de la empresa a mano 
                 # para que el frontend de Flutter no tenga que escarbar en el JSON
                 company = item.store.company
+                print(f"IMAGEN DE LAA COMPNY {company}: {company.image}")
                 item_json['company_info'] = {
                     'id': str(company.id),
                     'name': company.name,
@@ -2294,6 +2618,183 @@ class CartViewSet(viewsets.ViewSet):
             final_data.append(item_data)
 
         return Response({'data': final_data}, status=status.HTTP_200_OK)
+    
+    @action(detail=False, methods=['post'])
+    def create_order(self, request):
+        store_id = request.data.get('store_id')
+        items_data = request.data.get('items', [])  # Ej: [{'id': 'uid', 'quantity': 2}]
+        withdrawal_type = request.data.get('withdrawal_type', 0)
+        location_id = request.data.get('delivery_location_id')
+
+        if not store_id or not items_data:
+            return Response({
+                "error": "El carrito está vacío o faltan datos para procesar tu orden."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # =========================================================================
+        # 1. VALIDACIONES PRELIMINARES (Ahorran recursos)
+        # =========================================================================
+        try:
+            store = CompanyStore.objects.select_related(
+                'company', 'company__owner__subscription'
+            ).get(id=store_id)
+        except CompanyStore.DoesNotExist:
+            return Response({
+                "error": "La tienda en la que intentas comprar ya no se encuentra disponible en la plataforma."
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        if not store.is_active:
+            return Response({
+                "error": f"Lo sentimos, {store.name} se encuentra inactiva en este momento. Por favor, intenta más tarde."
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        if not store.is_currently_open:
+            return Response({
+                "error": "La tienda se encuentra fuera de horario laboral.",
+                "work_hours": store.effective_work_hours,
+                "work_days": store.effective_work_days
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            sub = store.company.owner.subscription
+            if not sub.valid_until or sub.valid_until < timezone.now():
+                return Response({
+                    "error": f"El comercio {store.company.name} no se encuentra habilitado para recibir pedidos en este momento."
+                }, status=status.HTTP_403_FORBIDDEN)
+        except ObjectDoesNotExist:
+            return Response({
+                "error": f"El comercio {store.company.name} no puede procesar compras temporalmente."
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        # Validar que el usuario NO tenga órdenes activas en esta misma tienda
+        # (Asumiendo que status 0 = WAITING. Si agregas luego status 1=PREPARANDO, pon status__in=[0, 1])
+        has_active_order = Order.objects.filter(
+            client=request.user, 
+            store_id=store_id, 
+            status=OrderStatus.WAITING
+        ).exists()
+
+        if has_active_order:
+            return Response({
+                "error": "ORDEN_DUPLICADA",
+                "message": f"Ya tienes un pedido en curso en {store.company.name}. Por favor espera a que finalice o cancélalo si deseas modificar tu compra."
+            }, status=status.HTTP_409_CONFLICT)
+
+        item_ids = [item['id'] for item in items_data]
+        item_qty_map = {item['id']: int(item['quantity']) for item in items_data}
+
+        # 💡 Buscamos la ubicación de forma segura
+        client_location = None
+        if withdrawal_type == 1:
+            try:
+                client_location = ClientLocation.objects.get(id=location_id, user=request.user)
+            except ClientLocation.DoesNotExist:
+                return Response({"error": "La dirección seleccionada no es válida."}, status=status.HTTP_404_NOT_FOUND)
+
+        # =========================================================================
+        # 2. BLOQUEO ATÓMICO Y HARD RESERVATION
+        # =========================================================================
+        try:
+            with transaction.atomic():
+                inventory_items = InventoryItem.objects.select_for_update().filter(id__in=item_ids)
+
+                
+                # 💡 CASO 1: Un producto fue borrado de la BD por el comerciante
+                if inventory_items.count() != len(item_ids):
+                    found_ids = set(str(item.id) for item in inventory_items)
+                    missing_ids = set(item_ids) - found_ids
+                    # Retornamos el primer ID faltante para que Flutter lo limpie
+                    return Response({
+                        "error": "PRODUCTO_ELIMINADO",
+                        "product_id": list(missing_ids)[0],
+                        "message": "Uno de los productos en tu carrito fue retirado del catálogo por el vendedor. Hemos actualizado tu carrito."
+                    }, status=status.HTTP_404_NOT_FOUND)
+
+                cart_snapshot = []
+                total_price = 0.0
+
+                for item in inventory_items:
+                    requested_qty = item_qty_map[str(item.id)]
+                    
+                    # 💡 CASO 2: El producto fue pausado
+                    if item.paused:
+                        return Response({
+                            "error": "PRODUCTO_PAUSADO",
+                            "product_id": str(item.id),
+                            "message": f"El vendedor acaba de pausar la venta de '{item.product.name}'. Por favor, retíralo de tu carrito para continuar."
+                        }, status=status.HTTP_409_CONFLICT)
+                    
+                    # 💡 CASO 3: Stock agotado totalmente o parcialmente
+                    if item.stock < requested_qty:
+                        if item.stock == 0:
+                            msg = f"¡Ups! Alguien más acaba de comprar la última unidad de '{item.product.name}'. Lo hemos retirado de tu carrito."
+                        else:
+                            # =========================================================
+                            # ✨ MENSAJE ULTRA-DESCRIPTIVO (Lo que pediste)
+                            # =========================================================
+                            msg = f"Hemos ajustado tu pedido de '{item.product.name}' de {requested_qty} a {item.stock} unidades, que es el stock disponible actualmente."
+                            
+                        return Response({
+                            "error": "STOCK_INSUFICIENTE",
+                            "product_id": str(item.id),
+                            "available_stock": item.stock,
+                            "message": msg
+                        }, status=status.HTTP_409_CONFLICT)
+                    
+                    # Todo en orden: Descontamos
+                    item.stock -= requested_qty
+                    item.save()
+
+                    price_to_use = float(item.custom_price) if item.custom_price else float(item.product.price)
+                    
+                    # Extraemos la imagen si existe para mostrarla en el historial futuro
+                    img_url = storage_manager.get_url(item.product.images[0]) if item.product.images else ""
+
+                    cart_snapshot.append({
+                        "product_id": str(item.product.id),
+                        "inventory_item_id": str(item.id),
+                        "name": item.product.name,
+                        "quantity": requested_qty,
+                        "unit_price": price_to_use,
+                        "subtotal": price_to_use * requested_qty,
+                        "product_image": img_url # 💡 Nuevo campo en el snapshot
+                    })
+                    total_price += (price_to_use * requested_qty)
+
+                # 3. Creamos la orden oficial
+                order = Order.objects.create(
+                    store=store,
+                    client=request.user,
+                    delivery_location=client_location, # 💡 Anclamos la dirección
+                    cart={"items": cart_snapshot, "total": total_price},
+                    status=OrderStatus.WAITING, 
+                    withdrawal_type=withdrawal_type
+                )
+                
+                # Invalidamos caché volátil
+                for item in inventory_items:
+                    cache.delete(f"cartmaker:volatile:item:{item.id}")
+
+            # Obtenemos el ID del dueño de la empresa (Comerciante)
+            merchant_id = store.company.owner.id
+            total_price = order.cart.get('total', 0.0)
+            
+            # Lanzamos la alerta al panel administrativo
+            firebase_admin.NotificationManager.notify_order_created(
+                merchant_id=merchant_id,
+                order_id=order.id,
+                store_name=store.name,
+                total=total_price
+            )
+
+            return Response({
+                "success": True, 
+                "order_id": str(order.id), 
+                "message": "¡Orden creada exitosamente!"
+            }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            return Response({"error": "Ocurrió un error inesperado al procesar tu compra. Por favor, intenta de nuevo."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class InteractionLogViewSet(viewsets.ViewSet):
     """
@@ -3401,6 +3902,17 @@ class NotificationViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
     def get_queryset(self):
         # IMPORTANTE: Ordenamos para que las más nuevas salgan primero
         return Notification.objects.filter(user=self.request.user).order_by('-created_at')
+
+    @action(detail=False, methods=['post'], url_path="mark-section-as-read")
+    def mark_section_as_read(self, request):
+        section = request.data.get('section')
+        if section is None:
+            return Response({"detail": "Falta la sección."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        # 💡 Bulk update: Actualiza todas las no leídas de esta sección a True
+        updated_count = self.get_queryset().filter(section=section, is_read=False).update(is_read=True)
+        
+        return Response({"updated_count": updated_count, "detail": "Sección marcada como leída."}, status=status.HTTP_200_OK)
 
     # -------------------------------------------------------------------------
     # ENDPOINT 1: Obtener TODAS las notificaciones agrupadas por sección (KISS)

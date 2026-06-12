@@ -1,9 +1,13 @@
+from datetime import timedelta
+
 from celery import shared_task
 from django.contrib.auth import get_user_model
 import logging
 from django.utils import timezone
+
+from web.core.firebase_admin import NotificationManager
 from .core.platinum_manager import PlatinumEvaluator
-from web.models import InventoryItemOffer, InventoryItem
+from web.models import InventoryItemOffer, InventoryItem, Order
 from django.core.cache import cache
 
 logger = logging.getLogger(__name__)
@@ -87,3 +91,24 @@ def evaluate_platinum_status():
         logger.info("✅ Evaluación Platinum completada con éxito.")
     except Exception as e:
         logger.error(f"❌ Error en evaluate_platinum_status: {e}")
+
+@shared_task(name="cartmaker.orders.send_merchant_reminders")
+def send_uncompleted_orders_reminders_to_merchants():
+    """ Barre órdenes activas estancadas y recuerda al comerciante su gestión cada 6h """
+    time_threshold = timezone.now() - timedelta(hours=6)
+    
+    # Buscamos órdenes que sigan en WAITING (0) o SHIPPED (1) creadas hace más de 6 horas
+    pending_orders = Order.objects.select_related('store__company').filter(
+        status__in=[0, 1],
+        creation__lte=time_threshold
+    )
+    
+    for order in pending_orders:
+        merchant_id = order.store.company.owner.id
+        NotificationManager.notify_order_status_change(
+            user_id=merchant_id,
+            order_id=order.id,
+            title="⚠️ Pedido pendiente por cerrar",
+            body=f"La orden N° {order.id} aún no ha sido marcada como completada. Gestiona tu entrega.",
+            is_merchant=True
+        )

@@ -165,3 +165,56 @@ class NotificationManager:
             cls._send_multicast(user=user, title=title, body=body, data_payload=data)
         except Exception as e:
             logger.error(f"Fallo al notificar pregunta: {e}")
+
+    @classmethod
+    def notify_order_created(cls, merchant_id: int, order_id: int, store_name: str, total: float) -> None:
+        """ Notifica al comerciante que ha ingresado una nueva venta en su sucursal. """
+        title = '¡Nueva orden recibida!'
+        body = f'Has recibido el pedido N° {order_id} en {store_name} por un total de {total}$.'
+        
+        notification = Notification.objects.create(
+            user_id=merchant_id,
+            section=NotificationSection.MERCHANT_ORDERS,
+            title=title,
+            body=body,
+            category=NotificationCategory.NEW_ORDER,
+            metadata={'order_id': str(order_id)}
+        )
+        
+        # 💡 CAMBIO AQUÍ: Ahora especificamos que el evento es 'new_order'
+        data = {'type': 'new_order', 'order_id': str(order_id)} 
+        
+        try:
+            user = User.objects.prefetch_related('fcm_tokens').get(id=merchant_id)
+            cls._send_multicast(user=user, title=title, body=body, data_payload=data)
+        except Exception as e:
+            logger.error(f"Fallo al notificar creación de orden al comerciante: {e}")
+
+    @classmethod
+    def notify_order_status_change(cls, user_id: int, order_id: int, title: str, body: str, is_merchant: bool, new_status: int = -1) -> None:
+        """ 
+        Notifica cambios de estado (Cancelado, Enviado, Completado) cruzados entre cliente y comerciante. 
+        """
+        section = NotificationSection.MERCHANT_ORDERS if is_merchant else NotificationSection.ORDERS
+        
+        notification = Notification.objects.create(
+            user_id=user_id,
+            section=section,
+            title=title,
+            body=body,
+            category=NotificationCategory.ORDER_STATUS_CHANGED,
+            metadata={'order_id': str(order_id)}
+        )
+        
+        # 💡 AGREGAMOS EL STATUS AL PAYLOAD EN VIVO
+        data = {
+            'type': 'order_status_changed',
+            'order_id': str(order_id),
+            'status': str(new_status)
+        } 
+        
+        try:
+            user = User.objects.prefetch_related('fcm_tokens').get(id=user_id)
+            cls._send_multicast(user=user, title=title, body=body, data_payload=data)
+        except Exception as e:
+            logger.error(f"Fallo en cruce de notificación de orden: {e}")

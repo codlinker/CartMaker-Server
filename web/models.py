@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime
 import uuid
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
@@ -71,9 +71,10 @@ class OrderStatus(models.IntegerChoices):
     ENUM Estado de la orden.
     """
     WAITING = 0, _('Esperando')
+    DELIVERY_SENT = 1, _("Delivery en camino")
     CANCELLED = 3, _('Cancelada')
     COMPLETED = 4, _('Completada')
-    RESOLVED = 5, _('Resuelta')
+    SOLVED = 5, _('Resuelta')
 
 class StoreType(models.IntegerChoices):
     # Ubicaciones tradicionales
@@ -99,6 +100,16 @@ class MerchantType(models.IntegerChoices):
     """
     ENTREPRENEUR = 0, _('Emprendedor')
     BUSINESS = 1, _('Empresa')
+
+class CancellationReason(models.IntegerChoices):
+    """
+    Razones predefinidas para la cancelación de pedidos.
+    """
+    BETTER_PRICE = 1, _('Encontré un mejor precio.')
+    WRONG_PRODUCT = 2, _('Me equivoqué de producto.')
+    DELIVERY_TOO_LONG = 3, _('El delivery tarda demasiado.')
+    NO_LONGER_NEEDED = 4, _('Ya no lo necesito.')
+    OTHER = 5, _('Otros motivos.')
 
 class PaymentStatus(models.IntegerChoices):
     """
@@ -212,6 +223,7 @@ class NotificationCategory(models.IntegerChoices):
     OUT_OF_STOCK = 8, _('Producto agotado.')
     ANALYTICS_REPORT = 9, _('Reporte de métricas listo.')
     GAMIFICATION_ALERT = 10, _('Alerta de tokens/gamificación.')
+    ORDER_STATUS_CHANGED = 11, _('Actualización en orden.')
 
 class MessageOrigin(models.IntegerChoices):
     """
@@ -594,17 +606,6 @@ class Company(models.Model):
 class CompanyStore(models.Model):
     """
     Sucursal física o virtual de una compañía.
-
-    Attributes:
-        id (uuid): ID único de la tienda.
-        company (ForeignKey): Compañía a la que pertenece.
-        name (str): Nombre de la sucursal.
-        creation (datetime): Fecha de apertura en la plataforma.
-        work_hours (json): Horarios de atención por día.
-        store_img_url (str): Url de la imagen de la tienda.
-        store_type (int): Tipo de tienda.
-        is_active (bool): Indica si la tienda esta activa.
-        is_main_store (bool): Indica si es la sucursal principal. Obligatorio si el plan no permite múltiples sucursales.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='stores')
@@ -622,7 +623,6 @@ class CompanyStore(models.Model):
 
     class Meta:
         constraints = [
-            # 💡 REGLA DE INTEGRIDAD: Solo puede haber un is_main_store=True por cada company
             UniqueConstraint(
                 fields=['company'],
                 condition=Q(is_main_store=True),
@@ -630,22 +630,58 @@ class CompanyStore(models.Model):
             )
         ]
 
+    # =========================================================================
+    # 💡 LÓGICA DE DÍAS Y HORARIOS BASADA EN BENEFICIOS DE SUSCRIPCIÓN
+    # =========================================================================
+    @property
+    def effective_work_days(self) -> list:
+        """Determina los días laborales efectivos basados en la suscripción del dueño."""
+        try:
+            # Verificamos si el dueño tiene el beneficio de múltiples sucursales en su plan activo
+            has_branches_benefit = self.company.owner.subscription.plan.company_branches
+        except Exception:
+            # Falla de seguridad (Si no tiene suscripción por algún motivo, negamos el beneficio)
+            has_branches_benefit = False
+            
+        if not has_branches_benefit:
+            # 1. Si no tiene el beneficio, forzamos los días de la compañía central
+            days = self.company.main_work_days
+        else:
+            # 2. Si tiene el beneficio, verificamos si configuró días propios en esta sucursal
+            has_valid_days = self.work_days and isinstance(self.work_days, list) and len(self.work_days) > 0
+            days = self.work_days if has_valid_days else self.company.main_work_days
+            
+        # Seguro anti-fallos por si la BD devuelve nulo
+        return days if days else [0, 1, 2, 3, 4]
+
+    @property
+    def effective_work_hours(self) -> dict:
+        """Determina el horario laboral efectivo basados en la suscripción del dueño."""
+        try:
+            # Verificamos si el dueño tiene el beneficio de múltiples sucursales
+            has_branches_benefit = self.company.owner.subscription.plan.company_branches
+        except Exception:
+            has_branches_benefit = False
+            
+        if not has_branches_benefit:
+            # 1. Si no tiene el beneficio, forzamos el horario de la compañía central
+            return self.company.main_work_hours
+        else:
+            # 2. Si tiene el beneficio, verificamos si configuró un horario propio en esta sucursal
+            has_valid_hours = self.work_hours and isinstance(self.work_hours, dict) and 'start' in self.work_hours
+            return self.work_hours if has_valid_hours else self.company.main_work_hours
+
+    # =========================================================================
+    # VALIDADORES EN TIEMPO REAL (No cambian, consumen las propiedades superiores)
+    # =========================================================================
     @property
     def is_between_work_days(self) -> bool:
-        """Verifica únicamente si hoy es un día laborable."""
-        days_to_check = self.work_days if self.work_days else self.company.main_work_days
         now_local = timezone.localtime(timezone.now())
-        return now_local.weekday() in days_to_check
+        return now_local.weekday() in self.effective_work_days
 
     @property
     def is_between_work_hours(self) -> bool:
-        """
-        Verifica si la hora actual local está dentro del horario laboral.
-        El horario aplica por igual a todos los días laborables definidos.
-        Si la tienda no tiene horario propio, usa el de la compañía.
-        """
-        # 1. Aplicamos la regla del fallback
-        hours_to_use = self.work_hours if self.work_hours else self.company.main_work_hours
+        hours_to_use = self.effective_work_hours
         
         if not hours_to_use or 'start' not in hours_to_use or 'end' not in hours_to_use:
             return False 
@@ -659,15 +695,50 @@ class CompanyStore(models.Model):
             if start_time <= end_time:
                 return start_time <= current_time <= end_time
             else:
-                # Para horarios que cruzan la medianoche (ej. 10:00 PM a 02:00 AM)
                 return current_time >= start_time or current_time <= end_time
         except (ValueError, TypeError, AttributeError):
             return False
         
-    @property # <-- 1. Agregamos el decorador para acceder como atributo
+    @property
     def is_currently_open(self) -> bool:
-        """Función pública que combina ambas validaciones."""
-        return self.is_between_work_days and self.is_between_work_hours
+        """
+        Calcula de forma unificada si la tienda está abierta.
+        Al alimentarse de `effective_work_hours` y `effective_work_days`, 
+        hereda automáticamente la lógica de suscripción programada arriba.
+        """
+        hours_to_use = self.effective_work_hours
+        days_to_use = self.effective_work_days
+
+        if not hours_to_use or 'start' not in hours_to_use or 'end' not in hours_to_use:
+            return False
+
+        try:
+            now_local = timezone.localtime(timezone.now())
+            current_time = now_local.time()
+            current_weekday = now_local.weekday()
+
+            start_time = datetime.strptime(hours_to_use['start'].strip(), "%I:%M %p").time()
+            end_time = datetime.strptime(hours_to_use['end'].strip(), "%I:%M %p").time()
+
+            # CASO A: Horario normal
+            if start_time <= end_time:
+                if current_weekday in days_to_use:
+                    return start_time <= current_time <= end_time
+                return False
+
+            # CASO B: Horario nocturno / Cruzando la medianoche
+            else:
+                if current_weekday in days_to_use and current_time >= start_time:
+                    return True
+                
+                yesterday_weekday = (current_weekday - 1) % 7
+                if yesterday_weekday in days_to_use and current_time <= end_time:
+                    return True
+
+                return False
+
+        except (ValueError, TypeError, AttributeError):
+            return False
 
     def get_json(self) -> dict:
         url = ""
@@ -679,29 +750,18 @@ class CompanyStore(models.Model):
             for contact in self.contact_methods.all()
         }
         
-        # 2. Blindamos el fallback asegurando que sea una lista/dict y que tenga elementos
-        has_valid_hours = self.work_hours and isinstance(self.work_hours, dict) and 'start' in self.work_hours
-        effective_work_hours = self.work_hours if has_valid_hours else self.company.main_work_hours
-        
-        has_valid_days = self.work_days and isinstance(self.work_days, list) and len(self.work_days) > 0
-        effective_work_days = self.work_days if has_valid_days else self.company.main_work_days
-        print("====== DEBUG GET_JSON ======")
-        print(f"Tienda ({self.name}): work_days crudo -> {repr(self.work_days)}")
-        print(f"Compañía ({self.company.name}): main_work_days crudo -> {repr(self.company.main_work_days)}")
-        print(f"Resultado efectivo enviado a Flutter -> {repr(effective_work_days)}")
-        print("============================")
         return {
             'id': self.id,
             'name': self.name,
             'creation': timezone.localtime(self.creation).strftime("%d/%m/%Y, %H:%M:%S"),
             'store_img_url': url,
-            'work_hours': effective_work_hours,
-            'work_days': effective_work_days,
-            'is_currently_open': self.is_currently_open, # Ahora esto se evaluará correctamente gracias al @property
+            'work_hours': self.effective_work_hours,
+            'work_days': self.effective_work_days,
+            'is_currently_open': self.is_currently_open,
             'location': self.location.get_json() if hasattr(self, 'location') else None,
             'contact_methods': contact_methods_dict,
             'is_active': self.is_active,
-            "is_main_store":self.is_main_store
+            "is_main_store": self.is_main_store
         }
     
     def __str__(self):
@@ -968,20 +1028,6 @@ class InventoryItem(models.Model):
     def get_json(self) -> dict:
         avg_rating = getattr(self, 'avg_rating', 0.0)
         rating_count = getattr(self, 'rating_count', 0)
-        
-        # 1. Blindar el fallback para work_hours
-        store_hours = self.store.work_hours
-        has_valid_hours = store_hours and isinstance(store_hours, dict) and 'start' in store_hours
-        effective_work_hours = store_hours if has_valid_hours else self.store.company.main_work_hours
-        
-        # 2. Agregar y blindar el fallback para work_days
-        store_days = self.store.work_days
-        has_valid_days = store_days and isinstance(store_days, list) and len(store_days) > 0
-        effective_work_days = store_days if has_valid_days else self.store.company.main_work_days
-
-        # 👇 EL SEGURO FINAL: Si la compañía tampoco tiene días, asumimos Lunes a Viernes
-        if not effective_work_days:
-            effective_work_days = [0, 1, 2, 3, 4]
 
         return {
             "id": str(self.id),
@@ -990,7 +1036,6 @@ class InventoryItem(models.Model):
             "store_id": self.store_id,
             "creation": timezone.localtime(self.creation) if self.creation else None,
             "company_name": self.store.company.name,
-            "store_id": self.store.id,
             "sold_out_time": timezone.localtime(self.sold_out_time) if self.sold_out_time else None,
             "expiration_date": timezone.localtime(self.expiration_date) if self.expiration_date else None,
             "custom_price": float(self.custom_price) if self.custom_price else None,
@@ -1000,12 +1045,10 @@ class InventoryItem(models.Model):
             "rating_count": int(rating_count),
             "is_very_close": bool(getattr(self, 'is_very_close', False)),
             "is_close": bool(getattr(self, 'is_close', False)),
-            
-            # 3. Enviamos la data completa y usamos la validación unificada
-            "work_hours": effective_work_hours,
-            "work_days": effective_work_days, 
-            "is_open_now": self.store.is_currently_open, 
             "is_liked": bool(getattr(self, 'is_liked', False)),
+            "work_hours": self.store.effective_work_hours,
+            "work_days": self.store.effective_work_days, 
+            "is_open_now": self.store.is_currently_open, 
         }
     
     def __str__(self):
@@ -1125,8 +1168,9 @@ class Order(models.Model):
     creation = models.DateTimeField(auto_now_add=True)
     end_time = models.DateTimeField(null=True, blank=True)
     status = models.IntegerField(choices=OrderStatus.choices, default=OrderStatus.WAITING)
-    cancellation_topic = models.ForeignKey(OrderCancellationTopic, on_delete=models.SET_NULL, null=True, blank=True)
+    cancellation_topic = models.IntegerField(choices=CancellationReason.choices, null=True, blank=True)
     withdrawal_type = models.IntegerField(choices=WithdrawalType.choices)
+    delivery_location = models.ForeignKey(ClientLocation, on_delete=models.SET_NULL, null=True, blank=True)
 
 class TokenWallet(models.Model):
     """
@@ -1166,21 +1210,6 @@ class TokenWalletTransaction(models.Model):
 # ==========================================
 # MÓDULO 5: CALIFICACIONES Y SOPORTE
 # ==========================================
-
-class StoreCalification(models.Model):
-    """
-    Reseñas de clientes sobre sucursales.
-
-    Attributes:
-        store (ForeignKey): Tienda calificada.
-        client (ForeignKey): Usuario que califica.
-        creation (datetime): Fecha de la reseña.
-        rating (int): Puntaje otorgado (1-5).
-    """
-    store = models.ForeignKey(CompanyStore, on_delete=models.CASCADE, related_name='califications')
-    client = models.ForeignKey(User, on_delete=models.CASCADE)
-    creation = models.DateTimeField(auto_now_add=True)
-    rating = models.IntegerField()
 
 class ProductCalification(models.Model):
     """

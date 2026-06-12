@@ -22,6 +22,7 @@ router.register(r'client-company', ClientCompanyViewSet, basename="client_compan
 router.register(r'product-conversation', ProductConversationViewSet, basename="product_conversation")
 router.register(r'logs', InteractionLogViewSet, basename="logs")
 router.register(r'cart', CartViewSet, basename='cart')
+router.register(r'orders', OrderViewSet, basename='orders')
 
 # --- DEFINICIÓN DE RUTAS (URLS) ---
 urlpatterns = [

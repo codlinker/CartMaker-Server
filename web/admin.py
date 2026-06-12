@@ -93,7 +93,7 @@ class EmployeeStoreAssignmentAdmin(ModelAdmin):
 
 @admin.register(Order)
 class OrderAdmin(ModelAdmin):
-    list_display = ("id", "client", "store", "status_pill", "withdrawal_type", "creation")
+    list_display = ("id", "client", "store", 'delivery_location', "status_pill", "withdrawal_type", "creation")
     list_filter = ("status", "withdrawal_type")
     readonly_fields = ("creation", "end_time")
 
@@ -101,7 +101,7 @@ class OrderAdmin(ModelAdmin):
         OrderStatus.WAITING: "info",
         OrderStatus.COMPLETED: "success",
         OrderStatus.CANCELLED: "danger",
-        OrderStatus.RESOLVED: "warning",
+        OrderStatus.SOLVED: "warning",
     })
     def status_pill(self, obj):
         return obj.get_status_display()
@@ -256,7 +256,7 @@ class StoreContactMethodAdmin(ModelAdmin):
 others = [
     InventoryItemOffer, 
     InventoryItemTransaction, InventoryItemQuestion, OrderCancellationTopic, 
-    TokenWalletTransaction, StoreCalification, ProductCalification, 
+    TokenWalletTransaction, ProductCalification, 
     MerchantCalification, SupportTicket, AtlasMessage, 
     SystemConfig, UserNavigationLog, ClientContactMethod
 ]

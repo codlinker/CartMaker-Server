@@ -245,8 +245,21 @@ def invalidate_user_relations_cache(sender, instance, **kwargs):
 @receiver(post_delete, sender=CompanyStore)
 def invalidate_company_cache(sender, instance, **kwargs):
     """Si el comerciante actualiza su empresa o agrega una sucursal"""
+    company_id = instance.id if isinstance(instance, Company) else instance.company.id
     owner_id = instance.owner_id if isinstance(instance, Company) else instance.company.owner_id
+    
+    # 1. Limpiamos el caché del tenant (tu lógica original)
     cache.delete(f"cartmaker:tenant:{owner_id}:company")
+
+    # 2. 💡 NUEVO: Invalidación Quirúrgica del Caché Estructural del Carrito
+    # Obtenemos todos los IDs de los productos (InventoryItems) que pertenecen a esta empresa.
+    item_ids = InventoryItem.objects.filter(store__company_id=company_id).values_list('id', flat=True)
+    
+    # Construimos la lista de claves exactas a borrar
+    keys_to_delete = [f"cartmaker:struct:item:{uid}" for uid in item_ids]
+    
+    if keys_to_delete:
+        cache.delete_many(keys_to_delete)
 
 # ==========================================
 # INVALIDACIÓN DEL CACHÉ DE SUSCRIPCIONES Y BILLETERA
