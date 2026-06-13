@@ -222,12 +222,11 @@ sudo systemctl enable grafana-server
 
 ## 🚀 Ejecución del Proyecto
 
-Se deben tener estas 2 terminales abiertas o usar herramientas como `Supervisor` / `Systemd` si estás en el servidor de producción.
+Se deben tener estas 3 terminales abiertas:
 
 ### Terminal 1 - Servidor de la API (Uvicorn)
 
 ```bash
-source venv/bin/activate
 uvicorn cartmaker_admin.asgi:application --host 0.0.0.0 --port 8000 --reload
 
 ```
@@ -237,10 +236,20 @@ uvicorn cartmaker_admin.asgi:application --host 0.0.0.0 --port 8000 --reload
 Este proceso ejecuta todas las tasks en segundo plano, evitando que acciones pesadas bloqueen la velocidad de respuesta del servidor.
 
 ```bash
-source venv/bin/activate
 celery -A cartmaker_admin worker -B --loglevel=info --concurrency=2 
 
 ```
+
+### Terminal 3: Microservicio de Chat
+
+Este proceso ejecuta el microservicio de Node.js para el manejo de Websockets para las conversaciones
+en tiempo real en los chats de las ordenes activas (chat de compra y venta).
+
+```bash
+node  node_chat_server/index.js
+
+```
+
 
 > **Nota:** Si agregas nuevas funciones a `tasks.py`, recuerda reiniciar el proceso de Celery para que las reconozca.
 > EOF
