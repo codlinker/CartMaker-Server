@@ -1,6 +1,6 @@
 from django.db import models
 from django.utils import timezone
-from api.models import Order, User
+from api.models import Order, User, Company
 from api.cos import storage_manager # Usamos tu gestor de Object Storage
 
 class ChatMessage(models.Model):
@@ -47,4 +47,20 @@ class ChatMessage(models.Model):
             'media_url': absolute_media_url,
             'status': self.status,
             'created_at': time_str,
+        }
+
+class PredefinedMessage(models.Model):
+    company = models.ForeignKey('api.Company', on_delete=models.CASCADE, related_name='predefined_messages')
+    title = models.CharField(max_length=100, default="Mensaje Rápido") # 💡 Nuevo campo
+    text = models.CharField(max_length=600)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def get_json(self):
+        return {
+            'id': self.id,
+            'title': self.title,
+            'text': self.text
         }

@@ -4,7 +4,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated, AllowAny
 
 from api.core.firebase_admin import NotificationManager
-from .models import ChatMessage
+from .models import ChatMessage, PredefinedMessage
 from api.models import Order
 from .permissions import IsNodeMicroservice
 from django.db import transaction
@@ -19,27 +19,32 @@ class ChatViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['get'])
     def history(self, request):
-        """ Devuelve el historial de un chat al abrir la pantalla en Flutter """
+        """ Devuelve el historial paginado de un chat """
         order_id = request.query_params.get('order_id')
+        offset = int(request.query_params.get('offset', 0))
+        limit = int(request.query_params.get('limit', 15))
         
         if not order_id:
             return Response({"error": "Falta el ID de la orden."}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
             order = Order.objects.get(id=order_id)
-            
-            # 💡 Validamos que el usuario que pide el historial sea dueño de la tienda o el cliente
             is_client = order.client == request.user
             is_merchant = order.store.company.owner == request.user
 
             if not is_client and not is_merchant:
-                return Response({"error": "No tienes acceso a esta conversación."}, status=status.HTTP_403_FORBIDDEN)
+                return Response({"error": "No tienes acceso."}, status=status.HTTP_403_FORBIDDEN)
 
-            # Optimizamos con select_related para no hacer N+1 queries al buscar el sender
-            messages = ChatMessage.objects.filter(order=order).select_related('sender')
+            # 💡 Traemos los últimos X mensajes ordenados por fecha descendente
+            messages = ChatMessage.objects.filter(order=order).select_related('sender').order_by('-created_at')[offset:offset+limit]
             
-            data = [msg.get_json() for msg in messages]
-            return Response({'data': data}, status=status.HTTP_200_OK)
+            # 💡 Invertimos la lista en memoria para que Flutter los reciba cronológicamente
+            data = [msg.get_json() for msg in messages][::-1]
+            
+            return Response({
+                'data': data,
+                'next_offset': offset + limit if len(data) == limit else None
+            }, status=status.HTTP_200_OK)
             
         except Order.DoesNotExist:
             return Response({"error": "La orden no existe."}, status=status.HTTP_404_NOT_FOUND)
@@ -67,6 +72,57 @@ class ChatViewSet(viewsets.ViewSet):
             }, status=status.HTTP_200_OK)
             
         return Response({"error": "Error al guardar el archivo en el storage"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+    
+    @action(detail=False, methods=['get', 'post', 'delete'], url_path='predefined-messages')
+    def predefined_messages(self, request):
+        """ CRUD para mensajes rápidos de la compañía """
+        # Obtenemos el order_id dependiendo del método HTTP
+        order_id = request.query_params.get('order_id') if request.method in ['GET', 'DELETE'] else request.data.get('order_id')
+        
+        if not order_id:
+            return Response({"error": "Falta el ID de la orden."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            order = Order.objects.get(id=order_id)
+            company = order.store.company
+            
+            # Validamos que el usuario logueado sea el dueño
+            if company.owner != request.user:
+                return Response({"error": "No tienes acceso a esta compañía."}, status=status.HTTP_403_FORBIDDEN)
+
+            if request.method == 'GET':
+                msgs = PredefinedMessage.objects.filter(company=company)
+                return Response({'data': [m.get_json() for m in msgs]}, status=status.HTTP_200_OK)
+                
+            elif request.method == 'POST':
+                title = request.data.get('title', 'Mensaje Rápido')
+                text = request.data.get('text')
+                
+                if not text:
+                    return Response({"error": "El texto es requerido"}, status=status.HTTP_400_BAD_REQUEST)
+                
+                if PredefinedMessage.objects.filter(company=company).count() >= 20:
+                    return Response({"error": "Límite alcanzado para esta empresa."}, status=status.HTTP_400_BAD_REQUEST)
+
+                msg = PredefinedMessage.objects.create(company=company, title=title, text=text)
+                return Response({'data': msg.get_json()}, status=status.HTTP_201_CREATED)
+
+            # 💡 NUEVA LÓGICA DE ELIMINACIÓN
+            elif request.method == 'DELETE':
+                message_id = request.query_params.get('message_id')
+                if not message_id:
+                    return Response({"error": "Falta el ID del mensaje a eliminar."}, status=status.HTTP_400_BAD_REQUEST)
+                
+                try:
+                    msg = PredefinedMessage.objects.get(id=message_id, company=company)
+                    msg.delete()
+                    return Response({"success": True, "message": "Eliminado correctamente"}, status=status.HTTP_200_OK)
+                except PredefinedMessage.DoesNotExist:
+                    return Response({"error": "El mensaje no existe o ya fue eliminado."}, status=status.HTTP_404_NOT_FOUND)
+
+        except Order.DoesNotExist:
+            return Response({"error": "La orden no existe."}, status=status.HTTP_404_NOT_FOUND)
 
 # =========================================================================
 # 2. ENDPOINT PARA NODE.JS (Webhook)

@@ -207,11 +207,12 @@ class NotificationManager:
             metadata={'order_id': str(order_id)}
         )
         
-        # 💡 AGREGAMOS EL STATUS AL PAYLOAD EN VIVO
+        # 💡 AÑADIMOS EL FLAG DE MERCHANT PARA FLUTTER
         data = {
             'type': 'order_status_changed',
             'order_id': str(order_id),
-            'status': str(new_status)
+            'status': str(new_status),
+            'is_merchant_receiver': str(is_merchant).lower() # <-- ¡Línea clave!
         } 
         
         try:
@@ -268,7 +269,7 @@ class NotificationManager:
                     metadata={
                         'type': 'new_chat_message',
                         'order_id': str(order.id),
-                        'is_merchant_receiver': not is_client_sender
+                        'is_merchant_receiver': is_client_sender
                     }
                 )
                 logger.info(f"FCM: Nueva notificación de chat creada (ID: {notification.id})")
@@ -280,7 +281,7 @@ class NotificationManager:
                 'type': 'new_chat_message',
                 'order_id': str(order.id),
                 'notification_id': str(notification.id),
-                'is_merchant_receiver': str(not is_client_sender).lower()
+                'is_merchant_receiver': str(is_client_sender).lower()
             }
             
             user_obj = User.objects.prefetch_related('fcm_tokens').get(id=receiver.id)

@@ -88,8 +88,8 @@ io.use((socket, next) => {
     const token = socket.handshake.auth.token;
 
     if (!token) {
-      debugPrint("WS Auth: Token no provisto");
-      return next(new Error("Autenticación denegada: Token no provisto"));
+      console.log("WS Auth: Token no provisto");
+      return next(new Error("token_missing"));
     }
 
     // Desciframos
@@ -98,7 +98,13 @@ io.use((socket, next) => {
     next();
   } catch (err) {
     console.error("❌ Error descifrando JWT en el handshake:", err.message);
-    return next(new Error("Autenticación denegada: Token inválido o expirado"));
+    
+    // 💡 CLAVE: Si el error de jsonwebtoken es por expiración, enviamos una bandera exacta
+    if (err.message.includes('expired')) {
+      return next(new Error("jwt_expired"));
+    }
+    
+    return next(new Error("invalid_token"));
   }
 });
 
