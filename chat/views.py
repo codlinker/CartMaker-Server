@@ -158,7 +158,7 @@ class ChatWebhookViewSet(viewsets.ViewSet):
 
             if not recipient_connected:
                 # Tu NotificationManager inteligente creado previamente
-                NotificationManager.notify_new_chat_message(order=order, sender_id=sender_id, text=text or "[Multimedia]")
+                NotificationManager.notify_new_chat_message(order=order, sender_id=sender_id, text=text or "🖼️ Foto")
 
             return Response({"success": True, "data": msg.get_json()}, status=status.HTTP_200_OK)
         except Order.DoesNotExist:

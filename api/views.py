@@ -642,10 +642,18 @@ class GetStoreInventoryItems(APIView):
             category_id = request.GET.get('category_id')
             page = request.GET.get('page', 1)
             
-            # 💡 2. Filtramos el queryset de lotes si viene el parámetro
+            # 💡 NUEVO: Atrapamos el parámetro de agotados
+            out_of_stock = request.GET.get('out_of_stock') == 'true'
+
+            # 💡 2. Filtramos el queryset de lotes si vienen los parámetros
             items_query = InventoryItem.objects.filter(store=store)
+            
             if category_id:
                 items_query = items_query.filter(product__category_id=category_id)
+                
+            # 💡 NUEVO: Aplicamos el filtro de stock en 0
+            if out_of_stock:
+                items_query = items_query.filter(stock=0)
                 
             items_query = items_query.order_by('-creation')
             
@@ -2247,7 +2255,7 @@ class OrderViewSet(viewsets.ViewSet):
             
             client_lat = float(order.delivery_location.coordinates.y) if order.delivery_location else None
             client_lng = float(order.delivery_location.coordinates.x) if order.delivery_location else None
-            client_address = order.delivery_location.name if order.delivery_location else None
+            client_address = order.delivery_location.description if order.delivery_location else None
 
             # Mandamos la estructura limpia que espera Flutter
             payload = {
@@ -2264,7 +2272,7 @@ class OrderViewSet(viewsets.ViewSet):
                 'client_lat': client_lat,
                 'client_lng': client_lng,
                 'client_address': client_address,
-                # Inyectamos ambos nombres por si acaso
+                "client_image": storage_manager.get_url(order.client.profile_picture) if order.client.profile_picture else None,
                 'client_name': f"{order.client.first_name} {order.client.last_name}",
             }
             
@@ -2314,7 +2322,7 @@ class OrderViewSet(viewsets.ViewSet):
             if order.delivery_location:
                 client_lat = float(order.delivery_location.coordinates.y)
                 client_lng = float(order.delivery_location.coordinates.x)
-                client_address = order.delivery_location.name
+                client_address = order.delivery_location.description
 
             # 💡 EXTRACCIÓN DE MÉTODOS DE CONTACTO (Tienda -> Cliente)
             contact_methods_dict = {
@@ -2393,7 +2401,7 @@ class OrderViewSet(viewsets.ViewSet):
             if order.delivery_location:
                 client_lat = float(order.delivery_location.coordinates.y)
                 client_lng = float(order.delivery_location.coordinates.x)
-                client_address = order.delivery_location.name
+                client_address = order.delivery_location.description
 
             orders_data.append({
                 'id': order.id,
@@ -2462,7 +2470,7 @@ class OrderViewSet(viewsets.ViewSet):
             return Response({"error": f"Error obteniendo tópicos: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     # =========================================================================
-    # 💡 CANCELAR ORDEN
+    # 💡 CANCELAR ORDEN (Con reintegro de Stock Físico y Digital)
     # =========================================================================
     @action(detail=False, methods=['post'])
     def cancel_order(self, request):
@@ -2472,7 +2480,6 @@ class OrderViewSet(viewsets.ViewSet):
         if not order_id or not topic_id:
             return Response({"error": "Se requiere order_id y cancellation_topic_id."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Validamos que el topic_id exista en nuestro Enum
         try:
             topic_id = int(topic_id)
             if topic_id not in dict(CancellationReason.choices):
@@ -2487,7 +2494,9 @@ class OrderViewSet(viewsets.ViewSet):
                 if order.status != OrderStatus.WAITING: 
                     return Response({"error": "Solo puedes cancelar órdenes pendientes."}, status=status.HTTP_400_BAD_REQUEST)
 
-                # Reintegro atómico de stock físico
+                # =============================================================
+                # 1. REINTEGRO DE STOCK FÍSICO
+                # =============================================================
                 cart_items = order.cart.get('items', [])
                 for item in cart_items:
                     inv_item_id = item.get('inventory_item_id')
@@ -2500,9 +2509,42 @@ class OrderViewSet(viewsets.ViewSet):
                         except InventoryItem.DoesNotExist:
                             pass 
 
-                # Actualizamos la orden
-                order.status = OrderStatus.CANCELLED # CANCELLED
-                order.cancellation_topic = topic_id # 💡 Guardamos el Entero del Enum
+                # =============================================================
+                # 💡 2. REINTEGRO DE TOKENS (Gamificación)
+                # =============================================================
+                # Buscamos si a esta orden se le cobraron tokens (OUTCOME)
+                spent_transactions = TokenWalletTransaction.objects.filter(
+                    order=order, 
+                    transaction_type=TransactionType.OUTCOME
+                )
+                
+                total_tokens_to_refund = sum(t.amount for t in spent_transactions)
+
+                if total_tokens_to_refund > 0:
+                    try:
+                        # Bloqueamos la billetera para evitar race conditions
+                        wallet = TokenWallet.objects.select_for_update().get(
+                            user=order.client, 
+                            company=order.store.company
+                        )
+                        wallet.balance += total_tokens_to_refund
+                        wallet.save(update_fields=['balance'])
+                        
+                        # Dejamos un recibo del reembolso
+                        TokenWalletTransaction.objects.create(
+                            token_wallet=wallet,
+                            amount=total_tokens_to_refund,
+                            transaction_type=TransactionType.INCOME, # O TransactionType.REFUND si lo tienes
+                            order=order
+                        )
+                    except TokenWallet.DoesNotExist:
+                        pass # Fallback de seguridad por si le borraron la billetera manualmente
+
+                # =============================================================
+                # 3. ACTUALIZACIÓN DE ESTADO Y NOTIFICACIONES
+                # =============================================================
+                order.status = OrderStatus.CANCELLED
+                order.cancellation_topic = topic_id 
                 order.end_time = timezone.now()
                 order.save()
 
@@ -2513,10 +2555,10 @@ class OrderViewSet(viewsets.ViewSet):
                     title="Orden Cancelada",
                     body=f"El cliente ha cancelado la orden N° {order.id}.",
                     is_merchant=True,
-                    new_status=OrderStatus.CANCELLED # 💡 AÑADIDO
+                    new_status=OrderStatus.CANCELLED 
                 )
 
-            return Response({"success": True, "message": "Orden cancelada exitosamente y stock devuelto."}, status=status.HTTP_200_OK)
+            return Response({"success": True, "message": "Orden cancelada exitosamente y stock/tokens devueltos."}, status=status.HTTP_200_OK)
         except Order.DoesNotExist:
             return Response({"error": "La orden no existe."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -2531,65 +2573,80 @@ class OrderViewSet(viewsets.ViewSet):
         product_ratings = request.data.get('product_ratings', [])
 
         try:
-            # Buscamos si quien ejecuta es el cliente o el comerciante
-            order = Order.objects.select_related('store__company').get(id=order_id)
-            is_client = order.client == request.user
-            is_merchant = order.store.company.owner == request.user
-
-            if not is_client and not is_merchant:
-                return Response({"error": "No tienes permisos sobre esta orden."}, status=status.HTTP_403_FORBIDDEN)
-
-            if order.status == OrderStatus.COMPLETED: # COMPLETED
-                return Response({"error": "Esta orden ya se encuentra completada."}, status=status.HTTP_400_BAD_REQUEST)
-
             with transaction.atomic():
-                order.status = OrderStatus.COMPLETED # COMPLETED
-                order.end_time = timezone.now()
-                order.save()
+                # Buscamos si quien ejecuta es el cliente o el comerciante
+                order = Order.objects.select_related('store__company').get(id=order_id)
+                is_client = order.client == request.user
+                is_merchant = order.store.company.owner == request.user
 
-                Notification.objects.filter(metadata__order_id=str(order.id), is_read=False).update(is_read=True)
+                if not is_client and not is_merchant:
+                    return Response({"error": "No tienes permisos sobre esta orden."}, status=status.HTTP_403_FORBIDDEN)
 
-                # El cliente califica (Solo si la petición viene del cliente real)
+                if order.status == OrderStatus.COMPLETED: # COMPLETED
+                    return Response({"error": "Esta orden ya se encuentra completada."}, status=status.HTTP_400_BAD_REQUEST)
+
+                with transaction.atomic():
+                    order.status = OrderStatus.COMPLETED # COMPLETED
+                    order.end_time = timezone.now()
+                    order.save()
+
+                    Notification.objects.filter(metadata__order_id=str(order.id), is_read=False).update(is_read=True)
+
+                    # El cliente califica (Solo si la petición viene del cliente real)
+                    if is_client:
+                        if merchant_rating and float(merchant_rating) > 0:
+                            MerchantCalification.objects.create(merchant=order.store.company, client=request.user, rating=float(merchant_rating))
+                        for pr in product_ratings:
+                            rating_val = pr.get('rating', 0)
+                            product_id = pr.get('product_id')
+                            if product_id and float(rating_val) > 0:
+                                ProductCalification.objects.create(product_id=product_id, client=request.user, rating=float(rating_val))
+
                 if is_client:
-                    if merchant_rating and float(merchant_rating) > 0:
-                        MerchantCalification.objects.create(merchant=order.store.company, client=request.user, rating=float(merchant_rating))
-                    for pr in product_ratings:
-                        rating_val = pr.get('rating', 0)
-                        product_id = pr.get('product_id')
-                        if product_id and float(rating_val) > 0:
-                            ProductCalification.objects.create(product_id=product_id, client=request.user, rating=float(rating_val))
+                    NotificationManager.notify_order_status_change(
+                        user_id=order.store.company.owner.id,
+                        order_id=order.id,
+                        title="Cliente confirmó entrega",
+                        body=f"El cliente de la orden N° {order.id} la ha marcado como completada.",
+                        is_merchant=True,
+                        new_status=OrderStatus.COMPLETED # 💡 AÑADIDO
+                    )
+                elif is_merchant:
+                    NotificationManager.notify_order_status_change(
+                        user_id=order.client.id,
+                        order_id=order.id,
+                        title="Tu orden fue completada",
+                        body=f"{order.store.company.name} ha marcado tu pedido como completado exitosamente.",
+                        is_merchant=False,
+                        new_status=OrderStatus.COMPLETED # 💡 AÑADIDO
+                    )
 
-            if is_client:
-                NotificationManager.notify_order_status_change(
-                    user_id=order.store.company.owner.id,
-                    order_id=order.id,
-                    title="Cliente confirmó entrega",
-                    body=f"El cliente de la orden N° {order.id} la ha marcado como completada.",
-                    is_merchant=True,
-                    new_status=OrderStatus.COMPLETED # 💡 AÑADIDO
-                )
-            elif is_merchant:
-                NotificationManager.notify_order_status_change(
-                    user_id=order.client.id,
-                    order_id=order.id,
-                    title="Tu orden fue completada",
-                    body=f"{order.store.company.name} ha marcado tu pedido como completado exitosamente.",
-                    is_merchant=False,
-                    new_status=OrderStatus.COMPLETED # 💡 AÑADIDO
-                )
+                tokens_earned = 0.0
+                company = order.store.company
 
-            return Response({"success": True, "tokens_earned": 20 if is_client else 0, "message": "Orden completada con éxito."}, status=status.HTTP_200_OK)
+                if company.gamification_enabled and company.gamification_tokens_per_dollar > 0:
+                    order_total = float(order.cart.get('total', 0.0))
+                    tokens_earned = int(order_total * company.gamification_tokens_per_dollar)
+                    
+                    if tokens_earned > 0:
+                        wallet, _ = TokenWallet.objects.get_or_create(user=order.client, company=company)
+                        wallet.balance += tokens_earned
+                        wallet.save(update_fields=['balance'])
+                        
+                        TokenWalletTransaction.objects.create(
+                            token_wallet=wallet, amount=tokens_earned,
+                            transaction_type=TransactionType.INCOME, order=order
+                        )
+
+                return Response({
+                    "success": True, 
+                    "tokens_earned": round(float(tokens_earned), 2) , # 👈 Ahora sí enviamos el número real
+                    "message": "Orden completada con éxito."
+                }, status=status.HTTP_200_OK)
+            return Response({'error':"Error interno en el servidor."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         except Order.DoesNotExist:
             return Response({"error": "La orden no existe."}, status=status.HTTP_404_NOT_FOUND)
 
-# TODO: 
-
-# YA SE INTEGRARON EL ENVIO DE NOTIFICACIONES Y MOSTRAR LOS METODOS DE CONTACTO EN LA ORDEN
-# AHORA TENEMOS QUE IMPLEMENTAR EL CHAT EN TIEMPO REAL DE LA ORDEN. ES LO MEJOR QUE PODEMOS HACER
-# PORQUE SI NO, NOS VAMOS A QUEDAR ATRAS DE PEDIDOS YA, YUMMY RIDES, MERCADOLIBRE, FACEBOOK, ETC.
-
-# TENER QUE DEPENDER DE WHATSAPP, INSTAGRAM, LLAMADAS TELEFONICAS U OTROS MEDIOS DE CONTACTO EXTERNOS
-# NOS DEJA FUERA DEL MERCADO.
 
 class CartViewSet(viewsets.ViewSet):
     """
@@ -2603,6 +2660,8 @@ class CartViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['post'])
     def details(self, request):
         item_ids = request.data.get('item_ids', [])
+
+        print("ITEM IDS: ", item_ids)
         
         if not item_ids or not isinstance(item_ids, list):
             return Response({'data': []}, status=status.HTTP_200_OK)
@@ -2737,7 +2796,11 @@ class CartViewSet(viewsets.ViewSet):
 
         item_ids = [item['id'] for item in items_data]
         item_qty_map = {item['id']: int(item['quantity']) for item in items_data}
-
+        item_discount_map = {item.get('id'): item.get('selected_discount') for item in items_data if item.get('selected_discount')}
+        # Calculamos cuántos tokens en total le va a costar esta orden al usuario
+        total_tokens_needed = 0
+        for item_id, discount in item_discount_map.items():
+            total_tokens_needed += int(discount.get('tokens', 0))
         # 💡 Buscamos la ubicación de forma segura
         client_location = None
         if withdrawal_type == 1:
@@ -2753,7 +2816,22 @@ class CartViewSet(viewsets.ViewSet):
             with transaction.atomic():
                 inventory_items = InventoryItem.objects.select_for_update().filter(id__in=item_ids)
 
-                
+                # 💡 BLOQUEO ATÓMICO 1: Validamos que el cliente SÍ tenga los tokens en esta compañía
+                token_wallet = None
+                if total_tokens_needed > 0:
+                    try:
+                        token_wallet = TokenWallet.objects.select_for_update().get(user=request.user, company=store.company)
+                        if token_wallet.balance < total_tokens_needed:
+                            return Response({
+                                "error": "TOKENS_INSUFICIENTES",
+                                "message": f"Necesitas {total_tokens_needed} tokens, pero tu saldo actual es de {token_wallet.balance} T."
+                            }, status=status.HTTP_409_CONFLICT)
+                    except TokenWallet.DoesNotExist:
+                        return Response({
+                            "error": "SIN_BILLETERA",
+                            "message": "No tienes tokens registrados con este comercio."
+                        }, status=status.HTTP_409_CONFLICT)
+                    
                 # 💡 CASO 1: Un producto fue borrado de la BD por el comerciante
                 if inventory_items.count() != len(item_ids):
                     found_ids = set(str(item.id) for item in inventory_items)
@@ -2800,21 +2878,49 @@ class CartViewSet(viewsets.ViewSet):
                     item.stock -= requested_qty
                     item.save()
 
-                    price_to_use = float(item.custom_price) if item.custom_price else float(item.product.price)
+                    # Precio base de la BD
+                    base_unit_price = float(item.custom_price) if item.custom_price else float(item.product.price)
                     
-                    # Extraemos la imagen si existe para mostrarla en el historial futuro
+                    # 💡 1. APLICAMOS OFERTA ESTÁNDAR (Afecta a TODAS las unidades)
+                    standard_offer_pct = None
+                    if hasattr(item, 'offer') and item.offer and item.offer.valid_until >= timezone.now():
+                        standard_offer_pct = int(item.offer.percentage)
+                        base_unit_price = base_unit_price - (base_unit_price * (standard_offer_pct / 100.0))
+
+                    # 💡 2. REGLA DE NEGOCIO: EXCLUSIVIDAD MUTUA
+                    applied_token_discount = item_discount_map.get(str(item.id))
+                    
+                    # Si el producto tiene oferta de tienda Y el usuario intentó usar tokens: ¡Rechazamos!
+                    if standard_offer_pct and applied_token_discount:
+                        return Response({
+                            "error": "OFERTAS_NO_ACUMULABLES",
+                            "message": f"El producto '{item.product.name}' ya tiene una oferta de la tienda, por lo que no es acumulable con descuentos por tokens."
+                        }, status=status.HTTP_409_CONFLICT)
+
+                    # El subtotal arranca asumiendo que todas valen el base_unit_price (ya rebajado si había oferta estándar)
+                    subtotal = base_unit_price * requested_qty
+
+                    # 💡 3. APLICAMOS DESCUENTO POR TOKENS (Afecta solo a 1 UNIDAD)
+                    if applied_token_discount:
+                        pct = float(applied_token_discount.get('percentage', 0))
+                        ahorro = base_unit_price * (pct / 100.0)
+                        subtotal -= ahorro 
+
                     img_url = storage_manager.get_url(item.product.images[0]) if item.product.images else ""
 
+                    # 💡 3. GUARDAMOS EL RECIBO DE COMPRA (Snapshot inmutable)
                     cart_snapshot.append({
                         "product_id": str(item.product.id),
                         "inventory_item_id": str(item.id),
                         "name": item.product.name,
                         "quantity": requested_qty,
-                        "unit_price": price_to_use,
-                        "subtotal": price_to_use * requested_qty,
-                        "product_image": img_url # 💡 Nuevo campo en el snapshot
+                        "unit_price": base_unit_price, 
+                        "subtotal": subtotal,
+                        "product_image": img_url,
+                        "standard_offer_applied": standard_offer_pct, # 👈 Guardamos % de oferta normal
+                        "token_discount_applied": applied_token_discount # 👈 Guardamos dict de tokens
                     })
-                    total_price += (price_to_use * requested_qty)
+                    total_price += subtotal
 
                 # 3. Creamos la orden oficial
                 order = Order.objects.create(
@@ -2825,6 +2931,18 @@ class CartViewSet(viewsets.ViewSet):
                     status=OrderStatus.WAITING, 
                     withdrawal_type=withdrawal_type
                 )
+
+                # 💡 COBRAMOS LOS TOKENS AL FINALIZAR LA ORDEN
+                if token_wallet and total_tokens_needed > 0:
+                    token_wallet.balance -= total_tokens_needed
+                    token_wallet.save(update_fields=['balance'])
+                    
+                    TokenWalletTransaction.objects.create(
+                        token_wallet=token_wallet,
+                        amount=total_tokens_needed,
+                        transaction_type=TransactionType.OUTCOME,
+                        order=order
+                    )
                 
                 # Invalidamos caché volátil
                 for item in inventory_items:
@@ -3392,6 +3510,23 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
             ).get(id=item_id, paused=False)
             
             data = item.get_json()
+            
+            # =================================================================
+            # 💡 NUEVO: INYECTAR EL SALDO REAL DE TOKENS DEL USUARIO EN LA TIENDA
+            # =================================================================
+            user_tokens = 0
+            if request.user.is_authenticated:
+                try:
+                    wallet = TokenWallet.objects.only('balance').get(
+                        user=request.user, 
+                        company=item.store.company
+                    )
+                    user_tokens = wallet.balance
+                except TokenWallet.DoesNotExist:
+                    user_tokens = 0
+            
+            data['user_wallet_balance'] = user_tokens
+            
             return Response({'success': True, 'data': data}, status=status.HTTP_200_OK)
             
         except InventoryItem.DoesNotExist:
@@ -3643,8 +3778,8 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
                 expiration_date_raw = request.data.get('expiration_date')
                 custom_price = request.data.get('custom_price')
 
-                store = CompanyStore.objects.get(id=store_id, company__owner=request.user)
-                product = Product.objects.get(id=product_id, company__owner=request.user)
+                store = CompanyStore.objects.select_related('company').get(id=store_id, company__owner=request.user)
+                product = Product.objects.select_related('company').get(id=product_id, company__owner=request.user)
 
                 # Procesamos la fecha de caducidad usando nuestra función flexible
                 exp_datetime = None
@@ -3702,7 +3837,7 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         # Aseguramos que el usuario solo pueda interactuar con los productos de su compañía
-        return Product.objects.filter(company__owner=self.request.user).order_by('-creation')
+        return Product.objects.select_related('company').filter(company__owner=self.request.user).order_by('-creation')
     
     @action(detail=False, methods=['post'])
     def bulk_create(self, request):
@@ -3949,6 +4084,36 @@ class ProductViewSet(viewsets.ModelViewSet):
             
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['post'])
+    def bulk_delete(self, request):
+        """
+        Recibe una lista de IDs y elimina los productos masivamente.
+        """
+        product_ids = request.data.get('product_ids', [])
+        if not product_ids or not isinstance(product_ids, list):
+            return Response({'error': 'Se requiere una lista de IDs de productos válidos.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            with transaction.atomic():
+                # Filtramos para asegurar que pertenezcan al usuario dueño de la compañía
+                products_to_delete = Product.objects.select_related('company').filter(id__in=product_ids, company__owner=request.user)
+                
+                # Borramos las imágenes del storage iterando la consulta evaluada
+                for product in products_to_delete:
+                    for img in product.images:
+                        try:
+                            storage_manager.delete_file(img)
+                        except Exception as e:
+                            print(f"Error borrando imagen en bulk_delete: {e}")
+                
+                # Eliminación masiva a nivel de BD
+                deleted_count, _ = products_to_delete.delete()
+
+            return Response({'success': True, 'deleted_count': deleted_count}, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class NotificationViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
     serializer_class = NotificationSerializer

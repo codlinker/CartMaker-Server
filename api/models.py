@@ -710,6 +710,8 @@ class CompanyStore(models.Model):
         hours_to_use = self.effective_work_hours
         days_to_use = self.effective_work_days
 
+        print(f"Esta cerradad actualmente? hours_to_user: {hours_to_use} days_to_use: {days_to_use}")
+
         if not hours_to_use or 'start' not in hours_to_use or 'end' not in hours_to_use:
             return False
 
@@ -989,7 +991,7 @@ class Product(models.Model):
                 'name':self.category.name
             },
             "description":self.description,
-            "discounts_by_tokens_active":self.discounts_by_tokens_active,
+            "discounts_by_tokens_active":self.discounts_by_tokens_active if self.company.gamification_enabled else False,
             "discounts_data":self.discounts_data,
             "company_id":self.company_id,
             "images":images
