@@ -14,6 +14,8 @@ from django.utils.html import mark_safe
 from decimal import Decimal
 from django.contrib.postgres.indexes import GinIndex
 from django.db.models import UniqueConstraint, Q
+from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
+from django.contrib.contenttypes.models import ContentType
 
 # FUNCIONES PARA JSON Fields por default
 
@@ -710,8 +712,6 @@ class CompanyStore(models.Model):
         hours_to_use = self.effective_work_hours
         days_to_use = self.effective_work_days
 
-        print(f"Esta cerradad actualmente? hours_to_user: {hours_to_use} days_to_use: {days_to_use}")
-
         if not hours_to_use or 'start' not in hours_to_use or 'end' not in hours_to_use:
             return False
 
@@ -1029,9 +1029,6 @@ class InventoryItem(models.Model):
     )
 
     def get_json(self) -> dict:
-        avg_rating = getattr(self, 'avg_rating', 0.0)
-        rating_count = getattr(self, 'rating_count', 0)
-
         return {
             "id": str(self.id),
             "product": self.product.get_json(), 
@@ -1039,16 +1036,18 @@ class InventoryItem(models.Model):
             "store_id": self.store_id,
             "creation": timezone.localtime(self.creation) if self.creation else None,
             "company_name": self.store.company.name,
+            "company_image": storage_manager.get_url(self.store.company.image),
             "sold_out_time": timezone.localtime(self.sold_out_time) if self.sold_out_time else None,
             "expiration_date": timezone.localtime(self.expiration_date) if self.expiration_date else None,
             "custom_price": float(self.custom_price) if self.custom_price else None,
             "paused": self.paused,
             "offer": self.offer.get_json() if hasattr(self, 'offer') else None,
-            "avg_rating": round(float(avg_rating), 2),
-            "rating_count": int(rating_count),
+            "avg_rating": round(float(getattr(self, 'avg_rating', 0.0)), 2),
+            "rating_count": int(getattr(self, 'rating_count', 0)),
             "is_very_close": bool(getattr(self, 'is_very_close', False)),
             "is_close": bool(getattr(self, 'is_close', False)),
             "is_liked": bool(getattr(self, 'is_liked', False)),
+            "likes_count": getattr(self, 'likes_count', 0),
             "work_hours": self.store.effective_work_hours,
             "work_days": self.store.effective_work_days, 
             "is_open_now": self.store.is_currently_open, 
@@ -1090,52 +1089,6 @@ class InventoryItemTransaction(models.Model):
     units = models.IntegerField()
     transaction_type = models.IntegerField(choices=TransactionType.choices)
     creation = models.DateTimeField(auto_now_add=True)
-
-class InventoryItemQuestion(models.Model):
-    """
-    Interacción de preventa entre cliente y comercio.
-
-    Attributes:
-        client (ForeignKey): Usuario que pregunta.
-        item (ForeignKey): Ítem consultado.
-        question_text (str): Contenido de la pregunta.
-        question_creation (datetime): Fecha de la pregunta.
-        answer_text (str): Respuesta del comercio.
-        answer_creation (datetime): Fecha de la respuesta.
-    """
-    client = models.ForeignKey(User, on_delete=models.CASCADE, related_name='questions_asked')
-    item = models.ForeignKey(InventoryItem, on_delete=models.CASCADE, related_name='questions')
-    question_text = models.TextField()
-    question_creation = models.DateTimeField(auto_now_add=True)
-    answer_text = models.TextField(null=True, blank=True)
-    answer_creation = models.DateTimeField(null=True, blank=True)
-
-    def get_json(self):
-        # 💡 Navegamos las relaciones para obtener la compañía
-        company = self.item.store.company
-        
-        # Resolvimos la URL de la misma forma que en Company.get_json()
-        company_image_url = ""
-        if company.image:
-            company_image_url = storage_manager.get_url(company.image)
-
-        return {
-            "id": self.id,
-            "client_data": {
-                "id": self.client.id,
-                "name": f"{self.client.first_name} {self.client.last_name}",
-                "profile_picture": self.client.get_profile_picture_url()
-            },
-            # 💡 NUEVO: Agregamos la data del vendedor
-            "seller_data": {
-                "name": company.name,
-                "profile_picture": company_image_url
-            },
-            "question_text": self.question_text,
-            "question_creation": timezone.localtime(self.question_creation).strftime('%d/%m/%Y, %H:%M:%S'),
-            "answer_text": self.answer_text,
-            "answer_creation": timezone.localtime(self.answer_creation).strftime('%d/%m/%Y, %H:%M:%S') if self.answer_creation else None
-        }
 
 
 # ==========================================
@@ -1191,6 +1144,13 @@ class TokenWallet(models.Model):
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='issued_wallets')
     balance = models.IntegerField(default=0)
     creation = models.DateTimeField(auto_now_add=True)
+
+    def get_json(self)->dict:
+        return {
+            "id":self.id,
+            "balance":self.balance,
+            "creation":timezone.localtime(self.creation).strftime("%d/%m/%Y, %H:%M:%S")
+        }
 
 class TokenWalletTransaction(models.Model):
     """
@@ -1760,6 +1720,7 @@ class StoreViewLog(models.Model):
         tryed_to_contact (bool): Si pulsó botones de contacto.
     """
     client = models.ForeignKey(User, on_delete=models.CASCADE, related_name='store_views')
+    store = models.ForeignKey(CompanyStore, on_delete=models.CASCADE, related_name='profile_views', null=True)
     join_time = models.DateTimeField()
     exit_time = models.DateTimeField(null=True, blank=True)
     location_watched = models.BooleanField(default=False)
@@ -1784,10 +1745,161 @@ class UserNavigationLog(models.Model):
     logout_time = models.DateTimeField(null=True, blank=True)
 
 # ==========================================
-# MÓDULO 10: RED SOCIAL
+# MÓDULO 10: RED SOCIAL & POLIMORFISMO
 # ==========================================
 
-class ProductLike(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
-    product = models.ForeignKey(InventoryItem, on_delete=models.CASCADE, related_name="likes")
+class UniversalLike(models.Model):
+    """
+    💡 SOLUCIÓN: Sistema unificado polimórfico de likes (Me Gusta).
+    Soporta dar likes a Productos (InventoryItem) o Videos (CompanyVideoStory).
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='universal_likes')
+    
+    # Tubería genérica de Django
+    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
+    object_id = models.CharField(max_length=50) # Admite UUIDs (Videos) y enteros (Productos)
+    content_object = GenericForeignKey('content_type', 'object_id')
+    
     creation = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        # Evita que un usuario le de más de un like a la misma entidad exacta
+        unique_together = ('user', 'content_type', 'object_id')
+
+
+class UniversalComment(models.Model):
+    """
+    💡 SOLUCIÓN: Sistema unificado polimórfico para Dudas / Mensajes de preventa.
+    Permite interactuar tanto en fichas de productos como en videos corporativos.
+    """
+    client = models.ForeignKey(User, on_delete=models.CASCADE, related_name='universal_comments')
+    
+    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
+    object_id = models.CharField(max_length=50)
+    content_object = GenericForeignKey('content_type', 'object_id')
+    
+    question_text = models.TextField()
+    question_creation = models.DateTimeField(auto_now_add=True)
+    answer_text = models.TextField(null=True, blank=True)
+    answer_creation = models.DateTimeField(null=True, blank=True)
+
+    def get_json(self):
+        # Resolvemos dinámicamente la compañía dueña del recurso
+        company = None
+        if self.content_type.model == 'inventoryitem' and self.content_object:
+            company = self.content_object.store.company
+        elif self.content_type.model == 'companyvideostory' and self.content_object:
+            company = self.content_object.company
+
+        company_image_url = ""
+        company_name = "Comercio"
+        if company:
+            company_name = company.name
+            if company.image:
+                company_image_url = storage_manager.get_url(company.image)
+
+        return {
+            "id": self.id,
+            "client_data": {
+                "id": self.client.id,
+                "name": f"{self.client.first_name} {self.client.last_name}",
+                "profile_picture": self.client.get_profile_picture_url()
+            },
+            "seller_data": {
+                "name": company_name,
+                "profile_picture": company_image_url
+            },
+            "question_text": self.question_text,
+            "question_creation": timezone.localtime(self.question_creation).strftime('%d/%m/%Y, %H:%M:%S'),
+            "answer_text": self.answer_text,
+            "answer_creation": timezone.localtime(self.answer_creation).strftime('%d/%m/%Y, %H:%M:%S') if self.answer_creation else None
+        }
+
+
+class CompanyVideoStory(models.Model):
+    """
+    Modelo unificado para la gestión de contenido en formato de video corto.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='video_stories')
+    video_file = models.CharField(max_length=500, null=True, blank=True)
+    thumbnail = models.CharField(max_length=500, null=True, blank=True)
+    description = models.TextField(blank=True, null=True)
+    associated_item = models.ForeignKey(
+        InventoryItem, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name='linked_stories'
+    )
+    creation = models.DateTimeField(auto_now_add=True, db_index=True)
+    expires_at = models.DateTimeField(db_index=True)
+    views_count = models.PositiveIntegerField(default=0)
+
+    # 💡 ENLACES GENÉRICOS (Borra automáticamente en cascada likes y comentarios de este video al ser eliminado)
+    likes = GenericRelation(UniversalLike, related_query_name='company_video_stories')
+    comments = GenericRelation(UniversalComment, related_query_name='company_video_stories')
+
+    class Meta:
+        verbose_name = _("Video Historia de Compañía")
+        verbose_name_plural = _("Video Historias de Compañía")
+        ordering = ['-creation']
+
+    def save(self, *args, **kwargs):
+        if not self.expires_at:
+            self.expires_at = timezone.now() + timezone.timedelta(days=3)
+        super().save(*args, **kwargs)
+
+    @property
+    def is_media_expired(self) -> bool:
+        return timezone.now() > self.expires_at
+
+    @property
+    def is_media_available(self) -> bool:
+        return bool(self.video_file) and not self.is_media_expired
+
+    def clear_media_files(self):
+        if self.video_file:
+            storage_manager.delete_file(self.video_file)
+            self.video_file = None
+        if self.thumbnail:
+            storage_manager.delete_file(self.thumbnail)
+            self.thumbnail = None
+        self.save(update_fields=['video_file', 'thumbnail'])
+
+    def reactivate_story(self, new_video_path: str, new_thumbnail_path: str):
+        self.video_file = new_video_path
+        self.thumbnail = new_thumbnail_path
+        self.expires_at = timezone.now() + timezone.timedelta(days=3)
+        self.save(update_fields=['video_file', 'thumbnail', 'expires_at'])
+
+    def get_json(self) -> dict:
+        return {
+            'id': str(self.id),
+            'company_id': str(self.company_id),
+            'company_name': self.company.name,
+            'company_image': storage_manager.get_url(self.company.image) if self.company.image else None,
+            'video_url': storage_manager.get_url(self.video_file) if self.video_file else None,
+            'thumbnail_url': storage_manager.get_url(self.thumbnail) if self.thumbnail else None,
+            'description': self.description,
+            'associated_item': self.associated_item.get_json() if self.associated_item else None,
+            'creation': self.creation.isoformat(),
+            'expires_at': self.expires_at.isoformat(),
+            'is_media_available': self.is_media_available,
+            'views_count': self.views_count,
+        }
+
+class VideoEngagementLog(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    client = models.ForeignKey(User, on_delete=models.CASCADE, related_name='video_engagement_records')
+    video = models.ForeignKey(CompanyVideoStory, on_delete=models.CASCADE, related_name='engagement_logs')
+    watch_time_seconds = models.FloatField(default=0.0)
+    video_completed = models.BooleanField(default=False)
+    interacted_with_product = models.BooleanField(default=False)
+    added_to_cart_from_video = models.BooleanField(default=False)
+    bought_from_video = models.BooleanField(default=False)
+    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        verbose_name = _("Log de Engagement de Video")
+        verbose_name_plural = _("Logs de Engagement de Video")

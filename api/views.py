@@ -2221,6 +2221,154 @@ class SearchCacheAPI(APIView):
 #################### VIEW SETS #####################
 ####################################################
 
+class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
+    """
+    Endpoints para gestionar los videos cortos de los comercios.
+    """
+    queryset = CompanyVideoStory.objects.all()
+    serializer_class = CompanyVideoStorySerializer
+    
+    # 💡 MUY IMPORTANTE: Habilitamos a Django para recibir archivos pesados
+    parser_classes = (MultiPartParser, FormParser)
+
+    @action(detail=False, methods=['get'])
+    def available_items(self, request):
+        """
+        Retorna todos los InventoryItems agrupados por sucursal.
+        Indica si el ítem ya tiene un video vigente.
+        """
+        company = Company.objects.filter(owner=request.user).first()
+        if not company:
+            return Response({"error": "No tienes una compañía registrada."}, status=status.HTTP_403_FORBIDDEN)
+
+        now = timezone.now()
+        stores = company.stores.filter(is_active=True).prefetch_related(
+            'product_items', 'product_items__product', 'product_items__linked_stories'
+        )
+        
+        data = []
+        for store in stores:
+            items_data = []
+            # Filtramos ítems con stock y que no estén pausados
+            inventory_items = store.product_items.filter(paused=False, stock__gt=0)
+            
+            for item in inventory_items:
+                # Verificamos si tiene un video vigente activo
+                active_story = item.linked_stories.filter(expires_at__gt=now, video_file__isnull=False).first()
+                
+                img_url = ""
+                if item.product.images and len(item.product.images) > 0:
+                    img_url = storage_manager.get_url(item.product.images[0])
+
+                items_data.append({
+                    "id": str(item.id),
+                    "product_name": item.product.name,
+                    "image": img_url,
+                    "active_video_expiration": timezone.localtime(active_story.expires_at).isoformat() if active_story else None
+                })
+            
+            data.append({
+                "store_id": str(store.id),
+                "store_name": store.name,
+                "items": items_data
+            })
+            
+        return Response({"data": data}, status=status.HTTP_200_OK)
+
+    def create(self, request, *args, **kwargs):
+        """
+        Endpoint que recibe la petición desde Flutter (multipart/form-data).
+        Maneja los archivos físicamente a través del COS (storage_manager).
+        """
+        try:
+            # 1. Obtener la compañía del comerciante
+            company = Company.objects.filter(owner=request.user).first()
+            if not company:
+                return Response({
+                    "error": "No tienes una compañía registrada para subir videos."
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            # 2. Extraer datos crudos del Request
+            video_obj = request.FILES.get('video_file')
+            thumb_obj = request.FILES.get('thumbnail')
+            description = request.data.get('description', '')
+            associated_item_id = request.data.get('associated_item_id')
+
+            if not video_obj or not thumb_obj:
+                return Response({
+                    "error": "Faltan los archivos físicos de video o miniatura."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # 3. Validar el producto vinculado (Si aplica)
+            associated_item = None
+            if associated_item_id and str(associated_item_id).strip():
+                try:
+                    associated_item = InventoryItem.objects.get(
+                        id=associated_item_id, 
+                        store__company=company
+                    )
+                except InventoryItem.DoesNotExist:
+                    return Response({
+                        "error": "El producto vinculado no existe o no te pertenece."
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+            # 4. Transacción Atómica y Guardado Físico
+            with transaction.atomic():
+                dtnow_str = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
+                
+                # --- GUARDAR VIDEO ---
+                v_ext = video_obj.name.split('.')[-1]
+                v_name = f"story_video_{company.id}_{dtnow_str}.{v_ext}"
+                v_folder = "stories/videos" 
+                v_path = storage_manager.save_file(video_obj, v_folder, v_name)
+
+                # --- GUARDAR MINIATURA ---
+                t_ext = thumb_obj.name.split('.')[-1]
+                t_name = f"story_thumb_{company.id}_{dtnow_str}.{t_ext}"
+                t_folder = "stories/thumbnails"
+                t_path = storage_manager.save_file(thumb_obj, t_folder, t_name)
+
+                if not v_path or not t_path:
+                    raise Exception("Fallo en el storage_manager al guardar los archivos.")
+
+                # 5. Crear el registro en la Base de Datos
+                expires_at = timezone.now() + timedelta(hours=24)
+
+                # 💡 Creamos la historia. Como "associated_item" es un ForeignKey, 
+                # la BD permite que varios videos apunten al mismo producto sin chocar.
+                story = CompanyVideoStory.objects.create(
+                    company=company,
+                    video_file=v_path,
+                    thumbnail=t_path,
+                    description=description,
+                    associated_item=associated_item,
+                    expires_at=expires_at
+                )
+
+                # 💡 Lanzamos la tarea a Celery
+                optimize_and_transcode_video_story.delay(story.id)
+
+                # 💡 Destrucción táctica del caché estructural.
+                # Al borrar esto, forzamos a los teléfonos a recalcular el Feed en la próxima petición,
+                # inyectando tu nuevo video inmediatamente en la mezcla.
+                try:
+                    cache.delete_pattern("cartmaker:struct:*")
+                except Exception as e:
+                    print(f"Nota: No se pudo limpiar el caché por patrón: {e}")
+
+            return Response({
+                "success": True,
+                "message": "Video publicado con éxito",
+                "data": story.get_json()
+            }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            print(f"Error al guardar la historia: {e}")
+            return Response({
+                "success": False,
+                "error": f"Error interno: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 class OrderViewSet(viewsets.ViewSet):
     """
     API para la gestión y consulta de órdenes de compra del usuario.
@@ -2590,6 +2738,52 @@ class OrderViewSet(viewsets.ViewSet):
                     order.end_time = timezone.now()
                     order.save()
 
+                    cart_items = order.cart.get('items', [])
+                    for item in cart_items:
+                        inv_item_id = item.get('inventory_item_id')
+                        qty = int(item.get('quantity', 0))
+                        
+                        # 💡 EXTRAEMOS LA ETIQUETA DEL VIDEO DEL SNAPSHOT DE LA ORDEN
+                        source_video_id = item.get('source_video_id')
+                        
+                        if inv_item_id and qty > 0:
+                            try:
+                                inv_item = InventoryItem.objects.get(id=inv_item_id)
+                                InventoryItemTransaction.objects.create(
+                                    item=inv_item,
+                                    units=qty,
+                                    transaction_type=TransactionType.OUTCOME
+                                )
+                            except InventoryItem.DoesNotExist:
+                                pass # Si el producto ya no existe, ignoramos
+
+                        # =========================================================
+                        # 💡 REGISTRO DE COMPRA DE VIDEO (Atribución Real en Checkout)
+                        # =========================================================
+                        if source_video_id:
+                            try:
+                                # ⚠️ MUY IMPORTANTE: Usamos order.client, NO request.user, 
+                                # porque el que completa la orden podría ser el comerciante.
+                                log = VideoEngagementLog.objects.filter(
+                                    client=order.client,
+                                    video_id=source_video_id
+                                ).order_by('-timestamp').first()
+
+                                if log:
+                                    log.bought_from_video = True
+                                    log.save(update_fields=['bought_from_video'])
+                                else:
+                                    # Fallback de seguridad
+                                    VideoEngagementLog.objects.create(
+                                        client=order.client,
+                                        video_id=source_video_id,
+                                        bought_from_video=True
+                                    )
+                                print(f"✅ ATRIBUCIÓN DE COMPRA REGISTRADA PARA EL VIDEO: {source_video_id}")
+                            except Exception as e:
+                                print(f"❌ Error actualizando atribución de video: {e}")
+                    
+
                     Notification.objects.filter(metadata__order_id=str(order.id), is_read=False).update(is_read=True)
 
                     # El cliente califica (Solo si la petición viene del cliente real)
@@ -2739,6 +2933,8 @@ class CartViewSet(viewsets.ViewSet):
         items_data = request.data.get('items', [])  # Ej: [{'id': 'uid', 'quantity': 2}]
         withdrawal_type = request.data.get('withdrawal_type', 0)
         location_id = request.data.get('delivery_location_id')
+
+        print("REQUEST DATA EN CREATE ORDER: ", request.data)
 
         if not store_id or not items_data:
             return Response({
@@ -2908,7 +3104,11 @@ class CartViewSet(viewsets.ViewSet):
 
                     img_url = storage_manager.get_url(item.product.images[0]) if item.product.images else ""
 
-                    # 💡 3. GUARDAMOS EL RECIBO DE COMPRA (Snapshot inmutable)
+                    original_item_req = next((req_item for req_item in items_data if str(req_item['id']) == str(item.id)), {})
+                    source_video_id = original_item_req.get('source_video_id')
+
+                    img_url = storage_manager.get_url(item.product.images[0]) if item.product.images else ""
+
                     cart_snapshot.append({
                         "product_id": str(item.product.id),
                         "inventory_item_id": str(item.id),
@@ -2917,8 +3117,9 @@ class CartViewSet(viewsets.ViewSet):
                         "unit_price": base_unit_price, 
                         "subtotal": subtotal,
                         "product_image": img_url,
-                        "standard_offer_applied": standard_offer_pct, # 👈 Guardamos % de oferta normal
-                        "token_discount_applied": applied_token_discount # 👈 Guardamos dict de tokens
+                        "standard_offer_applied": standard_offer_pct,
+                        "token_discount_applied": applied_token_discount,
+                        "source_video_id": source_video_id
                     })
                     total_price += subtotal
 
@@ -3052,6 +3253,7 @@ class InteractionLogViewSet(viewsets.ViewSet):
 
             StoreViewLog.objects.create(
                 client=request.user,
+                store=store, # 💡 AQUÍ PASAMOS LA TIENDA
                 join_time=join_time,
                 exit_time=exit_time,
                 location_watched=data.get('location_watched', False),
@@ -3093,6 +3295,54 @@ class InteractionLogViewSet(viewsets.ViewSet):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    @action(detail=False, methods=['post'])
+    def video_engagement(self, request):
+        """
+        Registra interacciones de video, tiempo de visualización y marca el video como visto.
+        """
+        data = request.data
+        video_id = data.get('video_id')
+        
+        if not video_id:
+            return Response({'error': 'video_id es obligatorio.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            video = CompanyVideoStory.objects.only('id').get(id=video_id)
+            
+            log, created = VideoEngagementLog.objects.get_or_create(
+                client=request.user,
+                video=video
+            )
+
+            # Acumular o actualizar métricas
+            watch_time = float(data.get('watch_time_seconds', 0.0))
+            if watch_time > 0:
+                log.watch_time_seconds += watch_time
+            
+            # 💡 BLINDAJE DE PARSEO BOOLEANO DESDE FLUTTER
+            raw_completed = data.get('video_completed', False)
+            is_completed = str(raw_completed).lower() == 'true' if isinstance(raw_completed, str) else bool(raw_completed)
+
+            if is_completed:
+                log.video_completed = True
+                
+            raw_interacted = data.get('interacted_with_product', False)
+            if (str(raw_interacted).lower() == 'true' if isinstance(raw_interacted, str) else bool(raw_interacted)):
+                log.interacted_with_product = True
+                
+            raw_added_cart = data.get('added_to_cart_from_video', False)
+            if (str(raw_added_cart).lower() == 'true' if isinstance(raw_added_cart, str) else bool(raw_added_cart)):
+                log.added_to_cart_from_video = True
+
+            log.save()
+            
+            return Response({'success': True}, status=status.HTTP_200_OK)
+
+        except CompanyVideoStory.DoesNotExist:
+            return Response({'error': 'El video no existe.'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 # ============================================================================
 # 1. MÓDULO DE PERFILES DE EMPRESA
 # ============================================================================
@@ -3121,8 +3371,30 @@ class ClientCompanyViewSet(viewsets.ViewSet):
             )
 
         try:
-            # 1. Determinar qué tienda consultar
-            if company_id:
+            # 1. Determinar qué tienda consultar (PRIORIDAD AL STORE_ID)
+            # 💡 Agregamos "!= 'null'" por si el frontend manda la palabra string por error en la URL
+            if store_id and store_id != 'null': 
+                store = CompanyStore.objects.select_related('company', 'company__category').filter(
+                    Q(company__owner__subscription__plan__company_branches=True) |
+                    Q(company__owner__subscription__plan__company_branches=False, is_main_store=True),
+                    id=store_id,
+                    is_active=True
+                ).first()
+
+                # Parche: Si no la encontró, verificamos si por error Flutter mandó el ID de la compañía aquí
+                if not store:
+                    store = CompanyStore.objects.select_related('company', 'company__category').filter(
+                        company_id=store_id,
+                        is_main_store=True,
+                        is_active=True
+                    ).first()
+
+                if not store:
+                    return Response({'error': 'La tienda solicitada no existe, fue eliminada o está inactiva.'}, status=status.HTTP_404_NOT_FOUND)
+                company = store.company
+                
+            elif company_id and company_id != 'null':
+                # Solo entramos aquí si Flutter explícitamente NO mandó un store_id
                 store = CompanyStore.objects.select_related('company', 'company__category').filter(
                     Q(company__owner__subscription__plan__company_branches=True) |
                     Q(company__owner__subscription__plan__company_branches=False, is_main_store=True),
@@ -3131,20 +3403,11 @@ class ClientCompanyViewSet(viewsets.ViewSet):
                 ).order_by('-is_main_store', 'creation').first() # 💡 Priorizamos mostrar la Main Store
                 
                 if not store:
-                    return Response({'error': 'La compañía no tiene tiendas activas o visibles bajo su plan actual.'}, status=status.HTTP_404_NOT_FOUND)
+                    return Response({'error': 'La compañía no tiene tiendas activas bajo su plan actual.'}, status=status.HTTP_404_NOT_FOUND)
                 company = store.company
+                
             else:
-                # Si piden una store_id directa, también debemos validar que sea legal mostrarla
-                store = CompanyStore.objects.select_related('company', 'company__category').filter(
-                    Q(company__owner__subscription__plan__company_branches=True) |
-                    Q(company__owner__subscription__plan__company_branches=False, is_main_store=True),
-                    id=store_id,
-                    is_active=True
-                ).first()
-
-                if not store:
-                    return Response({'error': 'La tienda solicitada no existe, fue eliminada o está inactiva por límite de plan.'}, status=status.HTTP_404_NOT_FOUND)
-                company = store.company
+                return Response({'error': 'Faltan parámetros válidos.'}, status=status.HTTP_400_BAD_REQUEST)
             
             # =======================================================
             # 2. CÁLCULO DE MÉTRICAS GLOBALES DE LA COMPAÑÍA
@@ -3155,21 +3418,32 @@ class ClientCompanyViewSet(viewsets.ViewSet):
             avg_rating = round(rating_aggr['rating__avg'] or 0.0, 2)
             
             # B) Total de ventas de TODAS las sucursales
-            # Asumiendo que 1 = Venta (Reemplaza con tu TransactionType.SALE)
             sales_aggr = InventoryItemTransaction.objects.filter(
                 item__store__company=company,
-                transaction_type=1 
+                transaction_type=1  # OUTCOME
             ).aggregate(Sum('units'))
             total_sales = sales_aggr['units__sum'] or 0
             formatted_sales = f"{total_sales // 1000}k" if total_sales >= 1000 else str(total_sales)
 
-            # C) Categorías disponibles para esta compañía (Solo las que tienen productos activos en inventario)
+            # C) Categorías disponibles para esta compañía
             available_categories = SubCategory.objects.filter(
                 product__inventory_items__store__company=company,
                 product__inventory_items__paused=False
             ).distinct().values('id', 'name')
 
             merchant_subscription = MerchantSubscription.objects.get(merchant=company.owner)
+
+            # 💡 NUEVO: D) Obtenemos todas las sucursales activas permitidas para el Selector
+            available_stores_qs = CompanyStore.objects.select_related('location').filter(
+                company=company,
+                is_active=True
+            ).order_by('-is_main_store', 'creation')
+
+            # Si el plan NO permite sucursales, solo mandamos la principal para evitar "hackeos"
+            if not merchant_subscription.plan.company_branches:
+                available_stores_qs = available_stores_qs.filter(is_main_store=True)
+
+            available_stores = [s.get_json() for s in available_stores_qs]
 
             # =======================================================
             # 3. CONSTRUCCIÓN DE LA RESPUESTA
@@ -3182,10 +3456,14 @@ class ClientCompanyViewSet(viewsets.ViewSet):
             
             store_metadata = store.get_json()
 
+            token_wallet = company.issued_wallets.filter(user=request.user).first()
+
             return Response({
                 'store_metadata': store_metadata,
                 'company_metadata': company_metadata,
-                'available_categories': list(available_categories)
+                'token_wallet': token_wallet.get_json() if token_wallet else None,
+                'available_categories': list(available_categories),
+                'available_stores': available_stores # 👈 LA LISTA DE SUCURSALES
             }, status=status.HTTP_200_OK)
 
         except CompanyStore.DoesNotExist:
@@ -3193,181 +3471,152 @@ class ClientCompanyViewSet(viewsets.ViewSet):
         except Exception as e:
             return Response({'error': f'Error interno: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
-# ============================================================================
-# 2. MÓDULO DE CONVERSACIONES Y PREGUNTAS
-# ============================================================================
-class ProductConversationPagination(PageNumberPagination):
-    """
-    Configuración de paginación para las preguntas y respuestas.
-    Trae 15 por página por defecto para que el modal cargue rápido en la App.
-    """
+class UniversalConversationPagination(PageNumberPagination):
     page_size = 15
     page_size_query_param = 'page_size'
     max_page_size = 30
 
-
-class ProductConversationViewSet(viewsets.ViewSet):
+class UniversalConversationViewSet(viewsets.ViewSet):
+    """
+    API unificada para comentarios y preguntas en Productos y Videos.
+    """
     permission_classes = [IsAuthenticated]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'navigation'
 
-    # ------------------------------------------------------------------------
-    # ENDPOINT: GET /api/v1/product-conversation/item_questions/
-    # ------------------------------------------------------------------------
     @action(detail=False, methods=['get'])
-    def item_questions(self, request):
-        """
-        Retorna la lista de preguntas y respuestas de un lote de forma paginada.
-        """
-        item_id = request.query_params.get('item_id')
+    def list_comments(self, request):
+        target_type = request.query_params.get('target_type')
+        target_id = request.query_params.get('target_id')
 
-        if not item_id:
-            return Response(
-                {'error': 'Falta el parámetro obligatorio: item_id'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        if not target_type or not target_id:
+            return Response({'error': 'Faltan parámetros: target_type o target_id'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Query optimizado con select_related para evitar el N+1 al traer el cliente
-        questions = InventoryItemQuestion.objects.filter(
-            item_id=item_id
-        ).select_related(
-            'client', 
-            'item__store__company' # 👈 Esto trae toda la info de la empresa en un solo viaje
-        ).order_by('-question_creation')
+        # Mapeo de tipos hacia los modelos nativos
+        model_map = {
+            'product': 'inventoryitem',
+            'video': 'companyvideostory'
+        }
+        
+        content_model = model_map.get(target_type)
+        if not content_model:
+            return Response({'error': 'Tipo de contenido no soportado.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        paginator = ProductConversationPagination()
-        paginated_qs = paginator.paginate_queryset(questions, request)
+        content_type_obj = ContentType.objects.get(model=content_model)
+        
+        # Filtramos por el tipo y el ID (Usamos select_related genérico si es necesario)
+        comments = UniversalComment.objects.filter(
+            content_type=content_type_obj,
+            object_id=target_id
+        ).select_related('client').order_by('-question_creation')
 
-        # Mapeamos usando tu get_json() maestro
+        paginator = UniversalConversationPagination()
+        paginated_qs = paginator.paginate_queryset(comments, request)
+
         data = [q.get_json() for q in paginated_qs]
-
         return paginator.get_paginated_response(data)
 
-    # ------------------------------------------------------------------------
-    # ENDPOINT: POST /api/v1/product-conversation/ask_question/
-    # ------------------------------------------------------------------------
     @action(detail=False, methods=['post'])
-    def ask_question(self, request):
-        """
-        Crea una pregunta y devuelve el objeto formateado con get_json().
-        """
-        item_id = request.data.get('item_id')
+    def add_comment(self, request):
+        target_type = request.data.get('target_type')
+        target_id = request.data.get('target_id')
         question_text = request.data.get('question_text')
 
-        if not item_id or not question_text:
-            return Response(
-                {'error': 'Faltan parámetros obligatorios.'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        if not target_type or not target_id or not question_text:
+            return Response({'error': 'Faltan parámetros.'}, status=status.HTTP_400_BAD_REQUEST)
 
         clean_text = question_text.strip()
         if not clean_text:
-            return Response(
-                {'error': 'La pregunta no puede estar vacía.'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({'error': 'El comentario no puede estar vacío.'}, status=status.HTTP_400_BAD_REQUEST)
+
         with transaction.atomic():
             try:
-                item = InventoryItem.objects.prefetch_related('store__company__owner', 'product').get(id=item_id, paused=False)
-            except InventoryItem.DoesNotExist:
-                return Response(
-                    {'error': 'El producto no existe o fue retirado.'}, 
-                    status=status.HTTP_404_NOT_FOUND
-                )
+                if target_type == 'product':
+                    target_obj = InventoryItem.objects.select_related('store__company__owner', 'product').get(id=target_id, paused=False)
+                    owner_id = target_obj.store.company.owner.id
+                    item_name = target_obj.product.name
+                elif target_type == 'video':
+                    target_obj = CompanyVideoStory.objects.select_related('company__owner').get(id=target_id)
+                    owner_id = target_obj.company.owner.id
+                    item_name = "tu Video Historia"
+                else:
+                    raise ValueError("Tipo inválido")
+            except (InventoryItem.DoesNotExist, CompanyVideoStory.DoesNotExist, ValueError):
+                return Response({'error': 'El contenido no existe o fue retirado.'}, status=status.HTTP_404_NOT_FOUND)
 
-            question = InventoryItemQuestion.objects.create(
+            content_type_obj = ContentType.objects.get_for_model(target_obj)
+            
+            comment = UniversalComment.objects.create(
                 client=request.user,
-                item=item,
+                content_type=content_type_obj,
+                object_id=target_id,
                 question_text=clean_text
             )
 
+            # Notificamos al dueño
             firebase_admin.NotificationManager.notify_new_question(
-                merchant_user_id=item.store.company.owner.id,
-                item_name=item.product.name,
-                item_id=item.id
+                merchant_user_id=owner_id,
+                item_name=item_name,
+                item_id=target_id # Puedes inyectarle el target_type a FCM si lo necesitas
             )
-            return Response({
-                'message': 'Pregunta enviada con éxito.',
-                'data': question.get_json() # 💡 Devolvemos exactamente la misma estructura
-            }, status=status.HTTP_201_CREATED)
-        return Response({
-            'error':"No se pudo crear la pregunta."
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'message': 'Comentario enviado con éxito.', 'data': comment.get_json()}, status=status.HTTP_201_CREATED)
 
-    # ------------------------------------------------------------------------
-    # ENDPOINT: POST /api/v1/product-conversation/answer_question/
-    # ------------------------------------------------------------------------
     @action(detail=False, methods=['post'])
-    def answer_question(self, request):
-        """
-        Permite al dueño del comercio responder una pregunta.
-        """
+    def answer_comment(self, request):
         question_id = request.data.get('question_id')
         answer_text = request.data.get('answer_text')
 
         if not question_id or not answer_text:
-            return Response(
-                {'error': 'Faltan parámetros obligatorios.'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({'error': 'Faltan parámetros.'}, status=status.HTTP_400_BAD_REQUEST)
 
         clean_text = answer_text.strip()
         if not clean_text:
-            return Response(
-                {'error': 'La respuesta no puede estar vacía.'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({'error': 'La respuesta no puede estar vacía.'}, status=status.HTTP_400_BAD_REQUEST)
+
         with transaction.atomic():
             try:
-                # Traemos la pregunta con sus relaciones para verificar permisos eficientemente
-                question = InventoryItemQuestion.objects.select_related(
-                    'item__store__company__owner'
-                ).get(id=question_id)
-            except InventoryItemQuestion.DoesNotExist:
-                return Response(
-                    {'error': 'La pregunta no existe.'}, 
-                    status=status.HTTP_404_NOT_FOUND
-                )
+                comment = UniversalComment.objects.get(id=question_id)
+            except UniversalComment.DoesNotExist:
+                return Response({'error': 'La pregunta no existe.'}, status=status.HTTP_404_NOT_FOUND)
 
-            # 🔒 VERIFICACIÓN DE SEGURIDAD: ¿El usuario que dispara el endpoint es el dueño de la empresa?
-            if question.item.store.company.owner != request.user:
-                return Response(
-                    {'error': 'No tienes permisos para responder en nombre de este comercio.'}, 
-                    status=status.HTTP_403_FORBIDDEN
-                )
+            # Extraemos dinámicamente al dueño para verificar permisos
+            owner = None
+            company_name = ""
+            item_name = ""
+            
+            if comment.content_type.model == 'inventoryitem':
+                owner = comment.content_object.store.company.owner
+                company_name = comment.content_object.store.company.name
+                item_name = comment.content_object.product.name
+            elif comment.content_type.model == 'companyvideostory':
+                owner = comment.content_object.company.owner
+                company_name = comment.content_object.company.name
+                item_name = "tu Video"
 
-            # 🔒 Evitar re-escribir respuestas si ya se respondió (opcional, pero buena práctica)
-            if question.answer_text is not None:
-                return Response(
-                    {'error': 'Esta pregunta ya fue respondida.'}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+            if owner != request.user:
+                return Response({'error': 'No tienes permisos para responder.'}, status=status.HTTP_403_FORBIDDEN)
 
-            question.answer_text = clean_text
-            question.answer_creation = timezone.now()
-            question.save()
+            if comment.answer_text is not None:
+                return Response({'error': 'Esta pregunta ya fue respondida.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            comment.answer_text = clean_text
+            comment.answer_creation = timezone.now()
+            comment.save()
+
             firebase_admin.NotificationManager.notify_new_answer(
-                user_id=question.client.id,
-                company_name=question.item.store.company.name,
-                item_name=question.item.product.name,
-                item_id=question.item.id
+                user_id=comment.client.id,
+                company_name=company_name,
+                item_name=item_name,
+                item_id=comment.object_id
             )
 
-            return Response({
-                'success': True,
-                'message': 'Respuesta enviada con éxito.',
-                'data': question.get_json()
-            }, status=status.HTTP_200_OK)
-        return Response({
-            'error':"No se pudo crear la respuesta."
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'success': True, 'message': 'Respuesta enviada.', 'data': comment.get_json()}, status=status.HTTP_200_OK)
     
 class ProductSearchEngineViewSet(viewsets.ViewSet):
     """
     API integral para la distribución algorítmica de productos hacia la App.
     Interactúa con el ProductSearchEngine para retornar Feeds dinámicos cacheados
-    respetando exactamente las firmas de respuesta originales requeridas por Flutter.
+    respetando exactamente las firmas de respuesta requeridas por Flutter.
     """
     permission_classes = [IsAuthenticated]
     throttle_classes = [ScopedRateThrottle]
@@ -3389,18 +3638,21 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
         price_order = request.query_params.get('price_order')
         return sort_by, price_order
 
-    def _paginate_and_respond(self, data_list: list, request) -> Response:
-        """
-        Paginación O(1) en RAM que imita con precisión milimétrica la estructura 
-        de CursorPagination de DRF (next, previous, results) para mantener la 
-        compatibilidad con el controlador de scrolls infinitos en Flutter.
-        """
+    def _get_pagination_params(self, request):
+        """Extrae de forma segura los parámetros de paginación con fallbacks."""
         try:
             page = int(request.query_params.get('page', 1))
             page_size = int(request.query_params.get('page_size', 20))
         except ValueError:
-            page = 1
-            page_size = 20
+            page, page_size = 1, 20
+        return page, page_size
+
+    def _paginate_and_respond(self, data_list: list, request) -> Response:
+        """
+        [OBSOLETO PARA FEEDS PRINCIPALES - Mantenido por retrocompatibilidad]
+        Paginación O(1) en RAM que imita la estructura CursorPagination de DRF.
+        """
+        page, page_size = self._get_pagination_params(request)
 
         start = (page - 1) * page_size
         end = start + page_size
@@ -3428,6 +3680,33 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
             'results': paginated_data
         }, status=status.HTTP_200_OK)
 
+    def _respond_pre_sliced_data(self, data_list: list, request, page: int, page_size: int) -> Response:
+        """
+        Paginador optimizado para feeds.
+        Asume que la lista ya fue rebanada nativamente en SQL (Limit/Offset).
+        """
+        has_next = len(data_list) == page_size
+        has_previous = page > 1
+
+        url = request.build_absolute_uri()
+        import urllib.parse as urlparse
+        
+        def replace_page_param(base_url, page_num):
+            url_parts = list(urlparse.urlparse(base_url))
+            query = dict(urlparse.parse_qsl(url_parts[4]))
+            query['page'] = page_num
+            url_parts[4] = urlparse.urlencode(query)
+            return urlparse.urlunparse(url_parts)
+
+        next_url = replace_page_param(url, page + 1) if has_next else None
+        prev_url = replace_page_param(url, page - 1) if has_previous else None
+
+        return Response({
+            'next': next_url,
+            'previous': prev_url,
+            'results': data_list
+        }, status=status.HTTP_200_OK)
+
     # ------------------------------------------------------------------------
     # ENDPOINTS
     # ------------------------------------------------------------------------
@@ -3436,21 +3715,18 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
         sub_category_id = request.query_params.get('sub_category_id')
         lat, lng = self._get_coordinates(request)
         sort_by, price_order = self._get_sorting_params(request)
+        page, page_size = self._get_pagination_params(request)
 
         if not sub_category_id or lat is None or lng is None:
-            return Response(
-                {'error': 'Faltan parámetros obligatorios: sub_category_id, lat, lng'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({'error': 'Faltan parámetros'}, status=status.HTTP_400_BAD_REQUEST)
 
         engine = ProductSearchEngine(lat, lng, user=request.user)
         data_list = engine.get_category_feed(
-            sub_category_id=sub_category_id, 
-            sort_by=sort_by, 
-            price_order=price_order
+            sub_category_id=sub_category_id, page=page, page_size=page_size, 
+            sort_by=sort_by, price_order=price_order
         )
 
-        return self._paginate_and_respond(data_list, request)
+        return self._respond_pre_sliced_data(data_list, request, page, page_size)
 
     @action(detail=False, methods=['get'])
     def store(self, request):
@@ -3459,6 +3735,7 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
         category_id = request.query_params.get('category_id')
         lat, lng = self._get_coordinates(request)
         _, price_order = self._get_sorting_params(request)
+        page, page_size = self._get_pagination_params(request)
 
         if (not store_id and not company_id) or lat is None or lng is None:
             return Response(
@@ -3468,33 +3745,94 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
 
         engine = ProductSearchEngine(lat, lng, user=request.user)
         data_list = engine.get_store_feed(
+            page=page, page_size=page_size,
             store_id=store_id, 
             company_id=company_id,
             category_id=category_id,
             price_order=price_order
         )
         
-        return self._paginate_and_respond(data_list, request)
+        return self._respond_pre_sliced_data(data_list, request, page, page_size)
 
     @action(detail=False, methods=['get'])
     def offers(self, request):
         lat, lng = self._get_coordinates(request)
         sort_by, price_order = self._get_sorting_params(request)
+        page, page_size = self._get_pagination_params(request)
         is_home_widget = request.query_params.get('home_widget', 'false').lower() == 'true'
 
         if lat is None or lng is None:
             return Response({'error': 'Faltan parámetros obligatorios: lat, lng'}, status=status.HTTP_400_BAD_REQUEST)
 
         engine = ProductSearchEngine(lat, lng, user=request.user)
-        data_list = engine.get_offers_feed(sort_by=sort_by, price_order=price_order)
+        data_list = engine.get_offers_feed(page=page, page_size=page_size, sort_by=sort_by, price_order=price_order)
 
-        # RESTRICCION DE FIRMA: Conserva el formato plano original para el widget horizontal
         if is_home_widget:
             top_10 = data_list[:10]
             return Response({'results': top_10}, status=status.HTTP_200_OK)
             
-        return self._paginate_and_respond(data_list, request)
+        return self._respond_pre_sliced_data(data_list, request, page, page_size)
+
+    @action(detail=False, methods=['get'])
+    def text_search(self, request):
+        search_query = request.query_params.get('q', '')
+        lat, lng = self._get_coordinates(request)
+        sort_by, price_order = self._get_sorting_params(request)
+        page, page_size = self._get_pagination_params(request)
         
+        try:
+            max_distance = float(request.query_params.get('max_distance', 10000))
+        except ValueError:
+            max_distance = 10000
+
+        if not search_query or lat is None or lng is None:
+            return Response({'error': 'Faltan parámetros obligatorios: q, lat, lng'}, status=status.HTTP_400_BAD_REQUEST)
+
+        engine = ProductSearchEngine(lat, lng, user=request.user)
+        data_list = engine.get_text_search_feed(
+            search_query=search_query, page=page, page_size=page_size,
+            sort_by=sort_by, price_order=price_order,
+            max_distance_meters=max_distance
+        )
+
+        return self._respond_pre_sliced_data(data_list, request, page, page_size)
+
+    @action(detail=False, methods=['get'])
+    def home_feed(self, request):
+        lat, lng = self._get_coordinates(request)
+        
+        if lat is None or lng is None:
+            return Response({'error': 'Faltan coordenadas'}, status=status.HTTP_400_BAD_REQUEST)
+
+        page, page_size = self._get_pagination_params(request)
+
+        engine = ProductSearchEngine(lat, lng, user=request.user)
+        data_list = engine.get_home_feed(page=page, page_size=page_size)
+        
+        return self._respond_pre_sliced_data(data_list, request, page, page_size)
+        
+    @action(detail=False, methods=['get'])
+    def favorites(self, request):
+        lat, lng = self._get_coordinates(request)
+        sort_by, price_order = self._get_sorting_params(request)
+        page, page_size = self._get_pagination_params(request)
+        is_home_widget = request.query_params.get('home_widget', 'false').lower() == 'true'
+
+        if lat is None or lng is None:
+            return Response({'error': 'Faltan parámetros obligatorios: lat, lng'}, status=status.HTTP_400_BAD_REQUEST)
+
+        engine = ProductSearchEngine(lat, lng, user=request.user)
+        data_list = engine.get_favorites_feed(page=page, page_size=page_size, sort_by=sort_by, price_order=price_order)
+
+        if is_home_widget:
+            top_10 = data_list[:10]
+            return Response({'data': {'results': top_10}}, status=status.HTTP_200_OK)
+    
+        return self._respond_pre_sliced_data(data_list, request, page, page_size)
+
+    # ------------------------------------------------------------------------
+    # MÉTODOS SIN PAGINACIÓN (Item Details y Toggle Like)
+    # ------------------------------------------------------------------------
     @action(detail=False, methods=['get'])
     def item_details(self, request):
         item_id = request.query_params.get('item_id')
@@ -3511,12 +3849,10 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
             
             data = item.get_json()
             
-            # =================================================================
-            # 💡 NUEVO: INYECTAR EL SALDO REAL DE TOKENS DEL USUARIO EN LA TIENDA
-            # =================================================================
             user_tokens = 0
             if request.user.is_authenticated:
                 try:
+                    from api.models import TokenWallet
                     wallet = TokenWallet.objects.only('balance').get(
                         user=request.user, 
                         company=item.store.company
@@ -3531,84 +3867,58 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
             
         except InventoryItem.DoesNotExist:
             return Response({'error': 'El producto no existe o fue retirado.'}, status=status.HTTP_404_NOT_FOUND)
-            
-    @action(detail=False, methods=['get'])
-    def text_search(self, request):
-        search_query = request.query_params.get('q', '')
-        lat, lng = self._get_coordinates(request)
-        sort_by, price_order = self._get_sorting_params(request)
-        
-        try:
-            max_distance = float(request.query_params.get('max_distance', 10000))
-        except ValueError:
-            max_distance = 10000
 
-        if not search_query or lat is None or lng is None:
-            return Response({'error': 'Faltan parámetros obligatorios: q, lat, lng'}, status=status.HTTP_400_BAD_REQUEST)
-
-        engine = ProductSearchEngine(lat, lng, user=request.user)
-        data_list = engine.get_text_search_feed(
-            search_query=search_query,
-            sort_by=sort_by,
-            price_order=price_order,
-            max_distance_meters=max_distance
-        )
-
-        return self._paginate_and_respond(data_list, request)
-    
-    @action(detail=False, methods=['get'])
-    def home_feed(self, request):
-        lat, lng = self._get_coordinates(request)
-        
-        if lat is None or lng is None:
-            return Response({'error': 'Faltan coordenadas'}, status=status.HTTP_400_BAD_REQUEST)
-
-        engine = ProductSearchEngine(lat, lng, user=request.user)
-        data_list = engine.get_home_feed()
-        
-        return self._paginate_and_respond(data_list, request)
-        
-    @action(detail=False, methods=['get'])
-    def favorites(self, request):
-        lat, lng = self._get_coordinates(request)
-        sort_by, price_order = self._get_sorting_params(request)
-        is_home_widget = request.query_params.get('home_widget', 'false').lower() == 'true'
-
-        if lat is None or lng is None:
-            return Response({'error': 'Faltan parámetros obligatorios: lat, lng'}, status=status.HTTP_400_BAD_REQUEST)
-
-        engine = ProductSearchEngine(lat, lng, user=request.user)
-        data_list = engine.get_favorites_feed(sort_by=sort_by, price_order=price_order)
-
-        # RESTRICCION DE FIRMA: Conserva el envoltorio exacto original {'data': {'results': [...]}}
-        if is_home_widget:
-            top_10 = data_list[:10]
-            return Response({'data': {'results': top_10}}, status=status.HTTP_200_OK)
-            
-        return self._paginate_and_respond(data_list, request)
-
+    # ------------------------------------------------------------------------
+    # MÉTODOS SIN PAGINACIÓN (Item Details y Toggle Universal Like)
+    # ------------------------------------------------------------------------
     @action(detail=False, methods=['post'])
     def toggle_like(self, request):
-        item_id = request.data.get('item_id')
+        target_type = request.data.get('target_type')
+        target_id = request.data.get('target_id')
 
-        if not item_id:
-            return Response({'error': 'Falta el parámetro obligatorio: item_id'}, status=status.HTTP_400_BAD_REQUEST)
+        if not target_type or not target_id:
+            return Response({'error': 'Faltan parámetros: target_type, target_id'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            item = InventoryItem.objects.get(id=item_id, paused=False)
-        except InventoryItem.DoesNotExist:
-            return Response({'error': 'El producto no existe o está inactivo.'}, status=status.HTTP_404_NOT_FOUND)
+            if target_type == 'product':
+                target_obj = InventoryItem.objects.get(id=target_id, paused=False)
+            elif target_type == 'video':
+                target_obj = CompanyVideoStory.objects.get(id=target_id)
+            else:
+                return Response({'error': 'Tipo no soportado.'}, status=status.HTTP_400_BAD_REQUEST)
+        except (InventoryItem.DoesNotExist, CompanyVideoStory.DoesNotExist):
+            return Response({'error': 'El contenido no existe.'}, status=status.HTTP_404_NOT_FOUND)
 
-        like, created = ProductLike.objects.get_or_create(
+        content_type_obj = ContentType.objects.get_for_model(target_obj)
+
+        like, created = UniversalLike.objects.get_or_create(
             user=request.user,
-            product=item
+            content_type=content_type_obj,
+            object_id=target_id
         )
 
         if not created:
             like.delete()
-            return Response({'success': True, 'is_liked': False}, status=status.HTTP_200_OK)
+            # Contamos cuántos likes quedaron tras eliminar
+            total_likes = UniversalLike.objects.filter(content_type=content_type_obj, object_id=target_id).count()
+            return Response({'success': True, 'is_liked': False, 'total_likes': total_likes}, status=status.HTTP_200_OK)
         
-        return Response({'success': True, 'is_liked': True}, status=status.HTTP_200_OK)
+        total_likes = UniversalLike.objects.filter(content_type=content_type_obj, object_id=target_id).count()
+        return Response({'success': True, 'is_liked': True, 'total_likes': total_likes}, status=status.HTTP_200_OK)
+    
+    @action(detail=True, methods=['post'])
+    def mark_video_as_viewed(self, request, pk=None):
+        try:
+            video = CompanyVideoStory.objects.get(pk=pk)
+            # 💡 get_or_create usando VideoEngagementLog
+            # Esto registra que el usuario ha interactuado con el video
+            VideoEngagementLog.objects.get_or_create(
+                client=request.user, 
+                video=video
+            )
+            return Response({'status': 'viewed'}, status=status.HTTP_200_OK)
+        except CompanyVideoStory.DoesNotExist:
+            return Response({'error': 'Historia no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
 class AtlasViewSet(viewsets.ViewSet):
     """

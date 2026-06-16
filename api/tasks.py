@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+import boto3
 from celery import shared_task
 from django.contrib.auth import get_user_model
 import logging
@@ -7,8 +8,9 @@ from django.utils import timezone
 
 from api.core.firebase_admin import NotificationManager
 from .core.platinum_manager import PlatinumEvaluator
-from api.models import InventoryItemOffer, InventoryItem, Order
+from api.models import CompanyVideoStory, InventoryItemOffer, InventoryItem, Order
 from django.core.cache import cache
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -111,4 +113,168 @@ def send_uncompleted_orders_reminders_to_merchants():
             title="⚠️ Pedido pendiente por cerrar",
             body=f"La orden N° {order.id} aún no ha sido marcada como completada. Gestiona tu entrega.",
             is_merchant=True
+        )
+
+@shared_task(ignore_result=True)
+def cleanup_expired_video_stories():
+    """
+    Busca todas las Video Historias que hayan superado su tiempo de vida estipulado (3 días)
+    y elimina los archivos pesados (video y miniatura) del Cloud Object Storage (o local)
+    para ahorrar espacio y costos, conservando el registro intacto para las analíticas.
+    """
+    try:
+        now = timezone.now()
+        
+        # 💡 Optimizamos la query buscando SOLO historias expiradas 
+        # que todavía tengan archivos vinculados (evita procesar el historial limpio)
+        expired_stories = CompanyVideoStory.objects.filter(
+            expires_at__lt=now
+        ).exclude(
+            video_file__isnull=True, 
+            thumbnail__isnull=True
+        )
+        
+        count = expired_stories.count()
+        
+        if count > 0:
+            logger.info(f"🧹 Iniciando limpieza de {count} historias de video expiradas...")
+            
+            # Iteramos e invocamos la limpieza física archivo por archivo
+            for story in expired_stories:
+                try:
+                    story.clear_media_files()
+                except Exception as file_error:
+                    # Aislamos el error para que un archivo corrupto no detenga todo el bucle
+                    logger.warning(f"⚠️ No se pudo limpiar la historia {story.id}: {file_error}")
+                    continue
+            
+            logger.info(f"✅ Limpieza multimedia completada con éxito.")
+            
+    except Exception as e:
+        logger.error(f"❌ Error crítico en cleanup_expired_video_stories: {e}")
+
+@shared_task(ignore_result=True)
+def optimize_and_transcode_video_story(story_id):
+    """
+    Orquestador fail-safe para transcodificación de video.
+    Si detecta almacenamiento AWS, intenta delegar la segmentación HLS a MediaConvert.
+    Si falla o estamos en entorno local, aborta elegantemente manteniendo el .mp4 original.
+    """
+    try:
+        story = CompanyVideoStory.objects.get(id=story_id)
+        
+        # 💡 CASO 1: Entorno de Desarrollo Local
+        if settings.STORAGE_TYPE != 'aws':
+            logger.info(f"ℹ️ Entorno local detectado. Se mantiene el archivo original .mp4 para la historia {story_id}.")
+            return
+
+        # Validamos que tengamos las credenciales mínimas configuradas para no disparar llamadas en falso
+        if not settings.AWS_MEDIACONVERT_ROLE_ARN or not story.video_file:
+            logger.warning(f"⚠️ MediaConvert omitido: Falta AWS_MEDIACONVERT_ROLE_ARN o el archivo base en la historia {story_id}.")
+            return
+
+        logger.info(f"📡 Inicializando cliente AWS Elemental MediaConvert para historia {story_id}...")
+
+        # 1. AWS MediaConvert requiere consultar tu endpoint único regional antes de operar
+        client_discover = boto3.client(
+            'mediaconvert',
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+            region_name=settings.AWS_S3_REGION_NAME
+        )
+        
+        endpoints = client_discover.describe_endpoints()
+        mediaconvert_endpoint = endpoints['Endpoints'][0]['Url']
+
+        # 2. Instanciamos el cliente real conectado a tu endpoint dedicado
+        media_client = boto3.client(
+            'mediaconvert',
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+            region_name=settings.AWS_S3_REGION_NAME,
+            endpoint_url=mediaconvert_endpoint
+        )
+
+        # Definimos las rutas S3 usando el formato nativo URI s3://
+        input_s3_uri = f"s3://{settings.AWS_STORAGE_BUCKET_NAME}/{story.video_file}"
+        output_folder_key = f"stories/videos/hls_{story_id}/"
+        output_s3_uri = f"s3://{settings.AWS_STORAGE_BUCKET_NAME}/{output_folder_key}"
+
+        # 3. Construimos la estructura de la tarea (Job JSON) para segmentación HLS Serverless
+        job_settings = {
+            "Inputs": [{
+                "FileInput": input_s3_uri,
+                "VideoSelector": {},
+                "AudioSelectors": {"Audio Selector 1": {"DefaultSelection": "DEFAULT"}}
+            }],
+            "OutputGroups": [{
+                "Name": "Apple HLS",
+                "OutputGroupSettings": {
+                    "Type": "HLS_GROUP_SETTINGS",
+                    "HlsGroupSettings": {
+                        "SegmentLength": 3, # Segmentos de 3 segundos para el 4G de Venezuela
+                        "Destination": output_s3_uri,
+                        "MinSegmentLength": 0
+                    }
+                },
+                "Outputs": [{
+                    "VideoDescription": {
+                        "CodecSettings": {
+                            "Codec": "H_264",
+                            "H264Settings": {
+                                "RateControlMode": "QVBR", # Calidad variable inteligente (Ahorra megas)
+                                "SceneChangeDetect": "ENABLED",
+                                "MaxBitrate": 2000000,
+                            }
+                        }
+                    },
+                    "AudioDescriptions": [{
+                        "CodecSettings": {
+                            "Codec": "AAC",
+                            "AacSettings": {
+                                "Bitrate": 96000,
+                                "CodingMode": "CODING_MODE_2_0",
+                                "SampleRate": 44100
+                            }
+                        }
+                    }],
+                    "OutputSettings": {
+                        "HlsSettings": {
+                            "AudioGroupId": "program_audio",
+                            "IFrameOnlyPlaylists": "DISABLED"
+                        }
+                    },
+                    "NameModifier": "_v720p" # Esto generará el archivo index_v720p.m3u8
+                }]
+            }]
+        }
+
+        # 4. Despachamos el Job a la infraestructura de AWS
+        logger.info("Sending transcode job to AWS Elemental MediaConvert...")
+        response = media_client.create_job(
+            Role=settings.AWS_MEDIACONVERT_ROLE_ARN,
+            Settings=job_settings
+        )
+        
+        logger.info(f"Job creado exitosamente. ID: {response['Job']['Id']}")
+
+        # 5. Como el proceso es exitoso, actualizamos la firma del video en BD apuntando al playlist index
+        # MediaConvert generará el m3u8 sumándole el NameModifier
+        story.video_file = f"{output_folder_key}index_v720p.m3u8"
+        story.save(update_fields=['video_file'])
+
+        # Limpiamos el caché estructural para forzar la inyección en vivo
+        try:
+            cache.delete_pattern("cartmaker:struct:*")
+        except Exception:
+            pass
+
+    except Exception as e:
+        # 💡 EL EMBUDO FAIL-SAFE: Si AWS no está configurado, da error de red o no existe el rol,
+        # atrapamos el error aquí. El .mp4 original ya está guardado en el bucket, así que no hacemos nada
+        # y la aplicación continuará reproduciendo el video de forma tradicional sin romperse.
+        print(
+            f"""🔔 [Modo Híbrido Activo]: Omitiendo MediaConvert para la historia {story_id}. 
+            Motivo: El servicio de transcodificación no está activo o configurado en AWS. 
+            Detalle técnico: {e}"""
         )

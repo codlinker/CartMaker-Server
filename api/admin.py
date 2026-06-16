@@ -154,20 +154,7 @@ class AtlasThreadAdmin(ModelAdmin):
     def summary_short(self, obj):
         return obj.summary[:50] if obj.summary else "Sin resumen"
 
-# --- MÓDULO 9: ANALÍTICAS (DINÁMICAS) ---
-
-@admin.register(ProductViewLog)
-class ProductViewLogAdmin(ModelAdmin):
-    list_display = ("client", "inventory_item", "added_to_cart", "bought", "start_time")
-    list_filter = ("added_to_cart", "bought")
-
-@admin.register(StoreViewLog)
-class StoreViewLogAdmin(ModelAdmin):
-    list_display = ("client", "join_time", "exit_time", "location_watched")
-
-# --- REGISTRO DE TODAS LAS TABLAS RESTANTES ---
-
-# Modelos Geográficos
+# --- MODELOS GEOGRÁFICOS ---
 @admin.register(ClientLocation)
 class GeoAdmin(GISModelAdmin, ModelAdmin):
     gis_widget_kwargs = {
@@ -252,13 +239,174 @@ class CompanyCategoryAdmin(ModelAdmin):
 class StoreContactMethodAdmin(ModelAdmin):
     list_display = ('id', 'store', 'method_type','value')
 
-# Modelos de Soporte y Configuración (Registro Simple con Estilo Unfold)
+# =========================================================================
+# 💡 MÓDULO 9: ANALÍTICAS (Optimizadas para Unfold)
+# =========================================================================
+
+@admin.register(ProductViewLog)
+class ProductViewLogAdmin(ModelAdmin):
+    list_display = ("client", "inventory_item", "duration_seconds", "added_to_cart_icon", "bought_icon", "start_time")
+    list_filter = ("added_to_cart", "bought", "start_time")
+    search_fields = ("client__email", "client__first_name", "inventory_item__product__name")
+    readonly_fields = ("start_time", "end_time")
+    date_hierarchy = "start_time"
+
+    @display(description="Duración (Segs)")
+    def duration_seconds(self, obj):
+        if obj.end_time and obj.start_time:
+            return (obj.end_time - obj.start_time).seconds
+        return "-"
+
+    @display(description="Carrito", boolean=True)
+    def added_to_cart_icon(self, obj):
+        return obj.added_to_cart
+
+    @display(description="Comprado", boolean=True)
+    def bought_icon(self, obj):
+        return obj.bought
+
+
+@admin.register(StoreViewLog)
+class StoreViewLogAdmin(ModelAdmin):
+    # 💡 Añadimos "store" a las columnas visibles
+    list_display = ("client", "store", "join_time", "duration_seconds", "engagement_summary")
+    list_filter = ("location_watched", "presentation_video_watched", "stories_watched", "products_watched", "store__company")
+    search_fields = ("client__email", "store__name", "store__company__name")
+    date_hierarchy = "join_time"
+
+    @display(description="Duración (Segs)")
+    def duration_seconds(self, obj):
+        if obj.exit_time and obj.join_time:
+            return (obj.exit_time - obj.join_time).seconds
+        return "-"
+
+    @display(description="Acciones Tomadas")
+    def engagement_summary(self, obj):
+        actions = []
+        if obj.location_watched: actions.append("📍 Mapa")
+        if obj.presentation_video_watched: actions.append("🎬 Intro")
+        if obj.stories_watched: actions.append("📱 Historias")
+        if obj.products_watched: actions.append("🛍️ Productos")
+        if obj.tryed_to_contact: actions.append("💬 Contacto")
+        return " | ".join(actions) if actions else "Solo visita"
+
+
+@admin.register(UserNavigationLog)
+class UserNavigationLogAdmin(ModelAdmin):
+    list_display = ("user", "login_time", "logout_time", "screens_visited_count")
+    list_filter = ("login_time",)
+    search_fields = ("user__email",)
+    date_hierarchy = "login_time"
+
+    @display(description="Pantallas Visitadas")
+    def screens_visited_count(self, obj):
+        if obj.navigation_record and isinstance(obj.navigation_record, dict):
+            return len(obj.navigation_record.keys())
+        return 0
+
+
+# =========================================================================
+# 💡 MÓDULO 10: RED SOCIAL & ENGAGEMENT (Optimizados para Unfold)
+# =========================================================================
+
+@admin.register(CompanyVideoStory)
+class CompanyVideoStoryAdmin(ModelAdmin):
+    list_display = ("id", "company", "associated_item_link", "views_count", "is_active", "creation")
+    list_filter = ("company", "creation")
+    search_fields = ("company__name", "description")
+    readonly_fields = ("creation", "views_count")
+    date_hierarchy = "creation"
+    
+    fieldsets = (
+        ('Contexto del Video', {
+            'fields': ('company', 'associated_item', 'description')
+        }),
+        ('Multimedia', {
+            'fields': ('video_file', 'thumbnail')
+        }),
+        ('Métricas y Ciclo de Vida', {
+            'fields': ('views_count', 'creation', 'expires_at')
+        }),
+    )
+
+    @display(description="Producto Enlazado")
+    def associated_item_link(self, obj):
+        return obj.associated_item.product.name if obj.associated_item else "Ninguno"
+
+    @display(description="Estado", boolean=True)
+    def is_active(self, obj):
+        return obj.is_media_available
+
+
+@admin.register(UniversalLike)
+class UniversalLikeAdmin(ModelAdmin):
+    list_display = ("user", "content_type", "content_object_display", "creation")
+    list_filter = ("content_type", "creation")
+    search_fields = ("user__email", "object_id")
+    readonly_fields = ("creation",)
+    date_hierarchy = "creation"
+
+    @display(description="Elemento que recibió el Like")
+    def content_object_display(self, obj):
+        return str(obj.content_object) if obj.content_object else f"ID: {obj.object_id} (Huérfano)"
+
+
+@admin.register(UniversalComment)
+class UniversalCommentAdmin(ModelAdmin):
+    list_display = ("client", "content_type", "short_question", "has_answer", "question_creation")
+    list_filter = ("content_type", "question_creation", "answer_creation")
+    search_fields = ("client__email", "question_text", "answer_text")
+    readonly_fields = ("question_creation", "answer_creation")
+    
+    fieldsets = (
+        ('Referencias', {
+            'fields': ('client', 'content_type', 'object_id')
+        }),
+        ('Interacción del Cliente', {
+            'fields': ('question_text', 'question_creation')
+        }),
+        ('Respuesta del Comercio', {
+            'fields': ('answer_text', 'answer_creation')
+        }),
+    )
+
+    @display(description="Duda del Cliente")
+    def short_question(self, obj):
+        return obj.question_text[:40] + "..." if len(obj.question_text) > 40 else obj.question_text
+
+    @display(description="¿Respondida?", boolean=True)
+    def has_answer(self, obj):
+        return bool(obj.answer_text)
+
+
+@admin.register(VideoEngagementLog)
+class VideoEngagementLogAdmin(ModelAdmin):
+    list_display = ("client", "video_company", "watch_time_seconds", "engagement_score", "timestamp")
+    list_filter = ("video_completed", "interacted_with_product", "added_to_cart_from_video", "bought_from_video", "timestamp")
+    search_fields = ("client__email", "video__company__name")
+    date_hierarchy = "timestamp"
+
+    @display(description="Empresa del Video")
+    def video_company(self, obj):
+        return obj.video.company.name if obj.video else "Desconocida"
+
+    @display(description="Nivel de Interacción")
+    def engagement_score(self, obj):
+        score = 0
+        if obj.video_completed: score += 1
+        if obj.interacted_with_product: score += 1
+        if obj.added_to_cart_from_video: score += 1
+        if obj.bought_from_video: score += 1
+        
+        badges = ["👀 Visto", "🎯 Completado", "🛒 Carrito", "🛍️ Compra!"]
+        return badges[score - 1] if score > 0 else "Ignorado"
+
 others = [
     InventoryItemOffer, 
-    InventoryItemTransaction, InventoryItemQuestion, OrderCancellationTopic, 
+    InventoryItemTransaction, OrderCancellationTopic, 
     TokenWalletTransaction, ProductCalification, 
     MerchantCalification, SupportTicket, AtlasMessage, 
-    SystemConfig, UserNavigationLog, ClientContactMethod
+    SystemConfig, ClientContactMethod
 ]
 
 for m in others:

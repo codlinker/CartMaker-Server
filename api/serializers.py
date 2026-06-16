@@ -367,3 +367,45 @@ class ProductSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         # Delegamos la serialización de salida a tu método del modelo
         return instance.get_json()
+
+class CompanyVideoStorySerializer(serializers.ModelSerializer):
+    """
+    Serializer robusto para crear Historias de Video desde Flutter.
+    """
+    # 💡 Declaramos explícitamente los campos de archivo
+    video_file = serializers.FileField(required=True)
+    thumbnail = serializers.ImageField(required=True)
+    
+    # 💡 Los campos de texto siguen siendo opcionales y tolerantes
+    associated_item_id = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    description = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+
+    class Meta:
+        model = CompanyVideoStory
+        fields = [
+            'id', 'video_file', 'thumbnail', 'description', 
+            'associated_item_id', 'creation', 'expires_at', 'views_count'
+        ]
+        read_only_fields = ['id', 'creation', 'expires_at', 'views_count']
+
+    def create(self, validated_data):
+        item_id = validated_data.pop('associated_item_id', None)
+        
+        user = self.context['request'].user
+        company = Company.objects.filter(owner=user).first()
+        
+        if not company:
+            raise serializers.ValidationError({"company": "No tienes una empresa registrada para subir videos."})
+            
+        validated_data['company'] = company
+        
+        if item_id and str(item_id).strip():
+            try:
+                item = InventoryItem.objects.get(id=item_id, store__company=company)
+                validated_data['associated_item'] = item
+            except InventoryItem.DoesNotExist:
+                raise serializers.ValidationError({"associated_item_id": "El producto seleccionado no existe o no te pertenece."})
+        else:
+            validated_data['associated_item'] = None
+
+        return super().create(validated_data)

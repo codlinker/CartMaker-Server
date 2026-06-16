@@ -200,104 +200,143 @@ MEDIA_ROOT = BASE_DIR / 'media'
 USE_I18N = True
 
 UNFOLD = {
-    "SITE_TITLE": "Administracion",
-    "SITE_HEADER": "Administracion de CartMaker",
-    "SITE_SUBHEADER": "Cart Maker",
+    "SITE_TITLE": "Admin | CartMaker",
+    "SITE_HEADER": "CartMaker Core",
+    "SITE_SUBHEADER": "Panel de Administración Central",
     "SITE_LOGO": {
-        "light": lambda request: static("img/logo.svg"),
+        "light": lambda request: static("img/logo.svg"),  # Asegúrate de tener tu logo
         "dark": lambda request: static("img/logo.svg"),
     },
+    "SITE_SYMBOL": "speed",  # Ícono alternativo si no carga el logo
+    "SITE_URL": "/",
+    
+    # 💡 INYECCIÓN DE MARCA: Tonos Morados de CartMaker
+    "COLORS": {
+        "primary": {
+            "50": "#faf5ff",
+            "100": "#f3e8ff",
+            "200": "#e9d5ff",
+            "300": "#d8b4fe",
+            "400": "#c084fc",
+            "500": "#a855f7", # Morado CartMaker
+            "600": "#9333ea",
+            "700": "#7e22ce",
+            "800": "#6b21a8",
+            "900": "#581c87",
+            "950": "#3b0764",
+        },
+    },
+    
     "SIDEBAR": {
         "show_search": True,
+        "show_all_applications": False, # Mantiene el menú limpio
         "navigation": [
             {
-                "title": "Manejo de Usuarios",
+                "title": "Usuarios y Accesos",
+                "separator": True, # Agrega una línea divisoria visual
                 "items": [
-                    {"title": "Usuarios", "link": "/admin/api/user/", "icon": "account_circle"},
-                    {'title': "Billeteras", "link":'/admin/api/userwallet/', "icon":"wallet"},
-                    {"title": "Notificaciones", "link": "/admin/api/notification/", "icon": "notification_important"},
-                    {"title":"Ubicaciones", "link":"/admin/api/clientlocation/", "icon":"location_on"},
-                    {'title':"Métodos de contacto", "link":"/admin/api/clientcontactmethod/", "icon":"call"},
-                    {'title':"Dispositivos registrados", "link":"/admin/api/devicetoken/", "icon":"phone"}
+                    {"title": "Usuarios", "link": "/admin/api/user/", "icon": "group"},
+                    {"title": "Billeteras (Fiat)", "link": "/admin/api/userwallet/", "icon": "account_balance_wallet"},
+                    {"title": "Notificaciones", "link": "/admin/api/notification/", "icon": "notifications_active"},
+                    {"title": "Ubicaciones (Clientes)", "link": "/admin/api/clientlocation/", "icon": "pin_drop"},
+                    {"title": "Métodos de contacto", "link": "/admin/api/clientcontactmethod/", "icon": "contact_phone"},
+                    {"title": "Dispositivos Móviles", "link": "/admin/api/devicetoken/", "icon": "phonelink_setup"}
                 ],
             },
             {
                 "title": "Estructura Comercial",
+                "separator": True,
                 "items": [
-                    {"title": "Compañías", "link": "/admin/api/company/", "icon": "business"},
-                    {"title":"Categorías", 'link':"/admin/api/companycategory/", "icon":"domain_disabled"},
-                    {"title": "Tiendas", "link": "/admin/api/companystore/", "icon": "storefront"},
-                    {"title": "Centros comerciales", "link": "/admin/api/mall/", "icon": "store"},
-                    {"title": "Ubicaciones", "link":"/admin/api/storelocation/", "icon":"location_on"},
-                    {"title": "Métodos de contacto", "link":"/admin/api/storecontactmethod/", "icon":"call"},
-                    {"title":"Empleados", "link":"/admin/api/employee/", "icon":"emoji_people"},
-                    {"title":"Permisos de empleados", "link":"/admin/api/employeepermission/", "icon":"manage_accounts"},
-                    {"title":"Asignaciones empleado-sucursal", "link":"/admin/api/employeestoreassignment/", "icon":"add_home_work"}
+                    {"title": "Compañías", "link": "/admin/api/company/", "icon": "corporate_fare"},
+                    {"title": "Categorías de Negocio", "link": "/admin/api/companycategory/", "icon": "domain"},
+                    {"title": "Sucursales", "link": "/admin/api/companystore/", "icon": "storefront"},
+                    {"title": "Centros Comerciales", "link": "/admin/api/mall/", "icon": "local_mall"},
+                    {"title": "Ubicaciones (Tiendas)", "link": "/admin/api/storelocation/", "icon": "share_location"},
+                    {"title": "Directorio de Contacto", "link": "/admin/api/storecontactmethod/", "icon": "support_agent"},
+                    {"title": "Personal y Empleados", "link": "/admin/api/employee/", "icon": "badge"},
+                    {"title": "Roles y Permisos", "link": "/admin/api/employeepermission/", "icon": "security"},
+                    {"title": "Asignación de Sucursal", "link": "/admin/api/employeestoreassignment/", "icon": "assignment_ind"}
                 ],
             },
             {
-                "title": "Productos e Inventario",
+                "title": "Catálogo e Inventario",
+                "separator": True,
                 "items": [
-                    {"title":"Categorías", 'link':"/admin/api/category/", "icon":"category"},
-                    {"title":"Sub-Categorías", 'link':"/admin/api/subcategory/", "icon":"category_search"},
-                    {"title": "Productos", "link": "/admin/api/product/", "icon": "inventory_2"},
-                    {"title": "Items en inventario", "link":"/admin/api/inventoryitem/", "icon":"box"},
-                    {"title":"Ofertas en items", "link":"/admin/api/inventoryitemoffer/", "icon":"percent_discount"},
-                    {"title":"Transacciones de items", "link":"/admin/api/inventoryitemtransaction/", "icon":"arrows_left_right_circle"},
-                    {"title":"Preguntas de clientes", "link":"/admin/api/inventoryitemquestion/", "icon":"contact_support"},
+                    {"title": "Categorías", "link": "/admin/api/category/", "icon": "grid_view"},
+                    {"title": "Sub-Categorías", "link": "/admin/api/subcategory/", "icon": "segment"},
+                    {"title": "Productos Maestros", "link": "/admin/api/product/", "icon": "inventory_2"},
+                    {"title": "Existencias (Lotes)", "link": "/admin/api/inventoryitem/", "icon": "view_in_ar"},
+                    {"title": "Ofertas Activas", "link": "/admin/api/inventoryitemoffer/", "icon": "loyalty"},
+                    {"title": "Auditoría de Stock", "link": "/admin/api/inventoryitemtransaction/", "icon": "sync_alt"},
                 ],
             },
             {
-                "title":"Ventas y Fidelización",
-                "items":[
-                    {"title": "Topicos de cancelación de órdenes", "link": "/admin/api/ordercancellationtopic/", "icon": "cancel"},
-                    {"title": "Órdenes", "link": "/admin/api/order/", "icon": "shopping_cart"},
-                    {"title": "Billeteras de tokens", "link":"/admin/api/tokenwallet/", "icon":"wallet"},
-                    {"title": "Movimientos de billeteras", "link":"/admin/api/tokenwallettransaction", "icon":"payments"},
-                ]
-            },
-            {
-                "title":"Calificación y Soporte",
-                "items":[
-                    {"title":"Calificaciones de tiendas", "link":"/admin/api/storecalification/", "icon":"star_rate"},
-                    {"title":"Calificaciones de productos", "link":"/admin/api/productcalification/", "icon":"star_rate"},
-                    {"title":"Calificaciones de comerciantes", "link":"/admin/api/merchantcalification/", "icon":"star_rate"},
-                    {"title":"Tickets de soporte", "link":"/admin/api/supportticket/", "icon":"support_agent"},
-                ]
-            },
-            {
-                "title":"Suscripciones y Planes",
-                "items":[
-                    {'title':'Planes de comerciantes', "link":"/admin/api/merchantplan/", "icon":"id_card"},
-                    {'title':"Suscripciones de comerciantes", "link":"/admin/api/merchantsubscription", "icon":"credit_score"},
-                    {"title":'Pagos de planes', "link":"/admin/api/merchantplanpayment", "icon":"price_check"},
-                ]
-            },
-            {
-                "title": "Atlas IA",
+                "title": "Ventas y Fidelización",
+                "separator": True,
                 "items": [
-                    {"title": "Suscripciones a Atlas Plus", "link": "/admin/api/atlasplusplan/", "icon": "credit_score"},
-                    {"title": "Pagos a Atlas Plus", "link": "/admin/api/atlasplusplanpayment/", "icon": "price_check"},
-                    {"title": "Conversaciones con Atlas", "link":"/admin/api/atlasthread/", "icon":"comment"},
-                    {"title": "Mensajes en Atlas", "link":"/admin/api/atlasmessage/", "icon":"chat"},
+                    {"title": "Órdenes de Compra", "link": "/admin/api/order/", "icon": "local_shipping"},
+                    {"title": "Motivos de Cancelación", "link": "/admin/api/ordercancellationtopic/", "icon": "rule"},
+                    {"title": "Billeteras de Tokens", "link": "/admin/api/tokenwallet/", "icon": "savings"},
+                    {"title": "Emisión de Tokens", "link": "/admin/api/tokenwallettransaction/", "icon": "receipt_long"},
+                ]
+            },
+            {
+                "title": "Red Social y Multimedia",
+                "separator": True,
+                "items": [
+                    {"title": "Video Historias", "link": "/admin/api/companyvideostory/", "icon": "video_library"},
+                    {"title": "Q&A (Dudas Públicas)", "link": "/admin/api/universalcomment/", "icon": "forum"},
+                    {"title": "Likes (Me Gusta)", "link": "/admin/api/universallike/", "icon": "thumb_up"},
+                ]
+            },
+            {
+                "title": "Reputación y Soporte",
+                "separator": True,
+                "items": [
+                    {"title": "Reviews: Tiendas", "link": "/admin/api/storecalification/", "icon": "store"},
+                    {"title": "Reviews: Productos", "link": "/admin/api/productcalification/", "icon": "star"},
+                    {"title": "Reviews: Comerciantes", "link": "/admin/api/merchantcalification/", "icon": "workspace_premium"},
+                    {"title": "Tickets de Soporte", "link": "/admin/api/supportticket/", "icon": "headset_mic"},
+                ]
+            },
+            {
+                "title": "Suscripciones (B2B)",
+                "separator": True,
+                "items": [
+                    {"title": "Planes de Negocio", "link": "/admin/api/merchantplan/", "icon": "card_membership"},
+                    {"title": "Suscripciones Activas", "link": "/admin/api/merchantsubscription/", "icon": "verified"},
+                    {"title": "Pagos Recibidos", "link": "/admin/api/merchantplanpayment/", "icon": "price_check"},
+                ]
+            },
+            {
+                "title": "Inteligencia Artificial (Atlas)",
+                "separator": True,
+                "items": [
+                    {"title": "Suscripciones Atlas+", "link": "/admin/api/atlasplusplan/", "icon": "auto_awesome"},
+                    {"title": "Pagos Atlas+", "link": "/admin/api/atlasplusplanpayment/", "icon": "payments"},
+                    {"title": "Hilos de Conversación", "link": "/admin/api/atlasthread/", "icon": "memory"},
+                    {"title": "Log de Mensajes IA", "link": "/admin/api/atlasmessage/", "icon": "chat_bubble"},
                 ],
             },
             {
-                "title":"Configuración y Anuncios",
-                "items":[
-                    {'title':'Cuentas bancarias de CartMaker', 'link':"/admin/api/cartmakerbankaccount", "icon":"account_balance"},
-                    {'title':"Configuración del sistema", "link":"/admin/api/systemconfig/", "icon":"settings"},
-                    {"title":"Anuncios", "link":"/admin/api/announcement/", "icon":"brand_awareness"}
+                "title": "Telemetría y Data Lake",
+                "separator": True,
+                "items": [
+                    {"title": "Tráfico de Vistas (Productos)", "link": "/admin/api/productviewlog/", "icon": "touch_app"},
+                    {"title": "Tráfico de Visitas (Tiendas)", "link": "/admin/api/storeviewlog/", "icon": "visibility"},
+                    {"title": "Retención de Video", "link": "/admin/api/videoengagementlog/", "icon": "monitoring"},
+                    {"title": "Rutas de Navegación", "link": "/admin/api/usernavigationlog/", "icon": "timeline"},
                 ]
             },
             {
-                "title":"Logs y Estadísticas",
-                "items":[
-                    {'title':"Navegaciones", "link":"/admin/api/usernavigationlog/", "icon":"navigation"},
-                    {'title':"Ojeos a tiendas", "link":"/admin/api/storeviewlog/", 'icon':'store'},
-                    {'title':'Ojeos a productos', "link":"/admin/api/productviewlog/", "icon":'feature_search'}
+                "title": "Ajustes Core",
+                "separator": True,
+                "items": [
+                    {"title": "Cuentas Receptoras", "link": "/admin/api/cartmakerbankaccount/", "icon": "account_balance"},
+                    {"title": "Anuncios Globales", "link": "/admin/api/announcement/", "icon": "campaign"},
+                    {"title": "Parámetros del Sistema", "link": "/admin/api/systemconfig/", "icon": "settings_suggest"},
                 ]
-            }
+            },
         ],
     },
 }
@@ -324,17 +363,29 @@ CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'America/Caracas' 
 CELERY_ENABLE_UTC = False
 
-# Celery Beat Settings
 CELERY_BEAT_SCHEDULE = {
-    # Tarea 1: Limpiar ofertas de descuento expiradas en items. Todos los dias a las 12:02 AM
+    # Tarea 1: Limpiar ofertas de descuento expiradas en items. Todos los días a las 12:02 AM
     'cleanup-expired-offers-midnight': {
         'task': 'api.tasks.cleanup_expired_offers', 
         'schedule': crontab(minute=2, hour=0), 
     },
+    
     # Tarea 2: Evaluar comerciantes Platinum. Todos los días a las 3:00 AM
     'evaluate-platinum-status-nightly': {
         'task': 'api.tasks.evaluate_platinum_status', 
         'schedule': crontab(minute=0, hour=3), 
+    },
+    
+    # Tarea 3: Alerta de órdenes estancadas. Revisa y notifica al vendedor cada 6 horas en punto
+    'send-merchant-order-reminders-every-6h': {
+        'task': 'cartmaker.orders.send_merchant_reminders',  # 💡 Nombre explícito del decorador
+        'schedule': crontab(minute=0, hour='*/6'),          # '*/6' ejecuta a las 00:00, 06:00, 12:00 y 18:00
+    },
+    
+    # Tarea 4: Limpieza de almacenamiento de videos e historias expiradas (72h). Corre al inicio de cada hora
+    'cleanup-expired-video-stories-hourly': {
+        'task': 'api.tasks.cleanup_expired_video_stories', 
+        'schedule': crontab(minute=0),                      # Al omitir 'hour', corre en el minuto 0 de cada hora
     },
 }
 
@@ -352,6 +403,7 @@ AWS_ACCESS_KEY_ID = env_manager.AWS_ACCESS_KEY_ID
 AWS_SECRET_ACCESS_KEY = env_manager.AWS_SECRET_ACCESS_KEY
 AWS_STORAGE_BUCKET_NAME = env_manager.AWS_STORAGE_BUCKET_NAME
 AWS_S3_REGION_NAME = env_manager.AWS_S3_REGION_NAME
+AWS_MEDIACONVERT_ROLE_ARN = env_manager.AWS_MEDIACONVERT_ROLE_ARN
 
 CEDULAS_API_APP_ID = env_manager.CEDULAS_API_APP_ID
 CEDULAS_API_ACCESS_TOKEN = env_manager.CEDULAS_API_ACCESS_TOKEN

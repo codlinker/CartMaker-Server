@@ -25,6 +25,7 @@ class EnviromentManager:
         "AWS_SECRET_ACCESS_KEY":"Secret key del bucket de AWS.",
         "AWS_STORAGE_BUCKET_NAME":"Nombre del bucket de AWS.",
         "AWS_S3_REGION_NAME":"Region del bucket de AWS.",
+        "AWS_MEDIACONVERT_ROLE_ARN":"ARN del rol de IAM asignado para AWS Elemental MediaConvert.",
         "CEDULAS_API_APP_ID":"App id de la api de consulta de cedulas.",
         "CEDULAS_API_ACCESS_TOKEN":"Access token de la api de consulta de cedulas.",
         "USE_CEDULAS_API":"Indica si se debe usar la api de consulta de cedulas al verificar identidades.",
@@ -49,6 +50,7 @@ class EnviromentManager:
         self._aws_secret_access_key = None
         self._aws_storage_bucket_name = None
         self._aws_s3_region_name = None
+        self._aws_mediaconvert_role_arn = None
         self._cedulas_api_app_id = None
         self._cedulas_api_access_token = None
         self._use_cedulas_api = None
@@ -160,6 +162,11 @@ class EnviromentManager:
         return self._aws_s3_region_name
     
     @property
+    def AWS_MEDIACONVERT_ROLE_ARN(self) -> str:
+        """ ARN del rol de IAM para AWS Elemental MediaConvert. """
+        return self._aws_mediaconvert_role_arn
+    
+    @property
     def CEDULAS_API_APP_ID(self) -> str:
         """
         App id de la api de cedulas.
@@ -244,6 +251,7 @@ class EnviromentManager:
             "AWS_SECRET_ACCESS_KEY":os.environ.get('AWS_SECRET_ACCESS_KEY'),
             "AWS_STORAGE_BUCKET_NAME":os.environ.get("AWS_STORAGE_BUCKET_NAME"),
             "AWS_S3_REGION_NAME":os.environ.get("AWS_S3_REGION_NAME"),
+            "AWS_MEDIACONVERT_ROLE_ARN":os.environ.get("AWS_MEDIACONVERT_ROLE_ARN"),
             "CEDULAS_API_APP_ID":os.environ.get("CEDULAS_API_APP_ID"),
             "CEDULAS_API_ACCESS_TOKEN":os.environ.get("CEDULAS_API_ACCESS_TOKEN"),
             "USE_CEDULAS_API":self.__process_boolean_env_variable(os.environ.get('USE_CEDULAS_API')),
@@ -267,6 +275,7 @@ class EnviromentManager:
         self._aws_secret_access_key = env_variables['AWS_SECRET_ACCESS_KEY']
         self._aws_storage_bucket_name = env_variables['AWS_STORAGE_BUCKET_NAME']
         self._aws_s3_region_name = env_variables['AWS_S3_REGION_NAME']
+        self._aws_mediaconvert_role_arn = env_variables['AWS_MEDIACONVERT_ROLE_ARN']
         self._cedulas_api_app_id = env_variables['CEDULAS_API_APP_ID']
         self._cedulas_api_access_token = env_variables['CEDULAS_API_ACCESS_TOKEN']
         self._use_cedulas_api = env_variables['USE_CEDULAS_API']

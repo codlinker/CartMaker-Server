@@ -19,10 +19,11 @@ router.register(r'atlas', AtlasViewSet, basename='atlas')
 router.register(r'search-engine', ProductSearchEngineViewSet, basename='search-engine')
 router.register(r'cartmaker-map', CartMakerMapViewSet, basename='cartmaker_map')
 router.register(r'client-company', ClientCompanyViewSet, basename="client_company")
-router.register(r'product-conversation', ProductConversationViewSet, basename="product_conversation")
+router.register(r'universal-conversation', UniversalConversationViewSet, basename="universal_conversation")
 router.register(r'logs', InteractionLogViewSet, basename="logs")
 router.register(r'cart', CartViewSet, basename='cart')
 router.register(r'orders', OrderViewSet, basename='orders')
+router.register(r'story-video', CompanyVideoStoryViewSet, basename='story-video')
 
 # --- DEFINICIÓN DE RUTAS (URLS) ---
 urlpatterns = [
