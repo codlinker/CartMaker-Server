@@ -321,23 +321,21 @@ class ProductSearchEngine:
 
         date_threshold = timezone.now() - timedelta(days=30)
         
-        # 1. Obtenemos el ContentType de InventoryItem
         product_ct = ContentType.objects.get_for_model(InventoryItem)
+        video_ct = ContentType.objects.get_for_model(CompanyVideoStory)
 
-        # 2. Paso 1: Obtenemos los IDs de los productos que el usuario ha dado Like
-        # (Buscamos en la tabla polimórfica filtrando por el tipo 'product')
+        # 1. AFINIDAD POR LIKES (Productos)
         liked_product_ids = UniversalLike.objects.filter(
             user=self.user,
             content_type=product_ct,
             creation__gte=date_threshold
         ).values_list('object_id', flat=True)
 
-        # 3. Paso 2: Obtenemos las categorías de esos productos específicos
         liked_categories = InventoryItem.objects.filter(
             id__in=list(liked_product_ids)
         ).values_list('product__category_id', flat=True)
 
-        # 4. Obtenemos categorías de productos visualizados
+        # 2. AFINIDAD POR VISUALIZACIONES / CARRITO / COMPRAS
         viewed_categories = ProductViewLog.objects.filter(
             client=self.user,
             start_time__gte=date_threshold
@@ -345,16 +343,48 @@ class ProductSearchEngine:
             Q(added_to_cart=True) | Q(bought=True) | Q(end_time__isnull=False)
         ).values_list('inventory_item__product__category_id', flat=True)
 
-        all_categories = list(liked_categories) + list(viewed_categories)
+        # =========================================================================
+        # 💡 NUEVA CAPA: AFINIDAD POR COMENTARIOS / PREGUNTAS (Alta Señal)
+        # =========================================================================
+        # Caso A: Categorías de productos donde el usuario dejó una duda
+        commented_product_ids = UniversalComment.objects.filter(
+            client=self.user,
+            content_type=product_ct,
+            question_creation__gte=date_threshold
+        ).values_list('object_id', flat=True)
         
-        if not all_categories:
-            return []
+        commented_prod_categories = InventoryItem.objects.filter(
+            id__in=list(commented_product_ids)
+        ).values_list('product__category_id', flat=True)
 
+        # Caso B: Categorías de los productos vinculados a los VIDEOS que el usuario comentó
+        commented_video_ids = UniversalComment.objects.filter(
+            client=self.user,
+            content_type=video_ct,
+            question_creation__gte=date_threshold
+        ).values_list('object_id', flat=True)
+        
+        commented_video_categories = CompanyVideoStory.objects.filter(
+            id__in=list(commented_video_ids),
+            associated_item__isnull=False
+        ).values_list('associated_item__product__category_id', flat=True)
+
+        # =========================================================================
+        # 3. PONDERACIÓN ASIMÉTRICA DE INTERACCIONES
+        # =========================================================================
         frequency = {}
-        for cat_id in all_categories:
+        
+        # Likes y Views suman 1 punto de interés
+        for cat_id in list(liked_categories) + list(viewed_categories):
             if cat_id:
                 frequency[cat_id] = frequency.get(cat_id, 0) + 1
+                
+        # 💡 Los comentarios demuestran alta intención: Suman 3 puntos directo al score
+        for cat_id in list(commented_prod_categories) + list(commented_video_categories):
+            if cat_id:
+                frequency[cat_id] = frequency.get(cat_id, 0) + 3
 
+        # Ordenamos de mayor a menor y extraemos el Top 5
         sorted_categories = sorted(frequency.items(), key=lambda x: x[1], reverse=True)
         top_5_category_ids = [cat[0] for cat in sorted_categories[:5]]
 
@@ -627,7 +657,7 @@ class ProductSearchEngine:
         qs = self._apply_feed_sorting(qs, sort_by, price_order)
         return self._get_cached_structural_feed(base_cache_key, qs, page, page_size)
     
-    def get_home_feed(self, page: int = 1, page_size: int = 20, max_distance_meters: float = 15000) -> list:
+    def get_home_feed(self, page: int = 1, page_size: int = 20, max_distance_meters: float = 15000) -> dict:
         """
         Orquesta el feed mixto dinámicamente por página.
         Soporta escalabilidad infinita y compensación por falta de contenido multimedia.
@@ -641,16 +671,8 @@ class ProductSearchEngine:
         structural_page_feed = cache.get(cache_key)
         
         if not structural_page_feed:
-            # Calcular cuántos elementos ideales de cada tipo corresponden a esta página
             ideal_videos_count = int(page_size * 0.75)  # Ej: 15 si el tamaño es 20
-            ideal_products_count = page_size - ideal_videos_count  # Ej: 5
             
-            # Offsets para base de datos
-            v_start = (page - 1) * ideal_videos_count
-            v_end = v_start + ideal_videos_count
-            
-            p_start = (page - 1) * ideal_products_count
-
             # 1. EVALUAMOS VIDEOS VIGENTES
             qs_videos = self._get_base_video_queryset()
             qs_videos = qs_videos.filter(
@@ -658,27 +680,45 @@ class ProductSearchEngine:
                 company__stores__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters))
             ).distinct() 
             
-            # Anotamos el puntaje base
             qs_videos = self._annotate_video_ranking(qs_videos)
             
-            # 💡 SOLUCIÓN AQUÍ: Mezclamos los videos de distintas compañías
+            # 💡 CONTAMOS ANTES DEL WINDOW FUNCTION: Para no romper la base de datos
+            total_videos = qs_videos.count()
+            
             qs_videos = self._apply_video_monopoly_prevention(qs_videos)
             
-            # Slicing nativo en SQL de los videos de esta página
+            # =========================================================================
+            # 💡 MATEMÁTICA EXACTA PARA EVITAR REPETIDOS (Offset Fijo)
+            # =========================================================================
+            # ¿Cuántos videos reales nos saltamos de TODAS las páginas anteriores?
+            v_start = min((page - 1) * ideal_videos_count, total_videos)
+            v_end = v_start + ideal_videos_count
+            
             videos_list = list(qs_videos[v_start:v_end])
-            
-            # 💡 COMPENSACIÓN DE CONTENIDO (Mantenemos la página siempre llena)
-            video_deficit = ideal_videos_count - len(videos_list)
-            real_products_to_fetch = ideal_products_count + video_deficit
-            
-            # Ajustamos dinámicamente el final del corte de productos en SQL
-            p_end_adjusted = p_start + real_products_to_fetch
 
+            # ==========================================
+            # 💡 DEBUG: AUDITORÍA DE RANKING DE VIDEOS
+            # ==========================================
+            print(f"\n[{timezone.localtime(timezone.now()).strftime('%H:%M:%S')}] 🎬 --- RANKING DE VIDEOS (Página {page}) ---")
+            for idx, v in enumerate(videos_list):
+                score = round(getattr(v, 'ranking_score', 0.0), 4)
+                store_name = v.company.name if getattr(v, 'company', None) else "Desconocida"
+                linked_prod = v.associated_item.product.name if getattr(v, 'associated_item', None) else "Sin producto"
+                print(f"  #{idx + 1} | Score: {score} | Tienda: {store_name} | Vinculado a: {linked_prod}")
+            print("--------------------------------------------------\n")
+            
             # 2. EVALUAMOS PRODUCTOS
+            # ¿Cuántos items EN TOTAL se mostraron en páginas anteriores? -> (page - 1) * page_size
+            # Como sabemos matemáticamente que 'v_start' de esos items fueron videos, el resto fueron obligatoriamente productos.
+            p_start = ((page - 1) * page_size) - v_start
+            
+            # ¿Cuántos productos necesitamos AHORA para completar esta página a tope?
+            products_needed = page_size - len(videos_list)
+            p_end = p_start + products_needed
+
             qs_products = self._get_base_active_queryset()
             if self.user and self.user.is_authenticated:
                 product_ct = ContentType.objects.get_for_model(InventoryItem)
-                # 💡 FIX: Cast explícito a CharField(max_length=50)
                 is_liked_subquery = UniversalLike.objects.filter(
                     user=self.user, 
                     content_type=product_ct, 
@@ -693,11 +733,22 @@ class ProductSearchEngine:
             qs_products = self._annotate_ranking_score(qs_products)
             qs_products = self._apply_monopoly_prevention(qs_products)
             
-            # Slicing optimizado de productos en SQL
-            products_list = list(qs_products[p_start:p_end_adjusted])
+            # Slicing dinámico de productos en SQL con el punto de partida real
+            products_list = list(qs_products[p_start:p_end])
+            
+            # ==========================================
+            # 💡 DEBUG: AUDITORÍA DE RANKING DE PRODUCTOS
+            # ==========================================
+            print(f"\n[{timezone.localtime(timezone.now()).strftime('%H:%M:%S')}] 📦 --- RANKING DE PRODUCTOS (Página {page}) ---")
+            for idx, p in enumerate(products_list):
+                score = round(getattr(p, 'ranking_score', 0.0), 4)
+                prod_name = p.product.name if getattr(p, 'product', None) else "Desconocido"
+                pop_score = getattr(p, 'cached_popularity_score', 0.0)
+                print(f"  #{idx + 1} | Score Final: {score} (Pop. base: {pop_score}) | Producto: {prod_name}")
+            print("--------------------------------------------------\n")
             
             if not videos_list and not products_list:
-                return []
+                return {"results": []}
 
             # 3. ENTRELAZAMOS
             structural_page_feed = self._interleave_feeds(videos_list, products_list, v_ratio=3, p_ratio=1)
@@ -708,12 +759,12 @@ class ProductSearchEngine:
         # 4. STITCHING VOLÁTIL
         final_feed = self._stitch_and_filter_results(structural_page_feed)
         
-        # 💡 NUEVO: Retornamos un diccionario
         response_data = {"results": final_feed}
         
-        # Solo calculamos la barra de historias si es la primera página
+        # Solo calculamos la barra de historias (StoryViewer) si es la primera página
         if page == 1:
             response_data["stories"] = self._get_stories_feed(max_distance_meters)
+            
         return response_data
     
     def get_favorites_feed(self, page: int = 1, page_size: int = 20, sort_by: str = 'relevance', price_order: str = None, max_distance_meters: float = 10000) -> list:

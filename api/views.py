@@ -2032,20 +2032,18 @@ class CompanyCacheAPI(APIView):
             if "error_status" in cached_data:
                 return Response({'message': cached_data["message"]}, status=cached_data["error_status"])
             return Response(cached_data, status=status.HTTP_200_OK)
-
+        try:
+            company = Company.objects.get(owner=request.user).get_json()
+        except Company.DoesNotExist:
+            error_data = {"error_status": status.HTTP_404_NOT_FOUND, "message": "No ha configurado su tienda."}
+            cache.set(cache_key, error_data, timeout=300) # Caché corto para errores
+            return Response({'message': error_data["message"]}, status=error_data["error_status"])
         # Cache Miss
         if MerchantSubscription.objects.filter(merchant=request.user, valid_until__gt=timezone.now()).exists():
-            try:
-                company = Company.objects.get(owner=request.user).get_json()
                 stores = [company_store.get_json() for company_store in CompanyStore.objects.filter(company_id=company['id']).order_by('creation')]
-                
                 data = {'company': company, 'stores': stores}
                 cache.set(cache_key, data, timeout=3600) # 1 hora
                 return Response(data, status=status.HTTP_200_OK)
-            except Company.DoesNotExist:
-                error_data = {"error_status": status.HTTP_404_NOT_FOUND, "message": "No ha configurado su tienda."}
-                cache.set(cache_key, error_data, timeout=300) # Caché corto para errores
-                return Response({'message': error_data["message"]}, status=error_data["error_status"])
         else:
             error_data = {"error_status": status.HTTP_406_NOT_ACCEPTABLE, "message": "La suscripcion del comerciante expiro o no ha sido adquirida."}
             cache.set(cache_key, error_data, timeout=300)
