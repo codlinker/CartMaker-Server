@@ -1,11 +1,14 @@
 from datetime import timedelta
+import json
 
 import boto3
 from celery import shared_task
 from django.contrib.auth import get_user_model
 import logging
 from django.utils import timezone
-
+import os
+import subprocess
+import tempfile
 from api.core.firebase_admin import NotificationManager
 from .core.platinum_manager import PlatinumEvaluator
 from api.models import CompanyVideoStory, InventoryItemOffer, InventoryItem, Order
@@ -156,37 +159,135 @@ def cleanup_expired_video_stories():
 @shared_task(ignore_result=True)
 def optimize_and_transcode_video_story(story_id):
     """
-    Orquestador fail-safe para transcodificación de video.
-    Si detecta almacenamiento AWS, intenta delegar la segmentación HLS a MediaConvert.
-    Si falla o estamos en entorno local, aborta elegantemente manteniendo el .mp4 original.
+    Orquestador fail-safe adaptativo.
+    Aplica el filtro de color de FFmpeg en local o AWS S3, y luego
+    delega la segmentación HLS a MediaConvert si está en producción.
     """
     try:
         story = CompanyVideoStory.objects.get(id=story_id)
+        matrix_data = getattr(story, 'applied_filter_matrix', None)
         
-        # 💡 CASO 1: Entorno de Desarrollo Local
+        # =========================================================================
+        # 🎨 FASE 1: APLICACIÓN DEL FILTRO DE COLOR (Video y Thumbnail)
+        # =========================================================================
+        if matrix_data:
+            logger.info(f"🎨 Matriz de color detectada para la historia {story_id}. Procesando...")
+            matrix = json.loads(matrix_data) if isinstance(matrix_data, str) else matrix_data
+            
+            vf_string = (
+                f"colorchannelmixer="
+                f"rr={matrix[0]}:rg={matrix[1]}:rb={matrix[2]}:ra={matrix[3]}:"
+                f"gr={matrix[5]}:gg={matrix[6]}:gb={matrix[7]}:ga={matrix[8]}:"
+                f"br={matrix[10]}:bg={matrix[11]}:bb={matrix[12]}:ba={matrix[13]}"
+            )
+
+            # 🛠️ SUB-CASO A: Procesamiento en Entorno AWS S3
+            if settings.STORAGE_TYPE == 'aws':
+                input_s3_key = str(story.video_file)
+                thumb_s3_key = str(story.thumbnail) # 💡 Obtenemos la llave de la miniatura
+                bucket_name = settings.AWS_STORAGE_BUCKET_NAME
+                
+                s3_client = boto3.client(
+                    's3',
+                    aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                    aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                    region_name=settings.AWS_S3_REGION_NAME
+                )
+
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    local_input = os.path.join(tmpdir, "input.mp4")
+                    local_output = os.path.join(tmpdir, "output.mp4")
+                    local_thumb_in = os.path.join(tmpdir, "thumb_in.jpg")
+                    local_thumb_out = os.path.join(tmpdir, "thumb_out.jpg")
+
+                    # Descargas
+                    s3_client.download_file(bucket_name, input_s3_key, local_input)
+                    s3_client.download_file(bucket_name, thumb_s3_key, local_thumb_in)
+
+                    # 1. Filtrar Video
+                    result_v = subprocess.run([
+                        'ffmpeg', '-y', '-i', local_input, 
+                        '-vf', vf_string, 
+                        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-profile:v', 'main', '-level:v', '4.0',
+                        '-c:a', 'copy', local_output
+                    ], capture_output=True, text=True)
+                    
+                    # 💡 2. Filtrar Thumbnail en S3
+                    result_t = subprocess.run([
+                        'ffmpeg', '-y', '-i', local_thumb_in, 
+                        '-vf', vf_string, local_thumb_out
+                    ], capture_output=True, text=True)
+
+                    if result_v.returncode != 0 or result_t.returncode != 0:
+                        raise Exception(f"FFmpeg S3 Error. Video: {result_v.stderr} | Thumb: {result_t.stderr}")
+
+                    # Subidas / Sobrescritura
+                    s3_client.upload_file(local_output, bucket_name, input_s3_key)
+                    s3_client.upload_file(local_thumb_out, bucket_name, thumb_s3_key)
+                    logger.info("✅ Filtro aplicado y archivos originales sobrescritos en S3 (Video y Thumbnail).")
+
+            # 🛠️ SUB-CASO B: Procesamiento en Entorno Local (Desarrollo)
+            else:
+                absolute_input_path = os.path.join(settings.MEDIA_ROOT, str(story.video_file))
+                absolute_thumb_path = os.path.join(settings.MEDIA_ROOT, str(story.thumbnail)) # 💡 Ruta de la imagen local
+                
+                # Temporales para evitar colisión de descriptores de archivos
+                with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp_v:
+                    local_output_path = tmp_v.name
+                with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp_t:
+                    local_thumb_out_path = tmp_t.name
+
+                logger.info(f"⏳ Renderizando filtros FFmpeg locales...")
+                
+                # 1. Filtrar Video Local
+                result_v = subprocess.run([
+                    'ffmpeg', '-y', '-i', absolute_input_path, 
+                    '-vf', vf_string, 
+                    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-profile:v', 'main', '-level:v', '4.0',
+                    '-c:a', 'copy', local_output_path
+                ], capture_output=True, text=True)
+
+                # 💡 2. Filtrar Thumbnail Local
+                result_t = subprocess.run([
+                    'ffmpeg', '-y', '-i', absolute_thumb_path, 
+                    '-vf', vf_string, local_thumb_out_path
+                ], capture_output=True, text=True)
+
+                if result_v.returncode != 0 or result_t.returncode != 0:
+                    if os.path.exists(local_output_path): os.remove(local_output_path)
+                    if os.path.exists(local_thumb_out_path): os.remove(local_thumb_out_path)
+                    raise Exception(f"FFmpeg Local Error. Video: {result_v.stderr} | Thumb: {result_t.stderr}")
+
+                # Reemplazo atómico de archivos originales en disco
+                import shutil
+                shutil.move(local_output_path, absolute_input_path)
+                shutil.move(local_thumb_out_path, absolute_thumb_path)
+                logger.info("✅ Filtro aplicado localmente sobrescribiendo video y thumbnail originales.")
+
+        # =========================================================================
+        # 📡 FASE 2: ORQUESTACIÓN HLS CON MEDIACONVERT (Solo producción AWS)
+        # =========================================================================
         if settings.STORAGE_TYPE != 'aws':
-            logger.info(f"ℹ️ Entorno local detectado. Se mantiene el archivo original .mp4 para la historia {story_id}.")
+            logger.info(f"ℹ️ Finalizado: Entorno local no requiere segmentación HLS.")
             return
 
-        # Validamos que tengamos las credenciales mínimas configuradas para no disparar llamadas en falso
-        if not settings.AWS_MEDIACONVERT_ROLE_ARN or not story.video_file:
-            logger.warning(f"⚠️ MediaConvert omitido: Falta AWS_MEDIACONVERT_ROLE_ARN o el archivo base en la historia {story_id}.")
+        if not settings.AWS_MEDIACONVERT_ROLE_ARN:
+            logger.warning(f"⚠️ Omitiendo AWS MediaConvert: Falta AWS_MEDIACONVERT_ROLE_ARN.")
             return
 
-        logger.info(f"📡 Inicializando cliente AWS Elemental MediaConvert para historia {story_id}...")
-
-        # 1. AWS MediaConvert requiere consultar tu endpoint único regional antes de operar
+        # De aquí en adelante, tu lógica original de MediaConvert se ejecuta usando
+        # el archivo que YA fue filtrado en la FASE 1...
+        bucket_name = settings.AWS_STORAGE_BUCKET_NAME
+        input_s3_key = str(story.video_file)
+        
         client_discover = boto3.client(
             'mediaconvert',
             aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
             aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
             region_name=settings.AWS_S3_REGION_NAME
         )
-        
-        endpoints = client_discover.describe_endpoints()
-        mediaconvert_endpoint = endpoints['Endpoints'][0]['Url']
+        mediaconvert_endpoint = client_discover.describe_endpoints()['Endpoints'][0]['Url']
 
-        # 2. Instanciamos el cliente real conectado a tu endpoint dedicado
         media_client = boto3.client(
             'mediaconvert',
             aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
@@ -195,12 +296,10 @@ def optimize_and_transcode_video_story(story_id):
             endpoint_url=mediaconvert_endpoint
         )
 
-        # Definimos las rutas S3 usando el formato nativo URI s3://
-        input_s3_uri = f"s3://{settings.AWS_STORAGE_BUCKET_NAME}/{story.video_file}"
+        input_s3_uri = f"s3://{bucket_name}/{input_s3_key}"
         output_folder_key = f"stories/videos/hls_{story_id}/"
-        output_s3_uri = f"s3://{settings.AWS_STORAGE_BUCKET_NAME}/{output_folder_key}"
+        output_s3_uri = f"s3://{bucket_name}/{output_folder_key}"
 
-        # 3. Construimos la estructura de la tarea (Job JSON) para segmentación HLS Serverless
         job_settings = {
             "Inputs": [{
                 "FileInput": input_s3_uri,
@@ -212,7 +311,7 @@ def optimize_and_transcode_video_story(story_id):
                 "OutputGroupSettings": {
                     "Type": "HLS_GROUP_SETTINGS",
                     "HlsGroupSettings": {
-                        "SegmentLength": 3, # Segmentos de 3 segundos para el 4G de Venezuela
+                        "SegmentLength": 3,
                         "Destination": output_s3_uri,
                         "MinSegmentLength": 0
                     }
@@ -222,7 +321,7 @@ def optimize_and_transcode_video_story(story_id):
                         "CodecSettings": {
                             "Codec": "H_264",
                             "H264Settings": {
-                                "RateControlMode": "QVBR", # Calidad variable inteligente (Ahorra megas)
+                                "RateControlMode": "QVBR", 
                                 "SceneChangeDetect": "ENABLED",
                                 "MaxBitrate": 2000000,
                             }
@@ -244,37 +343,25 @@ def optimize_and_transcode_video_story(story_id):
                             "IFrameOnlyPlaylists": "DISABLED"
                         }
                     },
-                    "NameModifier": "_v720p" # Esto generará el archivo index_v720p.m3u8
+                    "NameModifier": "_v720p" 
                 }]
             }]
         }
 
-        # 4. Despachamos el Job a la infraestructura de AWS
         logger.info("Sending transcode job to AWS Elemental MediaConvert...")
         response = media_client.create_job(
             Role=settings.AWS_MEDIACONVERT_ROLE_ARN,
             Settings=job_settings
         )
         
-        logger.info(f"Job creado exitosamente. ID: {response['Job']['Id']}")
-
-        # 5. Como el proceso es exitoso, actualizamos la firma del video en BD apuntando al playlist index
-        # MediaConvert generará el m3u8 sumándole el NameModifier
         story.video_file = f"{output_folder_key}index_v720p.m3u8"
         story.save(update_fields=['video_file'])
 
-        # Limpiamos el caché estructural para forzar la inyección en vivo
         try:
+            from django.core.cache import cache
             cache.delete_pattern("cartmaker:struct:*")
         except Exception:
             pass
 
     except Exception as e:
-        # 💡 EL EMBUDO FAIL-SAFE: Si AWS no está configurado, da error de red o no existe el rol,
-        # atrapamos el error aquí. El .mp4 original ya está guardado en el bucket, así que no hacemos nada
-        # y la aplicación continuará reproduciendo el video de forma tradicional sin romperse.
-        print(
-            f"""🔔 [Modo Híbrido Activo]: Omitiendo MediaConvert para la historia {story_id}. 
-            Motivo: El servicio de transcodificación no está activo o configurado en AWS. 
-            Detalle técnico: {e}"""
-        )
+        logger.error(f"❌ Error crítico en la transcodificación de la historia {story_id}: {e}")

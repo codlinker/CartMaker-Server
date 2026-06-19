@@ -64,26 +64,29 @@ def _parse_flexible_date(date_str):
                 raise ValueError(f"Formato de fecha no reconocido: {date_str}")
             
 def recalculate_item_popularity(inventory_item_id: str):
-    """
-    Función de utilidad que recalcula y actualiza la popularidad 
-    de un solo ítem específico de forma atómica.
-    """
     from .models import ProductViewLog, InventoryItem
-    # 1. Agrupamos rápido solo para este ítem específico
-    stats = ProductViewLog.objects.filter(inventory_item_id=inventory_item_id).aggregate(
-        views=Count('id'),
-        carts=Count('id', filter=Q(added_to_cart=True)),
-        buys=Count('id', filter=Q(bought=True)) # Añadimos compras para el futuro
+    from django.utils import timezone
+    from datetime import timedelta
+
+    # 💡 LA MAGIA: Solo nos importa el engagement fresco de los últimos 14 días
+    time_horizon = timezone.now() - timedelta(days=14)
+    
+    stats = ProductViewLog.objects.filter(
+        inventory_item_id=inventory_item_id,
+        start_time__gte=time_horizon # 👈 Filtro crítico
+    ).aggregate(
+        unique_viewers=Count('client', distinct=True),
+        unique_carters=Count('client', filter=Q(added_to_cart=True), distinct=True),
+        unique_buyers=Count('client', filter=Q(bought=True), distinct=True)
     )
     
-    # 2. Aplicamos los pesos de la fórmula comercial
-    views_score = (stats['views'] or 0) * 1.0
-    carts_score = (stats['carts'] or 0) * 5.0
-    buys_score = (stats['buys'] or 0) * 15.0 # Mayor peso si terminó en compra
+    # Pesos comerciales exponenciales calibrados para el funnel
+    views_score = (stats['unique_viewers'] or 0) * 1.0
+    carts_score = (stats['unique_carters'] or 0) * 10.0
+    buys_score = (stats['unique_buyers'] or 0) * 50.0 # Multiplicador de alto impacto
     
     total_popularity = views_score + carts_score + buys_score
     
-    # 3. Actualización atómica en BD sin disparar el método save() completo
     InventoryItem.objects.filter(id=inventory_item_id).update(
         cached_popularity_score=total_popularity
     )

@@ -1017,7 +1017,7 @@ class InventoryItem(models.Model):
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='inventory_items')
     stock = models.IntegerField(default=0)
     store = models.ForeignKey(CompanyStore, on_delete=models.CASCADE, related_name='product_items')
-    creation = models.DateTimeField(auto_now_add=True)
+    creation = models.DateTimeField(auto_now_add=True, db_index=True)
     sold_out_time = models.DateTimeField(null=True, blank=True)
     expiration_date = models.DateTimeField(null=True, blank=True)
     custom_price = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
@@ -1835,7 +1835,7 @@ class CompanyVideoStory(models.Model):
     creation = models.DateTimeField(auto_now_add=True, db_index=True)
     expires_at = models.DateTimeField(db_index=True)
     views_count = models.PositiveIntegerField(default=0)
-
+    applied_filter_matrix = models.JSONField(null=True, blank=True)
     # 💡 ENLACES GENÉRICOS (Borra automáticamente en cascada likes y comentarios de este video al ser eliminado)
     likes = GenericRelation(UniversalLike, related_query_name='company_video_stories')
     comments = GenericRelation(UniversalComment, related_query_name='company_video_stories')

@@ -5,9 +5,11 @@ from django.contrib.gis.geos import Point
 from django.contrib.gis.db.models.functions import Distance
 from django.db.models import F, Q, CharField, Exists, FloatField, ExpressionWrapper, Avg, OuterRef, Subquery
 from django.db.models.expressions import Window
-from django.db.models.functions import Cast, RowNumber, Coalesce
+from django.db.models.functions import Cast, RowNumber, Coalesce, Power, Extract, Ln
+from django.db.models.functions import Now
 from django.db.models import Case, When, Value, Count, BooleanField
 from django.contrib.gis.measure import D
+from django.db.models.expressions import RawSQL
 from django.core.cache import cache
 from api.models import *
 
@@ -17,6 +19,14 @@ class ProductSearchEngine:
     Combina geolocalización, prevención de monopolios, popularidad global 
     y filtrado basado en contenido (afinidad del usuario) en tiempo real.
     """
+
+    def __init__(self, lat: float, lng: float, user=None, seed: str = 'default'):
+        self.user_location = Point(lng, lat, srid=4326)
+        self.user = user
+        self.seed = str(seed)
+        
+        # Al instanciar, construimos su huella digital de intereses
+        self.user_top_categories = self._build_user_affinity_profile()
 
     # =========================================================================
     # CAPA DE CACHÉ DIVIDIDO (STRUCTURAL VS VOLATILE)
@@ -146,13 +156,6 @@ class ProductSearchEngine:
                 
         return final_feed
 
-    def __init__(self, lat: float, lng: float, user=None):
-        self.user_location = Point(lng, lat, srid=4326)
-        self.user = user
-        
-        # Al instanciar, construimos su huella digital de intereses
-        self.user_top_categories = self._build_user_affinity_profile()
-
     # =========================================================================
     # 💡 NUEVA CAPA: QUERYSETS DE VIDEOS
     # =========================================================================
@@ -240,34 +243,33 @@ class ProductSearchEngine:
         
         if self.user and self.user.is_authenticated:
             video_ct = ContentType.objects.get_for_model(CompanyVideoStory)
-            # 💡 FIX: Cast explícito a CharField(max_length=50)
             is_liked_subquery = UniversalLike.objects.filter(
                 user=self.user, 
                 content_type=video_ct, 
                 object_id=Cast(OuterRef('pk'), output_field=CharField(max_length=50))
             )
-            qs = qs.annotate(is_liked=Exists(is_liked_subquery))
+            # 💡 Subquery para saber si ya lo vio (Impresión)
+            is_viewed_subquery = VideoEngagementLog.objects.filter(
+                client=self.user, 
+                video=OuterRef('pk')
+            )
+            qs = qs.annotate(
+                is_liked=Exists(is_liked_subquery),
+                is_viewed=Exists(is_viewed_subquery) # 👈 Nueva anotación
+            )
         else:
-            qs = qs.annotate(is_liked=Value(False, output_field=BooleanField()))
+            qs = qs.annotate(
+                is_liked=Value(False, output_field=BooleanField()),
+                is_viewed=Value(False, output_field=BooleanField())
+            )
         return qs
 
     def _annotate_video_ranking(self, queryset):
         """
-        Calcula la relevancia del video basándose en:
-        1. Vistas (Popularidad)
-        2. Afinidad del usuario (Categorías favoritas)
-        3. 💡 Novedad (Freshness Boost para evitar el estancamiento)
+        Calcula la relevancia del video basándose en Gravedad (Estilo Facebook/TikTok).
         """
         now = timezone.now()
         
-        # 💡 FRESHNESS BOOST: Los videos de las últimas 48h valen x3. Los de la última semana x1.5.
-        freshness_multiplier = Case(
-            When(creation__gte=now - timedelta(days=2), then=Value(3.0)),
-            When(creation__gte=now - timedelta(days=7), then=Value(1.5)),
-            default=Value(1.0),
-            output_field=FloatField()
-        )
-
         if self.user_top_categories:
             affinity_multiplier = Case(
                 When(associated_item__product__category_id__in=self.user_top_categories, then=Value(1.50)),
@@ -277,11 +279,30 @@ class ProductSearchEngine:
         else:
             affinity_multiplier = Value(1.0, output_field=FloatField())
 
-        # 💡 PUNTAJE BASE (+ 1.0): Evita que un video nuevo con 0 vistas multiplique todo por cero.
-        score_expression = ExpressionWrapper(
-            (F('views_count') + 1.0) * affinity_multiplier * freshness_multiplier,
+        age_in_hours = ExpressionWrapper(
+            (Extract(Now(), 'epoch') - Extract(F('creation'), 'epoch')) / 3600.0,
             output_field=FloatField()
         )
+
+        gravity = Power(age_in_hours + 2.0, 1.5)
+
+        # 💡 TÉCNICA 1: Fatiga de Impresión para videos
+        viewed_penalty = Case(
+            When(is_viewed=True, then=Value(0.05)),
+            default=Value(1.0),
+            output_field=FloatField()
+        )
+
+        # 💡 TÉCNICA 2: Jitter con Referencia Explícita a la Tabla
+        table_name = CompanyVideoStory._meta.db_table
+        jitter = RawSQL(f"((abs(hashtext(%s || {table_name}.id::text)) %% 100) / 100.0) * 0.4 + 0.8", (self.seed,))
+
+        # 🚀 Fórmula integrada con Logaritmo para videos
+        score_expression = ExpressionWrapper(
+            ((Ln(F('views_count') + 2.0) * affinity_multiplier) / gravity) * viewed_penalty * jitter,
+            output_field=FloatField()
+        )
+        
         return queryset.annotate(ranking_score=score_expression).order_by('-ranking_score')
 
     # =========================================================================
@@ -405,28 +426,34 @@ class ProductSearchEngine:
             paused=False,
             stock__gt=0,
             store__is_active=True,
-            # Regla global: El vendedor de este producto DEBE tener suscripción activa
             store__company__owner__subscription__isnull=False,
             store__company__owner__subscription__valid_until__gte=now
-        )
-
-        # =====================================================================
-        # 💡 NUEVO: Filtro ORTODOXO de Límite de Sucursales según Plan
-        # =====================================================================
-        qs = qs.filter(
-            # Condición A: El plan SÍ permite múltiples sucursales
+        ).filter(
             Q(store__company__owner__subscription__plan__company_branches=True) |
-            # Condición B: El plan NO permite sucursales (pasa solo la marcada como is_main_store)
             Q(
                 store__company__owner__subscription__plan__company_branches=False,
                 store__is_main_store=True
             )
         )
 
-        # =====================================================================
-        # Filtro Anti-Auto-Compra / Anti-Auto-Recomendación
-        # =====================================================================
+        # 💡 LÓGICA MOVIDA AQUÍ: Disponible globalmente para todos los endpoints
         if self.user and self.user.is_authenticated:
+            product_ct = ContentType.objects.get_for_model(InventoryItem)
+            is_liked_subquery = UniversalLike.objects.filter(
+                user=self.user, 
+                content_type=product_ct, 
+                object_id=Cast(OuterRef('pk'), output_field=CharField(max_length=50))
+            )
+            is_viewed_subquery = ProductViewLog.objects.filter(
+                client=self.user,
+                inventory_item=OuterRef('pk')
+            )
+            qs = qs.annotate(
+                is_liked=Exists(is_liked_subquery),
+                is_viewed=Exists(is_viewed_subquery)
+            )
+            
+            # Filtro Anti-Auto-Compra
             is_active_merchant = MerchantSubscription.objects.filter(
                 merchant=self.user,
                 valid_until__gte=now
@@ -434,6 +461,11 @@ class ProductSearchEngine:
             
             if is_active_merchant:
                 qs = qs.exclude(store__company__owner=self.user)
+        else:
+            qs = qs.annotate(
+                is_liked=Value(False, output_field=BooleanField()),
+                is_viewed=Value(False, output_field=BooleanField())
+            )
                 
         return qs
     
@@ -460,20 +492,13 @@ class ProductSearchEngine:
 
     def _annotate_ranking_score(self, queryset):
         """
-        Calcula la relevancia del producto estático.
+        Calcula la relevancia del producto estático aplicando Gravedad,
+        Fatiga de Impresión y Jitter por Semilla.
         """
         now = timezone.now()
 
-        # 💡 FRESHNESS BOOST: Productos recién creados compiten contra los más vendidos.
-        freshness_multiplier = Case(
-            When(creation__gte=now - timedelta(days=3), then=Value(3.0)),
-            When(creation__gte=now - timedelta(days=10), then=Value(1.5)),
-            default=Value(1.0),
-            output_field=FloatField()
-        )
-
         platinum_multiplier = Case(
-            When(store__company__is_platinum=True, then=Value(1.10)),
+            When(store__company__is_platinum=True, then=Value(1.20)),
             default=Value(1.0),
             output_field=FloatField()
         )
@@ -487,13 +512,35 @@ class ProductSearchEngine:
         else:
             affinity_multiplier = Value(1.0, output_field=FloatField())
 
-        # 💡 PUNTAJE BASE (+ 1.0): Evita que productos sin historial de compras queden en 0 absoluto.
+        age_in_hours = ExpressionWrapper(
+            (Extract(Now(), 'epoch') - Extract(F('creation'), 'epoch')) / 3600.0,
+            output_field=FloatField()
+        )
+
+        gravity = Power(age_in_hours + 2.0, 1.2)
+
+        # 💡 TÉCNICA 1: Fatiga de Impresión para productos
+        viewed_penalty = Case(
+            When(is_viewed=True, then=Value(0.05)),
+            default=Value(1.0),
+            output_field=FloatField()
+        )
+
+        # 💡 TÉCNICA 2: Jitter con Referencia Explícita a la Tabla
+        table_name = InventoryItem._meta.db_table
+        jitter = RawSQL(f"((abs(hashtext(%s || {table_name}.id::text)) %% 100) / 100.0) * 0.4 + 0.8", (self.seed,))
+
+        # 🚀 Fórmula integrada con Logaritmo para controlar productos virales
         score_expression = ExpressionWrapper(
-            (F('cached_popularity_score') + 1.0) * platinum_multiplier * affinity_multiplier * freshness_multiplier,
+            ((Ln(F('cached_popularity_score') + 2.0) * platinum_multiplier * affinity_multiplier) / gravity) * viewed_penalty * jitter,
             output_field=FloatField()
         )
         
-        return queryset.annotate(ranking_score=score_expression)
+        # 🕵️ ESPÍA 4: Exponemos el jitter y la penalización como columnas virtuales
+        return queryset.annotate(
+            ranking_score=score_expression,
+            debug_jitter=jitter,
+        )
 
     def _apply_monopoly_prevention(self, queryset):
         qs = queryset.annotate(
@@ -667,10 +714,14 @@ class ProductSearchEngine:
         affinity_hash = hashlib.md5(str(self.user_top_categories).encode()).hexdigest()
         
         # Llave de Redis aislada por página
-        cache_key = f"cartmaker:struct:home_mixed:{approx_lat}:{approx_lng}:{affinity_hash}:p_{page}:sz_{page_size}"
+        cache_key = f"cartmaker:struct:home:{approx_lat}:{approx_lng}:{affinity_hash}:seed_{self.seed}:p_{page}:sz_{page_size}"
         structural_page_feed = cache.get(cache_key)
+
+        # 🕵️ ESPÍA 2: ¿Qué llave estamos buscando?
+        print(f"🔍 [CACHE] Llave solicitada: {cache_key}")
         
         if not structural_page_feed:
+            print(f"⚙️ [CACHE MISS] Calculando feed fresco desde la Base de Datos...")
             ideal_videos_count = int(page_size * 0.75)  # Ej: 15 si el tamaño es 20
             
             # 1. EVALUAMOS VIDEOS VIGENTES
@@ -695,17 +746,6 @@ class ProductSearchEngine:
             v_end = v_start + ideal_videos_count
             
             videos_list = list(qs_videos[v_start:v_end])
-
-            # ==========================================
-            # 💡 DEBUG: AUDITORÍA DE RANKING DE VIDEOS
-            # ==========================================
-            print(f"\n[{timezone.localtime(timezone.now()).strftime('%H:%M:%S')}] 🎬 --- RANKING DE VIDEOS (Página {page}) ---")
-            for idx, v in enumerate(videos_list):
-                score = round(getattr(v, 'ranking_score', 0.0), 4)
-                store_name = v.company.name if getattr(v, 'company', None) else "Desconocida"
-                linked_prod = v.associated_item.product.name if getattr(v, 'associated_item', None) else "Sin producto"
-                print(f"  #{idx + 1} | Score: {score} | Tienda: {store_name} | Vinculado a: {linked_prod}")
-            print("--------------------------------------------------\n")
             
             # 2. EVALUAMOS PRODUCTOS
             # ¿Cuántos items EN TOTAL se mostraron en páginas anteriores? -> (page - 1) * page_size
@@ -717,21 +757,16 @@ class ProductSearchEngine:
             p_end = p_start + products_needed
 
             qs_products = self._get_base_active_queryset()
-            if self.user and self.user.is_authenticated:
-                product_ct = ContentType.objects.get_for_model(InventoryItem)
-                is_liked_subquery = UniversalLike.objects.filter(
-                    user=self.user, 
-                    content_type=product_ct, 
-                    object_id=Cast(OuterRef('pk'), output_field=CharField(max_length=50))
-                )
-                qs_products = qs_products.annotate(is_liked=Exists(is_liked_subquery))
-            else:
-                qs_products = qs_products.annotate(is_liked=Value(False, output_field=BooleanField()))
                 
             qs_products = self._annotate_proximity_flag(qs_products)
             qs_products = qs_products.filter(store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters)))
             qs_products = self._annotate_ranking_score(qs_products)
             qs_products = self._apply_monopoly_prevention(qs_products)
+            home_horizon = timezone.now() - timedelta(days=45)
+            # 💡 FILTRO INTELIGENTE: Pasan los nuevos OR los que tienen actividad viva (> 0)
+            qs_products = qs_products.filter(
+                Q(creation__gte=home_horizon) | Q(cached_popularity_score__gt=0.0)
+            )
             
             # Slicing dinámico de productos en SQL con el punto de partida real
             products_list = list(qs_products[p_start:p_end])
@@ -739,12 +774,18 @@ class ProductSearchEngine:
             # ==========================================
             # 💡 DEBUG: AUDITORÍA DE RANKING DE PRODUCTOS
             # ==========================================
-            print(f"\n[{timezone.localtime(timezone.now()).strftime('%H:%M:%S')}] 📦 --- RANKING DE PRODUCTOS (Página {page}) ---")
+            print(f"\n📦 --- AUDITORÍA DE PRODUCTOS (Página {page}) ---")
             for idx, p in enumerate(products_list):
                 score = round(getattr(p, 'ranking_score', 0.0), 4)
                 prod_name = p.product.name if getattr(p, 'product', None) else "Desconocido"
+                is_viewed = getattr(p, 'is_viewed', False)
+                jitter_val = round(getattr(p, 'debug_jitter', 0.0), 4)
                 pop_score = getattr(p, 'cached_popularity_score', 0.0)
-                print(f"  #{idx + 1} | Score Final: {score} (Pop. base: {pop_score}) | Producto: {prod_name}")
+                
+                # Símbolos visuales para detectar rápido si aplicó la fatiga
+                viewed_icon = "🔴 YA VISTO (-95%)" if is_viewed else "🟢 NUEVO"
+                
+                print(f" #{idx + 1} | Score: {score} | Jitter: {jitter_val}x | {viewed_icon} | Pop: {pop_score} | {prod_name}")
             print("--------------------------------------------------\n")
             
             if not videos_list and not products_list:

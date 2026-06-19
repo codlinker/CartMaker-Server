@@ -2273,6 +2273,50 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
             
         return Response({"data": data}, status=status.HTTP_200_OK)
 
+    @action(detail=False, methods=['get'])
+    def my_videos(self, request):
+        company = Company.objects.filter(owner=request.user).first()
+        if not company:
+            return Response({"error": "No tienes una compañía registrada."}, status=status.HTTP_403_FORBIDDEN)
+
+        # Traemos los videos ordenados por fecha de creación
+        videos = self.queryset.filter(company=company).order_by('-creation')
+        
+        page_number = request.GET.get('page', 1)
+        paginator = Paginator(videos, 10) # 10 videos por página
+        page_obj = paginator.get_page(page_number)
+
+        data = [video.get_json() for video in page_obj.object_list]
+        
+        return Response({
+            "success": True,
+            "data": {
+                "videos": data,
+                "pagination": {
+                    "current_page": page_obj.number,
+                    "total_pages": paginator.num_pages,
+                    "has_next": page_obj.has_next(),
+                    "total_items": paginator.count
+                }
+            }
+        }, status=status.HTTP_200_OK)
+
+    # 💡 2. OVERRIDE: Destrucción segura
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        
+        # Validar que el dueño sea el que intenta borrar
+        if instance.company.owner != request.user:
+             return Response({"error": "No tienes permiso para eliminar este video."}, status=status.HTTP_403_FORBIDDEN)
+        
+        # Disparamos la limpieza física de AWS/Storage
+        instance.clear_media_files()
+        
+        # Borramos de la BD (GenericRelation limpiará likes y comments en cascada)
+        instance.delete()
+        
+        return Response({"success": True, "message": "Video eliminado correctamente."}, status=status.HTTP_200_OK)
+
     def create(self, request, *args, **kwargs):
         """
         Endpoint que recibe la petición desde Flutter (multipart/form-data).
@@ -2291,6 +2335,9 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
             thumb_obj = request.FILES.get('thumbnail')
             description = request.data.get('description', '')
             associated_item_id = request.data.get('associated_item_id')
+
+            filter_matrix_raw = request.data.get('applied_filter_matrix')
+            filter_matrix = json.loads(filter_matrix_raw) if filter_matrix_raw else None
 
             if not video_obj or not thumb_obj:
                 return Response({
@@ -2330,7 +2377,9 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
                     raise Exception("Fallo en el storage_manager al guardar los archivos.")
 
                 # 5. Crear el registro en la Base de Datos
-                expires_at = timezone.now() + timedelta(hours=24)
+                expires_at = timezone.now() + timedelta(hours=72)
+
+                print("FILTER MATRIX: ", filter_matrix)
 
                 # 💡 Creamos la historia. Como "associated_item" es un ForeignKey, 
                 # la BD permite que varios videos apunten al mismo producto sin chocar.
@@ -2340,6 +2389,7 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
                     thumbnail=t_path,
                     description=description,
                     associated_item=associated_item,
+                    applied_filter_matrix=filter_matrix,
                     expires_at=expires_at
                 )
 
@@ -3070,6 +3120,11 @@ class CartViewSet(viewsets.ViewSet):
                     
                     # Todo en orden: Descontamos
                     item.stock -= requested_qty
+                    if item.stock <= 0:
+                        item.sold_out_time = timezone.now()
+                        if item.stock < 0:
+                            # Corregir en caso de error
+                            item.stock = 0
                     item.save()
 
                     # Precio base de la BD
@@ -3798,13 +3853,21 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['get'])
     def home_feed(self, request):
         lat, lng = self._get_coordinates(request)
+        # 💡 Capturamos la semilla enviada por Flutter
+        seed = request.query_params.get('seed', 'default_seed')
         
         if lat is None or lng is None:
             return Response({'error': 'Faltan coordenadas'}, status=status.HTTP_400_BAD_REQUEST)
 
         page, page_size = self._get_pagination_params(request)
 
-        engine = ProductSearchEngine(lat, lng, user=request.user)
+        # 🕵️ ESPÍA 1: ¿Flutter nos está mandando una semilla distinta cada vez?
+        print(f"\n=======================================================")
+        print(f"🚀 [ENDPOINT HOME] Request -> Page: {page} | Semilla recibida: {seed}")
+        print(f"=======================================================")
+
+        # 💡 Le pasamos la semilla al motor
+        engine = ProductSearchEngine(lat, lng, user=request.user, seed=seed)
         data_list = engine.get_home_feed(page=page, page_size=page_size)
         
         return self._respond_pre_sliced_data(data_list, request, page, page_size)
@@ -4133,6 +4196,45 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             return Response({'success': True, 'data': item.get_json()}, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+    @action(detail=True, methods=['post'])
+    def restock(self, request, pk=None):
+        item = self.get_object()
+        units_raw = request.data.get('units')
+
+        try:
+            units = int(units_raw)
+            if units <= 0:
+                return Response({'error': {'error': 'La cantidad a reponer debe ser mayor a cero.'}}, status=status.HTTP_400_BAD_REQUEST)
+        except (ValueError, TypeError):
+            return Response({'error': {'error': 'Cantidad inválida.'}}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            with transaction.atomic():
+                # 1. Actualizamos el stock
+                item.stock += units
+                
+                # NO SE LIMPIA EL SOLD OUT TIME PORQUE AYUDA A SABER LA ULTIMA VEZ QUE SE AGOTO...
+                # # 2. Si estaba agotado y ahora tiene stock, limpiamos el 'sold_out_time'
+                # if item.stock > 0 and item.sold_out_time is not None:
+                #     item.sold_out_time = None
+                item.creation = timezone.now()
+                item.save()
+
+                # 3. Registramos el movimiento en el historial
+                # 💡 IMPORTANTE: Reemplaza el '1' por el valor que corresponda a "Entrada/Reposición"
+                # en tu clase TransactionType (ej. TransactionType.REPOSICION)
+                from .models import InventoryItemTransaction # Ajusta la ruta si es necesario
+                InventoryItemTransaction.objects.create(
+                    item=item,
+                    units=units,
+                    transaction_type=1 
+                )
+
+            item.refresh_from_db()
+            return Response({'success': True, 'data': item.get_json()}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'success': False, 'error': {'error': str(e)}}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class ProductViewSet(viewsets.ModelViewSet):
     serializer_class = ProductSerializer
