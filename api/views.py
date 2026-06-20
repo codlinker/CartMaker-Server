@@ -3543,6 +3543,87 @@ class ClientCompanyViewSet(viewsets.ViewSet):
         except Exception as e:
             return Response({'error': f'Error interno: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+class GamificationViewSet(viewsets.ViewSet):
+    """
+    API dedicada al motor de gamificación del comerciante.
+    Maneja la activación global y por producto.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=['get'])
+    def status(self, request):
+        """ Obtiene el estado actual de la empresa y la lista de sus productos. """
+        company = Company.objects.filter(owner=request.user).first()
+        if not company:
+            return Response({'error': 'No se encontró la empresa del comerciante.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Traemos los productos de esta empresa
+        products = Product.objects.filter(company=company).order_by('-creation')
+        
+        products_data = []
+        for p in products:
+            image_url = ""
+            if p.images and len(p.images) > 0:
+                image_url = storage_manager.get_url(p.images[0])
+                
+            products_data.append({
+                'id': str(p.id),
+                'name': p.name,
+                'image': image_url,
+                'discounts_by_tokens_active': p.discounts_by_tokens_active
+            })
+
+        return Response({
+            'gamification_enabled': company.gamification_enabled,
+            'gamification_tokens_per_dollar': company.gamification_tokens_per_dollar,
+            'products': products_data
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['patch'])
+    def update_company_settings(self, request):
+        """ Actualiza los settings globales de la empresa. """
+        company = Company.objects.filter(owner=request.user).first()
+        if not company:
+            return Response({'error': 'Compañía no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+
+        enabled = request.data.get('gamification_enabled')
+        tokens = request.data.get('gamification_tokens_per_dollar')
+
+        update_fields = []
+        if enabled is not None:
+            company.gamification_enabled = bool(enabled)
+            update_fields.append('gamification_enabled')
+            
+        if tokens is not None:
+            try:
+                company.gamification_tokens_per_dollar = int(tokens)
+                update_fields.append('gamification_tokens_per_dollar')
+            except ValueError:
+                return Response({'error': 'El valor de tokens debe ser numérico.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if update_fields:
+            company.save(update_fields=update_fields)
+
+        return Response({'success': True, 'message': 'Configuración actualizada.'}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['patch'])
+    def toggle_product(self, request):
+        """ Activa o desactiva la gamificación para un producto individual. """
+        product_id = request.data.get('product_id')
+        active = request.data.get('active')
+
+        if product_id is None or active is None:
+            return Response({'error': 'Faltan parámetros.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # Aseguramos que el producto le pertenezca a la empresa del usuario
+            product = Product.objects.get(id=product_id, company__owner=request.user)
+            product.discounts_by_tokens_active = bool(active)
+            product.save(update_fields=['discounts_by_tokens_active'])
+            return Response({'success': True}, status=status.HTTP_200_OK)
+        except Product.DoesNotExist:
+            return Response({'error': 'Producto no encontrado o no tienes permisos.'}, status=status.HTTP_404_NOT_FOUND)
+
 class UniversalConversationPagination(PageNumberPagination):
     page_size = 15
     page_size_query_param = 'page_size'
@@ -3773,7 +3854,7 @@ class UniversalConversationViewSet(viewsets.ViewSet):
                 company_name=company_name,
                 item_name=item_name,
                 item_id=comment.object_id,
-                target_type=item_type # 💡 NUEVO PARÁMETRO
+                target_type=item_type
             )
 
             return Response({'success': True, 'message': 'Respuesta enviada.', 'data': comment.get_json()}, status=status.HTTP_200_OK)
