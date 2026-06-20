@@ -1798,6 +1798,13 @@ class UniversalComment(models.Model):
             if company.image:
                 company_image_url = storage_manager.get_url(company.image)
 
+        # 💡 NUEVO: Resolvemos el nombre del ítem para que el comercio sepa a qué le están preguntando
+        item_name = "Artículo no disponible"
+        if self.content_type.model == 'inventoryitem' and self.content_object:
+            item_name = self.content_object.product.name
+        elif self.content_type.model == 'companyvideostory' and self.content_object:
+            item_name = "Video Promocional"
+
         return {
             "id": self.id,
             "client_data": {
@@ -1808,6 +1815,11 @@ class UniversalComment(models.Model):
             "seller_data": {
                 "name": company_name,
                 "profile_picture": company_image_url
+            },
+            "target_info": {
+                "name": item_name,
+                "type": self.content_type.model,
+                "target_id": self.object_id
             },
             "question_text": self.question_text,
             "question_creation": timezone.localtime(self.question_creation).strftime('%d/%m/%Y, %H:%M:%S'),

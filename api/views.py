@@ -41,11 +41,12 @@ from .utils import _parse_flexible_date
 from asgiref.sync import sync_to_async, async_to_sync
 from rest_framework.pagination import PageNumberPagination
 from django.db.models.functions import Coalesce, Round
-from django.db.models import Avg, Count, Sum, Q, Subquery, OuterRef, Prefetch
+from django.db.models import Avg, Count, Sum, Q, Subquery, OuterRef, Prefetch, UUIDField
 from django.contrib.gis.measure import D
 import operator
 from functools import reduce
 from django.utils.dateparse import parse_datetime
+from django.db.models.functions import Cast
 
 ####################################################
 ################## AUTENTICACION ###################
@@ -2021,31 +2022,49 @@ class CompanyCacheAPI(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        """
-        Caché por Usuario: Datos de la compañía del comerciante.
-        """
         cache_key = f"cartmaker:tenant:{request.user.id}:company"
         cached_data = cache.get(cache_key)
 
         if cached_data:
-            # Si el caché guardó un error explícito (ej. sin suscripción), lo respetamos
             if "error_status" in cached_data:
                 return Response({'message': cached_data["message"]}, status=cached_data["error_status"])
             return Response(cached_data, status=status.HTTP_200_OK)
+            
         try:
             company = Company.objects.get(owner=request.user).get_json()
         except Company.DoesNotExist:
             error_data = {"error_status": status.HTTP_404_NOT_FOUND, "message": "No ha configurado su tienda."}
-            cache.set(cache_key, error_data, timeout=300) # Caché corto para errores
+            cache.set(cache_key, error_data, timeout=300)
             return Response({'message': error_data["message"]}, status=error_data["error_status"])
-        # Cache Miss
+            
         if MerchantSubscription.objects.filter(merchant=request.user, valid_until__gt=timezone.now()).exists():
-                stores = [company_store.get_json() for company_store in CompanyStore.objects.filter(company_id=company['id']).order_by('creation')]
-                data = {'company': company, 'stores': stores}
-                cache.set(cache_key, data, timeout=3600) # 1 hora
-                return Response(data, status=status.HTTP_200_OK)
+            stores = [company_store.get_json() for company_store in CompanyStore.objects.filter(company_id=company['id']).order_by('creation')]
+            
+            # ==========================================
+            # 💡 NUEVO: EXTRAER IDs DE PREGUNTAS PENDIENTES
+            # ==========================================
+            item_ct = ContentType.objects.get(model='inventoryitem')
+            video_ct = ContentType.objects.get(model='companyvideostory')
+
+            items_pks = InventoryItem.objects.filter(store__company_id=company['id']).values_list('id', flat=True)
+            videos_pks = CompanyVideoStory.objects.filter(company_id=company['id']).values_list('id', flat=True)
+
+            pending_items = UniversalComment.objects.filter(content_type=item_ct).annotate(
+                object_uuid=Cast('object_id', output_field=UUIDField())
+            ).filter(object_uuid__in=items_pks).filter(Q(answer_text__isnull=True) | Q(answer_text__exact=''))
+
+            pending_videos = UniversalComment.objects.filter(content_type=video_ct).annotate(
+                object_uuid=Cast('object_id', output_field=UUIDField())
+            ).filter(object_uuid__in=videos_pks).filter(Q(answer_text__isnull=True) | Q(answer_text__exact=''))
+
+            pending_questions = list(pending_items.values_list('id', flat=True)) + list(pending_videos.values_list('id', flat=True))
+            # ==========================================
+
+            data = {'company': company, 'stores': stores, 'pending_questions': pending_questions}
+            cache.set(cache_key, data, timeout=3600)
+            return Response(data, status=status.HTTP_200_OK)
         else:
-            error_data = {"error_status": status.HTTP_406_NOT_ACCEPTABLE, "message": "La suscripcion del comerciante expiro o no ha sido adquirida."}
+            error_data = {"error_status": status.HTTP_406_NOT_ACCEPTABLE, "message": "Suscripción expirada."}
             cache.set(cache_key, error_data, timeout=300)
             return Response({'message': error_data["message"]}, status=error_data["error_status"])
 
@@ -3538,6 +3557,95 @@ class UniversalConversationViewSet(viewsets.ViewSet):
     throttle_scope = 'navigation'
 
     @action(detail=False, methods=['get'])
+    def merchant_items_summary(self, request):
+        """
+        Retorna la TOTALIDAD de los productos y videos del comerciante,
+        calculando sus preguntas pendientes para servir como panel histórico.
+        """
+        user = request.user
+        item_ct = ContentType.objects.get(model='inventoryitem')
+        video_ct = ContentType.objects.get(model='companyvideostory')
+
+        # ==========================================
+        # 1. OBTENER TODO EL INVENTARIO Y SUS ALERTAS
+        # ==========================================
+        db_items = InventoryItem.objects.select_related('product', 'store__company').filter(
+            store__company__owner=user
+        )
+        items_ids_strs = [str(item.id) for item in db_items]
+
+        products_summary = UniversalComment.objects.filter(
+            content_type=item_ct,
+            object_id__in=items_ids_strs
+        ).values('object_id').annotate(
+            pending=Count('id', filter=Q(answer_text__isnull=True) | Q(answer_text__exact=''))
+        )
+        products_dict = {item['object_id']: item['pending'] for item in products_summary}
+
+        # ==========================================
+        # 2. OBTENER TODAS LAS VIDEO HISTORIAS Y SUS ALERTAS
+        # ==========================================
+        db_videos = CompanyVideoStory.objects.filter(company__owner=user)
+        videos_ids_strs = [str(vid.id) for vid in db_videos]
+
+        videos_summary = UniversalComment.objects.filter(
+            content_type=video_ct,
+            object_id__in=videos_ids_strs
+        ).values('object_id').annotate(
+            pending=Count('id', filter=Q(answer_text__isnull=True) | Q(answer_text__exact=''))
+        )
+        videos_dict = {video['object_id']: video['pending'] for video in videos_summary}
+
+        # ==========================================
+        # 3. COMPILACIÓN DE DATA COMPLETA
+        # ==========================================
+        data = []
+
+        # Mapeamos absolutamente todos los productos
+        for item in db_items:
+            item_id_str = str(item.id)
+            product_json = item.product.get_json()
+            images = product_json.get('images', [])
+            
+            data.append({
+                "id": item_id_str,
+                "name": product_json.get('name', 'Producto sin nombre'),
+                "image": images[0] if images else '',
+                "type": "product",
+                "pending_questions_count": products_dict.get(item_id_str, 0),
+                "creation": item.creation # 💡 Inyectamos la fecha nativa para ordenar
+            })
+
+        # Mapeamos absolutamente todos los videos
+        for vid in db_videos:
+            vid_id_str = str(vid.id)
+            vid_json = vid.get_json()
+            
+            raw_desc = vid_json.get('description') or ''
+            clean_desc = raw_desc.strip() if raw_desc else "Video Historia sin descripción"
+            
+            data.append({
+                "id": vid_id_str,
+                "name": clean_desc if len(clean_desc) <= 40 else clean_desc[:40] + "...",
+                "image": vid_json.get('thumbnail_url') or '', 
+                "type": "video",
+                "pending_questions_count": videos_dict.get(vid_id_str, 0),
+                "creation": vid.creation # 💡 Inyectamos la fecha nativa para ordenar
+            })
+
+        # 📊 ORDENAMIENTO DOBLE CRÍTICO:
+        # 1. Primero por cantidad de dudas pendientes (Mayor a menor)
+        # 2. Segundo por fecha de creación (Más nuevo/reciente a más viejo)
+        data.sort(key=lambda x: (x['pending_questions_count'], x['creation']), reverse=True)
+
+        # 🧼 LIMPIEZA PRE-JSON: Eliminamos el objeto 'datetime' para que Django no explote
+        # al serializar la respuesta hacia Flutter, ya que el móvil no necesita este campo.
+        for item in data:
+            item.pop('creation', None)
+
+        return Response({'data': data}, status=200)
+
+    @action(detail=False, methods=['get'])
     def list_comments(self, request):
         target_type = request.query_params.get('target_type')
         target_id = request.query_params.get('target_id')
@@ -3610,7 +3718,8 @@ class UniversalConversationViewSet(viewsets.ViewSet):
             firebase_admin.NotificationManager.notify_new_question(
                 merchant_user_id=owner_id,
                 item_name=item_name,
-                item_id=target_id # Puedes inyectarle el target_type a FCM si lo necesitas
+                item_id=target_id,
+                question_id=comment.id 
             )
             return Response({'message': 'Comentario enviado con éxito.', 'data': comment.get_json()}, status=status.HTTP_201_CREATED)
 
@@ -3656,14 +3765,64 @@ class UniversalConversationViewSet(viewsets.ViewSet):
             comment.answer_creation = timezone.now()
             comment.save()
 
+            # En UniversalConversationViewSet.answer_comment, al llamar a notify_new_answer:
+            item_type = 'product' if comment.content_type.model == 'inventoryitem' else 'video'
+            
             firebase_admin.NotificationManager.notify_new_answer(
                 user_id=comment.client.id,
                 company_name=company_name,
                 item_name=item_name,
-                item_id=comment.object_id
+                item_id=comment.object_id,
+                target_type=item_type # 💡 NUEVO PARÁMETRO
             )
 
             return Response({'success': True, 'message': 'Respuesta enviada.', 'data': comment.get_json()}, status=status.HTTP_200_OK)
+        
+    @action(detail=False, methods=['get'], url_path='single-feed-post')
+    def single_feed_post(self, request):
+        """
+        Recupera un solo elemento (Producto o Video) y lo empaqueta con el
+        formato exacto del Home Feed para inyecciones dinámicas en Flutter
+        cuando el usuario entra desde una notificación push.
+        """
+        target_id = request.query_params.get('target_id')
+        target_type = request.query_params.get('target_type')
+
+        if not target_id or not target_type:
+            return Response({'error': 'Faltan parámetros target_id o target_type.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            if target_type == 'product':
+                # 💡 Buscamos el ítem asegurándonos de que no esté pausado
+                item = InventoryItem.objects.select_related('product', 'store__company').get(id=target_id, paused=False)
+                
+                # 💡 Empaquetamos igual que tu Feed
+                data = item.get_json()
+                data['feed_type'] = 'product' 
+                
+                return Response({'data': data}, status=status.HTTP_200_OK)
+
+            elif target_type == 'video':
+                video = CompanyVideoStory.objects.select_related('company', 'associated_item').get(id=target_id)
+                
+                # 💡 Verificamos que el video no haya expirado
+                if not video.is_media_available:
+                    return Response({'error': 'El video expiró o fue eliminado.'}, status=status.HTTP_404_NOT_FOUND)
+
+                data = video.get_json()
+                data['feed_type'] = 'video'
+                
+                return Response({'data': data}, status=status.HTTP_200_OK)
+
+            else:
+                return Response({'error': 'Tipo de contenido no soportado.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        except InventoryItem.DoesNotExist:
+            return Response({'error': 'El producto no existe o fue retirado.'}, status=status.HTTP_404_NOT_FOUND)
+        except CompanyVideoStory.DoesNotExist:
+            return Response({'error': 'El video no existe o fue retirado.'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
 class ProductSearchEngineViewSet(viewsets.ViewSet):
     """

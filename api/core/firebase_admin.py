@@ -114,7 +114,7 @@ class NotificationManager:
         cls._send_multicast(user=user, title=title, body=body.replace('<b>', '').replace('</b>', ''), data_payload=data)
 
     @classmethod
-    def notify_new_question(cls, merchant_user_id: int, item_name: str, item_id:int) -> None:
+    def notify_new_question(cls, merchant_user_id: int, item_name: str, item_id: str, question_id: int) -> None:
         """ Notifica al dueño del comercio que tiene una nueva pregunta en su producto. """
         title = 'Tienes una nueva duda'
         body = f'Un cliente acaba de preguntar sobre tu producto: {item_name}.'
@@ -127,12 +127,13 @@ class NotificationManager:
             category=NotificationCategory.NEW_QUESTION,
             metadata={
                 'type': 'new_question',
-                "item_id":f"{item_id}"
+                'item_id': str(item_id),
+                'question_id': str(question_id) # 💡 Vital para Flutter
             }
         )
         
-        # Le decimos a Flutter que tipo de alerta es. 'generic_refresh' obligará a Flutter a recargar la caché de alertas.
-        data = {'type': 'generic_refresh'} 
+        # 💡 Este es el payload silencioso que despierta a Flutter
+        data = {'type': 'new_question', 'question_id': str(question_id)} 
         
         try:
             user = User.objects.prefetch_related('fcm_tokens').get(id=merchant_user_id)
@@ -141,9 +142,8 @@ class NotificationManager:
             logger.error(f"Fallo al notificar pregunta: {e}")
 
     @classmethod
-    def notify_new_answer(cls, user_id: int, company_name:str, item_name: str, item_id:int) -> None:
-        """ Notifica al cliente del producto que el comercio le respondio. """
-        title = f'Te respondieron'
+    def notify_new_answer(cls, user_id: int, company_name: str, item_name: str, item_id: str, target_type: str) -> None:
+        title = 'Te respondieron'
         body = f'{company_name} acaba de responderte sobre el producto: {item_name}.'
         
         notification = Notification.objects.create(
@@ -154,11 +154,11 @@ class NotificationManager:
             category=NotificationCategory.NEW_ANSWER,
             metadata={
                 'type': 'new_answer',
-                "item_id":f"{item_id}"
+                'item_id': str(item_id),
+                'target_type': target_type # 💡 AHORA FLUTTER SABRÁ QUÉ ABRIR
             }
         )
         
-        # Le decimos a Flutter que tipo de alerta es. 'generic_refresh' obligará a Flutter a recargar la caché de alertas.
         data = {'type': 'generic_refresh'} 
         
         try:
