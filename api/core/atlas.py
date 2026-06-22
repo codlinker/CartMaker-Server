@@ -118,7 +118,7 @@ class AtlasManager:
         )
         
         # 2. Selección de modelo Gemini Flash a través de OpenRouter
-        self.model_name = 'google/gemini-3.5-flash'
+        self.model_name = 'google/gemini-2.5-flash'
         
         # 3. Datos inyectados para el motor de búsqueda local
         self.user_lat = user_lat
