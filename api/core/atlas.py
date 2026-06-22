@@ -141,11 +141,6 @@ class AtlasManager:
             - **Proactividad Extrema:** NUNCA respondes con un simple \"sí\" o \"no\" ni te limites a procesar pasivamente lo que el texto dice de forma literal. Si el usuario te da una idea general, tú toma la iniciativa comercial.
             - **Fluidez Humana:** Prohibido usar estructuras robóticas como \"Soy un modelo de lenguaje\" o \"Aquí tienes una lista de opciones\". Habla en párrafos fluidos, cálidos y conversacionales.
 
-            # CONTEXTO ESPACIAL DEL USUARIO
-            El usuario no está en un solo lugar. Tiene múltiples zonas de interés. Aquí tienes sus ubicaciones guardadas:
-            {ubicaciones_str}
-            *Regla Espacial:* Usa esta información para hablarle en sus términos. No le digas \"está a 3km\", dile \"Mira, esto te queda súper cerca del Trabajo\" o \"No hay por tu Casa, pero cerca de donde tienes guardado 'Gimnasio' sí conseguí\".
-
             # MOTOR ANALÍTICO DE DECISIÓN (EL CEREBRO DE ATLAS)
             Cuando la herramienta 'buscar_productos_inventario' te devuelva resultados, DEBES analizarlos antes de hablar. Evalúa siempre \"La Tríada\": Precio, Distancia y Reputación. Aplica esta lógica:
             1. **El Escenario Ideal (No-Brainer):** Si hay un producto barato, muy cerca y de una tienda con buena reputación, destácalo como la opción principal: \"Te conseguí exactamente lo que buscas cerquita de ti en [Tienda], a muy buen precio y son súper confiables\".
@@ -594,15 +589,23 @@ class AtlasManager:
         messages = AtlasMessage.objects.filter(conversation_id=thread_id).order_by('-creation')[:6]
         messages = list(messages)[::-1]
         
+        # 1. EL BLOQUE CACHEABLE (100% estático para todos los usuarios)
         history = [{"role": "system", "content": self.chat_system_instruction}]
+        
+        # 2. LA INYECCIÓN DINÁMICA (Variables del usuario actual)
+        ubicaciones_str = "\n".join([f"- {loc.get('name', 'Ubicación')}: Lat {loc.get('latitude', '')}, Lng {loc.get('longitude', '')}. (Descripción: {loc.get('description', '')})" for loc in self.user_locations]) if self.user_locations else "- Solo ubicación actual disponible."
+        
+        history.append({
+            "role": "system", 
+            "content": f"CONTEXTO ESPACIAL DEL USUARIO ACTUAL:\n{ubicaciones_str}\n*Regla Espacial:* Usa esta información para hablarle en sus términos referenciando distancias (ej. 'cerca de tu Casa')."
+        })
+
         for msg in messages:
             role = 'user' if msg.origin == self.ORIGIN_USER else 'assistant'
             
             # 💡 OPTIMIZACIÓN 2: Truncamiento de Tokens. 
-            # Cortamos a 400 caracteres. Da suficiente contexto sin gastar tokens extra.
             content = msg.text[:1500] + "... [Texto truncado por el sistema]" if len(msg.text) > 1500 else msg.text
             
-            # (Aquí mantenemos el Truco Ninja de la respuesta anterior)
             if msg.origin == self.ORIGIN_AI and getattr(msg, 'product_ids', None):
                 content = f"[Nota del Sistema: Los datos de esta respuesta fueron extraídos de la base de datos mediante herramientas]\n{content}"
                 
@@ -671,7 +674,11 @@ class AtlasManager:
                 messages=history,
                 tools=_get_tools_schema(),
                 tool_choice="auto",
-                temperature=0.2 # 💡 Temperatura fría estructural para liquidar alucinaciones
+                temperature=0.2, # 💡 Temperatura fría estructural para liquidar alucinaciones
+                extra_body={
+                    # 💡 ENRUTAMIENTO PEGAJOSO: Maximiza el % de Cache Hits en OpenRouter
+                    "session_id": f"cartmaker-atlas-thread-{thread_id}"
+                }
             )
             
             choice = response.choices[0]
@@ -762,7 +769,10 @@ class AtlasManager:
                     model=self.model_name,
                     messages=history,
                     tools=_get_tools_schema(),
-                    temperature=0.5
+                    temperature=0.5,
+                    extra_body={
+                        "session_id": f"cartmaker-atlas-thread-{thread_id}"
+                    }
                 )
                 choice = response.choices[0]
             
