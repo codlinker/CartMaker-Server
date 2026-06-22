@@ -55,6 +55,7 @@ class EnviromentManager:
         self._cedulas_api_access_token = None
         self._use_cedulas_api = None
         self._gemini_api_key = None
+        self._openrouter_api_key = None
         self.__execute_sh_file()
         self.__load_enviroment_variables()
 
@@ -194,6 +195,13 @@ class EnviromentManager:
         """
         return self._gemini_api_key
     
+    @property
+    def OPENROUTER_API_KEY(self) -> str:
+        """
+        API Key de OpenRouter para comunicarse con Google Gemini
+        """
+        return self._openrouter_api_key
+    
     def __get_env_variable_description(self, env_variable_name:str)->str:
         """
         Retorna una descripcion para la variable indicada.
@@ -256,6 +264,7 @@ class EnviromentManager:
             "CEDULAS_API_ACCESS_TOKEN":os.environ.get("CEDULAS_API_ACCESS_TOKEN"),
             "USE_CEDULAS_API":self.__process_boolean_env_variable(os.environ.get('USE_CEDULAS_API')),
             "GEMINI_API_KEY":os.environ.get("GEMINI_API_KEY"),
+            "OPENROUTER_API_KEY":os.environ.get('OPENROUTER_API_KEY'),
         }
         self.__check_variables(env_variables)
         self._db_name = env_variables['DB_NAME']
@@ -280,6 +289,7 @@ class EnviromentManager:
         self._cedulas_api_access_token = env_variables['CEDULAS_API_ACCESS_TOKEN']
         self._use_cedulas_api = env_variables['USE_CEDULAS_API']
         self._gemini_api_key = env_variables['GEMINI_API_KEY']
+        self._openrouter_api_key = env_variables['OPENROUTER_API_KEY']
 
     def __process_boolean_env_variable(self, variable:str)->bool:
         """Procesa la variable indicada en el parametro. Se espera

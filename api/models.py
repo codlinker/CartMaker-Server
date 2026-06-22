@@ -1463,13 +1463,25 @@ class MerchantPlanPayment(models.Model):
     def clean(self):
         if self.pk:
             original_instance = MerchantPlanPayment.objects.get(pk=self.pk)
-            if original_instance.status != PaymentStatus.REJECTED and self.status == PaymentStatus.REJECTED:
+            
+            # Si el pago está siendo rechazado...
+            if (original_instance.status != PaymentStatus.REJECTED and 
+                self.status == PaymentStatus.REJECTED):
+                
+                # 1. Validamos que haya seleccionado un motivo
                 if self.rejection_reason is None:
                     raise ValidationError({
                         'rejection_reason': "Debes seleccionar una razón de rechazo."
                     })
-        if self.status != PaymentStatus.REJECTED:
-            self.rejection_reason = None
+                    
+                # 💡 2. Aplicamos la misma lógica de auto-asignación aquí
+                self.rejection_help = int(self.rejection_reason)
+
+            # Si el pago NO está rechazado, limpiamos
+            elif self.status != PaymentStatus.REJECTED:
+                self.rejection_reason = None
+                self.rejection_help = None
+
         super().clean()
 
     # 2. Método para renderizar la imagen en el Admin
@@ -1503,23 +1515,25 @@ class MerchantPlanPayment(models.Model):
 # MÓDULO 7: ATLAS AI
 # ==========================================
 
+class AtlasSubscriptionTier(models.IntegerChoices):
+    FREEMIUM = 0, 'Freemium'
+    PREMIUM = 1, 'Premium'
+
 class AtlasPlusPlan(models.Model):
     """
-    Suscripción premium para el asistente inteligente Atlas.
-
-    Attributes:
-        id (uuid): ID único del plan.
-        user (ForeignKey): Usuario beneficiario.
-        is_active (bool): Estado del servicio premium.
-        valid_until (datetime): Fecha de vencimiento.
+    Gestión de estado y suscripción para el asistente inteligente Atlas.
+    Todos los usuarios tienen este registro. El tier define sus límites.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='atlas_plan')
-    valid_until = models.DateTimeField()
+    tier = models.IntegerField(choices=AtlasSubscriptionTier.choices, default=AtlasSubscriptionTier.FREEMIUM)
+    valid_until = models.DateTimeField(null=True, blank=True)
 
     def get_json(self) -> dict:
         return {
-            'valid_until':self.valid_until.strftime("%d/%m/%Y, %H:%M:%S") if self.valid_until else None
+            'tier': self.get_tier_display(),
+            'is_premium': self.tier == AtlasSubscriptionTier.PREMIUM and self.valid_until and self.valid_until > timezone.now(),
+            'valid_until': self.valid_until.strftime("%d/%m/%Y, %H:%M:%S") if self.valid_until else None
         }
 
 class AtlasPlusPlanPayment(models.Model):
@@ -1551,32 +1565,48 @@ class AtlasPlusPlanPayment(models.Model):
     def clean(self):
         if self.pk:
             original_instance = AtlasPlusPlanPayment.objects.get(pk=self.pk)
+            
+            # Si el pago está siendo rechazado...
             if (original_instance.status != PaymentStatus.REJECTED and 
                 self.status == PaymentStatus.REJECTED):
-                if not self.rejection_reason or self.rejection_reason.strip() == "":
+                
+                # 1. Validamos que haya seleccionado un motivo
+                if self.rejection_reason is None:
                     raise ValidationError({
                         'rejection_reason': "Debes especificar una razón de rechazo."
                     })
+                
+                # 💡 2. Forzamos la asignación usando el atributo value o convirtiendo a int
+                # Esto asegura que se guarde el ID numérico, no el objeto Choice
+                self.rejection_help = int(self.rejection_reason)
+
+            # Si el pago NO está rechazado (ej. Aprobado o Pendiente), limpiamos los campos
+            elif self.status != PaymentStatus.REJECTED:
+                self.rejection_reason = None
+                self.rejection_help = None
+
         super().clean()
 
+    # 2. Método para renderizar la imagen en el Admin
     @property
     def payment_proof_preview(self):
         if self.payment_proof_url:
-            return mark_safe(f'<img src="{self.payment_proof_url}" style="max-height: 400px; max-width: 300px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" />')
+            return mark_safe(f'<img src="{storage_manager.get_url(self.payment_proof_url)}" style="max-height: 400px; max-width: 300px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" />')
         return "Sin comprobante"
     
     payment_proof_preview.fget.short_description = "Comprobante de Pago"
 
     def get_json(self)->dict:
+        print("GET JSON")
         return {
             'id':self.id,
             'reference_number':self.reference_number,
-            'payment_proof_url':self.payment_proof_url,
+            'payment_proof_url':storage_manager.get_url(self.payment_proof_url),
             'amount':float(self.amount),
             'bcv_taxes_to_day':float(self.bcv_taxes_to_day),
             'status':self.status,
             'verified_at':self.verified_at.strftime("%d/%m/%Y, %H:%M:%S") if self.verified_at else None,
-            'rejection_reason':self.rejection_reason,
+            'rejection_reason':self.get_rejection_reason_display() if self.rejection_reason else "",
             'rejection_help': self.get_rejection_help_display() if self.rejection_help else "",
             'creation':self.creation.strftime("%d/%m/%Y, %H:%M:%S") if self.creation else None
         }
@@ -1606,6 +1636,8 @@ class AtlasMessage(models.Model):
     origin = models.IntegerField(choices=MessageOrigin.choices)
     creation = models.DateTimeField(auto_now_add=True)
     text = models.TextField()
+    product_ids = models.JSONField(default=list, blank=True)
+    action_command = models.JSONField(null=True, blank=True)
 
 
 # ==========================================
@@ -1654,8 +1686,11 @@ class SystemConfig(models.Model):
         platinum_min_rating_promedy_requirement (int): Rating mínimo para ser tienda Platinum.
         creation (datetime): Fecha de última actualización de config.
     """
-    platinum_min_rating_promedy_requirement = models.IntegerField()
+    platinum_min_rating_promedy_requirement = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('4.5'))
     creation = models.DateTimeField(auto_now_add=True)
+    atlas_plus_price_usd = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('2.99'))
+    atlas_plus_daily_limit = models.IntegerField(default=75)
+    atlas_free_daily_limit = models.IntegerField(default=15)
 
 class Announcement(models.Model):
     """
@@ -1701,6 +1736,14 @@ class ProductViewLog(models.Model):
     client = models.ForeignKey(User, on_delete=models.CASCADE, related_name='product_views')
     inventory_item = models.ForeignKey(InventoryItem, on_delete=models.CASCADE, related_name='views')
     added_to_cart = models.BooleanField(default=False)
+    origin_source = models.CharField(
+        max_length=20, 
+        choices=[('organic', 'Orgánico'), ('atlas', 'Atlas IA')], 
+        default='organic'
+    )
+    search_prompt = models.TextField(null=True, blank=True)
+    ai_keywords = models.CharField(max_length=255, null=True, blank=True)
+    atlas_message_id = models.IntegerField(null=True, blank=True)
     bought = models.BooleanField(default=False)
     start_time = models.DateTimeField()
     end_time = models.DateTimeField(null=True, blank=True)

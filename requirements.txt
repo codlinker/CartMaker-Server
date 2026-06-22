@@ -63,3 +63,4 @@ google-genai
 celery
 redis
 django_redis
+openai

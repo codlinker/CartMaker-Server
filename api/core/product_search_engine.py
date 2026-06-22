@@ -693,13 +693,28 @@ class ProductSearchEngine:
         )
 
         if search_query:
-            clean_query = search_query.strip()
-            qs = qs.filter(
-                Q(product__name__icontains=clean_query) | 
-                Q(product__description__icontains=clean_query) |
-                Q(product__category__name__icontains=clean_query) |
-                Q(product__company__name__icontains=clean_query)
-            ).distinct()
+            import operator
+            from functools import reduce
+
+            search_terms = search_query.strip().split()
+            word_queries = []
+            
+            # 🕵️ DEBUG 3: Ver los términos exactos que exige la consulta SQL
+            print(f"🔍 ENGINE SQL -> Buscando coincidencia ESTRICTA (AND) para las palabras: {search_terms}")
+            
+            for term in search_terms:
+                if len(term) > 2:
+                    term_filter = (
+                        Q(product__name__icontains=term) | 
+                        Q(product__description__icontains=term) |
+                        Q(product__category__name__icontains=term) |
+                        Q(product__company__name__icontains=term)
+                    )
+                    word_queries.append(term_filter)
+            
+            if word_queries:
+                global_search_filter = reduce(operator.and_, word_queries)
+                qs = qs.filter(global_search_filter).distinct()
 
         qs = self._apply_feed_sorting(qs, sort_by, price_order)
         return self._get_cached_structural_feed(base_cache_key, qs, page, page_size)

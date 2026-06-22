@@ -727,79 +727,146 @@ class GetMerchantPlans(APIView):
             plan['dollar_bcv_tax'] = dollar_bcv_tax
         return Response({'data':plans}, status=status.HTTP_200_OK)
     
-class UploadSubscriptionPayment(APIView):
+class GetAtlasPlusPlanDetails(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'actions'
     permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """
+        Devuelve los datos de configuración, límites y costos en tiempo real 
+        (USD y Bs BCV) para el plan Atlas Plus.
+        """
+        config = SystemConfig.objects.latest('creation')
+        
+        dollar_bcv_tax = 1.0
+        bs_price = 0.0
+        
+        # Consumimos la tasa oficial en vivo al igual que con los comercios
+        try:
+            response = requests.get('https://ve.dolarapi.com/v1/estado')
+            response.raise_for_status()
+            data = response.json()
+            api_available = data.get('estado') == 'Disponible' if data.get('estado') else False
+            
+            if api_available:
+                response = requests.get('https://ve.dolarapi.com/v1/dolares/oficial')
+                response.raise_for_status()
+                data = response.json()
+                dollar_bcv_tax = float(data.get('promedio', 1.0))
+        except Exception as e:
+            print(f"Error obteniendo el precio del dolar bcv para Atlas: {e}")
+
+        price_usd = float(config.atlas_plus_price_usd)
+        if dollar_bcv_tax > 0.0:
+            bs_price = price_usd * dollar_bcv_tax
+
+        payload = {
+            'atlas_plus_price_usd': price_usd,
+            'bs_price': bs_price,
+            'dollar_bcv_tax': dollar_bcv_tax,
+            'atlas_plus_daily_limit': config.atlas_plus_daily_limit,
+            'atlas_free_daily_limit': config.atlas_free_daily_limit,
+        }
+        
+        return Response({'data': payload}, status=status.HTTP_200_OK)
+    
+class UploadSubscriptionPayment(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def _try_automatic_bank_validation(self, reference_number, amount_bs) -> bool:
+        """
+        [Capa Defensiva] Intenta conciliar el pago móvil/transferencia con la API del banco.
+        Si la API del banco falla, cae, o no encuentra coincidencia exacta, devuelve False
+        para que el flujo pase a validación manual por supervisores sin trancar la app.
+        """
+        try:
+            # Ejemplo analítico de consumo de webhook/API bancaria
+            # payload = {"ref": reference_number, "amount": float(amount_bs)}
+            # r = requests.post("https://api.tu-banco.com/v1/verify", json=payload, timeout=4)
+            # return r.json().get("matched") == True
+            return False  # Simulamos falla/no disponible para forzar validación manual segura
+        except Exception as e:
+            print(f"⚠️ API Bancaria no disponible: {e}")
+            return False
 
     def post(self, request):
         serializer = UploadSubscriptionPaymentSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
-        bank_api_available = False 
-        print(data)
-        # TODO: Implementar chequeo de disponibilidad de api de bancos.
-        subscription_type = data['subscription_type']
-        subscription_id = data['subscription_id']
         
+        subscription_type = data['subscription_type']
+        subscription_id = data['subscription_id'] # ID del MerchantPlan o del SystemConfig
+        dollar_bcv_tax = Decimal(str(data['dollar_bcv_tax']))
+        monto_enviado_bs = Decimal(str(data['amount_sended']))
+
+        # Intentar conciliación bancaria automática primero
+        bank_api_available = self._try_automatic_bank_validation(data['reference_number'], monto_enviado_bs)
+
+        # =========================================================================
+        # CASO 1: SUSCRIPCIONES ATLAS PLUS
+        # =========================================================================
         if subscription_type == 1:
-            # TODO: Subscripciones de Atlas Plus
-            pass
+            atlas_plan, created = AtlasPlusPlan.objects.get_or_create(user=request.user)
+            
+            # Evitar duplicados en procesamiento pendiente
+            if AtlasPlusPlanPayment.objects.filter(plan=atlas_plan, status=PaymentStatus.PENDING).exists():
+                return Response({'error': "Ya tienes un pago pendiente por verificación para Atlas Plus."}, status=status.HTTP_406_NOT_ACCEPTABLE)
+
+            file_obj = data['payment_proof']
+            extension = file_obj.name.split('.')[-1]
+            file_name = f"atlas_payment_{atlas_plan.id}_{timezone.now().strftime('%d-%m-%Y_%H-%M-%S')}.{extension}"
+            relative_path = storage_manager.save_file(file_obj, "subscriptions/atlas_plus", file_name)
+
+            payment = AtlasPlusPlanPayment.objects.create(
+                plan=atlas_plan,
+                reference_number=data['reference_number'],
+                payment_proof_url=relative_path,
+                amount=monto_enviado_bs,
+                bcv_taxes_to_day=dollar_bcv_tax,
+                status=PaymentStatus.APPROVED if bank_api_available else PaymentStatus.PENDING,
+                verified_at=timezone.now() if bank_api_available else None
+            )
+
+            # Si la API del banco lo aprobó instantáneamente, se ejecutan las señales de activación de inmediato
+            return Response({'payment_data': payment.get_json(), 'subscription_data': atlas_plan.get_json()}, status=status.HTTP_201_CREATED)
+
+        # =========================================================================
+        # CASO 2: SUSCRIPCIONES COMERCIANTE (Tu código existente integrado con la API del banco)
+        # =========================================================================
         elif subscription_type == 2:
             try:
                 merchant_plan = MerchantPlan.objects.get(id=subscription_id)
             except MerchantPlan.DoesNotExist:
-                return Response({'error':'Plan no encontrado.'}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({'error': 'Plan no encontrado.'}, status=status.HTTP_400_BAD_REQUEST)
                 
-            try:
-                merchant_subscription = MerchantSubscription.objects.only('id', 'merchant', 'valid_until').get(merchant=request.user)
-                print("MERCHANT SUBSCRIPTION VALID UNTIL: ", merchant_subscription.valid_until)
-                print("NOW: ", timezone.now())
-                
-                # 💡 ELIMINADO EL BLOQUEO: Ya no bloqueamos si valid_until > now. 
-                # El usuario TIENE DERECHO a cambiarse de plan a mitad de mes.
-                # La protección contra spam de pagos la hace la tabla MerchantPlanPayment más abajo.
-                
-            except MerchantSubscription.DoesNotExist:
-                merchant_subscription = MerchantSubscription.objects.create(
-                    merchant=request.user,
-                    merchant_type = MerchantType.BUSINESS if merchant_plan.requires_business else MerchantType.ENTREPRENEUR,
-                    plan = merchant_plan
-                )
-                
-            if not bank_api_available:
-                file_obj = data['payment_proof']
-                extension = file_obj.name.split('.')[-1]
-                file_name = f"payment_proof_{merchant_subscription.id}_{timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')}.{extension}"
-                folder = f"subscriptions/merchant_plans/{merchant_plan.name}"
-                relative_path = storage_manager.save_file(file_obj, folder, file_name)
-                
-                if MerchantPlanPayment.objects.filter(
-                    subscription=merchant_subscription,
-                    verified_at__isnull=True,
-                    status=PaymentStatus.PENDING
-                    ).exists():
-                    return Response({'error':"Ya tienes un pago pendiente por verificacion por este plan."}, status=status.HTTP_406_NOT_ACCEPTABLE)
-                    
-                payment = MerchantPlanPayment.objects.create(
-                    subscription=merchant_subscription,
-                    target_plan=merchant_plan, # 💡 NUEVO: Guardamos a qué plan quiere ir (Requiere agregarlo en models.py)
-                    reference_number = data['reference_number'],
-                    payment_proof_url = relative_path,
-                    amount=data['amount_sended'],
-                    bcv_taxes_to_day=data['dollar_bcv_tax'],
-                )
-                
-                # 💡 ELIMINADO EL BUG: Ya no hacemos "merchant_subscription.plan = merchant_plan" aquí. 
-                # El plan de la tienda NO SE CAMBIA hasta que un administrador apruebe el pago en signals.py.
-                
-                return Response({'payment_data':payment.get_json(), 'subscription_data':merchant_subscription.get_json()}, status=status.HTTP_201_CREATED)
-            else:
-                # TODO: Implementar caso para utilizar api de bancos para validar el pago.
-                pass
-            return Response(status=status.HTTP_200_OK)
-        else:
-            return Response({'error':'Tipo de subscripcion no valida.'}, status=status.HTTP_400_BAD_REQUEST)
+            merchant_subscription, _ = MerchantSubscription.objects.get_or_create(
+                merchant=request.user,
+                defaults={
+                    'merchant_type': MerchantType.BUSINESS if merchant_plan.requires_business else MerchantType.ENTREPRENEUR,
+                    'plan': merchant_plan
+                }
+            )
+
+            if MerchantPlanPayment.objects.filter(subscription=merchant_subscription, target_plan=merchant_plan, status=PaymentStatus.PENDING).exists():
+                return Response({'error': "Ya tienes un pago pendiente por verificación por este plan."}, status=status.HTTP_406_NOT_ACCEPTABLE)
+
+            file_obj = data['payment_proof']
+            extension = file_obj.name.split('.')[-1]
+            file_name = f"payment_proof_{merchant_subscription.id}_{timezone.now().strftime('%d-%m-%Y_%H-%M-%S')}.{extension}"
+            relative_path = storage_manager.save_file(file_obj, f"subscriptions/merchant_plans/{merchant_plan.name}", file_name)
+
+            payment = MerchantPlanPayment.objects.create(
+                subscription=merchant_subscription,
+                target_plan=merchant_plan,
+                reference_number=data['reference_number'],
+                payment_proof_url=relative_path,
+                amount=monto_enviado_bs,
+                bcv_taxes_to_day=dollar_bcv_tax,
+                status=PaymentStatus.APPROVED if bank_api_available else PaymentStatus.PENDING,
+                verified_at=timezone.now() if bank_api_available else None
+            )
+            return Response({'payment_data': payment.get_json(), 'subscription_data': merchant_subscription.get_json()}, status=status.HTTP_201_CREATED)
 
 
 class FullPaySubscriptionWithWalletView(APIView):
@@ -812,6 +879,21 @@ class FullPaySubscriptionWithWalletView(APIView):
             with transaction.atomic():
                 print("REQUEST DATA: ", request.data)
                 plan_id = request.data.get('plan_id')
+
+                dollar_bcv_tax = 1.0
+                try:
+                    response = requests.get('https://ve.dolarapi.com/v1/estado')
+                    response.raise_for_status()
+                    data = response.json()
+                    api_available = data.get('estado') == 'Disponible' if data.get('estado') else False
+                    if api_available:
+                        response = requests.get('https://ve.dolarapi.com/v1/dolares/oficial')
+                        response.raise_for_status()
+                        data = response.json()
+                        dollar_bcv_tax = data.get('promedio', 1.0)
+                except Exception as e:
+                    print(f"Error obteniendo el precio del dolar bcv: {e}")
+                    return Response({'error':"No se pudo determinar la tasa del dolar."}, status=status.HTTP_423_LOCKED)
                 
                 # 1. Obtener el plan y crear la subscripcion u obtenerla si ya existe
                 merchant_plan = MerchantPlan.objects.only('price', 'name').get(id=plan_id)
@@ -828,8 +910,56 @@ class FullPaySubscriptionWithWalletView(APIView):
 
                 plan_price_usd = Decimal(str(merchant_plan.price))
 
-                # 2. Obtener la billetera del usuario
+                plan_type = request.data.get('plan_type', 'merchant')
                 wallet = UserWallet.objects.select_for_update().get(user=request.user)
+
+                if plan_type == 'atlas':
+                    config = SystemConfig.objects.latest('creation')
+                    atlas_plan = AtlasPlusPlan.objects.select_for_update().get(user=request.user)
+                    price_usd = config.atlas_plus_price_usd
+                    
+                    # Lógica de prorrateo para Atlas Plus si cambia/renueva antes de vencer
+                    if atlas_plan.tier == AtlasSubscriptionTier.PREMIUM and atlas_plan.valid_until and atlas_plan.valid_until > timezone.now():
+                        days_left = (atlas_plan.valid_until - timezone.now()).total_seconds() / 86400.0
+                        daily_rate = float(price_usd) / 30.0
+                        remanent_usd = Decimal(str(round(days_left * daily_rate, 2)))
+                        if remanent_usd > 0:
+                            wallet.regist_transaction(remanent_usd, 'atlas', "Reintegro por tiempo no consumido de Atlas Plus", 'add')
+
+                    if wallet.balance < price_usd:
+                        return Response({'success': False, 'message': 'Saldo insuficiente para Atlas Plus.'}, status=status.HTTP_400_BAD_REQUEST)
+
+                    wallet.regist_transaction(price_usd, 'atlas', "Pago de suscripción Atlas Plus", 'substract')
+                    
+                    atlas_plan.tier = AtlasSubscriptionTier.PREMIUM
+                    atlas_plan.valid_until = timezone.now() + relativedelta(months=1)
+                    atlas_plan.save()
+                    
+                    # Creamos el registro físico del pago aprobado
+                    atlas_payment = AtlasPlusPlanPayment.objects.create(
+                        plan=atlas_plan,
+                        reference_number=f"WALLET-ATLAS-{uuid.uuid4().hex[:6].upper()}",
+                        amount=0,
+                        bcv_taxes_to_day=dollar_bcv_tax,
+                        status=PaymentStatus.APPROVED,
+                        verified_at=timezone.now()
+                    )
+
+                    # Notificación local de interfaz
+                    Notification.objects.create(
+                        user=request.user,
+                        section=NotificationSection.HOME,
+                        title="¡Atlas Plus Activo!",
+                        body="Tu billetera cubrió la activación. Disfruta de tus 75 interacciones diarias.",
+                        category=NotificationCategory.PAYMENT_APPROVED,
+                        metadata={'payment_id': str(atlas_payment.id)}
+                    )
+                    
+                    return Response({
+                        'success': True,
+                        'message': '¡Atlas Plus activado usando tu saldo a favor!',
+                        'data': {'new_balance': float(wallet.balance), 'valid_until': atlas_plan.valid_until.strftime("%d/%m/%Y, %H:%M:%S")}
+                    }, status=status.HTTP_200_OK)
 
                 # =======================================================
                 # 💡 LÓGICA DE PRORRATEO (Split de saldos a favor)
@@ -871,20 +1001,6 @@ class FullPaySubscriptionWithWalletView(APIView):
                 # 5. Activar la suscripción
                 merchant_subscription.valid_until = timezone.now() + relativedelta(months=1)
                 merchant_subscription.save()
-
-                dollar_bcv_tax = 1.0
-                try:
-                    response = requests.get('https://ve.dolarapi.com/v1/estado')
-                    response.raise_for_status()
-                    data = response.json()
-                    api_available = data.get('estado') == 'Disponible' if data.get('estado') else False
-                    if api_available:
-                        response = requests.get('https://ve.dolarapi.com/v1/dolares/oficial')
-                        response.raise_for_status()
-                        data = response.json()
-                        dollar_bcv_tax = data.get('promedio', 1.0)
-                except Exception as e:
-                    print(f"Error obteniendo el precio del dolar bcv: {e}")
 
                 # 6. Dejar un registro en el historial de pagos
                 merchant_payment = MerchantPlanPayment.objects.create(
@@ -2111,16 +2227,33 @@ class SubscriptionsCacheAPI(APIView):
             subscriptions_payments['atlas'] = [atlas_payment.get_json() for atlas_payment in atlas_subscription.payments.all()]
         if merchant_subscription:
             subscriptions_payments['merchant'] = [merchant_payment.get_json() for merchant_payment in merchant_subscription.payments.all()]
-        
+        print("SUBSCRIPTIONS PAYMENTS ATLAS: ", subscriptions_payments['atlas'])
         data = {
             "merchant_subscription": merchant_subscription.get_json() if merchant_subscription else None,
             "atlas_subscription": atlas_subscription.get_json() if atlas_subscription else None,
             "subscriptions_payments": subscriptions_payments,
             "wallet": wallet_data,
-            "pending_payment_notification_retry_id": pending_rejection_notif.id if pending_rejection_notif else None
+            "pending_payment_notification_retry_id": pending_rejection_notif.id if pending_rejection_notif else None,
         }
-        
         cache.set(cache_key, data, timeout=3600) # 1 hora
+        return Response(data, status=status.HTTP_200_OK)
+    
+class SystemConfigCacheAPI(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'navigation'
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """
+        Caché de configuracion.
+        """
+        config = SystemConfig.objects.latest('creation')
+        data = {
+            'atlas_plus_price_usd': float(config.atlas_plus_price_usd),
+            'atlas_plus_daily_limit': config.atlas_plus_daily_limit,
+            'atlas_free_daily_limit': config.atlas_free_daily_limit,
+            'platinum_min_rating_promedy_requirement': config.platinum_min_rating_promedy_requirement
+        }
         return Response(data, status=status.HTTP_200_OK)
 
 class UserCacheAPI(APIView):
@@ -4227,7 +4360,9 @@ class AtlasViewSet(viewsets.ViewSet):
     """
     permission_classes = [IsAuthenticated]
 
-    # Al ser una vista síncrona de DRF, el ORM se usa de forma normal y limpia
+    # 💡 LÍMITE DIARIO CONFIGURABLE
+    DAILY_FREE_LIMIT = 15
+
     def _get_user_plan(self, user):
         try:
             return user.atlas_plan
@@ -4236,6 +4371,74 @@ class AtlasViewSet(viewsets.ViewSet):
 
     def _create_thread(self, plan):
         return AtlasThread.objects.create(plan=plan)
+
+    # =========================================================================
+    # LÓGICA DE CUOTA CON CACHE-ASIDE (PostgreSQL como fuente de verdad)
+    # =========================================================================
+    def _get_daily_limit(self, user) -> int:
+        """Devuelve el límite de interacciones según el Tier del usuario."""
+        config = SystemConfig.objects.latest('creation')
+        try:
+            plan = user.atlas_plan
+            # Si es Premium y el plan no ha vencido
+            if plan.tier == AtlasSubscriptionTier.PREMIUM and plan.valid_until and plan.valid_until >= timezone.now():
+                return config.atlas_plus_daily_limit
+        except AtlasPlusPlan.DoesNotExist:
+            pass
+        return config.atlas_free_daily_limit
+
+    def _get_used_today(self, user) -> int:
+        """Obtiene el consumo desde Redis, o lo reconstruye desde BD si se reinició el servidor."""
+        cache_key = f"cartmaker:atlas:daily_usage:{user.id}"
+        used = cache.get(cache_key)
+        
+        if used is None:
+            # 💡 CACHE MISS: Redis se reinició o es el primer mensaje del día.
+            # Vamos a la base de datos a buscar la verdad absoluta.
+            now_local = timezone.localtime(timezone.now())
+            
+            try:
+                plan = user.atlas_plan
+                used = AtlasMessage.objects.filter(
+                    conversation__plan=plan,
+                    origin=1, # Contamos solo los mensajes enviados por el usuario
+                    creation__date=now_local.date()
+                ).count()
+            except Exception:
+                used = 0
+                
+            # Calculamos los segundos exactos que faltan para la medianoche local
+            tomorrow = (now_local + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            timeout = int((tomorrow - now_local).total_seconds())
+            
+            # Repoblamos Redis
+            cache.set(cache_key, used, timeout=timeout)
+            
+        return used
+
+    def _get_free_interactions_left(self, user) -> int:
+        limit = self._get_daily_limit(user)
+        used = self._get_used_today(user)
+        return max(0, limit - used)
+
+    def _consume_free_interaction(self, user) -> bool:
+        limit = self._get_daily_limit(user)
+        used = self._get_used_today(user)
+        
+        if used >= limit:
+            return False 
+            
+        cache_key = f"cartmaker:atlas:daily_usage:{user.id}"
+        
+        if used == 0:
+            now_local = timezone.localtime(timezone.now())
+            tomorrow = (now_local + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            timeout = int((tomorrow - now_local).total_seconds())
+            cache.set(cache_key, 1, timeout=timeout)
+        else:
+            cache.incr(cache_key)
+            
+        return True
 
     # ------------------------------------------------------------------------
     # ENDPOINT: POST /api/atlas/scan_image/
@@ -4253,9 +4456,6 @@ class AtlasViewSet(viewsets.ViewSet):
         mime_type = image_file.content_type
         
         atlas_manager = atlas.AtlasManager()
-        
-        # LA MAGIA: Ejecutamos el método asíncrono de Atlas dentro de nuestra vista síncrona.
-        # Uvicorn mantendrá esto en un hilo secundario sin bloquear la app.
         resultado = async_to_sync(atlas_manager.analyze_image_for_products_async)(image_bytes, mime_type)
         
         if "error" in resultado and not resultado.get("products"):
@@ -4279,8 +4479,6 @@ class AtlasViewSet(viewsets.ViewSet):
         mime_type = image_file.content_type
         
         atlas_manager = atlas.AtlasManager()
-        
-        # Ejecutamos la versión plural
         resultado = async_to_sync(atlas_manager.analyze_image_for_multiple_products_async)(image_bytes, mime_type)
         
         if "error" in resultado and not resultado.get("products"):
@@ -4301,7 +4499,6 @@ class AtlasViewSet(viewsets.ViewSet):
         raw_rows = []
 
         try:
-            # 1. Extraemos las celdas limpias usando Python a la velocidad de la luz
             if filename.endswith('.xlsx') or filename.endswith('.xls'):
                 wb = openpyxl.load_workbook(io.BytesIO(excel_file.read()), data_only=True)
                 sheet = wb.active
@@ -4312,20 +4509,17 @@ class AtlasViewSet(viewsets.ViewSet):
                         row_dict = {headers[idx]: str(val) if val is not None else "" for idx, val in enumerate(row) if idx < len(headers)}
                         raw_rows.append(row_dict)
             else:
-                # Flujo CSV estándar
                 decoded_file = excel_file.read().decode('utf-8-sig').splitlines()
                 reader = csv.DictReader(decoded_file)
                 for row in reader:
                     raw_rows.append(dict(row))
 
-            # 4. Control de seguridad: Si el archivo es ridículamente enorme, limitamos el lote inicial
             raw_rows = raw_rows[:50] 
 
         except Exception as e:
             print(f"[PARSING ERROR]: {e}")
             return Response({'error': 'Error al procesar la estructura del archivo.'}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
 
-        # 5. Ejecutamos Atlas pasándole el JSON nativo de Python
         atlas_manager = atlas.AtlasManager()
         resultado = async_to_sync(atlas_manager.analyze_processed_json_products_async)(raw_rows)
         
@@ -4335,41 +4529,166 @@ class AtlasViewSet(viewsets.ViewSet):
         return Response(resultado, status=status.HTTP_200_OK)
 
     # ------------------------------------------------------------------------
-    # ENDPOINT: POST /api/atlas/thread/
+    # ENDPOINT: GET /api/v1/atlas/current_thread/
     # ------------------------------------------------------------------------
-    @action(detail=False, methods=['post'])
-    def thread(self, request):
-        plan = self._get_user_plan(request.user)
-        if not plan:
-            return Response({'error': 'Debes tener una suscripción activa a Atlas Plus.'}, status=status.HTTP_403_FORBIDDEN)
+    @action(detail=False, methods=['get'])
+    def current_thread(self, request):
+        plan = request.user.atlas_plan 
+        is_premium = plan.tier == AtlasSubscriptionTier.PREMIUM and plan.valid_until and plan.valid_until >= timezone.now()
+        free_left = self._get_free_interactions_left(request.user)
+        
+        latest_thread = AtlasThread.objects.filter(plan=plan).order_by('-id').first()
+        
+        if not latest_thread:
+            # 1. Creamos el hilo nuevo
+            latest_thread = AtlasThread.objects.create(plan=plan)
             
-        new_thread = self._create_thread(plan)
-        return Response({'thread_id': new_thread.id}, status=status.HTTP_201_CREATED)
+            # Extraemos el nombre del usuario (o usamos un genérico si no lo ha configurado)
+            nombre_usuario = request.user.first_name if request.user.first_name else "mi pana"
+            
+            # 💡 2. BANCO DE SALUDOS INICIALES DINÁMICOS (Anti-bot)
+            saludos_templates = [
+                f"¡Epa, {nombre_usuario}! Qué fino tenerte por aquí. Soy Atlas. Dime qué andas buscando hoy y te lo consigo en las tiendas de tu zona en un dos por tres.",
+                f"¡Hola, {nombre_usuario}! Por aquí Atlas. Vengo a resolverte la vida con las compras. ¿Qué te hace falta hoy para buscártelo de una?",
+                f"¡Qué más, {nombre_usuario}! Te saluda Atlas. Estoy activo para cuadrarte las mejores ofertas y productos cerca de ti. ¿Por dónde empezamos?",
+                f"¡Epa, {nombre_usuario}! ¿Cómo va todo? Soy Atlas, tu contacto directo con los comercios de la zona. Cuéntame, ¿qué tienes en mente comprar hoy?",
+                f"¡Hola, {nombre_usuario}! Aquí Atlas reportándose. Estoy listo para rastrear el inventario de la zona y conseguirte exactamente lo que necesitas. ¿Qué buscas hoy?",
+                f"¡Qué bueno verte por acá, {nombre_usuario}! Soy Atlas. Si estás buscando algo específico o solo quieres ver qué hay de bueno en las tiendas hoy, avísame y nos movemos."
+            ]
+            
+            # Selección aleatoria
+            mensaje_bienvenida = random.choice(saludos_templates)
+            
+            # Lo guardamos como si fuera una respuesta generada por la IA (origin=2)
+            AtlasMessage.objects.create(
+                conversation=latest_thread,
+                origin=2, # 2 es tu constante ORIGIN_AI en AtlasManager
+                text=mensaje_bienvenida,
+                product_ids=[]
+            )
+            
+        # 💡 FEATURE: PAGINACIÓN (Por defecto carga 15 mensajes)
+        try:
+            offset = int(request.query_params.get('offset', 0))
+        except ValueError:
+            offset = 0
+        limit = 15
+
+        # Obtenemos de más nuevo a más viejo para aplicar el slice exacto
+        messages_qs = AtlasMessage.objects.filter(conversation=latest_thread).order_by('-creation')[offset:offset+limit]
+        
+        # Invertimos la lista de nuevo para entregar en orden cronológico (Viejo -> Nuevo)
+        messages_list = list(messages_qs)[::-1]
+
+        # 💡 FEATURE: HIDRATACIÓN DE PRODUCTOS EN TIEMPO REAL
+        all_product_ids = set()
+        for m in messages_list:
+            if getattr(m, 'product_ids', None):
+                all_product_ids.update(m.product_ids)
+
+        items_dict = {}
+        if all_product_ids:
+            # Traemos la info viva para respetar el stock actual y pausas
+            fresh_items = InventoryItem.objects.filter(id__in=all_product_ids).select_related('product', 'store__company')
+            for item in fresh_items:
+                items_dict[str(item.id)] = item.get_json()
+
+        messages_data = []
+        for m in messages_list:
+            msg_type = 'text'
+            msg_products = []
+            
+            p_ids = getattr(m, 'product_ids', [])
+            if p_ids:
+                msg_type = 'products'
+                for pid in p_ids:
+                    if pid in items_dict:
+                        msg_products.append(items_dict[pid])
+                    else:
+                        # Fallback: El item fue borrado o no existe
+                        msg_products.append({"id": pid, "paused": True, "stock": 0})
+
+            # 💡 Aseguramos la integridad del JSON
+            cmd = getattr(m, 'action_command', None)
+            if isinstance(cmd, str):
+                try:
+                    cmd = json.loads(cmd)
+                except:
+                    cmd = None
+
+            messages_data.append({
+                "id": m.id,
+                "origin": m.origin, 
+                "text": m.text,
+                "type": msg_type,
+                "products": msg_products if msg_products else None,
+                "creation": m.creation.isoformat(),
+                "action_command": cmd # 💡 Usamos la variable limpia
+            })
+
+        return Response({
+            'thread_id': latest_thread.id,
+            'free_interactions_left': free_left,
+            'is_premium': is_premium,
+            'messages': messages_data
+        }, status=status.HTTP_200_OK)
 
     # ------------------------------------------------------------------------
-    # ENDPOINT: POST /api/atlas/{id}/message/
+    # ENDPOINT: POST /api/v1/atlas/{id}/message/
     # ------------------------------------------------------------------------
     @action(detail=True, methods=['post'])
     def message(self, request, pk=None):
         text = request.data.get('text')
+        # 💡 EXTRAEMOS LA FOTO EN BASE64 DESDE EL JSON (Si existe)
+        image_base64 = request.data.get('image_base64')
+        
         if not text:
             return Response({'error': 'El texto del mensaje es obligatorio.'}, status=status.HTTP_400_BAD_REQUEST)
             
-        plan = self._get_user_plan(request.user)
-        if not plan:
-            return Response({'error': 'Debes tener una suscripción activa a Atlas Plus.'}, status=status.HTTP_403_FORBIDDEN)
-            
-        atlas_manager = atlas.AtlasManager()
+        plan = request.user.atlas_plan
+        is_premium = plan.tier == AtlasSubscriptionTier.PREMIUM and plan.valid_until and plan.valid_until >= timezone.now()
         
-        # Llamamos al chat asíncrono con async_to_sync
-        resultado = async_to_sync(atlas_manager.send_chat_message_async)(thread_id=pk, user_text=text)
+        # 💡 FIX: Consumimos la interacción para TODOS. 
+        # La función _consume_free_interaction ya sabe si el límite es 15 o 75.
+        if not self._consume_free_interaction(request.user):
+            mensaje_error = 'Has agotado tus interacciones de Atlas Plus por hoy.' if is_premium else 'Has agotado tus interacciones gratuitas por hoy.'
+            return Response({
+                'error': mensaje_error,
+                'free_interactions_left': 0
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        lat = float(request.data.get('lat', 0.0))
+        lng = float(request.data.get('lng', 0.0))
+        user_locations = request.data.get('locations', [])
+        
+        atlas_manager = atlas.AtlasManager(
+            user_lat=lat, 
+            user_lng=lng, 
+            user_locations=user_locations, 
+            user=request.user, 
+            seed=str(pk)
+        )
+
+        # 💡 PASAMOS LA FOTO AL MOTOR DE ATLAS
+        resultado = async_to_sync(atlas_manager.send_chat_message_async)(thread_id=pk, user_text=text, image_base64=image_base64)
         
         if not resultado.get('success'):
+            if not is_premium:
+                try: cache.decr(f"cartmaker:atlas:daily_usage:{request.user.id}")
+                except: pass
             return Response({'error': resultado.get('error')}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+        free_left = self._get_free_interactions_left(request.user)
+            
+        # 💡 Nos aseguramos de imprimir para debuguear si está saliendo bien
+        print(f"📦 [VIEWS] Comando enviado al Frontend: {resultado.get('action_command')}")
             
         return Response({
             'response': resultado['response'],
-            'message_id': resultado['message_id']
+            'message_id': resultado['message_id'],
+            'free_interactions_left': free_left,
+            'injected_products': resultado.get('injected_products'),
+            'action_command': resultado.get('action_command') # <-- Esto es crucial
         }, status=status.HTTP_200_OK)
 
 class InventoryItemViewSet(viewsets.ModelViewSet):

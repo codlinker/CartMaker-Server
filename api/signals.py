@@ -121,6 +121,79 @@ def on_payment_created(sender, instance: MerchantPlanPayment, **kwargs):
         except sender.DoesNotExist:
             pass # Se acaba de crear el pago
 
+# 💡 FIX: Agregamos dispatch_uid con un nombre único para evitar ejecuciones dobles
+@receiver(pre_save, sender=AtlasPlusPlanPayment, dispatch_uid="on_atlas_payment_status_changed_unique")
+def on_atlas_payment_status_changed(sender, instance: AtlasPlusPlanPayment, **kwargs):
+    if instance.pk:
+        try:
+            old_instance = sender.objects.select_related('plan__user__wallet').get(pk=instance.pk)
+            
+            if old_instance.status == PaymentStatus.PENDING and instance.status != old_instance.status:
+                with transaction.atomic():
+                    user = old_instance.plan.user
+                    atlas_plan = old_instance.plan
+                    instance.verified_at = timezone.now()
+                    config = SystemConfig.objects.latest('creation')
+
+                    # --- CASO RECHAZADO ---
+                    if instance.status == PaymentStatus.REJECTED:
+                        # 💡 Asegúrate de parsearlo a int por si las dudas con los ENUM
+                        instance.rejection_help = int(instance.rejection_reason)
+                        NotificationManager.notify_payment_check(
+                            user_id=user.id, subscription_name="Atlas Plus AI", 
+                            approved=False, payment_id=instance.pk, 
+                            rejection_reason=instance.get_rejection_reason_display()
+                        )
+
+                    # --- CASO APROBADO ---
+                    elif instance.status == PaymentStatus.APPROVED:
+                        wallet = user.wallet
+                        tasa_bcv = Decimal(str(instance.bcv_taxes_to_day))
+                        monto_pagado_usd = Decimal(str(instance.amount)) / tasa_bcv
+                        
+                        # 1. Acreditamos el pago a la billetera temporalmente
+                        wallet.regist_transaction(monto_pagado_usd, 'atlas', f"Abono por Reporte Atlas (Ref: {instance.reference_number})", 'add')
+                        
+                        plan_price_usd = Decimal(str(config.atlas_plus_price_usd))
+                        
+                        # 2. Cobramos el plan directamente
+                        if wallet.balance >= plan_price_usd:
+                            excedente_usd = wallet.balance - plan_price_usd
+                            excedente_bs = round(excedente_usd * tasa_bcv, 2)
+                            
+                            wallet.regist_transaction(plan_price_usd, 'atlas', "Cobro automático de suscripción Atlas Plus", 'substract')
+                            
+                            # Actualización física del plan del usuario
+                            atlas_plan.tier = AtlasSubscriptionTier.PREMIUM
+                            atlas_plan.valid_until = timezone.now() + relativedelta(months=1)
+                            atlas_plan.save()
+                            
+                            NotificationManager.notify_payment_check(
+                                user_id=user.id, subscription_name="Atlas Plus AI", 
+                                approved=True, payment_id=instance.pk, surplus_amount=float(excedente_bs)
+                            )
+                        else:
+                            # Fondos insuficientes (Monto en Bolívares enviado se quedó corto debido a fluctuación de tasa)
+                            instance.status = PaymentStatus.REJECTED
+                            instance.rejection_reason = RejectionReason.NOT_ENOUGH_AMOUNT
+                            instance.rejection_help = RejectionHelpText.NOT_ENOUGH_AMOUNT
+                            NotificationManager.notify_payment_check(
+                                user_id=user.id, subscription_name="Atlas Plus AI", 
+                                approved=False, payment_id=instance.pk,
+                                rejection_reason=f"Monto insuficiente para Atlas Plus. Los {round(float(monto_pagado_usd), 2)}$ se guardaron en tu monedero."
+                            )
+        except sender.DoesNotExist:
+            pass
+
+
+# 💡 FIX: También agregamos el seguro a las señales de la caché para que no hagan el proceso de borrado dos veces
+@receiver(post_save, sender=AtlasPlusPlan, dispatch_uid="invalidate_atlas_plan_cache_unique")
+@receiver(post_save, sender=AtlasPlusPlanPayment, dispatch_uid="invalidate_atlas_payment_cache_unique")
+def invalidate_atlas_subscriptions_cache(sender, instance, **kwargs):
+    user_id = instance.user_id if isinstance(instance, AtlasPlusPlan) else instance.plan.user_id
+    if user_id:
+        cache.delete(f"cartmaker:tenant:{user_id}:subscriptions")
+
 @receiver(post_save, sender=User)
 def on_user_created(sender, created, instance: User, **kwargs):
     """
@@ -221,6 +294,19 @@ def invalidate_home_cache(sender, instance, **kwargs):
 @receiver(post_save, sender=SubCategory)
 def invalidate_search_cache(sender, instance, **kwargs):
     cache.delete("cartmaker:global:search")
+
+# ==========================================
+# CREACIÓN DE DEPENDENCIAS INICIALES
+# ==========================================
+@receiver(post_save, sender=User)
+def on_user_created(sender, created, instance: User, **kwargs):
+    """
+    Se dispara UNA SOLA VEZ cuando el usuario se registra.
+    """
+    if created:
+        UserWallet.objects.create(user=instance)
+        # 💡 Generamos su estado de Atlas Freemium desde el día 1
+        AtlasPlusPlan.objects.create(user=instance)
 
 # ==========================================
 # INVALIDACIÓN POR TENANT (Afecta solo al dueño)

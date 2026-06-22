@@ -121,14 +121,19 @@ class MerchantSubscriptionAdmin(ModelAdmin):
 @admin.register(MerchantPlanPayment, AtlasPlusPlanPayment)
 class PaymentAdmin(ModelAdmin):
     list_display = ("reference_number", "amount", "status", 'bcv_taxes_to_day', 'creation')
+    
+    # Lo dejamos en readonly para que el admin pueda leer qué texto se le envió al usuario, pero no editarlo
     readonly_fields = ('reference_number', 'amount', 'bcv_taxes_to_day', "verified_at", 'payment_proof_preview', 'creation', 'rejection_help')
+    
     list_filter = ("status", "rejection_reason")
+    
     fieldsets = (
         ('Detalles del Pago', {
             'fields': ('reference_number', 'amount', 'bcv_taxes_to_day', 'creation', 'payment_proof_preview')
         }),
         ('Estado de Verificación', {
-            'fields': ('status', 'rejection_reason')
+            # 💡 Está rejection_reason (editable) y rejection_help (readonly visual)
+            'fields': ('status', 'rejection_reason', 'rejection_help')
         }),
     )
 
@@ -245,7 +250,7 @@ class StoreContactMethodAdmin(ModelAdmin):
 
 @admin.register(ProductViewLog)
 class ProductViewLogAdmin(ModelAdmin):
-    list_display = ("client", "inventory_item", "duration_seconds", "added_to_cart_icon", "bought_icon", "start_time")
+    list_display = ("client", "inventory_item", "origin_source", "duration_seconds", "added_to_cart_icon", "bought_icon", "start_time")
     list_filter = ("added_to_cart", "bought", "start_time")
     search_fields = ("client__email", "client__first_name", "inventory_item__product__name")
     readonly_fields = ("start_time", "end_time")

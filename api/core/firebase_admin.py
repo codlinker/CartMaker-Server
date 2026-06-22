@@ -66,10 +66,11 @@ class NotificationManager:
         Notifica al usuario si su pago ha sido validado o no por un supervisor.
         """
         try:
+            # 💡 Calculamos el objetivo una sola vez arriba para usarlo en la metadata
+            objective_type = 'atlas' if 'Atlas' in subscription_name else 'merchant'
+            
             if approved:
                 title = '¡Pago Validado!'
-                
-                # Lógica del Saldo a Favor
                 if surplus_amount > 0:
                     body = f'Hemos aprobado el pago por la suscripción <b>{subscription_name}</b> y acreditamos tu excedente de <b>{surplus_amount} Bs</b> a tu billetera. Ya puedes configurar tu comercio.'
                 else:
@@ -81,25 +82,37 @@ class NotificationManager:
                     title=title,
                     body=body,
                     category=NotificationCategory.PAYMENT_APPROVED,
-                    metadata={'payment_id':str(payment_id)}
+                    metadata={
+                        'payment_id': str(payment_id),
+                        'type': 'subscription_payment_checked', # 💡 NUEVO
+                        'objective': objective_type,            # 💡 NUEVO
+                        'status': 'approved'                    # 💡 NUEVO
+                    }
                 )
             else:
-                # Lógica de rechazo (se mantiene igual)
                 title = 'Pago Rechazado'
                 body = f'El pago por la suscripción <b>{subscription_name}</b> ha sido rechazado por el siguiente motivo: <b>{rejection_reason}</b>'
+                
                 notification = Notification.objects.create(
                     user_id=user_id,
                     section=NotificationSection.HOME,
                     title=title,
                     body=body,
                     category=NotificationCategory.PAYMENT_REJECTED,
-                    metadata={'payment_id':str(payment_id)}
+                    metadata={
+                        'payment_id': str(payment_id),
+                        'type': 'subscription_payment_checked', # 💡 NUEVO
+                        'objective': objective_type,            # 💡 NUEVO
+                        'status': 'rejected'                    # 💡 NUEVO
+                    }
                 )
             
+            # El payload de Firebase (FCM) ahora enviará lo mismo
             data = {
-                'type': 'merchant_payment_checked',
-                'notification_id':f"{notification.id}",
-                'status':'approved' if approved else 'rejected'
+                'type': 'subscription_payment_checked',
+                'objective': objective_type,
+                'notification_id': f"{notification.id}",
+                'status': 'approved' if approved else 'rejected'
             }
         except Exception as e:
             print(f"Error armando las notificaciones: {e}")
