@@ -316,7 +316,7 @@ class UserNavigationLogAdmin(ModelAdmin):
 
 @admin.register(CompanyVideoStory)
 class CompanyVideoStoryAdmin(ModelAdmin):
-    list_display = ("id", "company", "associated_item_link", "views_count", "is_active", "creation")
+    list_display = ("id", "company", "duration_seconds", "associated_item_link", "views_count", "is_active", "creation")
     list_filter = ("company", "creation")
     search_fields = ("company__name", "description")
     readonly_fields = ("creation", "views_count")
@@ -327,7 +327,7 @@ class CompanyVideoStoryAdmin(ModelAdmin):
             'fields': ('company', 'associated_item', 'description')
         }),
         ('Multimedia', {
-            'fields': ('video_file', 'thumbnail')
+            'fields': ('video_file', 'thumbnail', 'duration_seconds')
         }),
         ('Métricas y Ciclo de Vida', {
             'fields': ('views_count', 'creation', 'expires_at')
@@ -405,6 +405,10 @@ class VideoEngagementLogAdmin(ModelAdmin):
         
         badges = ["👀 Visto", "🎯 Completado", "🛒 Carrito", "🛍️ Compra!"]
         return badges[score - 1] if score > 0 else "Ignorado"
+    
+@admin.register(UnmetDemandLog)
+class UnmetDemandLogAdmin(ModelAdmin):
+    list_display = ('client', 'search_term', 'coordinates', 'creation')
 
 others = [
     InventoryItemOffer, 

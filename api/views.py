@@ -2371,6 +2371,717 @@ class SearchCacheAPI(APIView):
 #################### VIEW SETS #####################
 ####################################################
 
+class AnalyticsViewSet(viewsets.ViewSet):
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'actions'
+
+    # =========================================================================
+    # 1. IMPACTO FINANCIERO Y RETORNO DE INVERSIÓN (ROI)
+    # =========================================================================
+    @action(detail=False, methods=['get'])
+    def roi_impact(self, request):
+        company = Company.objects.filter(owner=request.user).first()
+        if not company:
+            return Response({'error': 'Compañía no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+
+        time_horizon = timezone.now() - timedelta(days=30)
+
+        # --- 1. EMBUDO BASE (Vistas analíticas agregadas) ---
+        total_views = ProductViewLog.objects.filter(
+            inventory_item__store__company=company,
+            start_time__gte=time_horizon
+        ).count()
+
+        # --- 2. TRANSMUTACIÓN FINANCIERA DESDE DIARIO DE INVENTARIO ---
+        # Buscamos exclusivamente los EGRESOS (OUTCOME) que representan las ventas en CartMaker
+        sales_transactions = InventoryItemTransaction.objects.filter(
+            item__store__company=company,
+            transaction_type=TransactionType.OUTCOME,
+            creation__gte=time_horizon
+        ).select_related('item__product', 'item__store')
+
+        total_revenue = 0.0
+        total_items_sold = 0
+        
+        organic_sales_count = 0
+        atlas_sales_count = 0
+        video_sales_count = 0
+
+        product_financials = {}
+
+        for trans in sales_transactions:
+            qty = abs(trans.units)
+            total_items_sold += qty
+
+            # Deducción del precio basada en la jerarquía del inventario (Custom vs Base)
+            price = float(trans.item.custom_price if trans.item.custom_price else trans.item.product.price)
+            subtotal = qty * price
+            total_revenue += subtotal
+
+            # --- ATRIBUCIÓN LOGÍSTICA-TELEMETRÍCA (Sin Tabla de Órdenes) ---
+            # Correlacionamos el momento exacto del egreso con los logs de interacción del cliente
+            is_attributed = False
+
+            # A. Verificación de canal de Video Historias (Ventana de interacción de 2 horas previas)
+            has_video_engagement = VideoEngagementLog.objects.filter(
+                video__associated_item=trans.item,
+                timestamp__lte=trans.creation,
+                timestamp__gte=trans.creation - timedelta(hours=2)
+            ).exists()
+
+            if has_video_engagement:
+                video_sales_count += qty
+                is_attributed = True
+
+            # B. Verificación de recomendación de Atlas IA (Ventana de influencia de 7 días previos)
+            if not is_attributed:
+                has_atlas_influence = ProductViewLog.objects.filter(
+                    inventory_item=trans.item,
+                    origin_source='atlas',
+                    start_time__lte=trans.creation,
+                    start_time__gte=trans.creation - timedelta(days=7)
+                ).exists()
+
+                if has_atlas_influence:
+                    atlas_sales_count += qty
+                    is_attributed = True
+
+            # C. Fallback: Si no hay marcas telemétricas, la venta es puramente Orgánica
+            if not is_attributed:
+                organic_sales_count += qty
+
+            # --- MASTRUZACIÓN DEL RANKING FINANCIERO ---
+            pid = str(trans.item.product.id)
+            if pid not in product_financials:
+                product_financials[pid] = {
+                    'id': pid,
+                    'name': trans.item.product.name,
+                    'image': storage_manager.get_url(trans.item.product.images[0]) if trans.item.product.images else None,
+                    'units_sold': 0,
+                    'revenue': 0.0
+                }
+            product_financials[pid]['units_sold'] += qty
+            product_financials[pid]['revenue'] += subtotal
+
+        # Tasa de conversión basada en flujos reales
+        conversion_rate = round((total_items_sold / total_views * 100), 2) if total_views > 0 else 0.0
+        top_products = sorted(product_financials.values(), key=lambda x: x['revenue'], reverse=True)[:5]
+
+        # --- 3. CÁLCULO DE RENTABILIDAD SOBRE EL COSTO DEL PLAN ---
+        plan_cost = 0.0
+        try:
+            sub = MerchantSubscription.objects.select_related('plan').get(merchant=request.user)
+            plan_cost = float(sub.plan.price)
+        except MerchantSubscription.DoesNotExist:
+            pass
+
+        net_profit = total_revenue - plan_cost
+        roi_percentage = round((net_profit / plan_cost * 100), 1) if plan_cost > 0 else 0.0
+        is_profitable = total_revenue >= plan_cost
+
+        # --- 4. INSIGHTS CONTEXTUALES GENERADOS POR ATLAS ---
+        insights = {'roi': None, 'origin': None, 'products': None}
+
+        if is_profitable and plan_cost > 0:
+            multiplier = round(total_revenue / plan_cost, 1)
+            insights['roi'] = f"¡Excelente! Los ingresos deducidos este mes ya cubrieron tu plan {multiplier} veces. Tu negocio está en números verdes."
+        elif plan_cost > 0 and total_revenue > 0:
+            insights['roi'] = "Estás generando ingresos en inventario, pero aún no cubres el costo de tu suscripción. Intenta potenciar tus ofertas."
+
+        if total_items_sold > 0:
+            if atlas_sales_count >= organic_sales_count and atlas_sales_count >= video_sales_count:
+                insights['origin'] = "Estoy conectando exitosamente tus productos con los clientes ideales mediante el chat. Mantén tus precios al día."
+            elif video_sales_count >= organic_sales_count:
+                insights['origin'] = "Tus Video Historias están liderando la conversión de existencias. Sigue explotando tu vitrina visual."
+            else:
+                insights['origin'] = "Tus clientes retiran stock principalmente por búsquedas orgánicas. Tienes buen posicionamiento local."
+
+        if top_products:
+            insights['products'] = f"'{top_products[0]['name']}' es el motor de tu negocio este mes. Vigila de cerca su inventario en tiempo real."
+
+        return Response({
+            'data': {
+                'funnel': {
+                    'views': total_views,
+                    'sales': total_items_sold,
+                    'conversion_rate': conversion_rate
+                },
+                'sales_distribution': {
+                    'organic': organic_sales_count,
+                    'atlas': atlas_sales_count,
+                    'video': video_sales_count
+                },
+                'revenue_and_roi': {
+                    'total_revenue_usd': round(total_revenue, 2),
+                    'plan_cost_usd': plan_cost,
+                    'roi_percentage': roi_percentage,
+                    'is_profitable': is_profitable
+                },
+                'top_products': top_products,
+                'insights': insights
+            }
+        }, status=status.HTTP_200_OK)
+
+    # =========================================================================
+    # 2. RENDIMIENTO DE CONTENIDO (Video Stories Metrics)
+    # =========================================================================
+    @action(detail=False, methods=['get'])
+    def content_performance(self, request):
+        company = Company.objects.filter(owner=request.user).first()
+        if not company:
+            return Response({'error': 'Compañía no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+
+        time_horizon = timezone.now() - timedelta(days=30)
+        logs = VideoEngagementLog.objects.filter(video__company=company, timestamp__gte=time_horizon)
+
+        total_views = logs.count()
+        completed_views = logs.filter(video_completed=True).count()
+        abandoned_views = total_views - completed_views
+        interacted = logs.filter(interacted_with_product=True).count()
+        added_to_cart = logs.filter(added_to_cart_from_video=True).count()
+        
+        completion_rate = round((completed_views / total_views * 100), 1) if total_views > 0 else 0.0
+
+        video_stats = {}
+        total_video_revenue = 0.0
+        total_watch_time_seconds_clean = 0.0
+
+        company_videos = CompanyVideoStory.objects.filter(company=company)
+        for v in company_videos:
+            video_stats[str(v.id)] = {
+                'id': str(v.id),
+                'description': v.description or 'Video sin descripción',
+                'thumbnail': storage_manager.get_url(v.thumbnail) if v.thumbnail else None,
+                'duration_seconds': v.duration_seconds,
+                'views': 0, 'completions': 0, 'watch_time_seconds': 0.0,
+                'revenue': 0.0, 'units_sold': 0, 'interacted': 0
+            }
+
+        for log in logs:
+            vid = str(log.video_id)
+            if vid in video_stats:
+                video_stats[vid]['views'] += 1
+                
+                real_duration = video_stats[vid]['duration_seconds']
+                logged_time = log.watch_time_seconds
+                
+                if real_duration > 0 and logged_time > real_duration:
+                    capped_time = real_duration
+                else:
+                    capped_time = logged_time
+                    
+                video_stats[vid]['watch_time_seconds'] += capped_time
+                total_watch_time_seconds_clean += capped_time
+
+                if log.video_completed: video_stats[vid]['completions'] += 1
+                if log.interacted_with_product: video_stats[vid]['interacted'] += 1
+
+        # --- AUDITORÍA DE FACTURACIÓN POR VIDEO USANDO DIARIO CONTABLE ---
+        # Buscamos todos los egresos físicos vinculados a productos asociados a los videos
+        for vid, stats in video_stats.items():
+            video_obj = next((v for v in company_videos if str(v.id) == vid), None)
+            if video_obj and video_obj.associated_item_id:
+                # Rastreamos los egresos físicos que ocurrieron en la ventana temporal del video
+                related_txs = InventoryItemTransaction.objects.filter(
+                    item_id=video_obj.associated_item_id,
+                    transaction_type=TransactionType.OUTCOME,
+                    creation__gte=time_horizon
+                )
+                for tx in related_txs:
+                    # Correlacionamos si existen logs de compra atribuidos por video
+                    has_purchase_log = VideoEngagementLog.objects.filter(
+                        video_id=vid,
+                        bought_from_video=True,
+                        timestamp__lte=tx.creation,
+                        timestamp__gte=tx.creation - timedelta(hours=2)
+                    ).exists()
+
+                    if has_purchase_log:
+                        units = abs(tx.units)
+                        price = float(tx.item.custom_price if tx.item.custom_price else tx.item.product.price)
+                        revenue_tx = units * price
+                        
+                        video_stats[vid]['units_sold'] += units
+                        video_stats[vid]['revenue'] += revenue_tx
+                        total_video_revenue += revenue_tx
+
+        top_videos = sorted(
+            [v for v in video_stats.values() if v['views'] > 0 or v['revenue'] > 0], 
+            key=lambda x: (x['revenue'], x['views']), 
+            reverse=True
+        )[:5]
+
+        # Generación de insights telemétricos
+        insights = {'funnel': None, 'retention': None, 'top': None}
+        if total_views > 0:
+            click_rate = interacted / total_views
+            if click_rate < 0.05:
+                insights['funnel'] = "Tus videos captan atención, pero no derivan clics al producto. Ajusta tu llamado a la acción."
+            elif (added_to_cart / interacted) >= 0.3:
+                insights['funnel'] = "¡Conversión óptima desde el reproductor! El contenido multimedia es altamente persuasivo."
+                
+            if completion_rate < 20:
+                insights['retention'] = "Los usuarios abandonan el clip rápido. Intenta condensar el mensaje clave en menos segundos."
+
+        if top_videos and top_videos[0]['revenue'] > 0:
+            top_desc = top_videos[0]['description']
+            clean_desc = top_desc[:25] + "..." if len(top_desc) > 25 else top_desc
+            insights['top'] = f"Tu video '{clean_desc}' lidera los ingresos de almacén. Replica su estilo visual."
+
+        return Response({
+            'data': {
+                'global_metrics': {
+                    'total_views': total_views,
+                    'completed_views': completed_views,
+                    'abandoned_views': abandoned_views,
+                    'total_watch_time_minutes': round(total_watch_time_seconds_clean / 60, 1),
+                    'completion_rate': completion_rate,
+                    'total_video_revenue': round(total_video_revenue, 2),
+                },
+                'funnel': {
+                    'views': total_views,
+                    'interacted': interacted,
+                    'added_to_cart': added_to_cart,
+                },
+                'top_videos': top_videos,
+                'insights': insights
+            }
+        }, status=status.HTTP_200_OK)
+
+    # =========================================================================
+    # 3. MOTOR DE FIDELIZACIÓN (Gamificación y Retención Telemétrica)
+    # =========================================================================
+    @action(detail=False, methods=['get'])
+    def loyalty_performance(self, request):
+        company = Company.objects.filter(owner=request.user).first()
+        if not company:
+            return Response({'error': 'Compañía no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+
+        time_horizon = timezone.now() - timedelta(days=30)
+        
+        # --- 1. AUDITORÍA DE TOKENS ---
+        tokens_emitted = TokenWalletTransaction.objects.filter(
+            token_wallet__company=company,
+            transaction_type=TransactionType.INCOME,
+            creation__gte=time_horizon
+        ).aggregate(Sum('amount'))['amount__sum'] or 0
+
+        tokens_redeemed = TokenWalletTransaction.objects.filter(
+            token_wallet__company=company,
+            transaction_type=TransactionType.OUTCOME,
+            creation__gte=time_horizon
+        ).aggregate(Sum('amount'))['amount__sum'] or 0
+
+        # --- 2. RETENCIÓN MEDIANTE LOGS DE TRÁFICO COMPRADOR ---
+        # Usamos los logs analíticos donde se marca 'bought=True' para identificar clientes recurrentes
+        purchase_logs_30d = ProductViewLog.objects.filter(
+            inventory_item__store__company=company,
+            bought=True,
+            start_time__gte=time_horizon
+        ).values('client').annotate(purchase_count=Count('id'))
+
+        all_time_purchases = ProductViewLog.objects.filter(
+            inventory_item__store__company=company,
+            bought=True
+        ).values('client').annotate(total_purchases=Count('id'))
+        
+        history_map = {item['client']: item['total_purchases'] for item in all_time_purchases}
+        
+        new_customers = 0
+        returning_customers = 0
+        vip_data = {}
+
+        for log in purchase_logs_30d:
+            client_id = log['client']
+            if history_map.get(client_id, 0) > 1:
+                returning_customers += 1
+            else:
+                new_customers += 1
+
+        # --- 3. EXTRACCIÓN VIP Y ANALÍTICA DE GAMIFICACIÓN ---
+        # Buscamos transacciones contables del catálogo con reglas de gamificación activas
+        gamified_items = InventoryItem.objects.filter(
+            store__company=company,
+            product__discounts_by_tokens_active=True
+        ).select_related('product')
+
+        gamified_products_stats = {}
+        revenue_from_token_orders = 0.0
+
+        for item in gamified_items:
+            # Traemos todos los egresos reales de este producto gamificado
+            item_sales = InventoryItemTransaction.objects.filter(
+                item=item,
+                transaction_type=TransactionType.OUTCOME,
+                creation__gte=time_horizon
+            )
+            
+            for tx in item_sales:
+                qty = abs(tx.units)
+                price = float(item.custom_price if item.custom_price else item.product.price)
+                subtotal = qty * price
+                
+                # Si hubo tokens redimidos en la ventana de tiempo, asumimos impacto del programa
+                if tokens_redeemed > 0:
+                    revenue_from_token_orders += subtotal
+
+                pid = str(item.product.id)
+                if pid not in gamified_products_stats:
+                    gamified_products_stats[pid] = {
+                        'id': pid,
+                        'name': item.product.name,
+                        'image': storage_manager.get_url(item.product.images[0]) if item.product.images else None,
+                        'units_sold': 0,
+                        'revenue': 0.0,
+                        'discount_investment': 0.0
+                    }
+                gamified_products_stats[pid]['units_sold'] += qty
+                gamified_products_stats[pid]['revenue'] += subtotal
+
+        # Construcción sintética del Top VIP basado en volumen analítico de compras
+        top_vips_logs = ProductViewLog.objects.filter(
+            inventory_item__store__company=company,
+            bought=True,
+            start_time__gte=time_horizon
+        ).select_related('client').values(
+            'client__id', 'client__first_name', 'client__last_name', 'client__profile_picture'
+        ).annotate(total_purchases=Count('id'))[:5]
+
+        top_vips = []
+        for v in top_vips_logs:
+            top_vips.append({
+                'id': str(v['client__id']),
+                'name': f"{v['client__first_name']} {v['client__last_name']}",
+                'image': storage_manager.get_url(v['client__profile_picture']) if v['client__profile_picture'] else None,
+                'orders': v['total_purchases'],
+                'spent': 0.0  # Mantenemos firma del contrato de la API
+            })
+
+        top_gamified_products = sorted(gamified_products_stats.values(), key=lambda x: x['revenue'], reverse=True)[:10]
+
+        # Insights contextuados
+        insights = {'tokens': None, 'retention': None, 'general': None, 'products': None}
+        if not company.gamification_enabled:
+            insights['general'] = "No tienes la gamificación activada. Enciende los tokens para empezar a fidelizar clientes."
+        else:
+            if tokens_redeemed > 0:
+                insights['tokens'] = "¡El sistema de fidelización funciona! Los clientes están retornando para liberar sus puntos."
+            
+            if returning_customers > new_customers:
+                insights['retention'] = "¡Excelente retención telemétrica! Tienes una base de compradores altamente recurrentes."
+
+        return Response({
+            'data': {
+                'gamification_enabled': company.gamification_enabled,
+                'tokens': {
+                    'emitted': tokens_emitted,
+                    'redeemed': tokens_redeemed,
+                    'revenue_from_token_orders': round(revenue_from_token_orders, 2)
+                },
+                'retention': {
+                    'new_customers': new_customers,
+                    'returning_customers': returning_customers
+                },
+                'top_vips': top_vips,
+                'gamified_products': top_gamified_products,
+                'insights': insights
+            }
+        }, status=status.HTTP_200_OK)
+
+    # =========================================================================
+    # 4. RADAR DE OPORTUNIDADES COMERCIALES (Geolocalización Analítica)
+    # =========================================================================
+    @action(detail=False, methods=['get'])
+    def opportunities_radar(self, request):
+        company = Company.objects.filter(owner=request.user).first()
+        if not company:
+            return Response({'error': 'Compañía no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+
+        time_horizon = timezone.now() - timedelta(days=30)
+        
+        main_store = CompanyStore.objects.filter(company=company, is_main_store=True).select_related('location').first()
+        if not main_store or not hasattr(main_store, 'location'):
+            main_store = CompanyStore.objects.filter(company=company).select_related('location').first()
+            
+        if not main_store or not hasattr(main_store, 'location') or not main_store.location.coordinates:
+            return Response({'error': 'Tu comercio no tiene una ubicación configurada para generar el radar.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        center_point = main_store.location.coordinates
+
+        from django.contrib.gis.measure import D
+        unmet_logs = UnmetDemandLog.objects.filter(
+            creation__gte=time_horizon,
+            coordinates__distance_lte=(center_point, D(km=15))
+        )
+
+        total_missed_searches = unmet_logs.count()
+        top_terms = unmet_logs.values('search_term').annotate(count=Count('id')).order_by('-count')[:20]
+        top_keywords = [{'term': item['search_term'].capitalize(), 'count': item['count']} for item in top_terms]
+
+        features = []
+        for log in unmet_logs:
+            features.append({
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [log.coordinates.x, log.coordinates.y]
+                },
+                "properties": {
+                    "weight": 1.0,
+                    "term": log.search_term.capitalize() 
+                }
+            })
+            
+        heatmap_geojson = {
+            "type": "FeatureCollection",
+            "features": features
+        }
+
+        insights = {'radar': None, 'action': None}
+        if total_missed_searches == 0:
+            insights['radar'] = "Por ahora no detecto búsquedas fallidas relevantes cerca de tu ubicación."
+        else:
+            insights['radar'] = f"Detecté {total_missed_searches} clientes potenciales buscando productos sin stock en tu rango de entrega."
+            if top_keywords:
+                insights['action'] = f"La oportunidad de oro es '{top_keywords[0]['term']}'. Satisface esta demanda para dominar la zona."
+
+        return Response({
+            'data': {
+                'center_lat': center_point.y,
+                'center_lng': center_point.x,
+                'total_missed_searches': total_missed_searches,
+                'top_keywords': top_keywords,
+                'heatmap_geojson': heatmap_geojson,
+                'insights': insights
+            }
+        }, status=status.HTTP_200_OK)
+
+    # =========================================================================
+    # 5. GESTIÓN OPERATIVA DE SUCURSALES (Finanzas desde el Inventario)
+    # =========================================================================
+    @action(detail=False, methods=['get'])
+    def operative_management(self, request):
+        company = Company.objects.filter(owner=request.user).first()
+        if not company:
+            return Response({'error': 'Compañía no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+
+        time_horizon = timezone.now() - timedelta(days=30)
+        
+        # Traemos todas las transacciones de venta (OUTCOME) del mes
+        sales_txs = InventoryItemTransaction.objects.filter(
+            item__store__company=company,
+            transaction_type=TransactionType.OUTCOME,
+            creation__gte=time_horizon
+        ).select_related('item__store')
+
+        total_revenue = 0.0
+        # Consideramos cada transacción contable de venta como una entrada en caja
+        total_sales_records = sales_txs.count()
+
+        branches_data = {}
+        stores = CompanyStore.objects.filter(company=company)
+        
+        for store in stores:
+            total_items = InventoryItem.objects.filter(store=store).count()
+            low_stock_items = InventoryItem.objects.filter(store=store, stock__lte=5).count()
+            
+            health_status = "Estable"
+            if total_items > 0:
+                low_pct = low_stock_items / total_items
+                if low_pct > 0.5:
+                    health_status = "Bajo"
+                elif low_pct > 0.2:
+                    health_status = "Medio"
+
+            store_image = storage_manager.get_url(store.store_img_url) if store.store_img_url else ""
+            
+            branches_data[store.id] = {
+                'id': str(store.id),
+                'name': store.name,
+                'orders': 0,
+                'image': store_image,
+                'revenue': 0.0,
+                'inventory_health': health_status
+            }
+
+        # Procesamos los ingresos reales calculados desde el diario de stock
+        for tx in sales_txs:
+            qty = abs(tx.units)
+            price = float(tx.item.custom_price if tx.item.custom_price else tx.item.product.price)
+            subtotal = qty * price
+            
+            total_revenue += subtotal
+            
+            store_id = tx.item.store.id
+            if store_id in branches_data:
+                branches_data[store_id]['orders'] += 1
+                branches_data[store_id]['revenue'] += subtotal
+
+        average_ticket = round(total_revenue / total_sales_records, 2) if total_sales_records > 0 else 0.0
+        sorted_branches = sorted(branches_data.values(), key=lambda x: x['revenue'], reverse=True)
+
+        insights = {'accounting': None, 'branches': None}
+        if total_sales_records > 0:
+            if average_ticket > 20:
+                insights['accounting'] = f"Tu ticket promedio de ${average_ticket} basado en flujo de stock es muy sólido."
+            else:
+                insights['accounting'] = f"Tu ticket promedio es de ${average_ticket}. Incentiva compras de mayor volumen."
+                
+            if len(sorted_branches) > 1 and sorted_branches[0]['revenue'] > 0:
+                insights['branches'] = f"La sede '{sorted_branches[0]['name']}' lidera la facturación física."
+
+        return Response({
+            'data': {
+                'accounting': {
+                    'total_revenue': round(total_revenue, 2),
+                    'total_orders': total_sales_records,
+                    'average_ticket': average_ticket
+                },
+                'branches': sorted_branches,
+                'insights': insights
+            }
+        }, status=status.HTTP_200_OK)
+
+    # =========================================================================
+    # 6. LIBRO MAYOR DETALLADO (Soporta VENTA, INGRESO STOCK y CREACION)
+    # =========================================================================
+    @action(detail=False, methods=['get'])
+    def detailed_ledger(self, request):
+        company = Company.objects.filter(owner=request.user).first()
+        if not company:
+            return Response({'error': 'Compañía no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+
+        store_id = request.query_params.get('store_id', None)
+        page = int(request.query_params.get('page', 1))
+        is_export = request.query_params.get('export', 'false').lower() == 'true'
+        limit = 10
+        
+        time_horizon = timezone.now() - timedelta(days=30)
+
+        # Query limpia unificada: Traemos todo ordenado por fecha de creación decreciente
+        queryset = InventoryItemTransaction.objects.filter(
+            item__store__company=company,
+            creation__gte=time_horizon
+        ).select_related(
+            'item__product', 
+            'item__store'
+        ).order_by('-creation')
+
+        if store_id and store_id != 'all':
+            queryset = queryset.filter(item__store_id=store_id)
+
+        total_items = queryset.count()
+        total_pages = (total_items + limit - 1) // limit if total_items > 0 else 1
+
+        if not is_export:
+            start_idx = (page - 1) * limit
+            end_idx = start_idx + limit
+            transactions = queryset[start_idx:end_idx]
+        else:
+            transactions = queryset
+
+        ledger = []
+        for trans in transactions:
+            qty_val = abs(trans.units)
+            
+            # CASO A: Egresos (Ventas)
+            if trans.transaction_type == TransactionType.OUTCOME:
+                price = float(trans.item.custom_price if trans.item.custom_price else trans.item.product.price)
+                gross = round(price * qty_val, 2)
+                
+                ledger.append({
+                    'date': trans.creation,
+                    'type': 'VENTA',
+                    'store': trans.item.store.name,
+                    'product': trans.item.product.name,
+                    'qty': f"-{qty_val}",
+                    'gross_amount': gross,
+                    'discount_amount': 0.0,
+                    'net_revenue': gross,
+                    'origin': 'Venta Regular',
+                    'client_or_reason': 'Cliente CartMaker',
+                    'details': 'Procesado en caja / Checkout'
+                })
+                
+            # CASO B: Ingresos por reposición de stock
+            elif trans.transaction_type == TransactionType.INCOME:
+                ledger.append({
+                    'date': trans.creation,
+                    'type': 'INGRESO STOCK',
+                    'store': trans.item.store.name,
+                    'product': trans.item.product.name,
+                    'qty': f"+{qty_val}",
+                    'gross_amount': 0.0,
+                    'discount_amount': 0.0,
+                    'net_revenue': 0.0,
+                    'origin': 'Operativo',
+                    'client_or_reason': 'Abastecimiento / Proveedor',
+                    'details': 'Carga manual de inventario para reponer stock'
+                })
+                
+            # 💡 CASO C: Registro del Lote Inicial de Creación del Producto
+            elif trans.transaction_type == TransactionType.CREATION:
+                ledger.append({
+                    'date': trans.creation,
+                    'type': 'CREACION LOTE',
+                    'store': trans.item.store.name,
+                    'product': trans.item.product.name,
+                    'qty': f"+{qty_val}",
+                    'gross_amount': 0.0,
+                    'discount_amount': 0.0,
+                    'net_revenue': 0.0,
+                    'origin': 'Operativo',
+                    'client_or_reason': 'Registro Inicial',
+                    'details': 'Lote de inventario inicial creado en el sistema'
+                })
+
+        for entry in ledger:
+            entry['date'] = timezone.localtime(entry['date']).strftime("%d/%m/%Y %I:%M %p")
+
+        return Response({
+            'data': {
+                'ledger': ledger,
+                'pagination': {
+                    'current_page': page,
+                    'total_pages': total_pages,
+                    'has_next': page < total_pages,
+                    'has_previous': page > 1,
+                    'total_records': total_items
+                }
+            }
+        }, status=status.HTTP_200_OK)
+
+    # =========================================================================
+    # 7. INVENTARIO VIVO DE SUCURSAL (Para Modal en Flutter)
+    # =========================================================================
+    @action(detail=False, methods=['get'])
+    def branch_inventory(self, request):
+        store_id = request.query_params.get('store_id')
+        if not store_id:
+            return Response({'error': 'ID de sucursal requerido.'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        company = Company.objects.filter(owner=request.user).first()
+        
+        items = InventoryItem.objects.filter(
+            store_id=store_id, 
+            store__company=company,
+            paused=False
+        ).select_related('product')
+        
+        data = []
+        for item in items:
+            img_url = storage_manager.get_url(item.product.images[0]) if item.product.images else ""
+            data.append({
+                'id': str(item.id),
+                'name': item.product.name,
+                'stock': item.stock,
+                'image': img_url
+            })
+            
+        data.sort(key=lambda x: x['stock'])
+        return Response({'data': data}, status=status.HTTP_200_OK)
+
 class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
     """
     Endpoints para gestionar los videos cortos de los comercios.
@@ -2487,6 +3198,7 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
             thumb_obj = request.FILES.get('thumbnail')
             description = request.data.get('description', '')
             associated_item_id = request.data.get('associated_item_id')
+            duration = float(request.data.get('duration_seconds', 0.0))
 
             filter_matrix_raw = request.data.get('applied_filter_matrix')
             filter_matrix = json.loads(filter_matrix_raw) if filter_matrix_raw else None
@@ -2542,7 +3254,8 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
                     description=description,
                     associated_item=associated_item,
                     applied_filter_matrix=filter_matrix,
-                    expires_at=expires_at
+                    expires_at=expires_at,
+                    duration_seconds=duration
                 )
 
                 # 💡 Lanzamos la tarea a Celery
@@ -3311,6 +4024,7 @@ class CartViewSet(viewsets.ViewSet):
 
                     original_item_req = next((req_item for req_item in items_data if str(req_item['id']) == str(item.id)), {})
                     source_video_id = original_item_req.get('source_video_id')
+                    is_from_atlas = original_item_req.get('isFromAtlas', False)
 
                     img_url = storage_manager.get_url(item.product.images[0]) if item.product.images else ""
 
@@ -3324,7 +4038,8 @@ class CartViewSet(viewsets.ViewSet):
                         "product_image": img_url,
                         "standard_offer_applied": standard_offer_pct,
                         "token_discount_applied": applied_token_discount,
-                        "source_video_id": source_video_id
+                        "source_video_id": source_video_id,
+                        "is_from_atlas": is_from_atlas
                     })
                     total_price += subtotal
 
@@ -3407,7 +4122,7 @@ class InteractionLogViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['post'])
     def product_view(self, request):
         """
-        Registra el Dwell Time (tiempo en pantalla) e interacciones con un producto.
+        Registra el Dwell Time e interacciones. Envía los datos a un Buffer en Redis.
         """
         data = request.data
         item_id = data.get('item_id')
@@ -3416,26 +4131,25 @@ class InteractionLogViewSet(viewsets.ViewSet):
         if not item_id or not start_time_raw:
             return Response({'error': 'item_id y start_time son obligatorios.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        try:
-            item = InventoryItem.objects.only('id').get(id=item_id)
-            
-            # Usamos el helper para sanitizar las fechas
-            start_time = self._parse_aware_datetime(start_time_raw)
-            end_time = self._parse_aware_datetime(data.get('end_time'))
+        # Preparamos el payload añadiendo el ID del usuario
+        payload = {
+            'client_id': str(request.user.id),
+            'item_id': str(item_id),
+            'added_to_cart': data.get('added_to_cart', False),
+            'bought': data.get('bought', False),
+            'start_time': start_time_raw,
+            'end_time': data.get('end_time')
+        }
 
-            ProductViewLog.objects.create(
-                client=request.user,
-                inventory_item=item,
-                added_to_cart=data.get('added_to_cart', False),
-                bought=data.get('bought', False),
-                start_time=start_time,
-                end_time=end_time
-            )
-            return Response(status=status.HTTP_201_CREATED)
-        except InventoryItem.DoesNotExist:
-            return Response({'error': 'El producto no existe.'}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            # Empujamos a la lista de Redis
+            redis_conn = cache.client.get_client()
+            redis_conn.rpush("telemetry:product_views", json.dumps(payload))
+            return Response(status=status.HTTP_202_ACCEPTED) # 202 significa "Aceptado para procesamiento"
+            
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            print(f"Error al encolar analítica en Redis: {e}")
+            return Response({'error': 'Error interno'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['post'])
     def store_view(self, request):
@@ -3449,29 +4163,25 @@ class InteractionLogViewSet(viewsets.ViewSet):
         if not store_id or not join_time_raw:
             return Response({'error': 'store_id y join_time son obligatorios.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        try:
-            store = CompanyStore.objects.only('id').get(id=store_id)
-            
-            # Usamos el helper para sanitizar las fechas
-            join_time = self._parse_aware_datetime(join_time_raw)
-            exit_time = self._parse_aware_datetime(data.get('exit_time'))
+        payload = {
+            'client_id': str(request.user.id),
+            'store_id': str(store_id),
+            'join_time': join_time_raw,
+            'exit_time': data.get('exit_time'),
+            'location_watched': data.get('location_watched', False),
+            'presentation_video_watched': data.get('presentation_video_watched', False),
+            'stories_watched': data.get('stories_watched', False),
+            'products_watched': data.get('products_watched', False),
+            'tryed_to_contact': data.get('tryed_to_contact', False)
+        }
 
-            StoreViewLog.objects.create(
-                client=request.user,
-                store=store, # 💡 AQUÍ PASAMOS LA TIENDA
-                join_time=join_time,
-                exit_time=exit_time,
-                location_watched=data.get('location_watched', False),
-                presentation_video_watched=data.get('presentation_video_watched', False),
-                stories_watched=data.get('stories_watched', False),
-                products_watched=data.get('products_watched', False),
-                tryed_to_contact=data.get('tryed_to_contact', False)
-            )
-            return Response(status=status.HTTP_201_CREATED)
-        except CompanyStore.DoesNotExist:
-            return Response({'error': 'La tienda no existe.'}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            redis_conn = cache.client.get_client()
+            redis_conn.rpush("telemetry:store_views", json.dumps(payload))
+            return Response(status=status.HTTP_202_ACCEPTED)
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            print(f"Error al encolar analítica de store_view: {e}")
+            return Response({'error': 'Error interno'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['post'])
     def navigation(self, request):
@@ -3485,25 +4195,25 @@ class InteractionLogViewSet(viewsets.ViewSet):
         if not login_time_raw:
             return Response({'error': 'login_time es obligatorio.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        try:
-            # Usamos el helper para sanitizar las fechas
-            login_time = self._parse_aware_datetime(login_time_raw)
-            logout_time = self._parse_aware_datetime(data.get('logout_time'))
+        payload = {
+            'client_id': str(request.user.id),
+            'navigation_record': navigation_record,
+            'login_time': login_time_raw,
+            'logout_time': data.get('logout_time')
+        }
 
-            UserNavigationLog.objects.create(
-                user=request.user,
-                navigation_record=navigation_record,
-                login_time=login_time,
-                logout_time=logout_time
-            )
-            return Response(status=status.HTTP_201_CREATED)
+        try:
+            redis_conn = cache.client.get_client()
+            redis_conn.rpush("telemetry:navigation_logs", json.dumps(payload))
+            return Response(status=status.HTTP_202_ACCEPTED)
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            print(f"Error al encolar analítica de navigation: {e}")
+            return Response({'error': 'Error interno'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['post'])
     def video_engagement(self, request):
         """
-        Registra interacciones de video, tiempo de visualización y marca el video como visto.
+        Registra interacciones de video y acumula el tiempo de visualización.
         """
         data = request.data
         video_id = data.get('video_id')
@@ -3511,42 +4221,27 @@ class InteractionLogViewSet(viewsets.ViewSet):
         if not video_id:
             return Response({'error': 'video_id es obligatorio.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Blindaje de parseo booleano desde Flutter
+        def parse_bool(val):
+            return str(val).lower() == 'true' if isinstance(val, str) else bool(val)
+
+        payload = {
+            'client_id': str(request.user.id),
+            'video_id': str(video_id),
+            'watch_time_seconds': float(data.get('watch_time_seconds', 0.0)),
+            'video_completed': parse_bool(data.get('video_completed', False)),
+            'interacted_with_product': parse_bool(data.get('interacted_with_product', False)),
+            'added_to_cart_from_video': parse_bool(data.get('added_to_cart_from_video', False)),
+            'bought_from_video': parse_bool(data.get('bought_from_video', False))
+        }
+
         try:
-            video = CompanyVideoStory.objects.only('id').get(id=video_id)
-            
-            log, created = VideoEngagementLog.objects.get_or_create(
-                client=request.user,
-                video=video
-            )
-
-            # Acumular o actualizar métricas
-            watch_time = float(data.get('watch_time_seconds', 0.0))
-            if watch_time > 0:
-                log.watch_time_seconds += watch_time
-            
-            # 💡 BLINDAJE DE PARSEO BOOLEANO DESDE FLUTTER
-            raw_completed = data.get('video_completed', False)
-            is_completed = str(raw_completed).lower() == 'true' if isinstance(raw_completed, str) else bool(raw_completed)
-
-            if is_completed:
-                log.video_completed = True
-                
-            raw_interacted = data.get('interacted_with_product', False)
-            if (str(raw_interacted).lower() == 'true' if isinstance(raw_interacted, str) else bool(raw_interacted)):
-                log.interacted_with_product = True
-                
-            raw_added_cart = data.get('added_to_cart_from_video', False)
-            if (str(raw_added_cart).lower() == 'true' if isinstance(raw_added_cart, str) else bool(raw_added_cart)):
-                log.added_to_cart_from_video = True
-
-            log.save()
-            
-            return Response({'success': True}, status=status.HTTP_200_OK)
-
-        except CompanyVideoStory.DoesNotExist:
-            return Response({'error': 'El video no existe.'}, status=status.HTTP_404_NOT_FOUND)
+            redis_conn = cache.client.get_client()
+            redis_conn.rpush("telemetry:video_engagement", json.dumps(payload))
+            return Response({'success': True}, status=status.HTTP_202_ACCEPTED)
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            print(f"Error al encolar analítica de video_engagement: {e}")
+            return Response({'error': 'Error interno'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 # ============================================================================
 # 1. MÓDULO DE PERFILES DE EMPRESA
@@ -4221,6 +4916,20 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
             max_distance_meters=max_distance
         )
 
+        if len(data_list) == 0 and search_query:
+            payload = {
+                'client_id': str(request.user.id) if request.user.is_authenticated else None,
+                'search_term': search_query,
+                'lat': lat,
+                'lng': lng,
+                'timestamp': timezone.now().isoformat()
+            }
+            try:
+                redis_conn = cache.client.get_client()
+                redis_conn.rpush("telemetry:unmet_demand", json.dumps(payload))
+            except Exception as e:
+                print(f"Error registrando demanda insatisfecha: {e}")
+
         return self._respond_pre_sliced_data(data_list, request, page, page_size)
 
     @action(detail=False, methods=['get'])
@@ -4725,6 +5434,11 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
                     stock=int(stock),
                     expiration_date=exp_datetime,
                     custom_price=custom_price if custom_price else None
+                )
+                InventoryItemTransaction.objects.create(
+                    item=item,
+                    units=int(stock),
+                    transaction_type=TransactionType.CREATION
                 )
 
                 return Response({'success': True, 'data': item.get_json()}, status=status.HTTP_201_CREATED)

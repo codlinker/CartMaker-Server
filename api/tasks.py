@@ -1,6 +1,5 @@
 from datetime import timedelta
 import json
-
 import boto3
 from celery import shared_task
 from django.contrib.auth import get_user_model
@@ -11,9 +10,11 @@ import subprocess
 import tempfile
 from api.core.firebase_admin import NotificationManager
 from .core.platinum_manager import PlatinumEvaluator
-from api.models import CompanyVideoStory, InventoryItemOffer, InventoryItem, Order
+from api.models import CompanyVideoStory, InventoryItemOffer, InventoryItem, Order, ProductViewLog, StoreViewLog, UnmetDemandLog, UserNavigationLog, VideoEngagementLog
 from django.core.cache import cache
+from django.utils.dateparse import parse_datetime
 from django.conf import settings
+from django.contrib.gis.geos import Point
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -365,3 +366,178 @@ def optimize_and_transcode_video_story(story_id):
 
     except Exception as e:
         logger.error(f"❌ Error crítico en la transcodificación de la historia {story_id}: {e}")
+
+@shared_task(ignore_result=True)
+def process_analytics_batch():
+    """
+    Barre todas las colas de telemetría de CartMaker en Redis y 
+    procesa las inserciones y actualizaciones masivas hacia PostgreSQL.
+    """
+    try:
+        redis_conn = cache.client.get_client()
+    except Exception as e:
+        logger.error(f"❌ Error al conectar con Redis para analíticas: {e}")
+        return
+
+    # Extraemos todo usando un Pipeline para máxima velocidad
+    pipeline = redis_conn.pipeline()
+    
+    # 💡 Agregamos la nueva cola al final de la lista
+    queues = [
+        "telemetry:product_views", 
+        "telemetry:store_views", 
+        "telemetry:navigation_logs", 
+        "telemetry:video_engagement",
+        "telemetry:unmet_demand" 
+    ]
+    
+    for q in queues:
+        pipeline.lrange(q, 0, -1)
+        pipeline.delete(q)
+        
+    results = pipeline.execute()
+    
+    # results agrupa en pares [lista_data, bool_delete, lista_data, bool_delete...]
+    raw_products = results[0]
+    raw_stores = results[2]
+    raw_navigation = results[4]
+    raw_video = results[6]
+    raw_unmet_demand = results[8] # 💡 Extraemos la data de las búsquedas fallidas
+
+    def parse_aware_datetime(dt_str):
+        if not dt_str: return None
+        parsed = parse_datetime(str(dt_str))
+        if parsed and timezone.is_naive(parsed):
+            return timezone.make_aware(parsed)
+        return parsed
+
+    # ==========================================
+    # 1. STORE VIEWS (Bulk Create)
+    # ==========================================
+    if raw_stores:
+        store_logs = []
+        for item_bytes in raw_stores:
+            try:
+                data = json.loads(item_bytes.decode('utf-8'))
+                store_logs.append(StoreViewLog(
+                    client_id=data['client_id'],
+                    store_id=data['store_id'],
+                    join_time=parse_aware_datetime(data['join_time']),
+                    exit_time=parse_aware_datetime(data.get('exit_time')),
+                    location_watched=data['location_watched'],
+                    presentation_video_watched=data['presentation_video_watched'],
+                    stories_watched=data['stories_watched'],
+                    products_watched=data['products_watched'],
+                    tryed_to_contact=data['tryed_to_contact']
+                ))
+            except Exception: pass
+        if store_logs:
+            StoreViewLog.objects.bulk_create(store_logs, batch_size=500)
+
+    # ==========================================
+    # 2. NAVIGATION LOGS (Bulk Create)
+    # ==========================================
+    if raw_navigation:
+        nav_logs = []
+        for item_bytes in raw_navigation:
+            try:
+                data = json.loads(item_bytes.decode('utf-8'))
+                nav_logs.append(UserNavigationLog(
+                    user_id=data['client_id'],
+                    navigation_record=data['navigation_record'],
+                    login_time=parse_aware_datetime(data['login_time']),
+                    logout_time=parse_aware_datetime(data.get('logout_time'))
+                ))
+            except Exception: pass
+        if nav_logs:
+            UserNavigationLog.objects.bulk_create(nav_logs, batch_size=500)
+
+    # ==========================================
+    # 3. VIDEO ENGAGEMENT (Agrupación en RAM + Bulk Upsert)
+    # ==========================================
+    if raw_video:
+        aggregated_metrics = {}
+        for item_bytes in raw_video:
+            try:
+                data = json.loads(item_bytes.decode('utf-8'))
+                key = (data['client_id'], data['video_id'])
+                
+                if key not in aggregated_metrics:
+                    aggregated_metrics[key] = {
+                        'watch_time_seconds': 0.0,
+                        'video_completed': False,
+                        'interacted_with_product': False,
+                        'added_to_cart_from_video': False,
+                        'bought_from_video': False
+                    }
+                
+                metrics = aggregated_metrics[key]
+                metrics['watch_time_seconds'] += data['watch_time_seconds']
+                metrics['video_completed'] |= data['video_completed']
+                metrics['interacted_with_product'] |= data['interacted_with_product']
+                metrics['added_to_cart_from_video'] |= data['added_to_cart_from_video']
+                metrics['bought_from_video'] |= data['bought_from_video']
+            except Exception: pass
+
+        if aggregated_metrics:
+            client_ids = [k[0] for k in aggregated_metrics.keys()]
+            video_ids = [k[1] for k in aggregated_metrics.keys()]
+            
+            existing_logs = VideoEngagementLog.objects.filter(
+                client_id__in=client_ids, 
+                video_id__in=video_ids
+            )
+            existing_map = {(str(log.client_id), str(log.video_id)): log for log in existing_logs}
+
+            to_update = []
+            to_create = []
+
+            for (cid, vid), m in aggregated_metrics.items():
+                if (cid, vid) in existing_map:
+                    log = existing_map[(cid, vid)]
+                    log.watch_time_seconds += m['watch_time_seconds']
+                    log.video_completed = log.video_completed or m['video_completed']
+                    log.interacted_with_product = log.interacted_with_product or m['interacted_with_product']
+                    log.added_to_cart_from_video = log.added_to_cart_from_video or m['added_to_cart_from_video']
+                    log.bought_from_video = log.bought_from_video or m['bought_from_video']
+                    to_update.append(log)
+                else:
+                    to_create.append(VideoEngagementLog(
+                        client_id=cid, video_id=vid, **m
+                    ))
+
+            if to_update:
+                VideoEngagementLog.objects.bulk_update(to_update, [
+                    'watch_time_seconds', 'video_completed', 'interacted_with_product', 
+                    'added_to_cart_from_video', 'bought_from_video'
+                ], batch_size=500)
+            
+            if to_create:
+                VideoEngagementLog.objects.bulk_create(to_create, batch_size=500)
+
+    # ==========================================
+    # 4. UNMET DEMAND (Bulk Create)
+    # ==========================================
+    if raw_unmet_demand:
+        unmet_logs = []
+        for item_bytes in raw_unmet_demand:
+            try:
+                data = json.loads(item_bytes.decode('utf-8'))
+                lat = data.get('lat')
+                lng = data.get('lng')
+                
+                # Nos aseguramos de tener coordenadas válidas antes de instanciar Point
+                if lat is not None and lng is not None:
+                    unmet_logs.append(UnmetDemandLog(
+                        client_id=data.get('client_id'), # Soporta None tranquilamente
+                        search_term=data['search_term'],
+                        coordinates=Point(x=float(lng), y=float(lat)) # 💡 x=Longitud, y=Latitud
+                    ))
+            except Exception as e:
+                logger.warning(f"⚠️ Error parseando log de UnmetDemandLog (se omitirá): {e}")
+                
+        if unmet_logs:
+            try:
+                UnmetDemandLog.objects.bulk_create(unmet_logs, batch_size=500)
+            except Exception as e:
+                logger.error(f"❌ Error en bulk_create de unmet_demand: {e}")

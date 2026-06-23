@@ -67,6 +67,7 @@ class TransactionType(models.IntegerChoices):
     """
     INCOME = 0, _('Ingreso')
     OUTCOME = 1, _('Egreso')
+    CREATION = 2, _("Creacion")
 
 class OrderStatus(models.IntegerChoices):
     """
@@ -1323,23 +1324,28 @@ class MerchantPlan(models.Model):
                     "value": self.gamification_system
                 },
                 'gamification_analytics': {
-                    "label": "Analítica de gamificación",
-                    "description":"Sección de datos sobre los resultados y rendimiento del sistema de gamificación.",
+                    "label": "Motor de Fidelidad",
+                    "description":"Sección de datos sobre los resultados y rendimiento del sistema de gamificación y retención de clientes.",
                     "value": self.gamification_analytics
                 },
                 'digital_performance_analytics': {
-                    "label": "Analítica de rendimiento digital",
-                    "description":"Sección de datos sobre visualizaciones de la tienda, conversión de ventas, efectividad de productos y membresía.",
+                    "label": "Impacto y ROI",
+                    "description":"Sección de datos sobre rentabilidad del plan, conversión de ventas y efectividad de productos.",
                     "value": self.digital_performance_analytics
                 },
                 'clients_behavior_analytics': {
-                    "label": "Analítica de comportamiento de clientes",
-                    "description":"Sección de datos sobre retencion de clientes, rankings, mapas de calor sobre horas pico de compra.",
+                    "label": "Rendimiento Visual",
+                    "description":"Sección de datos sobre el rendimiento de los videos, midiendo las interacciones de los clientes.",
                     "value": self.clients_behavior_analytics
                 },
+                'comercial_radar': {
+                    "label": "Radar Comercial",
+                    "description":"Mapa especializado en mostrar la demanda de productos en zonas del territorio nacional, identificando oportunidades de negocio.",
+                    "value":True # TODOS LOS PLANES TIENEN ESTE BENEFICIO
+                },
                 'operative_management_analytics': {
-                    "label": "Analítica de gestión operativa",
-                    "description":"Sección de datos sobre el estado del inventario en cada sucursal, gastos promedios por cliente y contabilidad.",
+                    "label": "Gestión Operativa",
+                    "description":"Sección de datos sobre el rendimiento por sucursal, gastos promedios por cliente y contabilidad.",
                     "value": self.operative_management_analytics
                 },
                 'company_branches': {
@@ -1787,6 +1793,20 @@ class UserNavigationLog(models.Model):
     login_time = models.DateTimeField()
     logout_time = models.DateTimeField(null=True, blank=True)
 
+class UnmetDemandLog(models.Model):
+    """
+    Registro de búsquedas fallidas para detectar oportunidades de mercado por zona.
+    """
+    client = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
+    search_term = models.CharField(max_length=255, db_index=True)
+    coordinates = gis_models.PointField()
+    creation = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['coordinates'], name='unmet_demand_gis_idx', opclasses=['gist_geometry_ops_2d']),
+        ]
+
 # ==========================================
 # MÓDULO 10: RED SOCIAL & POLIMORFISMO
 # ==========================================
@@ -1878,6 +1898,7 @@ class CompanyVideoStory(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='video_stories')
     video_file = models.CharField(max_length=500, null=True, blank=True)
+    duration_seconds = models.FloatField(default=0.0)
     thumbnail = models.CharField(max_length=500, null=True, blank=True)
     description = models.TextField(blank=True, null=True)
     associated_item = models.ForeignKey(

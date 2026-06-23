@@ -326,6 +326,7 @@ UNFOLD = {
                     {"title": "Tráfico de Visitas (Tiendas)", "link": "/admin/api/storeviewlog/", "icon": "visibility"},
                     {"title": "Retención de Video", "link": "/admin/api/videoengagementlog/", "icon": "monitoring"},
                     {"title": "Rutas de Navegación", "link": "/admin/api/usernavigationlog/", "icon": "timeline"},
+                    {"title": "Busquedas en demanda", "link": "/admin/api/unmetdemandlog/", "icon": "search"}
                 ]
             },
             {
@@ -386,6 +387,12 @@ CELERY_BEAT_SCHEDULE = {
     'cleanup-expired-video-stories-hourly': {
         'task': 'api.tasks.cleanup_expired_video_stories', 
         'schedule': crontab(minute=0),                      # Al omitir 'hour', corre en el minuto 0 de cada hora
+    },
+
+    # Tarea 5: Volcado de buffer de analíticas. Corre cada 5 minutos.
+    'flush-analytics-buffer-every-5m': {
+        'task': 'api.tasks.process_analytics_batch',
+        'schedule': crontab(minute='*/15'),
     },
 }
 

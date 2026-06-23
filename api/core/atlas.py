@@ -127,9 +127,6 @@ class AtlasManager:
         self.user = user
         self.seed = seed
 
-        # Construimos un string detallado con las ubicaciones del usuario
-        ubicaciones_str = "\n".join([f"- {loc.get('name', 'Ubicación')}: Lat {loc.get('latitude', '')}, Lng {loc.get('longitude', '')}. (Descripción: {loc.get('description', '')})" for loc in user_locations]) if user_locations else "- Solo ubicación actual disponible."
-
         self.chat_system_instruction = f"""
             # ROL E IDENTIDAD CORE
             Eres 'Atlas', la inteligencia artificial de élite y el corazón operativo de CartMaker, la red social del comercio, líder en Venezuela. 
@@ -539,6 +536,24 @@ class AtlasManager:
         if all_consolidated_products:
             return {"type": "results", "data": all_consolidated_products}
         else:
+            # =========================================================================
+            # 💡 INYECCIÓN DE TELEMETRÍA: Radar de Oportunidades (Demanda Insatisfecha)
+            # =========================================================================
+            if raw_query:
+                payload = {
+                    'client_id': str(self.user.id) if self.user and self.user.is_authenticated else None,
+                    'search_term': raw_query,
+                    'lat': self.user_lat,
+                    'lng': self.user_lng,
+                    'timestamp': timezone.now().isoformat()
+                }
+                try:
+                    from django.core.cache import cache
+                    redis_conn = cache.client.get_client()
+                    redis_conn.rpush("telemetry:unmet_demand", json.dumps(payload))
+                except Exception as e:
+                    print(f"Error registrando demanda insatisfecha desde Atlas: {e}")
+
             return {"type": "not_found", "message": f"CERO RESULTADOS para '{raw_query}' en TODAS las zonas."}
 
     def _execute_recommendations(self, args: Dict[str, Any]) -> List[Dict[str, Any]]:
