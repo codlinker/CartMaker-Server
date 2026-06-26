@@ -6,7 +6,6 @@ const path = require('path');
 // =========================================================================
 function loadEnvFromSh() {
   try {
-    // Apuntamos al archivo variables.sh en la carpeta raíz (un nivel arriba)
     const envPath = path.resolve(__dirname, '../variables.sh');
     const envFile = fs.readFileSync(envPath, 'utf8');
 
@@ -14,41 +13,32 @@ function loadEnvFromSh() {
     for (let line of lines) {
       line = line.trim();
 
-      // Ignorar líneas vacías y comentarios
       if (!line || line.startsWith('#')) continue;
 
-      // Limpiar la palabra "export "
       if (line.startsWith('export ')) {
         line = line.replace('export ', '').trim();
       }
 
-      // Separar por el primer signo "="
       const separatorIndex = line.indexOf('=');
       if (separatorIndex !== -1) {
-        // Extraemos la llave limpiando espacios
         const key = line.substring(0, separatorIndex).trim();
-
-        // Extraemos el valor limpiando espacios
         let value = line.substring(separatorIndex + 1).trim();
 
-        // Limpiamos las comillas dobles o simples del valor
         if ((value.startsWith('"') && value.endsWith('"')) ||
           (value.startsWith("'") && value.endsWith("'"))) {
           value = value.substring(1, value.length - 1);
         }
 
-        // Inyectamos en el entorno de Node.js
         process.env[key] = value;
       }
     }
     console.log("✅ variables.sh cargado automáticamente con éxito.");
   } catch (err) {
     console.error("❌ Error CRÍTICO al leer ../variables.sh:", err.message);
-    process.exit(1); // Detenemos la ejecución si no consigue el archivo
+    process.exit(1); 
   }
 }
 
-// ⚠️ IMPORTANTÍSIMO: Ejecutar el loader ANTES de importar librerías que dependan del entorno
 loadEnvFromSh();
 
 const express = require('express');
@@ -78,7 +68,9 @@ if (!JWT_SECRET || !INTERNAL_SECRET) {
   process.exit(1);
 }
 
+// 💡 RUTAS DE WEBHOOKS
 const DJANGO_WEBHOOK_URL = 'http://127.0.0.1:8000/chat/webhook/process_message/';
+const DJANGO_SUPPORT_WEBHOOK_URL = 'http://127.0.0.1:8000/chat/webhook/process_support_message/';
 
 // =========================================================================
 // 🔒 MIDDLEWARE DE AUTENTICACIÓN PROTEGIDO
@@ -92,14 +84,12 @@ io.use((socket, next) => {
       return next(new Error("token_missing"));
     }
 
-    // Desciframos
     const decoded = jwt.verify(token, JWT_SECRET);
     socket.user_id = decoded.user_id;
     next();
   } catch (err) {
     console.error("❌ Error descifrando JWT en el handshake:", err.message);
     
-    // 💡 CLAVE: Si el error de jsonwebtoken es por expiración, enviamos una bandera exacta
     if (err.message.includes('expired')) {
       return next(new Error("jwt_expired"));
     }
@@ -111,65 +101,51 @@ io.use((socket, next) => {
 // =========================================================================
 // 🚀 TRACKING DE PRESENCIA EN TIEMPO REAL (In-Memory Maps)
 // =========================================================================
-const activeChats = new Map(); // Llave: socket.id, Valor: order_id
-const onlineUsers = new Map(); // Llave: user_id,   Valor: set de socket.ids
+// 💡 Ahora activeChats guarda el nombre COMPLETO de la sala ('order_X' o 'support_X')
+const activeChats = new Map(); 
+const onlineUsers = new Map(); 
 
 io.on('connection', (socket) => {
-  // Registramos al usuario en el mapa global de conexiones online
   if (!onlineUsers.has(String(socket.user_id))) {
     onlineUsers.set(String(socket.user_id), new Set());
   }
   onlineUsers.get(String(socket.user_id)).add(socket.id);
 
-  // Al entrar a una sala específica
+  // =========================================================================
+  // 📦 FLUJO DE ÓRDENES COMERCIALES
+  // =========================================================================
   socket.on('join_chat', async (data) => {
     const orderId = String(data.order_id);
     if (!orderId) return;
 
-    socket.join(`order_${orderId}`);
-    activeChats.set(socket.id, orderId);
+    const roomName = `order_${orderId}`;
+    socket.join(roomName);
+    activeChats.set(socket.id, roomName);
 
     console.log(`✅ Usuario [ID: ${socket.user_id}] entró a la sala de la orden: ${orderId}`);
 
-    // Informamos a la sala que el usuario está "online" dentro del chat
-    socket.to(`order_${orderId}`).emit('presence_change', { user_id: socket.user_id, status: 'online' });
+    socket.to(roomName).emit('presence_change', { user_id: socket.user_id, status: 'online' });
 
-    // Verificamos si la contraparte ya estaba adentro para avisarle al usuario que entre como 'online'
-    const room = io.sockets.adapter.rooms.get(`order_${orderId}`);
+    const room = io.sockets.adapter.rooms.get(roomName);
     if (room && room.size > 1) {
       socket.emit('presence_change', { status: 'online' });
     } else {
       socket.emit('presence_change', { status: 'offline' });
     }
 
-    // Sincronizamos base de datos: Marcar mensajes anteriores como leídos
     try {
-      // 💡 REEMPLAZAMOS LA URL QUEMADA POR UNA DINÁMICA BASADA EN LA QUE SÍ FUNCIONA
       const markReadUrl = DJANGO_WEBHOOK_URL.replace('process_message/', 'mark_room_as_read/');
-
       await axios.post(markReadUrl, {
         order_id: orderId,
         user_id: socket.user_id
       }, { headers: { 'X-Microservice-Token': INTERNAL_SECRET } });
 
-      socket.to(`order_${orderId}`).emit('room_read_receipt', { order_id: orderId });
+      socket.to(roomName).emit('room_read_receipt', { order_id: orderId });
     } catch (err) {
-      console.error("❌ Error sincronizando lecturas:", err.message);
+      console.error("❌ Error sincronizando lecturas de orden:", err.message);
     }
   });
 
-  // Evento de Escritura (WhatsApp style typing indicator)
-  socket.on('typing', (data) => {
-    const orderId = activeChats.get(socket.id);
-    if (orderId) {
-      socket.to(`order_${orderId}`).emit('typing_status', {
-        user_id: socket.user_id,
-        isTyping: data.isTyping
-      });
-    }
-  });
-
-  // Procesador maestro de mensajes (Agrega soporte multimedia)
   socket.on('send_message', async (data) => {
     const { order_id, text, message_type, media_url } = data;
     const roomName = `order_${order_id}`;
@@ -197,7 +173,6 @@ io.on('connection', (socket) => {
       }, { headers: { 'X-Microservice-Token': INTERNAL_SECRET } });
 
       if (response.data.success) {
-        // Retransmitimos el JSON oficial de Django que incluye el id e is_read real
         io.to(roomName).emit('new_message', response.data.data);
       }
     } catch (error) {
@@ -205,18 +180,111 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 💡 NUEVO EVENTO PROACTIVO
   socket.on('leave_chat', (data) => {
-    const orderId = String(data.order_id);
-    io.to(`order_${orderId}`).emit('presence_change', { user_id: socket.user_id, status: 'offline' });
-    socket.leave(`order_${orderId}`);
+    const roomName = `order_${data.order_id}`;
+    io.to(roomName).emit('presence_change', { user_id: socket.user_id, status: 'offline' });
+    socket.leave(roomName);
+  });
+
+  // =========================================================================
+  // 🛠️ NUEVO: FLUJO DE TICKETS DE SOPORTE
+  // =========================================================================
+  socket.on('join_support_chat', async (data) => {
+    const ticketId = String(data.ticket_id);
+    if (!ticketId) return;
+
+    const roomName = `support_${ticketId}`;
+    socket.join(roomName);
+    activeChats.set(socket.id, roomName);
+
+    console.log(`✅ Usuario [ID: ${socket.user_id}] entró al ticket de soporte: ${ticketId}`);
+
+    socket.to(roomName).emit('support_presence_change', { user_id: socket.user_id, status: 'online' });
+
+    const room = io.sockets.adapter.rooms.get(roomName);
+    if (room && room.size > 1) {
+      socket.emit('support_presence_change', { status: 'online' });
+    } else {
+      socket.emit('support_presence_change', { status: 'offline' });
+    }
+
+    try {
+      const markReadUrl = DJANGO_SUPPORT_WEBHOOK_URL.replace('process_support_message/', 'mark_support_room_as_read/');
+      await axios.post(markReadUrl, {
+        ticket_id: ticketId,
+        user_id: socket.user_id
+      }, { headers: { 'X-Microservice-Token': INTERNAL_SECRET } });
+
+      socket.to(roomName).emit('support_room_read_receipt', { ticket_id: ticketId });
+    } catch (err) {
+      console.error("❌ Error sincronizando lecturas de soporte:", err.message);
+    }
+  });
+
+  socket.on('send_support_message', async (data) => {
+    const { ticket_id, text, message_type, media_url } = data;
+    const roomName = `support_${ticket_id}`;
+    const room = io.sockets.adapter.rooms.get(roomName);
+
+    let isRecipientConnected = false;
+    if (room) {
+      for (const socketId of room) {
+        const clientSocket = io.sockets.sockets.get(socketId);
+        if (clientSocket && String(clientSocket.user_id) !== String(socket.user_id)) {
+          isRecipientConnected = true;
+          break;
+        }
+      }
+    }
+
+    try {
+      const response = await axios.post(DJANGO_SUPPORT_WEBHOOK_URL, {
+        ticket_id: ticket_id,
+        sender_id: socket.user_id,
+        text: text,
+        message_type: message_type || 'text',
+        media_url: media_url || null,
+        recipient_connected: isRecipientConnected
+      }, { headers: { 'X-Microservice-Token': INTERNAL_SECRET } });
+
+      if (response.data.success) {
+        io.to(roomName).emit('new_support_message', response.data.data);
+      }
+    } catch (error) {
+      socket.emit('chat_error', { message: "No se pudo procesar el mensaje de soporte." });
+    }
+  });
+
+  socket.on('leave_support_chat', (data) => {
+    const roomName = `support_${data.ticket_id}`;
+    io.to(roomName).emit('support_presence_change', { user_id: socket.user_id, status: 'offline' });
+    socket.leave(roomName);
+  });
+
+  // =========================================================================
+  // 📡 EVENTOS COMPARTIDOS
+  // =========================================================================
+  
+  // 💡 El evento 'typing' ahora es genérico. Se envía a la sala en la que esté el socket.
+  socket.on('typing', (data) => {
+    const roomName = activeChats.get(socket.id);
+    if (roomName) {
+      socket.to(roomName).emit('typing_status', {
+        user_id: socket.user_id,
+        isTyping: data.isTyping
+      });
+    }
   });
 
   socket.on('disconnect', () => {
-    const orderId = activeChats.get(socket.id);
-    if (orderId) {
-      // 💡 CAMBIAMOS socket.to POR io.to PARA EVITAR EL FALLO DE SALA ABANDONADA
-      io.to(`order_${orderId}`).emit('presence_change', { user_id: socket.user_id, status: 'offline' });
+    const roomName = activeChats.get(socket.id);
+    if (roomName) {
+      // 💡 Identificamos qué tipo de sala estaba abandonando para emitir el evento correcto
+      if (roomName.startsWith('order_')) {
+        io.to(roomName).emit('presence_change', { user_id: socket.user_id, status: 'offline' });
+      } else if (roomName.startsWith('support_')) {
+        io.to(roomName).emit('support_presence_change', { user_id: socket.user_id, status: 'offline' });
+      }
       activeChats.delete(socket.id);
     }
 
@@ -237,5 +305,4 @@ const PORT = process.env.PORT || 3000;
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Microservicio de CartMaker Chat corriendo en el puerto ${PORT}`);
-  console.log(`🔗 Conectado a Django en: ${DJANGO_WEBHOOK_URL}`);
 });

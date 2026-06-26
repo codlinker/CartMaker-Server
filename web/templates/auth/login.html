@@ -1,0 +1,27 @@
+{% extends 'base.html' %}
+
+{% block title %}Login | CartMaker{% endblock %}
+
+{% block content %}
+<div class="login-wrapper">
+    <div class="login-card">
+        <div class="login-header">
+            <span class="material-symbols-rounded login-icon">admin_panel_settings</span>
+            <h2>Portal de Agentes</h2>
+            <p>Acceso restringido al personal de soporte</p>
+        </div>
+        <form method="POST" class="login-form">
+            {% csrf_token %}
+            <div class="input-group">
+                <label for="id_username">Correo Electrónico</label>
+                <input type="text" name="username" autofocus required id="id_username" placeholder="ejemplo@cartmaker.app">
+            </div>
+            <div class="input-group">
+                <label for="id_password">Contraseña</label>
+                <input type="password" name="password" required id="id_password" placeholder="••••••••">
+            </div>
+            <button type="submit" class="btn-submit">Ingresar al Portal</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

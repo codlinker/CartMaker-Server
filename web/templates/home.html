@@ -1,0 +1,677 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}
+    {% if user.is_authenticated %}
+        Dashboard | CartMaker Soporte
+    {% else %}
+        CartMaker | El Fin del Precio al DM
+    {% endif %}
+{% endblock %}
+
+{% block content %}
+<section class="hero-section" id="hero">
+    <div class="hero-bg" data-speed="0.5"></div>
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    
+    <div class="hero-content">
+        <img src="{% static 'img/logo_sin_letras.svg' %}" alt="CartMaker" class="hero-main-logo">
+        <br>
+        <span class="hero-tag">Venezuela</span>
+        <h1 class="hero-title">
+            Comercio <br> Hiper&#8209;Local
+        </h1>
+        <p class="hero-desc">
+            Descubre los mejores productos de tu localidad <strong>deslizando videos</strong>, aprovecha descuentos al instante y <strong>compra en 3 clics</strong> dentro de la primera <strong>red social de e-commerce</strong> de Venezuela.
+        </p>
+        <div class="store-buttons">
+            <a href="#" class="store-btn">
+                <svg viewBox="0 0 384 512" width="30" height="30" fill="currentColor"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.3 48.6-.6 83.2-80.1 106.1-125.2-46.7-18.8-65.4-49.1-65.2-85.4zM257.5 76.9c14.6-18.8 28.3-48.4 22.9-76.9-24.9 1-52.6 15.6-70.6 36.1-14.7 16.6-28.7 48.1-23.7 75.6 27.6 2.3 54.7-15.6 71.4-34.8z"/></svg>
+                <div class="btn-text">
+                    <small>Consíguelo en el</small>
+                    <strong>App Store</strong>
+                </div>
+            </a>
+            <a href="#" class="store-btn">
+                <svg viewBox="0 0 512 512" width="30" height="30" fill="currentColor"><path d="M325.3 234.3L104.6 13l280.8 161.2-60.1 60.1zM47 0C34 6.8 25.3 19.2 25.3 35.3v441.3c0 16.1 8.7 28.5 21.7 35.3l256.6-256L47 0zm425.2 225.6l-58.9-34.1-65.7 64.5 65.7 64.5 60.1-34.1c18-14.3 18-46.5-1.2-60.8zM104.6 499l280.8-161.2-60.1-60.1L104.6 499z"/></svg>
+                <div class="btn-text">
+                    <small>DISPONIBLE EN</small>
+                    <strong>Google Play</strong>
+                </div>
+            </a>
+        </div>
+    </div>
+    <div class="hero-socials">
+        <a href="https://www.instagram.com/cartmaker.ve" target="_blank" rel="noopener noreferrer" class="hero-social-link" title="Síguenos en Instagram">
+            <svg viewBox="0 0 448 512" width="18" height="18" fill="currentColor"><path d="M224.1 141c-63.6 0-114.9 51.3-114.9 114.9s51.3 114.9 114.9 114.9S339 319.5 339 255.9 287.7 141 224.1 141zm0 189.6c-41.1 0-74.7-33.5-74.7-74.7s33.5-74.7 74.7-74.7 74.7 33.5 74.7 74.7-33.6 74.7-74.7 74.7zm146.4-194.3c0 14.9-12 26.8-26.8 26.8-14.9 0-26.8-12-26.8-26.8s12-26.8 26.8-26.8 26.8 12 26.8 26.8zm76.1 27.2c-1.7-35.9-9.9-67.7-36.2-93.9-26.2-26.2-58-34.4-93.9-36.2-37-2.1-147.9-2.1-184.9 0-35.8 1.7-67.6 9.9-93.9 36.1s-34.4 58-36.2 93.9c-2.1 37-2.1 147.9 0 184.9 1.7 35.9 9.9 67.7 36.2 93.9s58 34.4 93.9 36.2c37 2.1 147.9 2.1 184.9 0 35.9-1.7 67.7-9.9 93.9-36.2 26.2-26.2 34.4-58 36.2-93.9 2.1-37 2.1-147.8 0-184.8zM398.8 388c-7.8 19.6-22.9 34.7-42.6 42.6-29.5 11.7-99.5 9-132.1 9s-102.7 2.6-132.1-9c-19.6-7.8-34.7-22.9-42.6-42.6-11.7-29.5-9-99.5-9-132.1s-2.6-102.7 9-132.1c7.8-19.6 22.9-34.7 42.6-42.6 29.5-11.7 99.5-9 132.1-9s102.7-2.6 132.1 9c19.6 7.8 34.7 22.9 42.6 42.6 11.7 29.5 9 99.5 9 132.1s2.7 102.7-9 132.1z"/></svg>
+            @cartmaker.ve
+        </a>
+        <a href="https://www.tiktok.com/@cartmakerve" target="_blank" rel="noopener noreferrer" class="hero-social-link" title="Síguenos en TikTok">
+            <svg viewBox="0 0 448 512" width="18" height="18" fill="currentColor"><path d="M448 209.9a210.1 210.1 0 0 1 -122.8-39.3V349.4A162.6 162.6 0 1 1 185 188.3V278.2a74.6 74.6 0 1 0 52.2 71.2V0l88 0a121.2 121.2 0 0 0 1.9 22.2h0A122.2 122.2 0 0 0 381 102.4a121.4 121.4 0 0 0 67 20.1z"/></svg>
+            @cartmakerve
+        </a>
+    </div>
+</section>
+
+<section class="features-section" id="features">
+    <div class="carousel-container">
+        <button class="carousel-btn prev" id="btnPrev" aria-label="Anterior">
+            <span class="material-symbols-rounded">chevron_left</span>
+        </button>
+        
+        <div class="carousel-track" id="carouselTrack">
+            <div class="feature-card">
+                <button class="card-zoom-btn" aria-label="Ver imagen completa">
+                    <span class="material-symbols-rounded">visibility</span>
+                </button>
+                <img src="{% static 'img/card_atlas.jpg' %}" alt="Atlas IA" class="feature-img" draggable="false">
+                <div class="feature-overlay">
+                    <h3 class="feature-title">Atlas IA</h3>
+                    <p class="feature-desc">Asistente virtual que rastrea <strong>inventarios cercanos</strong>, compara precios y <strong>localiza productos por foto</strong> al instante.</p>
+                </div>
+            </div>
+
+            <div class="feature-card">
+                <button class="card-zoom-btn" aria-label="Ver imagen completa">
+                    <span class="material-symbols-rounded">visibility</span>
+                </button>
+                <img src="{% static 'img/card_feed_social.jpg' %}" alt="Red Social" class="feature-img" draggable="false">
+                <div class="feature-overlay">
+                    <h3 class="feature-title">Feed Social</h3>
+                    <p class="feature-desc">Descubre productos <strong>como si vieras historias</strong>. Desliza, dale like, guarda carritos y <strong>compra con un toque</strong>.</p>
+                </div>
+            </div>
+
+            <div class="feature-card">
+                <button class="card-zoom-btn" aria-label="Ver imagen completa">
+                    <span class="material-symbols-rounded">visibility</span>
+                </button>
+                <img src="{% static 'img/card_mapa.jpg' %}" alt="Mapa Interactivo" class="feature-img" draggable="false">
+                <div class="feature-overlay">
+                    <h3 class="feature-title">Mapa Interactivo</h3>
+                    <p class="feature-desc">Ubica las tiendas físicas a tu alrededor, verifica la <strong>disponibilidad de inventario real</strong> y traza tu ruta.</p>
+                </div>
+            </div>
+
+            <div class="feature-card">
+                <button class="card-zoom-btn" aria-label="Ver imagen completa">
+                    <span class="material-symbols-rounded">visibility</span>
+                </button>
+                <img src="{% static 'img/card_tokens.jpg' %}" alt="Tokens" class="feature-img" draggable="false">
+                <div class="feature-overlay">
+                    <h3 class="feature-title">Tokens Locales</h3>
+                    <p class="feature-desc"><strong>Gana tokens</strong> por cada compra y canjéalos por <strong>descuentos reales</strong> en las tiendas físicas de tu zona.</p>
+                </div>
+            </div>
+
+            <div class="feature-card">
+                <button class="card-zoom-btn" aria-label="Ver imagen completa">
+                    <span class="material-symbols-rounded">visibility</span>
+                </button>
+                <img src="{% static 'img/card_inventarios.jpg' %}" alt="Manejo de Inventarios" class="feature-img" draggable="false">
+                <div class="feature-overlay">
+                    <h3 class="feature-title">Inventario IA</h3>
+                    <p class="feature-desc">El manejo más avanzado. Carga inventarios enteros <strong>escaneando productos con IA</strong> o importa tu catálogo fácilmente a través de <strong>Excel</strong>.</p>
+                </div>
+            </div>
+
+            <div class="feature-card">
+                <button class="card-zoom-btn" aria-label="Ver imagen completa">
+                    <span class="material-symbols-rounded">visibility</span>
+                </button>
+                <img src="{% static 'img/card_analiticas.jpg' %}" alt="Analíticas para Comerciantes" class="feature-img" draggable="false">
+                <div class="feature-overlay">
+                    <h3 class="feature-title">Analíticas Pro</h3>
+                    <p class="feature-desc">Mide Impacto, ROI y retención. Usa el <strong>Radar Comercial</strong> para captar <strong>demanda insatisfecha</strong> y gestiona la contabilidad operativa.</p>
+                </div>
+            </div>
+
+            <div class="feature-card">
+                <button class="card-zoom-btn" aria-label="Ver imagen completa">
+                    <span class="material-symbols-rounded">visibility</span>
+                </button>
+                <img src="{% static 'img/card_chat.jpg' %}" alt="Chats en Tiempo Real" class="feature-img" draggable="false">
+                <div class="feature-overlay">
+                    <h3 class="feature-title">Comunicación Directa</h3>
+                    <p class="feature-desc">Conversa directamente con los comerciantes. <strong>Negocia precios</strong>, coordina <strong>despachos a domicilio</strong> y resuelve dudas en tiempo real bajo un <strong>sistema seguro</strong>.</p>
+                </div>
+            </div>
+
+            <div class="feature-card">
+                <button class="card-zoom-btn" aria-label="Ver imagen completa">
+                    <span class="material-symbols-rounded">visibility</span>
+                </button>
+                <img src="{% static 'img/card_historias.jpg' %}" alt="Historias y Reels" class="feature-img" draggable="false">
+                <div class="feature-overlay">
+                    <h3 class="feature-title">Catálogos Vivos</h3>
+                    <p class="feature-desc">Vive el comercio <strong>como una red social</strong>. Visualiza productos en acción a través de <strong>reels e historias</strong> publicadas por tus tiendas favoritas.</p>
+                </div>
+            </div>
+        </div>
+
+        <button class="carousel-btn next" id="btnNext" aria-label="Siguiente">
+            <span class="material-symbols-rounded">chevron_right</span>
+        </button>
+    </div>
+</section>
+
+<section id="manifesto" class="manifesto-section">
+    <div class="manifesto-text">
+        <h2>El fin del "Precio al DM"</h2>
+        <p>Las redes sociales tradicionales están <strong>rotas para el comercio</strong>. Cuando una tienda publica algo que te gusta, compite contra memes y bailes. Y cuando por fin decides comprar, te toca <strong>rogar en los comentarios para que te den el precio</strong>.</p>
+        <p>CartMaker es la primera <strong>red social de Venezuela dedicada 100% a las ventas</strong>. Desliza videos a pantalla completa, descubre los mejores productos de tu ciudad y <strong>compra al instante sin tener que escribirle a nadie por WhatsApp</strong>.</p>
+    </div>
+    <div class="manifesto-visual">
+        <div class="glass-panel" data-speed="0.2">
+            <div class="stat-row">
+                <div class="stat-icon">
+                    <span class="material-symbols-rounded">swipe</span> 
+                </div>
+                <div class="stat-info">
+                    <h4>La Nueva Vitrina</h4>
+                    <p>Olvídate de las fotos aburridas y los catálogos lentos. Descubre productos <strong>deslizando videos dinámicos</strong>, igual que en tus redes favoritas.</p>
+                </div>
+            </div>
+            <div class="stat-row">
+                <div class="stat-icon">
+                    <span class="material-symbols-rounded">verified_user</span>
+                </div>
+                <div class="stat-info">
+                    <h4>Adiós a las Estafas</h4>
+                    <p>Cada usuario pasa por <strong>validación biométrica</strong>. Si está en CartMaker, es un negocio o cliente real con <strong>inventario físico comprobado</strong>.</p>
+                </div>
+            </div>
+            <div class="stat-row">
+                <div class="stat-icon">
+                    <span class="material-symbols-rounded">bolt</span>
+                </div>
+                <div class="stat-info">
+                    <h4>Compra en 3 Clics</h4>
+                    <p><strong>Cero fricción.</strong> Toca la etiqueta del producto en el video, agrégalo al carrito y procesa tu orden en milisegundos con los productos más cercanos a ti, <strong>evitando los altos costos de Delivery</strong>.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section id="download" class="cta-section">
+    <div class="cta-bg-image" data-speed="0.4"></div>
+    <div class="cta-content">
+        <h2>Únete a la evolución del comercio</h2>
+        <div class="store-buttons">
+            <a href="#" class="store-btn">
+                <svg viewBox="0 0 384 512" width="35" height="35" fill="currentColor"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.3 48.6-.6 83.2-80.1 106.1-125.2-46.7-18.8-65.4-49.1-65.2-85.4zM257.5 76.9c14.6-18.8 28.3-48.4 22.9-76.9-24.9 1-52.6 15.6-70.6 36.1-14.7 16.6-28.7 48.1-23.7 75.6 27.6 2.3 54.7-15.6 71.4-34.8z"/></svg>
+                <div class="btn-text">
+                    <small>Consíguelo en el</small>
+                    <strong style="font-size: 1.4rem;">App Store</strong>
+                </div>
+            </a>
+            <a href="#" class="store-btn">
+                <svg viewBox="0 0 512 512" width="35" height="35" fill="currentColor"><path d="M325.3 234.3L104.6 13l280.8 161.2-60.1 60.1zM47 0C34 6.8 25.3 19.2 25.3 35.3v441.3c0 16.1 8.7 28.5 21.7 35.3l256.6-256L47 0zm425.2 225.6l-58.9-34.1-65.7 64.5 65.7 64.5 60.1-34.1c18-14.3 18-46.5-1.2-60.8zM104.6 499l280.8-161.2-60.1-60.1L104.6 499z"/></svg>
+                <div class="btn-text">
+                    <small>DISPONIBLE EN</small>
+                    <strong style="font-size: 1.4rem;">Google Play</strong>
+                </div>
+            </a>
+        </div>
+    </div>
+</section>
+
+<section id="team" class="team-section">
+    <div class="section-header">
+        <p>EL EQUIPO</p>
+        <h2>Mentes detrás de la evolución</h2>
+    </div>
+    
+    <div class="team-container">
+        <div class="team-card">
+            <div class="team-img-wrapper">
+                <img src="{% static 'img/ceo_profile.jpg' %}" alt="Fundador & CEO" class="team-img" draggable="false">
+                <div class="team-card-glow"></div>
+            </div>
+            <div class="team-info">
+                <h3>Fundador & CEO</h3>
+                <p class="team-role">Lead Software Engineer & UX/UI Specialist</p>
+                <p class="team-bio">
+                    Ingeniero de Software Líder y especialista en Backend y UX/UI. Arquitecto de sistemas de alta escalabilidad, fusiona la robustez técnica de infraestructuras masivas con un diseño de experiencia intuitivo, fluido y centrado en el usuario. Dirección técnica enfocada en garantizar que CartMaker sea un ecosistema ultra veloz, blindado y sin fricciones comerciales.
+                </p>
+                
+                <div class="team-social">
+                    <a href="https://www.linkedin.com/in/atreyusdev/" target="_blank" rel="noopener noreferrer" class="social-btn linkedin-btn" aria-label="LinkedIn del CEO">
+                        <svg viewBox="0 0 448 512" width="20" height="20" fill="currentColor"><path d="M416 32H31.9C14.3 32 0 46.5 0 64.3v383.4C0 465.5 14.3 480 31.9 480H416c17.6 0 32-14.5 32-32.3V64.3c0-17.8-14.4-32.3-32-32.3zM135.4 416H69V202.2h66.5V416zm-33.2-243c-21.3 0-38.5-17.3-38.5-38.5S80.9 96 102.2 96c21.2 0 38.5 17.3 38.5 38.5 0 21.3-17.2 38.5-38.5 38.5zm282.1 243h-66.4V312c0-24.8-.5-56.7-34.5-56.7-34.6 0-39.9 27-39.9 54.9V416h-66.4V202.2h63.7v29.2h.9c8.9-16.8 30.6-34.5 62.9-34.5 67.2 0 79.7 44.3 79.7 101.9V416z"/></svg>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section id="contact" class="contact-section">
+    <div class="section-header">
+        <p>CONTACTO</p>
+        <h2>¿Tienes dudas? Escríbenos</h2>
+    </div>
+    
+    <div class="contact-container">
+        <p class="contact-desc">Estamos listos para ayudarte a hacer crecer tu negocio o resolver cualquier pregunta sobre nuestro ecosistema hiper-local.</p>
+        
+        <div class="contact-methods">
+            
+            <div class="contact-box">
+                <a href="mailto:contact@cartmaker.app" class="email-link" title="Enviar correo directo">
+                    <svg viewBox="0 0 512 512" width="24" height="24" fill="currentColor"><path d="M48 64C21.5 64 0 85.5 0 112c0 15.1 7.1 29.3 19.2 38.4L236.8 313.6c11.4 8.5 27 8.5 38.4 0L492.8 150.4c12.1-9.1 19.2-23.3 19.2-38.4c0-26.5-21.5-48-48-48H48zM0 176V384c0 35.3 28.7 64 64 64H448c35.3 0 64-28.7 64-64V176L294.4 339.2c-22.8 17.1-54 17.1-76.8 0L0 176z"/></svg>
+                    Correo
+                </a>
+                <button class="copy-contact-btn" id="btnCopyEmail" aria-label="Copiar correo al portapapeles">
+                    <span class="material-symbols-rounded">content_copy</span>
+                    <span class="copy-tooltip" id="copyTooltip">¡Copiado!</span>
+                </button>
+            </div>
+
+            <div class="contact-box">
+                <a href="https://wa.me/584222383498" target="_blank" rel="noopener noreferrer" class="whatsapp-link" title="Abrir chat de WhatsApp">
+                    <svg viewBox="0 0 448 512" width="24" height="24" fill="currentColor"><path d="M380.9 97.1C339 55.1 283.2 32 223.9 32c-122.4 0-222 99.6-222 222 0 39.1 10.2 77.3 29.6 111L0 480l117.7-30.9c32.4 17.7 68.9 27 106.1 27h.1c122.3 0 224.1-99.6 224.1-222 0-59.3-25.2-115-67.1-157zM223.9 413.6c-33.6 0-66.5-9-95.2-26.1l-6.8-4-70.8 18.6 18.9-69-4.4-7.1c-18.8-30.1-28.7-65.1-28.7-100.9 0-101.4 82.5-183.9 184-183.9 49.1 0 95.3 19.1 130 53.8 34.6 34.7 53.7 80.9 53.7 130 0 101.4-82.5 183.9-183.9 183.9zm101.1-138.2c-5.5-2.8-32.8-16.2-37.9-18-5.1-1.9-8.8-2.8-12.5 2.8-3.7 5.6-14.3 18-17.6 21.8-3.2 3.7-6.5 4.2-12 1.4-32.6-16.3-54-29.1-75.5-66-5.7-9.8 5.7-9.1 16.3-30.3 1.8-3.7 .9-6.9-.5-9.7-1.4-2.8-12.5-30.1-17.1-41.2-4.5-10.8-9.1-9.3-12.5-9.5-3.2-.2-6.9-.2-10.6-.2-3.7 0-9.7 1.4-14.8 6.9-5.1 5.6-19.4 19-19.4 46.3 0 27.3 19.9 53.7 22.6 57.4 2.8 3.7 39.1 59.7 94.8 83.8 35.2 15.2 49 16.5 66.6 13.9 10.7-1.6 32.8-13.4 37.4-26.4 4.6-13 4.6-24.1 3.2-26.4-1.3-2.5-5-3.9-10.5-6.6z"/></svg>
+                    WhatsApp
+                </a>
+                <button class="copy-contact-btn" id="btnCopyWhatsApp" aria-label="Copiar número de WhatsApp">
+                    <span class="material-symbols-rounded">content_copy</span>
+                    <span class="copy-tooltip" id="whatsappTooltip">¡Copiado!</span>
+                </button>
+            </div>
+
+        </div>
+    </div>
+</section>
+
+<footer>
+    <div class="footer-brand">
+        <img src="{% static 'img/logo_sin_letras.svg' %}" alt="CartMaker Logo" class="footer-logo-img">
+        <div class="footer-logo">CartMaker 2026.</div>
+    </div>
+    <div class="footer-links">
+        <a href="#">Términos y Condiciones</a>
+        <a href="#">Privacidad Biométrica</a>
+        <a href="#">Para Comercios</a>
+    </div>
+</footer>
+
+<div class="image-modal" id="imageModal">
+    <button class="modal-close" id="modalClose" aria-label="Cerrar ventana">
+        <span class="material-symbols-rounded">close</span>
+    </button>
+    <img src="" alt="Vista completa de la captura" id="modalImg">
+</div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", (event) => {
+        gsap.registerPlugin(ScrollTrigger);
+
+        const titleSplit = new SplitType('.hero-title', { types: 'chars' });
+        
+        gsap.from(titleSplit.chars, {
+            opacity: 0,
+            y: 80,
+            rotationX: -90,
+            rotationY: 45,
+            scale: 0.5,
+            transformOrigin: "50% 50% -50",
+            stagger: {
+                amount: 0.8,
+                from: "center"
+            },
+            duration: 1.2,
+            ease: "expo.out",
+            delay: 0.2
+        });
+
+        const tl = gsap.timeline();
+        
+        tl.to('.hero-desc', {
+            y: 0,
+            opacity: 1,
+            duration: 0.8,
+            ease: "power3.out",
+            delay: 1
+        })
+        .to('.hero-section .store-buttons', {
+            y: 0,
+            opacity: 1,
+            duration: 0.8,
+            ease: "back.out(1.7)"
+        }, "-=0.4")
+
+        .to('.hero-socials', {
+            y: 0,
+            opacity: 1,
+            duration: 0.8,
+            ease: "back.out(1.5)"
+        }, "-=0.5");
+
+        gsap.to('.hero-bg', {
+            yPercent: 30,
+            ease: "none",
+            scrollTrigger: {
+                trigger: ".hero-section",
+                start: "top top",
+                end: "bottom top",
+                scrub: true
+            }
+        });
+
+        gsap.to('.section-header', {
+            y: 0,
+            opacity: 1,
+            duration: 1,
+            scrollTrigger: {
+                trigger: ".features-section",
+                start: "top 80%"
+            }
+        });
+
+        gsap.from('.carousel-container', {
+            y: 100,
+            opacity: 0,
+            duration: 1,
+            ease: "power3.out",
+            scrollTrigger: {
+                trigger: ".features-section",
+                start: "top 75%"
+            }
+        });
+
+        const track = document.getElementById('carouselTrack');
+        const cards = document.querySelectorAll('.feature-card');
+
+        track.addEventListener('dragstart', (e) => e.preventDefault());
+        
+        if (track && cards.length > 0) {
+            let currentIndex = 0;
+            const totalCards = cards.length;
+
+            const updateCoverflow = () => {
+                const isMobile = window.innerWidth <= 768;
+                const spacing = isMobile ? 110 : 180;
+
+                cards.forEach((card, index) => {
+                    let offset = index - currentIndex;
+                    
+                    if (offset > Math.floor(totalCards / 2)) {
+                        offset -= totalCards;
+                    } else if (offset < -Math.floor(totalCards / 2)) {
+                        offset += totalCards;
+                    }
+
+                    const direction = Math.sign(offset);
+                    const absOffset = Math.abs(offset);
+
+                    let scale = 1;
+                    let translateX = offset * spacing;
+                    let translateZ = 0;
+                    let rotateY = 0;
+                    let opacity = 1;
+                    let zIndex = 100 - absOffset;
+
+                    if (absOffset === 0) {
+                        scale = 1;
+                        translateZ = 50;
+                        rotateY = 0;
+                        opacity = 1;
+                        card.classList.add('active');
+                    } else {
+                        scale = 0.8 - (absOffset * 0.05);
+                        translateZ = -100 - (absOffset * 100);
+                        rotateY = direction * -35;
+                        opacity = absOffset > 2 ? 0 : 1 - (absOffset * 0.2);
+                        card.classList.remove('active');
+                    }
+
+                    card.style.zIndex = zIndex;
+                    card.style.opacity = opacity;
+                    card.style.transform = `translateX(${translateX}px) translateZ(${translateZ}px) rotateY(${rotateY}deg) scale(${scale})`;
+                });
+            };
+
+            document.getElementById('btnNext').addEventListener('click', () => {
+                currentIndex = (currentIndex + 1) % totalCards;
+                updateCoverflow();
+            });
+            
+            document.getElementById('btnPrev').addEventListener('click', () => {
+                currentIndex = (currentIndex - 1 + totalCards) % totalCards;
+                updateCoverflow();
+            });
+
+            cards.forEach((card, index) => {
+                card.addEventListener('click', () => {
+                    currentIndex = index;
+                    updateCoverflow();
+                });
+            });
+
+            let isDragging = false;
+            let startPos = 0;
+            let isSwiping = false;
+
+            const dragStart = (e) => {
+                isDragging = true;
+                isSwiping = false;
+                startPos = e.type.includes('mouse') ? e.pageX : e.touches[0].clientX;
+                track.classList.add('dragging');
+            };
+
+            const dragEnd = (e) => {
+                if (!isDragging) return;
+                isDragging = false;
+                track.classList.remove('dragging');
+                
+                const endPos = e.type.includes('mouse') ? e.pageX : e.changedTouches[0].clientX;
+                const diff = startPos - endPos;
+                
+                if (Math.abs(diff) > 40) {
+                    isSwiping = true; 
+                    if (diff > 0) {
+                        currentIndex = (currentIndex + 1) % totalCards;
+                    } else {
+                        currentIndex = (currentIndex - 1 + totalCards) % totalCards;
+                    }
+                    updateCoverflow();
+                    
+                    setTimeout(() => isSwiping = false, 100);
+                }
+            };
+
+            track.addEventListener('mousedown', dragStart);
+            track.addEventListener('mouseup', dragEnd);
+            track.addEventListener('mouseleave', dragEnd);
+            track.addEventListener('mousemove', (e) => {
+                if(isDragging) e.preventDefault();
+            });
+
+            track.addEventListener('touchstart', dragStart, {passive: true});
+            track.addEventListener('touchend', dragEnd, {passive: true});
+            
+            cards.forEach((card, index) => {
+                card.addEventListener('click', (e) => {
+                    if (isSwiping) {
+                        e.preventDefault();
+                        return;
+                    }
+                    currentIndex = index;
+                    updateCoverflow();
+                });
+            });
+
+            window.addEventListener('resize', updateCoverflow);
+            updateCoverflow();
+        }
+
+        const zoomBtns = document.querySelectorAll('.card-zoom-btn');
+        const modal = document.getElementById('imageModal');
+        const modalImg = document.getElementById('modalImg');
+        const modalClose = document.getElementById('modalClose');
+
+        if (zoomBtns.length > 0 && modal && modalImg) {
+            zoomBtns.forEach(btn => {
+                ['click', 'mousedown', 'touchstart'].forEach(eventType => {
+                    btn.addEventListener(eventType, (e) => e.stopPropagation());
+                });
+
+                btn.addEventListener('click', () => {
+                    const card = btn.closest('.feature-card');
+                    const img = card.querySelector('.feature-img');
+                    
+                    modalImg.src = img.src;
+                    modal.classList.add('active');
+                    document.body.style.overflow = 'hidden';
+                });
+            });
+
+            const closeModal = () => {
+                modal.classList.remove('active');
+                document.body.style.overflow = '';
+                setTimeout(() => { modalImg.src = ''; }, 400);
+            };
+
+            modalClose.addEventListener('click', closeModal);
+            
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) closeModal();
+            });
+
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && modal.classList.contains('active')) closeModal();
+            });
+        }
+
+        gsap.from('.manifesto-text h2, .manifesto-text p', {
+            x: -50,
+            opacity: 0,
+            duration: 1,
+            stagger: 0.2,
+            ease: "power3.out",
+            scrollTrigger: {
+                trigger: ".manifesto-section",
+                start: "top 70%"
+            }
+        });
+
+        const glassPanel = document.querySelector('.glass-panel');
+        if (window.innerWidth > 1024 && glassPanel) {
+            gsap.to(glassPanel, {
+                yPercent: -15,
+                ease: "none",
+                scrollTrigger: {
+                    trigger: ".manifesto-section",
+                    start: "top bottom",
+                    end: "bottom top",
+                    scrub: true
+                }
+            });
+        }
+
+        gsap.from('.stat-row', {
+            x: 50,
+            opacity: 0,
+            duration: 0.8,
+            stagger: 0.2,
+            ease: "back.out(1.5)",
+            scrollTrigger: {
+                trigger: ".glass-panel",
+                start: "top 75%"
+            }
+        });
+
+        gsap.to('.cta-bg-image', {
+            yPercent: 20,
+            ease: "none",
+            scrollTrigger: {
+                trigger: ".cta-section",
+                start: "top bottom",
+                end: "bottom top",
+                scrub: true
+            }
+        });
+
+        gsap.from('.cta-content h2', {
+            y: 50,
+            opacity: 0,
+            duration: 1,
+            scrollTrigger: {
+                trigger: ".cta-section",
+                start: "top 80%"
+            }
+        });
+
+        gsap.to('.cta-content .store-buttons', {
+            y: 0,
+            opacity: 1,
+            duration: 0.8,
+            ease: "back.out(1.7)",
+            scrollTrigger: {
+                trigger: ".cta-section",
+                start: "top 75%"
+            }
+        });
+
+        gsap.from('.team-card', {
+            y: 60,
+            opacity: 0,
+            duration: 1,
+            ease: "power3.out",
+            scrollTrigger: {
+                trigger: ".team-section",
+                start: "top 80%"
+            }
+        });
+
+        gsap.from('.contact-container', {
+            y: 50,
+            opacity: 0,
+            duration: 1,
+            ease: "power3.out",
+            scrollTrigger: {
+                trigger: ".contact-section",
+                start: "top 80%"
+            }
+        });
+
+        const btnCopyEmail = document.getElementById('btnCopyEmail');
+        const copyTooltip = document.getElementById('copyTooltip');
+
+        if (btnCopyEmail && copyTooltip) {
+            btnCopyEmail.addEventListener('click', () => {
+                navigator.clipboard.writeText('contact@cartmaker.app').then(() => {
+                    copyTooltip.classList.add('show');
+                    setTimeout(() => { copyTooltip.classList.remove('show'); }, 2000);
+                }).catch(err => console.error('Error al copiar el correo: ', err));
+            });
+        }
+
+        const btnCopyWhatsApp = document.getElementById('btnCopyWhatsApp');
+        const whatsappTooltip = document.getElementById('whatsappTooltip');
+
+        if (btnCopyWhatsApp && whatsappTooltip) {
+            btnCopyWhatsApp.addEventListener('click', () => {
+                navigator.clipboard.writeText('+584222383498').then(() => {
+                    whatsappTooltip.classList.add('show');
+                    setTimeout(() => { whatsappTooltip.classList.remove('show'); }, 2000);
+                }).catch(err => console.error('Error al copiar el WhatsApp: ', err));
+            });
+        }
+
+        const navbar = document.querySelector('.public-navbar');
+        if (navbar) {
+            window.addEventListener('scroll', () => {
+                if (window.scrollY > 50) {
+                    navbar.style.background = 'rgba(10, 6, 20, 0.98)';
+                    navbar.style.padding = '0 3%';
+                } else {
+                    navbar.style.background = 'rgba(10, 6, 20, 0.6)';
+                    navbar.style.padding = '0 5%';
+                }
+            });
+        }
+    });
+</script>
+{% endblock %}

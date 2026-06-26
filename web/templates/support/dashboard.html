@@ -1,0 +1,40 @@
+{% extends 'base.html' %}
+
+{% block title %}Dashboard | CartMaker Soporte{% endblock %}
+
+{% block content %}
+<div class="dashboard-header" style="margin-top: 60px;">
+    <h1>Panel de Control</h1>
+    <p>Resumen de tickets de soporte técnico activos</p>
+</div>
+
+<div class="tickets-grid">
+    {% for ticket in active_tickets %}
+    <div class="ticket-card">
+        <div class="ticket-header">
+            <span class="ticket-id">#{{ ticket.id }}</span>
+            <span class="ticket-topic">{{ ticket.topic }}</span>
+        </div>
+        <h3 class="ticket-title">{{ ticket.title }}</h3>
+        <div class="ticket-meta">
+            <span class="material-symbols-rounded">person</span>
+            <span>{{ ticket.client.first_name }} {{ ticket.client.last_name }}</span>
+        </div>
+        <div class="ticket-meta">
+            <span class="material-symbols-rounded">schedule</span>
+            <span>{{ ticket.creation|date:"d/m/Y h:i A" }}</span>
+        </div>
+        <a href="{% url 'support_agent_chat' ticket.id %}" class="btn-action">
+            <span class="material-symbols-rounded">forum</span>
+            Atender Ticket
+        </a>
+    </div>
+    {% empty %}
+    <div class="empty-state">
+        <span class="material-symbols-rounded empty-icon">task_alt</span>
+        <h3>No hay tickets pendientes</h3>
+        <p>¡Buen trabajo! Todos los clientes han sido atendidos.</p>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}

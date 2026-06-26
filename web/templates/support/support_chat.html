@@ -1,0 +1,69 @@
+{% extends 'base.html' %}
+
+{% block title %}Ticket #{{ ticket.id }} | CartMaker Soporte{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="/static/web/css/support.css">
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="chat-layout">
+    <div class="chat-sidebar">
+        <div class="ticket-info">
+            <span class="badge">Ticket #{{ ticket.id }}</span>
+            <h2>{{ ticket.title }}</h2>
+            <div class="meta-row">
+                <span class="material-icons-rounded">category</span>
+                <span>{{ ticket.topic }}</span>
+            </div>
+            <div class="meta-row">
+                <span class="material-icons-rounded">person</span>
+                <span>{{ ticket.client.first_name }} {{ ticket.client.last_name }}</span>
+            </div>
+            <div class="meta-row">
+                <span class="material-icons-rounded">calendar_today</span>
+                <span>{{ ticket.creation|date:"d/m/Y h:i A" }}</span>
+            </div>
+            <p class="ticket-desc">{{ ticket.description }}</p>
+        </div>
+        <div class="agent-controls">
+            <div class="status-indicator">
+                <div class="dot" id="client-status-dot"></div>
+                <span id="client-status-text">Cliente desconectado</span>
+            </div>
+            <button class="btn-close-ticket">Cerrar Ticket</button>
+        </div>
+    </div>
+
+    <div class="chat-main">
+        <div class="chat-header">
+            <div class="header-user">
+                <div class="avatar">{{ ticket.client.first_name|make_list|first }}</div>
+                <div class="user-details">
+                    <h3>{{ ticket.client.first_name }} {{ ticket.client.last_name }}</h3>
+                    <span id="typing-indicator" class="typing-text"></span>
+                </div>
+            </div>
+        </div>
+
+        <div class="chat-messages" id="chat-messages">
+            <div class="loader" id="history-loader"></div>
+        </div>
+
+        <div class="chat-input-wrapper">
+            <input type="text" id="message-input" placeholder="Escribe tu respuesta aquí..." autocomplete="off">
+            <button id="send-button" class="btn-send">
+                <span class="material-icons-rounded">send</span>
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const TICKET_ID = "{{ ticket.id }}";
+    const AGENT_ID = "{{ agent_id }}";
+    const JWT_TOKEN = "{{ jwt_token }}";
+</script>
+<script src="/static/web/js/support.js"></script>
+{% endblock %}

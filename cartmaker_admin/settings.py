@@ -60,7 +60,8 @@ INSTALLED_APPS = [
     'drf_spectacular',
     "colorfield",
     'api',
-    'chat'
+    'chat',
+    'web'
 ]
 
 MIDDLEWARE = [
@@ -182,6 +183,8 @@ TIME_ZONE = 'America/Caracas'
 USE_I18N = True
 
 USE_TZ = True
+
+LOGIN_URL = '/support/login/'
 
 
 # Static files (CSS, JavaScript, Images)

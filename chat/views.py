@@ -5,7 +5,7 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 
 from api.core.firebase_admin import NotificationManager
 from .models import ChatMessage, PredefinedMessage
-from api.models import Order
+from api.models import Order, SupportMessage, SupportTicket
 from .permissions import IsNodeMicroservice
 from django.db import transaction
 from django.utils import timezone
@@ -123,6 +123,23 @@ class ChatViewSet(viewsets.ViewSet):
 
         except Order.DoesNotExist:
             return Response({"error": "La orden no existe."}, status=status.HTTP_404_NOT_FOUND)
+        
+class SupportChatViewSet(viewsets.ViewSet):
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=['get'])
+    def history(self, request):
+        ticket_id = request.query_params.get('ticket_id')
+        offset = int(request.query_params.get('offset', 0))
+        limit = int(request.query_params.get('limit', 15))
+        
+        try:
+            ticket = SupportTicket.objects.get(id=ticket_id)
+            messages = SupportMessage.objects.filter(ticket=ticket).select_related('sender').order_by('-created_at')[offset:offset+limit]
+            data = [msg.get_json() for msg in messages][::-1]
+            return Response({'data': data, 'next_offset': offset + limit if len(data) == limit else None}, status=status.HTTP_200_OK)
+        except SupportTicket.DoesNotExist:
+            return Response({"error": "No existe"}, status=status.HTTP_404_NOT_FOUND)
 
 # =========================================================================
 # 2. ENDPOINT PARA NODE.JS (Webhook)
@@ -176,4 +193,27 @@ class ChatWebhookViewSet(viewsets.ViewSet):
                 status__lt=3
             ).exclude(sender_id=reader_id).update(status=3)
             
+        return Response({"success": True}, status=status.HTTP_200_OK)
+    
+    @action(detail=False, methods=['post'], url_path='process_support_message')
+    def process_support_message(self, request):
+        ticket_id = request.data.get('ticket_id')
+        sender_id = request.data.get('sender_id')
+        recipient_connected = request.data.get('recipient_connected', False)
+        try:
+            ticket = SupportTicket.objects.get(id=ticket_id)
+            msg = SupportMessage.objects.create(
+                ticket=ticket, sender_id=sender_id, text=request.data.get('text'),
+                message_type=request.data.get('message_type', 'text'), media_url=request.data.get('media_url'),
+                status=SupportMessage.DeliveryStatus.READ if recipient_connected else SupportMessage.DeliveryStatus.SENT
+            )
+            if not recipient_connected:
+                NotificationManager.notify_new_support_message(ticket=ticket, sender_id=sender_id, text=request.data.get('text'))
+            return Response({"success": True, "data": msg.get_json()}, status=status.HTTP_200_OK)
+        except SupportTicket.DoesNotExist:
+            return Response({"error": "No encontrada"}, status=status.HTTP_404_NOT_FOUND)
+    
+    @action(detail=False, methods=['post'], url_path='mark_support_room_as_read')
+    def mark_support_room_as_read(self, request):
+        SupportMessage.objects.filter(ticket_id=request.data.get('ticket_id'), status__lt=3).exclude(sender_id=request.data.get('user_id')).update(status=3)
         return Response({"success": True}, status=status.HTTP_200_OK)

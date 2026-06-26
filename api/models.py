@@ -563,7 +563,7 @@ class Company(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255)
-    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='companies')
+    owner = models.OneToOneField(User, on_delete=models.CASCADE, related_name='company')
     creation = models.DateTimeField(auto_now_add=True)
     category = models.ForeignKey(CompanyCategory, on_delete=models.SET_NULL, null=True)
     image = models.CharField(null=True, blank=True)
@@ -1206,25 +1206,53 @@ class MerchantCalification(models.Model):
     rating = models.FloatField()
 
 class SupportTicket(models.Model):
-    """
-    Gestión de incidencias y soporte técnico.
-
-    Attributes:
-        client (ForeignKey): Usuario que reporta el problema.
-        agent (ForeignKey): Usuario del staff que atiende el ticket.
-        closed (bool): Estado de resolución.
-        conversation (json): Historial de mensajes del ticket.
-        creation (datetime): Apertura del ticket.
-        close_time (datetime): Cierre del ticket.
-        waiting_for_client_reply (bool): Indica flujo de atención.
-    """
     client = models.ForeignKey(User, on_delete=models.CASCADE, related_name='support_tickets')
-    agent = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='assigned_tickets')
+    agent = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_tickets')
+    topic = models.CharField(max_length=100)
+    title = models.CharField(max_length=200)
+    description = models.TextField()
     closed = models.BooleanField(default=False)
-    conversation = models.JSONField(default=list)
     creation = models.DateTimeField(auto_now_add=True)
     close_time = models.DateTimeField(null=True, blank=True)
     waiting_for_client_reply = models.BooleanField(default=False)
+
+class SupportMessage(models.Model):
+    class MessageType(models.TextChoices):
+        TEXT = 'text', 'Texto'
+        IMAGE = 'image', 'Imagen'
+        AUDIO = 'audio', 'Nota de Voz'
+
+    class DeliveryStatus(models.IntegerChoices):
+        PENDING = 0, 'Enviando'
+        SENT = 1, 'Enviado al Servidor'
+        DELIVERED = 2, 'Entregado al Dispositivo'
+        READ = 3, 'Leído'
+
+    ticket = models.ForeignKey(SupportTicket, on_delete=models.CASCADE, related_name='messages')
+    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sent_support_messages')
+    text = models.TextField(blank=True, null=True)
+    message_type = models.CharField(max_length=10, choices=MessageType.choices, default=MessageType.TEXT)
+    media_url = models.TextField(null=True, blank=True)
+    status = models.IntegerField(choices=DeliveryStatus.choices, default=DeliveryStatus.SENT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def get_json(self) -> dict:
+        time_str = timezone.localtime(self.created_at).strftime("%d/%m/%Y %I:%M %p").lower()
+        absolute_media_url = storage_manager.get_url(self.media_url) if self.media_url else ""
+        return {
+            'id': self.id,
+            'ticket_id': self.ticket.id,
+            'sender_id': str(self.sender.id),
+            'sender_name': f"{self.sender.first_name} {self.sender.last_name}",
+            'text': self.text,
+            'message_type': self.message_type,
+            'media_url': absolute_media_url,
+            'status': self.status,
+            'created_at': time_str,
+        }
 
 
 # ==========================================
@@ -1693,6 +1721,7 @@ class SystemConfig(models.Model):
         creation (datetime): Fecha de última actualización de config.
     """
     platinum_min_rating_promedy_requirement = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('4.5'))
+    platinum_min_sells_per_month_requirement = models.IntegerField(default=100)
     creation = models.DateTimeField(auto_now_add=True)
     atlas_plus_price_usd = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('2.99'))
     atlas_plus_daily_limit = models.IntegerField(default=75)

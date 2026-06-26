@@ -2252,7 +2252,8 @@ class SystemConfigCacheAPI(APIView):
             'atlas_plus_price_usd': float(config.atlas_plus_price_usd),
             'atlas_plus_daily_limit': config.atlas_plus_daily_limit,
             'atlas_free_daily_limit': config.atlas_free_daily_limit,
-            'platinum_min_rating_promedy_requirement': config.platinum_min_rating_promedy_requirement
+            'platinum_min_rating_promedy_requirement': config.platinum_min_rating_promedy_requirement,
+            'platinum_min_sells_per_month_requirement': config.platinum_min_sells_per_month_requirement
         }
         return Response(data, status=status.HTTP_200_OK)
 
@@ -3318,9 +3319,15 @@ class OrderViewSet(viewsets.ViewSet):
             client_lng = float(order.delivery_location.coordinates.x) if order.delivery_location else None
             client_address = order.delivery_location.description if order.delivery_location else None
 
+            is_merchant_mode = False
+            if hasattr(request.user, 'company'):
+                if request.user.company.id == order.store.company.id:
+                    is_merchant_mode = True
+
             # Mandamos la estructura limpia que espera Flutter
             payload = {
                 'id': order.id, 
+                "is_merchant_mode":is_merchant_mode,
                 'status': order.status,
                 'withdrawal_type': order.withdrawal_type,
                 'store_id': str(order.store.id),
@@ -3842,6 +3849,10 @@ class CartViewSet(viewsets.ViewSet):
     
     @action(detail=False, methods=['post'])
     def create_order(self, request):
+        if request.user.cedula_verified == False:
+            return Response({
+                "error": "No puedes comprar sin antes verificar tu identidad."
+            }, status=status.HTTP_406_NOT_ACCEPTABLE)
         store_id = request.data.get('store_id')
         items_data = request.data.get('items', [])  # Ej: [{'id': 'uid', 'quantity': 2}]
         withdrawal_type = request.data.get('withdrawal_type', 0)
@@ -3861,6 +3872,11 @@ class CartViewSet(viewsets.ViewSet):
             store = CompanyStore.objects.select_related(
                 'company', 'company__owner__subscription'
             ).get(id=store_id)
+            if hasattr(request.user, 'company'):
+                if store.company.id == request.user.company.id:
+                    return Response({
+                        "error": "No puedes comprar tus mismos productos."
+                    }, status=status.HTTP_406_NOT_ACCEPTABLE)
         except CompanyStore.DoesNotExist:
             return Response({
                 "error": "La tienda en la que intentas comprar ya no se encuentra disponible en la plataforma."
@@ -4991,6 +5007,9 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
             ).get(id=item_id, paused=False)
             
             data = item.get_json()
+            data['is_owner'] = item.product.company.id == request.user.company.id \
+                if (request.user.is_authenticated and hasattr(request.user, 'company')) else False
+            
             
             user_tokens = 0
             if request.user.is_authenticated:

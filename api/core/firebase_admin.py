@@ -302,3 +302,22 @@ class NotificationManager:
             
         except Exception as e:
             logger.error(f"Fallo al notificar mensaje de chat agrupado: {e}")
+
+    @classmethod
+    def notify_new_support_message(cls, ticket, sender_id: int, text: str) -> None:
+        is_client_sender = (ticket.client.id == sender_id)
+        if is_client_sender: return
+        receiver = ticket.client
+        title = "Nuevo mensaje de Soporte CartMaker"
+        body = text if len(text) <= 45 else text[:45] + '...'
+        existing_notif = Notification.objects.filter(user_id=receiver.id, category=NotificationCategory.NEW_CHAT_MESSAGE, is_read=False, metadata__ticket_id=str(ticket.id)).first()
+        if existing_notif:
+            existing_notif.body = body
+            existing_notif.created_at = timezone.now()
+            existing_notif.save(update_fields=['body', 'created_at'])
+            notification = existing_notif
+        else:
+            notification = Notification.objects.create(user_id=receiver.id, section=NotificationSection.HELP, title=title, body=body, category=NotificationCategory.NEW_CHAT_MESSAGE, metadata={'type': 'new_support_message', 'ticket_id': str(ticket.id)})
+        data = {'type': 'new_support_message', 'ticket_id': str(ticket.id), 'notification_id': str(notification.id)}
+        user_obj = User.objects.prefetch_related('fcm_tokens').get(id=receiver.id)
+        cls._send_multicast(user=user_obj, title=title, body=body, data_payload=data)
