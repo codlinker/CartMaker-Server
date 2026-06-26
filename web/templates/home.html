@@ -1,12 +1,8 @@
 {% extends 'base.html' %}
 {% load static %}
 
-{% block title %}
-    {% if user.is_authenticated %}
-        Dashboard | CartMaker Soporte
-    {% else %}
-        CartMaker | El Fin del Precio al DM
-    {% endif %}
+{% block extra_head %}
+    <link rel="stylesheet" href="{% static 'css/home.css' %}">
 {% endblock %}
 
 {% block content %}
@@ -159,12 +155,12 @@
 <section id="manifesto" class="manifesto-section">
     <div class="manifesto-text">
         <h2>El fin del "Precio al DM"</h2>
-        <p>Las redes sociales tradicionales están <strong>rotas para el comercio</strong>. Cuando una tienda publica algo que te gusta, compite contra memes y bailes. Y cuando por fin decides comprar, te toca <strong>rogar en los comentarios para que te den el precio</strong>.</p>
+        <p>Las redes sociales tradicionales están <strong>rotas para el comercio</strong>. Cuando una tienda publica algo que te gusta, compite contra memes, bailes, history time, etc. Y cuando por fin decides comprar, te toca <strong>rogar en los comentarios para que te den el precio</strong>.</p>
         <p>CartMaker es la primera <strong>red social de Venezuela dedicada 100% a las ventas</strong>. Desliza videos a pantalla completa, descubre los mejores productos de tu ciudad y <strong>compra al instante sin tener que escribirle a nadie por WhatsApp</strong>.</p>
     </div>
     <div class="manifesto-visual">
         <div class="glass-panel" data-speed="0.2">
-            <div class="stat-row">
+            <div class="stat-card">
                 <div class="stat-icon">
                     <span class="material-symbols-rounded">swipe</span> 
                 </div>
@@ -173,7 +169,7 @@
                     <p>Olvídate de las fotos aburridas y los catálogos lentos. Descubre productos <strong>deslizando videos dinámicos</strong>, igual que en tus redes favoritas.</p>
                 </div>
             </div>
-            <div class="stat-row">
+            <div class="stat-card">
                 <div class="stat-icon">
                     <span class="material-symbols-rounded">verified_user</span>
                 </div>
@@ -182,7 +178,7 @@
                     <p>Cada usuario pasa por <strong>validación biométrica</strong>. Si está en CartMaker, es un negocio o cliente real con <strong>inventario físico comprobado</strong>.</p>
                 </div>
             </div>
-            <div class="stat-row">
+            <div class="stat-card">
                 <div class="stat-icon">
                     <span class="material-symbols-rounded">bolt</span>
                 </div>
@@ -192,6 +188,232 @@
                 </div>
             </div>
         </div>
+    </div>
+</section>
+
+<section id="plans" class="plans-section">
+    <div class="section-header">
+        <p>SUSCRIPCIONES</p>
+        <h2>Elige cómo escalar tu negocio</h2>
+    </div>
+    
+    <div class="plans-container">
+        {% for plan in plans %}
+        <div class="plan-card plan-theme-{{ forloop.counter }}">
+            
+            <div class="card-orb orb-top"></div>
+            <div class="card-orb orb-bottom"></div>
+
+            {% if plan.is_popular %}
+            <div class="plan-badge-popular">POPULAR</div>
+            {% endif %}
+
+            <div class="plan-icon-wrapper">
+                {% if 'Comercio' in plan.name %}
+                    <span class="material-symbols-rounded plan-icon">auto_awesome</span>
+                {% elif 'Franquicia' in plan.name %}
+                    <span class="material-symbols-rounded plan-icon">store</span>
+                {% else %}
+                    <span class="material-symbols-rounded plan-icon">storefront</span>
+                {% endif %}
+            </div>
+
+            <div class="plan-title-pill">
+                {{ plan.name }} 
+            </div>
+
+            <div class="plan-desc">
+                {{ plan.short_description_html|safe }}
+            </div>
+
+            <div class="plan-price-block">
+                <div class="price-main">
+                    {{ plan.price|floatformat:1 }}$<span class="price-month">/mes</span>
+                </div>
+                <div class="price-sub">¡A tasa del BCV!</div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</section>
+
+<section id="compare" class="comparison-section">
+    <div class="section-header">
+        <p>ANÁLISIS A DETALLE</p>
+        <h2>Compara los beneficios</h2>
+    </div>
+    
+    <div class="comparison-table-wrapper">
+        <table class="modern-table">
+            <thead>
+                <tr>
+                    <th class="feature-col-header">Características</th>
+                    {% for plan in plans %}
+                    <th>
+                        <div class="th-plan-name" style="color: {{ plan.label_border_color|default:'var(--primary)' }}">{{ plan.name }}</div>
+                        <div class="th-plan-price">{{ plan.price|floatformat:1 }}$ / mes</div>
+                    </th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="feature-name">
+                        <strong>Capacidad del inventario</strong>
+                        <span>Límite de productos registrados</span>
+                    </td>
+                    {% for plan in plans %}
+                    <td class="feature-value-text">{{ plan.inventory_capacity }}</td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td class="feature-name">
+                        <strong>Registro de productos con IA</strong>
+                        <span>Auto-completado y sugerencias de precio</span>
+                    </td>
+                    {% for plan in plans %}
+                    <td>
+                        {% if plan.products_registration_with_ia %}
+                            <span class="material-symbols-rounded check-icon">check_circle</span>
+                        {% else %}
+                            <span class="material-symbols-rounded empty-icon">horizontal_rule</span>
+                        {% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td class="feature-name">
+                        <strong>Historial de perfiles</strong>
+                        <span>Sube historias como en redes sociales</span>
+                    </td>
+                    {% for plan in plans %}
+                    <td>
+                        {% if plan.profile_histories %}
+                            <span class="material-symbols-rounded check-icon">check_circle</span>
+                        {% else %}
+                            <span class="material-symbols-rounded empty-icon">horizontal_rule</span>
+                        {% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td class="feature-name">
+                        <strong>Sistema de gamificación</strong>
+                        <span>Emite tokens canjeables por descuentos</span>
+                    </td>
+                    {% for plan in plans %}
+                    <td>
+                        {% if plan.gamification_system %}
+                            <span class="material-symbols-rounded check-icon">check_circle</span>
+                        {% else %}
+                            <span class="material-symbols-rounded empty-icon">horizontal_rule</span>
+                        {% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td class="feature-name">
+                        <strong>Motor de Fidelidad</strong>
+                        <span>Métricas de retención por gamificación</span>
+                    </td>
+                    {% for plan in plans %}
+                    <td>
+                        {% if plan.gamification_analytics %}
+                            <span class="material-symbols-rounded check-icon">check_circle</span>
+                        {% else %}
+                            <span class="material-symbols-rounded empty-icon">horizontal_rule</span>
+                        {% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td class="feature-name">
+                        <strong>Impacto y ROI</strong>
+                        <span>Métricas de conversión y efectividad</span>
+                    </td>
+                    {% for plan in plans %}
+                    <td>
+                        {% if plan.digital_performance_analytics %}
+                            <span class="material-symbols-rounded check-icon">check_circle</span>
+                        {% else %}
+                            <span class="material-symbols-rounded empty-icon">horizontal_rule</span>
+                        {% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td class="feature-name">
+                        <strong>Rendimiento Visual</strong>
+                        <span>Analíticas de interacciones en videos</span>
+                    </td>
+                    {% for plan in plans %}
+                    <td>
+                        {% if plan.clients_behavior_analytics %}
+                            <span class="material-symbols-rounded check-icon">check_circle</span>
+                        {% else %}
+                            <span class="material-symbols-rounded empty-icon">horizontal_rule</span>
+                        {% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td class="feature-name">
+                        <strong>Radar Comercial</strong>
+                        <span>Mapa de demanda insatisfecha</span>
+                    </td>
+                    {% for plan in plans %}
+                    <td>
+                        <span class="material-symbols-rounded check-icon">check_circle</span>
+                    </td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td class="feature-name">
+                        <strong>Gestión Operativa</strong>
+                        <span>Métricas de gastos por cliente y sucursal</span>
+                    </td>
+                    {% for plan in plans %}
+                    <td>
+                        {% if plan.operative_management_analytics %}
+                            <span class="material-symbols-rounded check-icon">check_circle</span>
+                        {% else %}
+                            <span class="material-symbols-rounded empty-icon">horizontal_rule</span>
+                        {% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td class="feature-name">
+                        <strong>Múltiples Sucursales</strong>
+                        <span>Inventarios independientes por local</span>
+                    </td>
+                    {% for plan in plans %}
+                    <td>
+                        {% if plan.company_branches %}
+                            <span class="material-symbols-rounded check-icon">check_circle</span>
+                        {% else %}
+                            <span class="material-symbols-rounded empty-icon">horizontal_rule</span>
+                        {% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td class="feature-name">
+                        <strong>Gestión de Empleados</strong>
+                        <span>Acceso biométrico para terceros</span>
+                    </td>
+                    {% for plan in plans %}
+                    <td>
+                        {% if plan.company_employees %}
+                            <span class="material-symbols-rounded check-icon">check_circle</span>
+                        {% else %}
+                            <span class="material-symbols-rounded empty-icon">horizontal_rule</span>
+                        {% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+            </tbody>
+        </table>
     </div>
 </section>
 
@@ -232,7 +454,8 @@
             </div>
             <div class="team-info">
                 <h3>Fundador & CEO</h3>
-                <p class="team-role">Lead Software Engineer & UX/UI Specialist</p>
+                <p class="team-role">Atreyus Reyes</p>
+                <p class="team-role" style="color: white">Lead Software Engineer & UX/UI Specialist</p>
                 <p class="team-bio">
                     Ingeniero de Software Líder y especialista en Backend y UX/UI. Arquitecto de sistemas de alta escalabilidad, fusiona la robustez técnica de infraestructuras masivas con un diseño de experiencia intuitivo, fluido y centrado en el usuario. Dirección técnica enfocada en garantizar que CartMaker sea un ecosistema ultra veloz, blindado y sin fricciones comerciales.
                 </p>
@@ -284,18 +507,6 @@
     </div>
 </section>
 
-<footer>
-    <div class="footer-brand">
-        <img src="{% static 'img/logo_sin_letras.svg' %}" alt="CartMaker Logo" class="footer-logo-img">
-        <div class="footer-logo">CartMaker 2026.</div>
-    </div>
-    <div class="footer-links">
-        <a href="#">Términos y Condiciones</a>
-        <a href="#">Privacidad Biométrica</a>
-        <a href="#">Para Comercios</a>
-    </div>
-</footer>
-
 <div class="image-modal" id="imageModal">
     <button class="modal-close" id="modalClose" aria-label="Cerrar ventana">
         <span class="material-symbols-rounded">close</span>
@@ -303,375 +514,5 @@
     <img src="" alt="Vista completa de la captura" id="modalImg">
 </div>
 
-<script>
-    document.addEventListener("DOMContentLoaded", (event) => {
-        gsap.registerPlugin(ScrollTrigger);
-
-        const titleSplit = new SplitType('.hero-title', { types: 'chars' });
-        
-        gsap.from(titleSplit.chars, {
-            opacity: 0,
-            y: 80,
-            rotationX: -90,
-            rotationY: 45,
-            scale: 0.5,
-            transformOrigin: "50% 50% -50",
-            stagger: {
-                amount: 0.8,
-                from: "center"
-            },
-            duration: 1.2,
-            ease: "expo.out",
-            delay: 0.2
-        });
-
-        const tl = gsap.timeline();
-        
-        tl.to('.hero-desc', {
-            y: 0,
-            opacity: 1,
-            duration: 0.8,
-            ease: "power3.out",
-            delay: 1
-        })
-        .to('.hero-section .store-buttons', {
-            y: 0,
-            opacity: 1,
-            duration: 0.8,
-            ease: "back.out(1.7)"
-        }, "-=0.4")
-
-        .to('.hero-socials', {
-            y: 0,
-            opacity: 1,
-            duration: 0.8,
-            ease: "back.out(1.5)"
-        }, "-=0.5");
-
-        gsap.to('.hero-bg', {
-            yPercent: 30,
-            ease: "none",
-            scrollTrigger: {
-                trigger: ".hero-section",
-                start: "top top",
-                end: "bottom top",
-                scrub: true
-            }
-        });
-
-        gsap.to('.section-header', {
-            y: 0,
-            opacity: 1,
-            duration: 1,
-            scrollTrigger: {
-                trigger: ".features-section",
-                start: "top 80%"
-            }
-        });
-
-        gsap.from('.carousel-container', {
-            y: 100,
-            opacity: 0,
-            duration: 1,
-            ease: "power3.out",
-            scrollTrigger: {
-                trigger: ".features-section",
-                start: "top 75%"
-            }
-        });
-
-        const track = document.getElementById('carouselTrack');
-        const cards = document.querySelectorAll('.feature-card');
-
-        track.addEventListener('dragstart', (e) => e.preventDefault());
-        
-        if (track && cards.length > 0) {
-            let currentIndex = 0;
-            const totalCards = cards.length;
-
-            const updateCoverflow = () => {
-                const isMobile = window.innerWidth <= 768;
-                const spacing = isMobile ? 110 : 180;
-
-                cards.forEach((card, index) => {
-                    let offset = index - currentIndex;
-                    
-                    if (offset > Math.floor(totalCards / 2)) {
-                        offset -= totalCards;
-                    } else if (offset < -Math.floor(totalCards / 2)) {
-                        offset += totalCards;
-                    }
-
-                    const direction = Math.sign(offset);
-                    const absOffset = Math.abs(offset);
-
-                    let scale = 1;
-                    let translateX = offset * spacing;
-                    let translateZ = 0;
-                    let rotateY = 0;
-                    let opacity = 1;
-                    let zIndex = 100 - absOffset;
-
-                    if (absOffset === 0) {
-                        scale = 1;
-                        translateZ = 50;
-                        rotateY = 0;
-                        opacity = 1;
-                        card.classList.add('active');
-                    } else {
-                        scale = 0.8 - (absOffset * 0.05);
-                        translateZ = -100 - (absOffset * 100);
-                        rotateY = direction * -35;
-                        opacity = absOffset > 2 ? 0 : 1 - (absOffset * 0.2);
-                        card.classList.remove('active');
-                    }
-
-                    card.style.zIndex = zIndex;
-                    card.style.opacity = opacity;
-                    card.style.transform = `translateX(${translateX}px) translateZ(${translateZ}px) rotateY(${rotateY}deg) scale(${scale})`;
-                });
-            };
-
-            document.getElementById('btnNext').addEventListener('click', () => {
-                currentIndex = (currentIndex + 1) % totalCards;
-                updateCoverflow();
-            });
-            
-            document.getElementById('btnPrev').addEventListener('click', () => {
-                currentIndex = (currentIndex - 1 + totalCards) % totalCards;
-                updateCoverflow();
-            });
-
-            cards.forEach((card, index) => {
-                card.addEventListener('click', () => {
-                    currentIndex = index;
-                    updateCoverflow();
-                });
-            });
-
-            let isDragging = false;
-            let startPos = 0;
-            let isSwiping = false;
-
-            const dragStart = (e) => {
-                isDragging = true;
-                isSwiping = false;
-                startPos = e.type.includes('mouse') ? e.pageX : e.touches[0].clientX;
-                track.classList.add('dragging');
-            };
-
-            const dragEnd = (e) => {
-                if (!isDragging) return;
-                isDragging = false;
-                track.classList.remove('dragging');
-                
-                const endPos = e.type.includes('mouse') ? e.pageX : e.changedTouches[0].clientX;
-                const diff = startPos - endPos;
-                
-                if (Math.abs(diff) > 40) {
-                    isSwiping = true; 
-                    if (diff > 0) {
-                        currentIndex = (currentIndex + 1) % totalCards;
-                    } else {
-                        currentIndex = (currentIndex - 1 + totalCards) % totalCards;
-                    }
-                    updateCoverflow();
-                    
-                    setTimeout(() => isSwiping = false, 100);
-                }
-            };
-
-            track.addEventListener('mousedown', dragStart);
-            track.addEventListener('mouseup', dragEnd);
-            track.addEventListener('mouseleave', dragEnd);
-            track.addEventListener('mousemove', (e) => {
-                if(isDragging) e.preventDefault();
-            });
-
-            track.addEventListener('touchstart', dragStart, {passive: true});
-            track.addEventListener('touchend', dragEnd, {passive: true});
-            
-            cards.forEach((card, index) => {
-                card.addEventListener('click', (e) => {
-                    if (isSwiping) {
-                        e.preventDefault();
-                        return;
-                    }
-                    currentIndex = index;
-                    updateCoverflow();
-                });
-            });
-
-            window.addEventListener('resize', updateCoverflow);
-            updateCoverflow();
-        }
-
-        const zoomBtns = document.querySelectorAll('.card-zoom-btn');
-        const modal = document.getElementById('imageModal');
-        const modalImg = document.getElementById('modalImg');
-        const modalClose = document.getElementById('modalClose');
-
-        if (zoomBtns.length > 0 && modal && modalImg) {
-            zoomBtns.forEach(btn => {
-                ['click', 'mousedown', 'touchstart'].forEach(eventType => {
-                    btn.addEventListener(eventType, (e) => e.stopPropagation());
-                });
-
-                btn.addEventListener('click', () => {
-                    const card = btn.closest('.feature-card');
-                    const img = card.querySelector('.feature-img');
-                    
-                    modalImg.src = img.src;
-                    modal.classList.add('active');
-                    document.body.style.overflow = 'hidden';
-                });
-            });
-
-            const closeModal = () => {
-                modal.classList.remove('active');
-                document.body.style.overflow = '';
-                setTimeout(() => { modalImg.src = ''; }, 400);
-            };
-
-            modalClose.addEventListener('click', closeModal);
-            
-            modal.addEventListener('click', (e) => {
-                if (e.target === modal) closeModal();
-            });
-
-            document.addEventListener('keydown', (e) => {
-                if (e.key === 'Escape' && modal.classList.contains('active')) closeModal();
-            });
-        }
-
-        gsap.from('.manifesto-text h2, .manifesto-text p', {
-            x: -50,
-            opacity: 0,
-            duration: 1,
-            stagger: 0.2,
-            ease: "power3.out",
-            scrollTrigger: {
-                trigger: ".manifesto-section",
-                start: "top 70%"
-            }
-        });
-
-        const glassPanel = document.querySelector('.glass-panel');
-        if (window.innerWidth > 1024 && glassPanel) {
-            gsap.to(glassPanel, {
-                yPercent: -15,
-                ease: "none",
-                scrollTrigger: {
-                    trigger: ".manifesto-section",
-                    start: "top bottom",
-                    end: "bottom top",
-                    scrub: true
-                }
-            });
-        }
-
-        gsap.from('.stat-row', {
-            x: 50,
-            opacity: 0,
-            duration: 0.8,
-            stagger: 0.2,
-            ease: "back.out(1.5)",
-            scrollTrigger: {
-                trigger: ".glass-panel",
-                start: "top 75%"
-            }
-        });
-
-        gsap.to('.cta-bg-image', {
-            yPercent: 20,
-            ease: "none",
-            scrollTrigger: {
-                trigger: ".cta-section",
-                start: "top bottom",
-                end: "bottom top",
-                scrub: true
-            }
-        });
-
-        gsap.from('.cta-content h2', {
-            y: 50,
-            opacity: 0,
-            duration: 1,
-            scrollTrigger: {
-                trigger: ".cta-section",
-                start: "top 80%"
-            }
-        });
-
-        gsap.to('.cta-content .store-buttons', {
-            y: 0,
-            opacity: 1,
-            duration: 0.8,
-            ease: "back.out(1.7)",
-            scrollTrigger: {
-                trigger: ".cta-section",
-                start: "top 75%"
-            }
-        });
-
-        gsap.from('.team-card', {
-            y: 60,
-            opacity: 0,
-            duration: 1,
-            ease: "power3.out",
-            scrollTrigger: {
-                trigger: ".team-section",
-                start: "top 80%"
-            }
-        });
-
-        gsap.from('.contact-container', {
-            y: 50,
-            opacity: 0,
-            duration: 1,
-            ease: "power3.out",
-            scrollTrigger: {
-                trigger: ".contact-section",
-                start: "top 80%"
-            }
-        });
-
-        const btnCopyEmail = document.getElementById('btnCopyEmail');
-        const copyTooltip = document.getElementById('copyTooltip');
-
-        if (btnCopyEmail && copyTooltip) {
-            btnCopyEmail.addEventListener('click', () => {
-                navigator.clipboard.writeText('contact@cartmaker.app').then(() => {
-                    copyTooltip.classList.add('show');
-                    setTimeout(() => { copyTooltip.classList.remove('show'); }, 2000);
-                }).catch(err => console.error('Error al copiar el correo: ', err));
-            });
-        }
-
-        const btnCopyWhatsApp = document.getElementById('btnCopyWhatsApp');
-        const whatsappTooltip = document.getElementById('whatsappTooltip');
-
-        if (btnCopyWhatsApp && whatsappTooltip) {
-            btnCopyWhatsApp.addEventListener('click', () => {
-                navigator.clipboard.writeText('+584222383498').then(() => {
-                    whatsappTooltip.classList.add('show');
-                    setTimeout(() => { whatsappTooltip.classList.remove('show'); }, 2000);
-                }).catch(err => console.error('Error al copiar el WhatsApp: ', err));
-            });
-        }
-
-        const navbar = document.querySelector('.public-navbar');
-        if (navbar) {
-            window.addEventListener('scroll', () => {
-                if (window.scrollY > 50) {
-                    navbar.style.background = 'rgba(10, 6, 20, 0.98)';
-                    navbar.style.padding = '0 3%';
-                } else {
-                    navbar.style.background = 'rgba(10, 6, 20, 0.6)';
-                    navbar.style.padding = '0 5%';
-                }
-            });
-        }
-    });
-</script>
+<script src="{% static 'js/home.js' %}"></script>
 {% endblock %}

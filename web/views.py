@@ -4,7 +4,7 @@ from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST
 from django.contrib import messages
-from api.models import SupportTicket
+from api.models import *
 from rest_framework_simplejwt.tokens import RefreshToken
 
 # ==============================================================
@@ -12,7 +12,9 @@ from rest_framework_simplejwt.tokens import RefreshToken
 # ==============================================================
 def landing_view(request):
     """ Exclusivo para branding y descarga de la App """
-    return render(request, 'home.html')
+    # Traemos los planes ordenados por precio
+    plans = MerchantPlan.objects.all().order_by('price')
+    return render(request, 'home.html', {'plans': plans})
 
 
 # ==============================================================
