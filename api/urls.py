@@ -26,6 +26,7 @@ router.register(r'orders', OrderViewSet, basename='orders')
 router.register(r'story-video', CompanyVideoStoryViewSet, basename='story-video')
 router.register(r'gamification', GamificationViewSet, basename="gamification")
 router.register(r'analytics', AnalyticsViewSet, basename='analytics')
+router.register(r'support-tickets', SupportTicketViewSet, basename='support-tickets')
 
 # --- DEFINICIÓN DE RUTAS (URLS) ---
 urlpatterns = [
@@ -76,8 +77,4 @@ urlpatterns = [
     path('v1/verify-user', VerifyUser.as_view(), name='verify_user'),
     # CRUD de modelos (viewsets)
     path('v1/', include(router.urls)),
-    # Vistas web
-    path('', Home.as_view(), name="home"),
-    # Rutas para testing
-    path('test/send-notification', SendNotificationToUser.as_view(), name="send_notification"),
 ]

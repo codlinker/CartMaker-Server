@@ -48,6 +48,7 @@ const axios = require('axios');
 const jwt = require('jsonwebtoken');
 
 const app = express();
+app.use(express.json());
 const server = http.createServer(app);
 
 // Configuramos Socket.io
@@ -105,7 +106,53 @@ io.use((socket, next) => {
 const activeChats = new Map(); 
 const onlineUsers = new Map(); 
 
+// =========================================================================
+// 🔌 API INTERNA PARA DJANGO (Asignación Inteligente)
+// =========================================================================
+
+// 1. Django pregunta: "¿Quién está conectado?"
+app.get('/internal/online-users', (req, res) => {
+  if (req.headers['x-microservice-token'] !== INTERNAL_SECRET) return res.status(403).send('Forbidden');
+  
+  // Devolvemos el array de IDs de todos los usuarios que tienen un socket activo
+  res.json({ online_users: Array.from(onlineUsers.keys()) });
+});
+
+// 2. Django ordena: "Notifica esta asignación"
+app.post('/internal/emit-assignment', (req, res) => {
+  if (req.headers['x-microservice-token'] !== INTERNAL_SECRET) return res.status(403).send('Forbidden');
+  const { ticket, agent_id, client_id } = req.body;
+
+  // A) Avisar al Agente en su Dashboard Web
+  io.to(`user_${agent_id}`).emit('new_ticket_assigned', ticket);
+  
+  // B) Avisar al Cliente en su App Flutter para que actualice la lista
+  io.to(`user_${client_id}`).emit('ticket_updated', ticket);
+  
+  // C) Avisar a la sala del chat (por si el cliente lo tiene abierto)
+  io.to(`support_${ticket.id}`).emit('agent_assigned', ticket);
+
+  res.json({ success: true });
+});
+
+// 3. Django ordena: "Cierra el ticket y bloquea a todos"
+app.post('/internal/emit-ticket-closed', (req, res) => {
+  if (req.headers['x-microservice-token'] !== INTERNAL_SECRET) return res.status(403).send('Forbidden');
+  const { ticket_id, reason, client_id, agent_id } = req.body;
+
+  // Cerrar el chat
+  io.to(`support_${ticket_id}`).emit('ticket_closed', { ticket_id, reason });
+  
+  // Actualizar las listas globales de ambos
+  const payload = { id: ticket_id, closed: true, close_reason: reason };
+  io.to(`user_${client_id}`).emit('ticket_updated', payload);
+  io.to(`user_${agent_id}`).emit('ticket_updated', payload);
+
+  res.json({ success: true });
+});
+
 io.on('connection', (socket) => {
+  socket.join(`user_${socket.user_id}`);
   if (!onlineUsers.has(String(socket.user_id))) {
     onlineUsers.set(String(socket.user_id), new Set());
   }
@@ -144,6 +191,11 @@ io.on('connection', (socket) => {
     } catch (err) {
       console.error("❌ Error sincronizando lecturas de orden:", err.message);
     }
+  });
+
+  socket.on('join_dashboard', () => {
+    socket.join(`agent_${socket.user_id}`);
+    console.log(`🛡️ Agente [ID: ${socket.user_id}] monitoreando su dashboard`);
   });
 
   socket.on('send_message', async (data) => {
@@ -249,6 +301,9 @@ io.on('connection', (socket) => {
 
       if (response.data.success) {
         io.to(roomName).emit('new_support_message', response.data.data);
+        if (response.data.recipient_id) {
+            io.to(`user_${response.data.recipient_id}`).emit('global_new_support_message', response.data.data);
+        }
       }
     } catch (error) {
       socket.emit('chat_error', { message: "No se pudo procesar el mensaje de soporte." });

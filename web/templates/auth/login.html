@@ -1,15 +1,24 @@
 {% extends 'base.html' %}
+{% load static %}
 
 {% block title %}Login | CartMaker{% endblock %}
 
+{% block extra_head %}
+    <link rel="stylesheet" href="{% static 'css/login.css' %}">
+{% endblock %}
+
 {% block content %}
 <div class="login-wrapper">
+    <div class="login-orb orb-1"></div>
+    <div class="login-orb orb-2"></div>
+
     <div class="login-card">
         <div class="login-header">
             <span class="material-symbols-rounded login-icon">admin_panel_settings</span>
             <h2>Portal de Agentes</h2>
             <p>Acceso restringido al personal de soporte</p>
         </div>
+        
         <form method="POST" class="login-form">
             {% csrf_token %}
             <div class="input-group">

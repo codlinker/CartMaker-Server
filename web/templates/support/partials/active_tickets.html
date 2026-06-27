@@ -1,0 +1,56 @@
+{% for ticket in active_tickets %}
+    <a href="{% url 'support_agent_chat' ticket.id %}" class="ticket-card-link" id="ticket-card-{{ ticket.id }}">
+        <div class="ticket-card">
+            <div class="ticket-header" style="display: flex; align-items: center;">
+                <span class="ticket-id">#{{ ticket.id|stringformat:"05d" }}</span>
+                <span class="ticket-topic topic-{{ ticket.topic }}">
+                    {{ ticket.get_topic_display }}
+                </span>
+                <span class="badge-unread" id="badge-{{ ticket.id }}" style="margin-left: auto; background-color: var(--error-red); color: white; border-radius: 50%; padding: 2px 8px; font-size: 12px; font-weight: bold; {% if ticket.unread_agent == 0 or not ticket.unread_agent %}display: none;{% endif %}">
+                    {{ ticket.unread_agent|default:"0" }}
+                </span>
+            </div>
+            <h4 class="ticket-title">{{ ticket.title }}</h4>
+            
+            <div class="ticket-message-preview">
+                <span class="preview-label" id="label-preview-{{ ticket.id }}">
+                    {% if ticket.last_msg_type %}Último mensaje:{% else %}Motivo de contacto:{% endif %}
+                </span>
+                <p class="ticket-desc" id="msg-preview-{{ ticket.id }}">
+                    {% if ticket.last_msg_type %}
+                        {% if ticket.last_msg_sender_id|slugify == agent_id|slugify %}
+                            <span class="sender-you">Tú:</span> 
+                        {% endif %}
+                        
+                        {% if ticket.last_msg_type == 'text' %}
+                            {{ ticket.last_msg_text|truncatechars:65 }}
+                        {% elif ticket.last_msg_type == 'image' %}
+                            <span class="material-symbols-rounded preview-icon">image</span> Imagen enviada
+                        {% elif ticket.last_msg_type == 'audio' %}
+                            <span class="material-symbols-rounded preview-icon">mic</span> Nota de voz
+                        {% endif %}
+                    {% else %}
+                        {{ ticket.description|truncatechars:65 }}
+                    {% endif %}
+                </p>
+            </div>
+            
+            <div class="ticket-footer">
+                <div class="ticket-client">
+                    <span class="material-symbols-rounded">person</span>
+                    {{ ticket.client.first_name }} {{ ticket.client.last_name }}
+                </div>
+                <div class="ticket-time">
+                    <span class="material-symbols-rounded">schedule</span>
+                    {{ ticket.creation|date:"d M Y, h:i A" }}
+                </div>
+            </div>
+            
+            {% if ticket.waiting_for_client_reply %}
+                <div class="ticket-status-badge pending-client">Esperando al cliente</div>
+            {% else %}
+                <div class="ticket-status-badge pending-agent">Requiere tu atención</div>
+            {% endif %}
+        </div>
+    </a>
+{% endfor %}

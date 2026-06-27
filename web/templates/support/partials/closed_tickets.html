@@ -1,0 +1,38 @@
+{% for ticket in closed_tickets %}
+    <a href="{% url 'support_agent_chat' ticket.id %}" class="ticket-card-link" id="closed-card-{{ ticket.id }}">
+        <div class="ticket-card is-closed">
+            <div class="ticket-header" style="display: flex; align-items: center;">
+                <span class="ticket-id">#{{ ticket.id|stringformat:"05d" }}</span>
+                <span class="ticket-topic topic-{{ ticket.topic }}">
+                    {{ ticket.get_topic_display }}
+                </span>
+            </div>
+            
+            <h4 class="ticket-title">{{ ticket.title }}</h4>
+            
+            <div class="ticket-message-preview">
+                <span class="preview-label">Resolución:</span>
+                <p class="ticket-desc" style="color: var(--success-green); font-weight: 600;">
+                    <span class="material-symbols-rounded" style="font-size: 14px; vertical-align: middle;">verified</span> 
+                    {{ ticket.get_close_reason_display }}
+                </p>
+            </div>
+            
+            <div class="ticket-footer">
+                <div class="ticket-client">
+                    <span class="material-symbols-rounded">person</span>
+                    {{ ticket.client.first_name }} {{ ticket.client.last_name }}
+                </div>
+                <div class="ticket-time">
+                    <span class="material-symbols-rounded">lock_clock</span>
+                    {{ ticket.close_time|date:"d M Y, h:i A" }}
+                </div>
+            </div>
+            
+            <div class="ticket-status-badge status-closed-badge">
+                <span class="material-symbols-rounded">lock</span>
+                Finalizado
+            </div>
+        </div>
+    </a>
+{% endfor %}

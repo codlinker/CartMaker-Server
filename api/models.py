@@ -1206,15 +1206,54 @@ class MerchantCalification(models.Model):
     rating = models.FloatField()
 
 class SupportTicket(models.Model):
+
+    class TicketTopic(models.IntegerChoices):
+        ORDER_ISSUE = 0, 'Problema con una Orden'
+        STORE_COMPLAINT = 1, 'Reclamo sobre Tienda'
+        ACCOUNT_ISSUE = 2, 'Problema con mi Cuenta'
+        OTHER = 3, 'Otro'
+
+    class CloseReason(models.IntegerChoices):
+        SOLVED = 0, 'Resuelto con éxito'
+        UNRESOLVED = 1, 'No se pudo resolver'
+        SPAM = 2, 'Spam / Inválido'
+        NO_RESPONSE = 3, 'El cliente no responde'
+
     client = models.ForeignKey(User, on_delete=models.CASCADE, related_name='support_tickets')
     agent = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_tickets')
-    topic = models.CharField(max_length=100)
+    topic = models.IntegerField(choices=TicketTopic.choices, default=TicketTopic.OTHER)
     title = models.CharField(max_length=200)
     description = models.TextField()
     closed = models.BooleanField(default=False)
+    close_reason = models.IntegerField(choices=CloseReason.choices, null=True, blank=True)
     creation = models.DateTimeField(auto_now_add=True)
     close_time = models.DateTimeField(null=True, blank=True)
     waiting_for_client_reply = models.BooleanField(default=False)
+
+    def get_json(self) -> dict:
+        time_str = timezone.localtime(self.creation).strftime("%d/%m/%Y %I:%M %p").lower()
+        unread_client = self.messages.filter(status__lt=3).exclude(sender=self.client).count()
+        unread_agent = self.messages.filter(status__lt=3).exclude(sender=self.agent).count() if self.agent else self.messages.count()
+
+        return {
+            'id': self.id,
+            'client_id': str(self.client.id) if self.client else None,
+            'agent_id': str(self.agent.id) if self.agent else None,
+            'agent_name': f"{self.agent.first_name} {self.agent.last_name}" if self.agent else None,
+            # 💡 1. ENVIAMOS LA FOTO DE PERFIL DEL AGENTE
+            'agent_image': self.agent.get_profile_picture_url() if self.agent and self.agent.profile_picture else None,
+            'topic': self.get_topic_display(), 
+            'topic_id': self.topic,
+            'title': self.title,
+            'description': self.description,
+            'closed': self.closed,
+            'close_reason': self.get_close_reason_display() if self.close_reason is not None else None,
+            'creation': time_str,
+            'waiting_for_client_reply': self.waiting_for_client_reply,
+            # 💡 2. ENVIAMOS LOS BADGES
+            'unread_client': unread_client,
+            'unread_agent': unread_agent,
+        }
 
 class SupportMessage(models.Model):
     class MessageType(models.TextChoices):

@@ -1,69 +1,147 @@
 {% extends 'base.html' %}
-
-{% block title %}Ticket #{{ ticket.id }} | CartMaker Soporte{% endblock %}
+{% load static %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="/static/web/css/support.css">
-<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <link rel="stylesheet" href="{% static 'css/support_chat.css' %}">
 {% endblock %}
 
 {% block content %}
-<div class="chat-layout">
-    <div class="chat-sidebar">
-        <div class="ticket-info">
-            <span class="badge">Ticket #{{ ticket.id }}</span>
-            <h2>{{ ticket.title }}</h2>
-            <div class="meta-row">
-                <span class="material-icons-rounded">category</span>
-                <span>{{ ticket.topic }}</span>
-            </div>
-            <div class="meta-row">
-                <span class="material-icons-rounded">person</span>
-                <span>{{ ticket.client.first_name }} {{ ticket.client.last_name }}</span>
-            </div>
-            <div class="meta-row">
-                <span class="material-icons-rounded">calendar_today</span>
-                <span>{{ ticket.creation|date:"d/m/Y h:i A" }}</span>
-            </div>
-            <p class="ticket-desc">{{ ticket.description }}</p>
+<div class="chat-interface-wrapper">
+    
+    <aside class="chat-sidebar">
+        <div class="sidebar-header">
+            <a href="{% url 'web_dashboard' %}" class="btn-back">
+                <span class="material-symbols-rounded">arrow_back</span>
+            </a>
+            <h3>Detalles del Ticket</h3>
         </div>
-        <div class="agent-controls">
-            <div class="status-indicator">
-                <div class="dot" id="client-status-dot"></div>
-                <span id="client-status-text">Cliente desconectado</span>
+        
+        <div class="ticket-info-panel">
+            <div class="info-group">
+                <label>ID del Ticket</label>
+                <div class="info-value">#{{ ticket.id|stringformat:"05d" }}</div>
             </div>
-            <button class="btn-close-ticket">Cerrar Ticket</button>
-        </div>
-    </div>
-
-    <div class="chat-main">
-        <div class="chat-header">
-            <div class="header-user">
-                <div class="avatar">{{ ticket.client.first_name|make_list|first }}</div>
-                <div class="user-details">
-                    <h3>{{ ticket.client.first_name }} {{ ticket.client.last_name }}</h3>
-                    <span id="typing-indicator" class="typing-text"></span>
+            
+            <div class="info-group">
+                <label>Cliente</label>
+                <div class="info-value client-profile">
+                    {% if ticket.client.profile_picture %}
+                        <img src="{{ ticket.client.get_profile_picture_url }}" class="small-avatar">
+                    {% else %}
+                        <span class="material-symbols-rounded small-avatar-placeholder">account_circle</span>
+                    {% endif %}
+                    {{ ticket.client.first_name }} {{ ticket.client.last_name }}
                 </div>
             </div>
+            
+            <div class="info-group">
+                <label>Tema</label>
+                <div class="info-value">
+                    <span class="ticket-topic topic-{{ ticket.topic }}">{{ ticket.get_topic_display }}</span>
+                </div>
+            </div>
+
+            <div class="info-group">
+                <label>Asunto</label>
+                <div class="info-value title">{{ ticket.title }}</div>
+            </div>
+
+            <div class="info-group">
+                <label>Descripción Original</label>
+                <div class="info-value description">{{ ticket.description }}</div>
+            </div>
+            
+            <div class="info-group">
+                <label>Fecha de Creación</label>
+                <div class="info-value">{{ ticket.creation|date:"d/m/Y h:i A" }}</div>
+            </div>
         </div>
 
-        <div class="chat-messages" id="chat-messages">
-            <div class="loader" id="history-loader"></div>
+        <div class="sidebar-actions">
+            {% if not ticket.closed %}
+                <button type="button" id="btn-trigger-close" class="btn-action close-ticket">
+                    <span class="material-symbols-rounded">lock</span>
+                    Cerrar Ticket
+                </button>
+                
+                <input type="hidden" id="csrf_token" value="{{ csrf_token }}">
+            {% else %}
+                <div class="closed-notice" style="background: rgba(229, 57, 53, 0.1); border: 1px solid rgba(229, 57, 53, 0.3); padding: 1.2rem; border-radius: 16px; text-align: center;">
+                    <span class="material-symbols-rounded" style="color: var(--error-red); font-size: 32px; margin-bottom: 8px;">lock</span>
+                    <p style="color: #FF8A80; font-weight: 800; font-size: 0.9rem; margin: 0;">Ticket Finalizado</p>
+                    <p style="color: var(--light-grey); font-size: 0.8rem; margin-top: 4px;">Razón: {{ ticket.get_close_reason_display }}</p>
+                </div>
+            {% endif %}
+        </div>
+    </aside>
+
+    <div class="chat-main-area">
+        <header class="chat-header">
+            <div class="chat-header-client">
+                <div class="client-avatar-wrapper">
+                    {% if ticket.client.profile_picture %}
+                        <img src="{{ ticket.client.get_profile_picture_url }}" alt="Cliente">
+                    {% else %}
+                        <span class="material-symbols-rounded">person</span>
+                    {% endif %}
+                    <div class="status-dot" id="client-status-dot"></div>
+                </div>
+                <div class="client-status-info">
+                    <h2>{{ ticket.client.first_name }} {{ ticket.client.last_name }}</h2>
+                    <span class="status-text" id="client-status-text">Buscando conexión...</span>
+                </div>
+            </div>
+            
+            <button class="mobile-details-toggle" id="btnToggleDetails">
+                <span class="material-symbols-rounded">info</span>
+            </button>
+        </header>
+
+        <div class="chat-messages-container" id="chat-messages">
+            <div class="history-loader" id="history-loader">
+                <span class="material-symbols-rounded spinner">sync</span>
+                Cargando historial...
+            </div>
         </div>
 
-        <div class="chat-input-wrapper">
-            <input type="text" id="message-input" placeholder="Escribe tu respuesta aquí..." autocomplete="off">
-            <button id="send-button" class="btn-send">
-                <span class="material-icons-rounded">send</span>
+        <div class="chat-typing-indicator">
+            <span id="typing-indicator"></span>
+        </div>
+
+        <div class="chat-input-area" {% if ticket.closed %}style="opacity: 0.5; pointer-events: none; filter: grayscale(100%);"{% endif %}>
+            <input type="file" id="media-input" accept="image/*" hidden {% if ticket.closed %}disabled{% endif %}>
+            
+            <button class="btn-attach" id="btn-attach" aria-label="Adjuntar archivo" {% if ticket.closed %}disabled{% endif %}>
+                <span class="material-symbols-rounded">attach_file</span>
+            </button>
+            
+            <div class="input-wrapper">
+                <input type="text" id="message-input" 
+                    placeholder="{% if ticket.closed %}Este ticket ha sido cerrado{% else %}Escribe un mensaje aquí...{% endif %}" 
+                    autocomplete="off" 
+                    {% if ticket.closed %}disabled{% endif %}>
+            </div>
+            
+            <button class="btn-mic" id="btn-mic" aria-label="Grabar audio" style="background: transparent; border: none; color: var(--primary); cursor: pointer; padding: 10px; display: flex; align-items: center; justify-content: center; outline: none; border-radius: 50%;" {% if ticket.closed %}disabled{% endif %}>
+                <span class="material-symbols-rounded">mic</span>
+            </button>
+            
+            <button class="btn-send" id="send-button" aria-label="Enviar" {% if ticket.closed %}disabled{% endif %}>
+                <span class="material-symbols-rounded">send</span>
             </button>
         </div>
     </div>
 </div>
 
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 <script>
     const TICKET_ID = "{{ ticket.id }}";
-    const AGENT_ID = "{{ agent_id }}";
     const JWT_TOKEN = "{{ jwt_token }}";
+    const AGENT_ID = "{{ agent_id }}";
+
+    document.getElementById('btnToggleDetails').addEventListener('click', () => {
+        document.querySelector('.chat-sidebar').classList.toggle('active');
+    });
 </script>
-<script src="/static/web/js/support.js"></script>
+<script src="{% static 'js/support_chat.js' %}"></script>
 {% endblock %}

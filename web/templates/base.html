@@ -44,25 +44,16 @@
         <nav class="portal-navbar">
             <a href="{% url 'web_home' %}" class="nav-brand">
                 <img src="{% static 'img/logo_sin_letras.svg' %}" alt="CartMaker" class="nav-logo-svg-dark">
-                <div class="nav-brand-text">Cart<span>Maker</span></div>
+                <div class="nav-brand-text">CARTMAKER</div>
             </a>
             
             <div class="nav-links">
                 {% if user.is_authenticated and user.is_superuser %}
                     <div class="nav-user-menu">
-                        <div class="user-info">
-                            <span class="material-symbols-rounded avatar-icon">account_circle</span>
-                            <div class="user-text">
-                                <span class="user-name">{{ user.first_name }} {{ user.last_name }}</span>
-                                <span class="user-role">Agente Autorizado</span>
-                            </div>
-                        </div>
-                        
                         <form action="{% url 'web_logout' %}" method="POST" class="logout-form">
                             {% csrf_token %}
                             <button type="submit" class="btn-logout">
                                 <span class="material-symbols-rounded">logout</span>
-                                Salir
                             </button>
                         </form>
                     </div>
@@ -143,5 +134,8 @@
             }
         });
     </script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css"/>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="{% static 'js/utils/cart_maker_dialogs.js' %}"></script>
 </body>
 </html>

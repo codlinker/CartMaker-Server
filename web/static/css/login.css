@@ -1,0 +1,191 @@
+/* =========================================
+   LOGIN WRAPPER & BACKGROUND
+   ========================================= */
+.main-content {
+    max-width: 100%;
+}
+
+.login-wrapper {
+    min-height: calc(100vh - 80px); /* 80px del navbar */
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 2rem;
+    position: relative;
+    background: var(--bg-dark);
+    overflow: hidden;
+    z-index: 1;
+}
+
+/* Efectos de luces de fondo (Orbes) */
+.login-orb {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(80px);
+    z-index: -1;
+    pointer-events: none;
+    animation: floatOrb 15s infinite ease-in-out alternate;
+}
+
+.login-orb.orb-1 {
+    width: 400px;
+    height: 400px;
+    background: rgba(109, 73, 242, 0.25); /* Primary glow */
+    top: -10%;
+    left: -5%;
+}
+
+.login-orb.orb-2 {
+    width: 300px;
+    height: 300px;
+    background: rgba(49, 27, 146, 0.3); /* Dark purple glow */
+    bottom: -5%;
+    right: 5%;
+    animation-delay: -5s;
+}
+
+@keyframes floatOrb {
+    0% { transform: translate(0, 0) scale(1); }
+    50% { transform: translate(30px, -30px) scale(1.1); }
+    100% { transform: translate(-20px, 20px) scale(0.9); }
+}
+
+/* =========================================
+   LOGIN CARD (GLASSMORPHISM)
+   ========================================= */
+.login-card {
+    width: 100%;
+    max-width: 460px;
+    background: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(30px);
+    -webkit-backdrop-filter: blur(30px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 35px;
+    padding: 3.5rem 3rem;
+    text-align: center;
+    box-shadow: 0 30px 60px rgba(0, 0, 0, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+    animation: cardEntrance 0.6s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
+
+@keyframes cardEntrance {
+    from { opacity: 0; transform: translateY(30px) scale(0.95); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* =========================================
+   HEADER & TIPOGRAFÍA
+   ========================================= */
+.login-header {
+    margin-bottom: 2.5rem;
+}
+
+.login-icon {
+    font-size: 64px;
+    color: var(--primary);
+    margin-bottom: 1rem;
+    filter: drop-shadow(0 0 20px rgba(109, 73, 242, 0.4));
+}
+
+.login-header h2 {
+    font-size: 1.8rem;
+    font-weight: 900;
+    color: var(--white);
+    margin-bottom: 0.5rem;
+    letter-spacing: -0.5px;
+    font-family: 'Poppins', sans-serif;
+}
+
+.login-header p {
+    color: var(--light-purple);
+    font-size: 0.95rem;
+    font-weight: 500;
+}
+
+/* =========================================
+   FORMULARIO & INPUTS
+   ========================================= */
+.login-form {
+    text-align: left;
+}
+
+.input-group {
+    margin-bottom: 1.5rem;
+}
+
+.input-group label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--light-grey);
+    margin-bottom: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.input-group input {
+    width: 100%;
+    padding: 1.2rem;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(0, 0, 0, 0.3);
+    font-family: 'Inter', sans-serif;
+    font-size: 1rem;
+    color: var(--white);
+    transition: all 0.3s ease;
+    outline: none;
+}
+
+.input-group input::placeholder {
+    color: rgba(255, 255, 255, 0.3);
+}
+
+.input-group input:focus {
+    border-color: var(--primary);
+    background: rgba(0, 0, 0, 0.5);
+    box-shadow: 0 0 0 4px rgba(109, 73, 242, 0.2);
+}
+
+/* =========================================
+   BOTÓN DE SUBMIT
+   ========================================= */
+.btn-submit {
+    width: 100%;
+    padding: 1.2rem;
+    background: var(--primary);
+    color: var(--white);
+    border: none;
+    border-radius: 16px;
+    font-weight: 800;
+    font-size: 1.1rem;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+    margin-top: 1rem;
+    box-shadow: 0 10px 20px rgba(109, 73, 242, 0.3);
+    font-family: 'Inter', sans-serif;
+}
+
+.btn-submit:hover {
+    background: var(--dark-purple);
+    transform: translateY(-3px);
+    box-shadow: 0 15px 30px rgba(109, 73, 242, 0.5);
+}
+
+.btn-submit:active {
+    transform: translateY(0);
+    box-shadow: 0 5px 10px rgba(109, 73, 242, 0.3);
+}
+
+/* =========================================
+   RESPONSIVE
+   ========================================= */
+@media (max-width: 480px) {
+    .login-wrapper {
+        padding: 1rem;
+    }
+    
+    .login-card {
+        padding: 2.5rem 1.5rem;
+        border-radius: 25px;
+    }
+}

@@ -65,6 +65,10 @@ class RegistDeviceView(APIView):
     def post(self, request):
         fcm_token = request.data.get('fcm_token')
         platform = request.data.get('platform', 'android')
+        if request.user.is_superuser:
+            return Response({
+                'error':"No se permite acceso a cuentas administrativas."
+            }, status=status.HTTP_406_NOT_ACCEPTABLE)
         device, created = DeviceToken.objects.update_or_create(
             token=fcm_token,
             defaults={
@@ -103,6 +107,11 @@ class BiometricLoginView(APIView):
             return Response({
                 'error':"Identidad biométrica no reconocida o no registrada."}, 
                 status=status.HTTP_401_UNAUTHORIZED)
+        
+        if closest_user.is_superuser:
+            return Response({
+                'error':"No se permite acceso a cuentas administrativas."
+            }, status=status.HTTP_406_NOT_ACCEPTABLE)
 
         print("USUARIO OBTENIDO: ", closest_user)
         print("CLOSEST USER DISTANCE: ", closest_user.distance)
@@ -2371,6 +2380,93 @@ class SearchCacheAPI(APIView):
 ####################################################
 #################### VIEW SETS #####################
 ####################################################
+
+class SupportTicketViewSet(viewsets.ViewSet):
+    permission_classes = [IsAuthenticated]
+
+    def list(self, request):
+        tickets = SupportTicket.objects.filter(client=request.user).order_by('-creation')
+        data = [ticket.get_json() for ticket in tickets]
+        return Response({'data': data}, status=status.HTTP_200_OK)
+
+    def create(self, request):
+        if SupportTicket.objects.filter(client=request.user, closed=False).exists():
+            return Response(
+                {'error': 'Ya tienes un ticket de soporte en curso. Por favor, espera a que sea resuelto antes de abrir uno nuevo.'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        topic_str = request.data.get('topic')
+        title = request.data.get('title')
+        description = request.data.get('description')
+
+        if not topic_str or not title or not description:
+            return Response({'error': 'Faltan campos obligatorios'}, status=status.HTTP_400_BAD_REQUEST)
+
+        TOPIC_MAP = {
+            'Problema con una Orden': SupportTicket.TicketTopic.ORDER_ISSUE,
+            'Reclamo sobre Tienda': SupportTicket.TicketTopic.STORE_COMPLAINT,
+            'Problema con mi Cuenta': SupportTicket.TicketTopic.ACCOUNT_ISSUE,
+            'Otro': SupportTicket.TicketTopic.OTHER,
+        }
+        topic_int = TOPIC_MAP.get(topic_str, SupportTicket.TicketTopic.OTHER)
+
+        # =================================================================
+        # 🧠 ALGORITMO DE ASIGNACIÓN INTELIGENTE
+        # =================================================================
+        
+        # 1. Preguntamos a Node.js qué IDs de usuarios tienen sockets abiertos
+        online_users = []
+        try:
+            resp = requests.get(
+                "http://127.0.0.1:3000/internal/online-users", 
+                headers={'X-Microservice-Token': settings.SECRET_KEY}, # o env_manager.DJANGO_SECRET_KEY
+                timeout=2
+            )
+            if resp.status_code == 200:
+                online_users = resp.json().get('online_users', [])
+        except Exception as e:
+            print(f"Advertencia: No se pudo conectar a Node.js para ver agentes online: {e}")
+
+        # 2. Buscamos a los SuperUsers. Filtramos primero a los que están online.
+        all_agents = User.objects.filter(is_superuser=True)
+        online_agents = all_agents.filter(id__in=online_users)
+
+        # Si no hay nadie online, usamos a todos los agentes para que no quede huerfano
+        agent_pool = online_agents if online_agents.exists() else all_agents
+
+        # 3. Anotamos cuántos tickets ABIERTOS tiene asignados cada uno y sacamos al que tenga menos
+        best_agent = agent_pool.annotate(
+            active_tickets=Count('assigned_tickets', filter=Q(assigned_tickets__closed=False))
+        ).order_by('active_tickets').first()
+
+        # 4. Creamos el ticket ya asignado desde el nacimiento
+        ticket = SupportTicket.objects.create(
+            client=request.user,
+            agent=best_agent,
+            topic=topic_int,
+            title=title,
+            description=description
+        )
+
+        ticket_json = ticket.get_json()
+
+        # 5. Si encontramos agente, disparamos las alertas en tiempo real mediante Node.js
+        if best_agent:
+            try:
+                requests.post(
+                    "http://127.0.0.1:3000/internal/emit-assignment",
+                    json={
+                        'ticket': ticket_json, 
+                        'agent_id': str(best_agent.id),
+                        'client_id': str(request.user.id) # 💡 NUEVO
+                    },
+                    headers={'X-Microservice-Token': settings.SECRET_KEY},
+                    timeout=2
+                )
+            except Exception as e:
+                pass
+
+        return Response({'success': True, 'data': ticket_json}, status=status.HTTP_201_CREATED)
 
 class AnalyticsViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
@@ -5967,36 +6063,3 @@ class UserViewSet(mixins.RetrieveModelMixin,
                 "url": storage_manager.get_url(relative_path)
             })
         return Response({"error": "Error al guardar el archivo"}, status=500)
-
-####################################################
-################### VISTAS WEB #####################
-####################################################
-
-class Home(APIView):
-    """
-    Home principal
-    """
-    permission_classes = [IsAuthenticated]
-    renderer_classes = [TemplateHTMLRenderer]
-    throttle_classes = [ScopedRateThrottle]
-    throttle_scope = 'navigation'
-
-    def get(self, request):
-        return Response({}, template_name='index.html')
-
-################################################################
-################### ENDPOINTS PARA TESTING #####################
-################################################################
-
-class SendNotificationToUser(APIView):
-    """
-    Prueba de envio de notificacion a traves de Firebase.
-    """
-    def post(self, request):
-        firebase_admin.NotificationManager._send_multicast(
-            User.objects.get(id=request.data.get('user_id')),
-            request.data.get('title'),
-            request.data.get('message'),
-            request.data.get('payload')
-        )
-        return Response(status=status.HTTP_200_OK)

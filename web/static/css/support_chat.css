@@ -1,0 +1,1169 @@
+/* =========================================
+   LAYOUT GLOBAL DASHBOARD Y PANELS
+   ========================================= */
+.agent-workspace {
+    display: flex;
+    min-height: calc(100vh - 80px); /* Restando el navbar global */
+    background: var(--bg-dark);
+    color: var(--white);
+}
+
+.agent-sidebar {
+    width: 280px;
+    background: rgba(10, 6, 20, 0.95);
+    border-right: 1px solid rgba(255, 255, 255, 0.05);
+    display: flex;
+    flex-direction: column;
+    padding: 2rem 1.5rem;
+}
+
+.sidebar-user {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding-bottom: 2rem;
+    margin-bottom: 2rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.avatar-sm {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background: rgba(109, 73, 242, 0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border: 2px solid var(--primary);
+}
+
+.avatar-sm img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.avatar-sm .material-symbols-rounded {
+    font-size: 30px;
+    color: var(--primary);
+}
+
+.user-details h4 {
+    font-size: 1rem;
+    font-weight: 800;
+    margin-bottom: 2px;
+}
+
+.user-details span {
+    font-size: 0.75rem;
+    color: var(--primary);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.sidebar-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.nav-btn {
+    background: transparent;
+    border: none;
+    color: var(--light-grey);
+    padding: 14px 20px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 0.95rem;
+    font-family: 'Inter', sans-serif;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+    text-align: left;
+}
+
+.nav-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--white);
+    transform: translateX(5px);
+}
+
+.nav-btn.active {
+    background: var(--primary);
+    color: var(--white);
+    box-shadow: 0 5px 15px rgba(109, 73, 242, 0.3);
+}
+
+.agent-main-content {
+    flex-grow: 1;
+    padding: 2.5rem;
+    overflow-y: auto;
+    position: relative;
+    background: radial-gradient(circle at top right, rgba(109, 73, 242, 0.05) 0%, transparent 50%);
+}
+
+.dash-panel {
+    display: none;
+    animation: fadeIn 0.4s ease forwards;
+}
+
+.dash-panel.active {
+    display: block;
+}
+
+@keyframes fadeIn {
+    from { 
+        opacity: 0; 
+        transform: translateY(10px); 
+    }
+    to { 
+        opacity: 1; 
+        transform: translateY(0); 
+    }
+}
+
+/* =========================================
+   PANEL A: MONITOR (TICKETS)
+   ========================================= */
+.panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-bottom: 2.5rem;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.panel-title {
+    font-size: 1.8rem;
+    font-weight: 900;
+    color: var(--white);
+    margin-bottom: 0.5rem;
+    letter-spacing: -1px;
+}
+
+.panel-subtitle {
+    font-size: 1rem;
+    color: var(--light-purple);
+}
+
+.stat-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(109, 73, 242, 0.15);
+    padding: 10px 20px;
+    border-radius: 30px;
+    font-weight: 800;
+    color: var(--white);
+    border: 1px solid rgba(109, 73, 242, 0.3);
+}
+
+.stat-badge .material-symbols-rounded { 
+    color: var(--warning-yellow); 
+}
+
+.tickets-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 2rem;
+}
+
+/* =========================================
+   ESTILOS PARA TICKETS CERRADOS
+   ========================================= */
+.ticket-card.is-closed {
+    opacity: 0.65;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.03);
+    filter: grayscale(80%);
+}
+
+.ticket-card.is-closed:hover {
+    opacity: 1;
+    filter: grayscale(0%);
+    transform: translateY(-4px); /* Animación más sutil para los cerrados */
+    border-color: rgba(255, 255, 255, 0.15);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.5);
+}
+
+.ticket-card.is-closed .ticket-title {
+    color: var(--light-grey);
+    text-decoration: line-through;
+    text-decoration-color: rgba(255, 255, 255, 0.2);
+}
+
+/* Badge específico para tickets cerrados */
+.status-closed-badge {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--light-grey);
+    border: 1px dashed rgba(255, 255, 255, 0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+.status-closed-badge .material-symbols-rounded {
+    font-size: 16px;
+}
+
+.ticket-card-link, .ticket-card-link:hover, .ticket-card-link:focus, .ticket-card-link:active {
+    text-decoration: none !important;
+    outline: none !important;
+}
+
+.ticket-card {
+    background: rgba(255, 255, 255, 0.02);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 24px;
+    padding: 1.8rem;
+    transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.4s ease, border-color 0.4s ease;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.ticket-card:hover {
+    transform: translateY(-8px);
+    box-shadow: 0 20px 40px rgba(109, 73, 242, 0.2);
+    border-color: var(--primary);
+}
+
+.ticket-message-preview {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 14px 16px;
+    border-radius: 16px;
+    margin-bottom: 1.5rem;
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.preview-label {
+    font-size: 0.7rem;
+    color: var(--primary);
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+    display: block;
+}
+
+.ticket-desc {
+    font-size: 0.9rem;
+    color: var(--light-grey);
+    line-height: 1.4;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.sender-you {
+    color: var(--white);
+    font-weight: 700;
+}
+
+.preview-icon {
+    font-size: 16px;
+    color: var(--light-purple);
+}
+
+.ticket-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.2rem;
+}
+
+.ticket-id {
+    font-family: 'Poppins', sans-serif;
+    font-weight: 800;
+    color: var(--light-purple);
+}
+
+.ticket-topic {
+    font-size: 0.75rem;
+    font-weight: 800;
+    padding: 6px 14px;
+    border-radius: 20px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.topic-0 { 
+    background: rgba(229, 57, 53, 0.15); 
+    color: #FF8A80; 
+    border: 1px solid rgba(229, 57, 53, 0.3); 
+} 
+
+.topic-1 { 
+    background: rgba(255, 145, 0, 0.15); 
+    color: #FFD180; 
+    border: 1px solid rgba(255, 145, 0, 0.3); 
+} 
+
+.topic-2 { 
+    background: rgba(109, 73, 242, 0.15); 
+    color: #B39DDB; 
+    border: 1px solid rgba(109, 73, 242, 0.3); 
+} 
+
+.topic-3 { 
+    background: rgba(255, 255, 255, 0.1); 
+    color: var(--light-grey); 
+    border: 1px solid rgba(255, 255, 255, 0.2); 
+} 
+
+.ticket-title { 
+    font-size: 1.2rem; 
+    font-weight: 800; 
+    margin-bottom: 0.8rem; 
+    color: var(--white); 
+}
+
+.ticket-desc { 
+    font-size: 0.95rem; 
+    color: var(--light-grey); 
+    line-height: 1.6; 
+    margin-bottom: 1.5rem; 
+    flex-grow: 1; 
+}
+
+.ticket-footer {
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center;
+    margin-bottom: 1.5rem; 
+    font-size: 0.85rem; 
+    color: var(--light-purple); 
+    font-weight: 600;
+}
+
+.ticket-client, .ticket-time { 
+    display: flex; 
+    align-items: center; 
+    gap: 6px; 
+}
+
+.ticket-footer .material-symbols-rounded { 
+    font-size: 18px; 
+    color: var(--primary); 
+}
+
+.ticket-status-badge {
+    text-align: center; 
+    padding: 10px; 
+    border-radius: 16px; 
+    font-size: 0.85rem;
+    font-weight: 800; 
+    text-transform: uppercase; 
+    letter-spacing: 1px;
+}
+
+.pending-agent { 
+    background: var(--primary); 
+    color: var(--white); 
+    box-shadow: 0 4px 15px rgba(109, 73, 242, 0.3); 
+}
+
+.pending-client { 
+    background: rgba(255, 255, 255, 0.05); 
+    color: var(--light-grey); 
+    border: 1px solid rgba(255, 255, 255, 0.1); 
+}
+
+.empty-tickets {
+    grid-column: 1 / -1; 
+    border-radius: 30px; 
+    padding: 5rem 2rem; 
+    text-align: center;
+    border: 2px dashed rgba(109, 73, 242, 0.4);
+    background: rgba(255, 255, 255, 0.02);
+    backdrop-filter: blur(20px);
+}
+
+.empty-tickets .material-symbols-rounded { 
+    font-size: 72px; 
+    color: var(--success-green); 
+    margin-bottom: 1.5rem; 
+    filter: drop-shadow(0 0 15px rgba(76, 175, 80, 0.4));
+}
+
+.empty-tickets h3 {
+    font-size: 1.8rem;
+    font-weight: 800;
+    margin-bottom: 0.8rem;
+    color: var(--white);
+}
+
+.empty-tickets p {
+    color: var(--light-purple);
+    font-size: 1.1rem;
+}
+
+/* =========================================
+   PANEL B: ANALÍTICAS
+   ========================================= */
+.analytics-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 2rem;
+    margin-bottom: 2.5rem;
+}
+
+.metric-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(20px);
+    border-radius: 24px;
+    padding: 2rem;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+}
+
+.metric-icon {
+    width: 60px;
+    height: 60px;
+    background: rgba(109, 73, 242, 0.15);
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--primary);
+    border: 1px solid rgba(109, 73, 242, 0.3);
+}
+
+.metric-icon .material-symbols-rounded { 
+    font-size: 32px; 
+}
+
+.metric-info h3 {
+    font-size: 2.2rem;
+    font-weight: 900;
+    color: var(--white);
+    line-height: 1;
+    margin-bottom: 5px;
+    font-family: 'Poppins', sans-serif;
+}
+
+.metric-info p {
+    font-size: 0.9rem;
+    color: var(--light-purple);
+    font-weight: 600;
+}
+
+.charts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 2rem;
+}
+
+.chart-box {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 24px;
+    padding: 2rem;
+    backdrop-filter: blur(20px);
+}
+
+.chart-box h3 {
+    font-size: 1.1rem;
+    font-weight: 800;
+    margin-bottom: 1.5rem;
+    color: var(--white);
+    text-align: center;
+}
+
+.canvas-container {
+    position: relative;
+    height: 250px;
+    width: 100%;
+}
+
+/* =========================================
+   PANEL C: PERFIL
+   ========================================= */
+.profile-edit-wrapper {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(20px);
+    border-radius: 30px;
+    padding: 3rem;
+    max-width: 700px;
+}
+
+.avatar-edit-wrapper {
+    position: relative; 
+    width: 140px; 
+    height: 140px; 
+    margin: 0 auto 3rem auto;
+}
+
+.avatar-preview {
+    width: 100%; 
+    height: 100%; 
+    border-radius: 50%; 
+    background: var(--bg-dark);
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    overflow: hidden;
+    border: 3px solid rgba(109, 73, 242, 0.5); 
+    box-shadow: 0 10px 25px rgba(109, 73, 242, 0.3);
+}
+
+/* 💡 NUEVO: Control estricto de la imagen para que no se deforme ni haga zoom extremo */
+.avatar-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center; /* Mantiene la cara siempre en el centro */
+    display: block;
+}
+
+.default-avatar { 
+    font-size: 80px; 
+    color: rgba(255, 255, 255, 0.2); 
+}
+
+.avatar-edit-btn {
+    position: absolute; 
+    bottom: 0; 
+    right: 0; 
+    width: 48px; 
+    height: 48px;
+    background: var(--primary); 
+    color: var(--white); 
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 5px 15px rgba(109, 73, 242, 0.4); 
+    transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    border: 4px solid var(--bg-dark); 
+    padding: 0;
+    /* Quitamos el grid/flex de aquí */
+    display: block; 
+}
+
+.avatar-edit-btn:hover { 
+    transform: scale(1.1); 
+    background: var(--warning-yellow); 
+    color: var(--bg-dark); 
+}
+
+.avatar-edit-btn .material-symbols-rounded {
+    font-size: 22px; 
+    /* 💡 La técnica infalible: centro matemático absoluto */
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    margin: 0;
+    padding: 0;
+    /* Matamos cualquier espacio nativo de la fuente */
+    line-height: 0; 
+}
+
+
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+}
+
+.profile-form .form-group { 
+    margin-bottom: 1.5rem; 
+}
+
+.profile-form label {
+    display: block; 
+    font-size: 0.85rem; 
+    font-weight: 700; 
+    color: var(--light-grey);
+    margin-bottom: 0.6rem; 
+    text-transform: uppercase; 
+    letter-spacing: 1px;
+}
+
+.profile-form input[type="text"] {
+    width: 100%; 
+    padding: 1.2rem; 
+    border-radius: 16px; 
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(0, 0, 0, 0.3); 
+    font-family: 'Inter', sans-serif; 
+    font-size: 1rem;
+    color: var(--white); 
+    transition: all 0.3s; 
+    outline: none;
+}
+
+.profile-form input[type="text"]:focus {
+    border-color: var(--primary); 
+    background: rgba(0, 0, 0, 0.5); 
+    box-shadow: 0 0 0 4px rgba(109, 73, 242, 0.2);
+}
+
+.btn-save-profile {
+    width: 100%; 
+    padding: 1.2rem; 
+    background: var(--primary); 
+    color: var(--white);
+    border: none; 
+    border-radius: 16px; 
+    font-weight: 800; 
+    font-size: 1.1rem;
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    gap: 8px;
+    cursor: pointer; 
+    transition: all 0.3s; 
+    margin-top: 2rem;
+}
+
+.btn-save-profile:hover {
+    background: var(--dark-purple); 
+    transform: translateY(-3px); 
+    box-shadow: 0 10px 20px rgba(109, 73, 242, 0.4);
+}
+
+/* =========================================
+   CHAT INTERFACE
+   ========================================= */
+.chat-interface-wrapper {
+    display: flex; 
+    height: calc(100vh - 80px); 
+    background: var(--bg-dark); 
+    overflow: hidden; 
+    position: relative; 
+    color: var(--white);
+}
+
+.chat-sidebar {
+    width: 350px; 
+    display: flex; 
+    flex-direction: column; 
+    z-index: 10; 
+    transition: transform 0.3s ease;
+    border-radius: 0; 
+    border-top: none; 
+    border-bottom: none; 
+    border-left: none; 
+    background: rgba(255, 255, 255, 0.02);
+    border-right: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.sidebar-header {
+    padding: 1.5rem 2rem; 
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08); 
+    display: flex; 
+    align-items: center; 
+    gap: 15px;
+}
+
+.btn-back {
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    width: 40px; 
+    height: 40px; 
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--white); 
+    border-radius: 50%; 
+    text-decoration: none; 
+    transition: all 0.3s; 
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.btn-back:hover { 
+    background: var(--primary); 
+    border-color: var(--primary); 
+    transform: translateX(-3px); 
+    box-shadow: 0 5px 15px rgba(109, 73, 242, 0.3); 
+}
+
+.sidebar-header h3 { 
+    font-size: 1.2rem; 
+    font-weight: 800; 
+}
+
+.ticket-info-panel { 
+    padding: 2rem; 
+    overflow-y: auto; 
+    flex-grow: 1; 
+}
+
+.info-group { 
+    margin-bottom: 2rem; 
+}
+
+.info-group label { 
+    display: block; 
+    font-size: 0.75rem; 
+    font-weight: 700; 
+    color: var(--light-grey); 
+    text-transform: uppercase; 
+    letter-spacing: 1px; 
+    margin-bottom: 8px; 
+}
+
+.info-value { 
+    font-size: 1rem; 
+    font-weight: 500; 
+    color: var(--white); 
+    line-height: 1.5; 
+}
+
+.info-value.title { 
+    font-weight: 800; 
+    font-size: 1.1rem; 
+    color: var(--warning-yellow); 
+}
+
+.info-value.description { 
+    font-size: 0.95rem; 
+    background: rgba(0, 0, 0, 0.3); 
+    padding: 15px; 
+    border-radius: 16px; 
+    border: 1px solid rgba(255, 255, 255, 0.05); 
+    color: var(--light-purple); 
+}
+
+.client-profile { 
+    display: flex; 
+    align-items: center; 
+    gap: 12px; 
+    font-weight: 700; 
+}
+
+.small-avatar { 
+    width: 36px; 
+    height: 36px; 
+    border-radius: 50%; 
+    object-fit: cover; 
+    border: 2px solid var(--primary); 
+}
+
+.small-avatar-placeholder { 
+    font-size: 36px; 
+    color: rgba(255, 255, 255, 0.2); 
+}
+
+/* =========================================
+   ESTILOS PARA EL SELECT DE CIERRE DE TICKET
+   ========================================= */
+.sidebar-actions label {
+    font-size: 0.75rem; 
+    color: var(--light-grey); 
+    font-weight: 700; 
+    text-transform: uppercase; 
+    letter-spacing: 1px;
+    margin-bottom: 8px; 
+    display: block;
+}
+
+.custom-select {
+    width: 100%;
+    padding: 1rem;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(0, 0, 0, 0.3);
+    color: var(--white);
+    font-family: 'Inter', sans-serif;
+    font-size: 0.95rem;
+    outline: none;
+    transition: all 0.3s ease;
+    cursor: pointer;
+    margin-bottom: 1.5rem;
+    /* Para quitar la flecha por defecto y hacerlo más limpio */
+    appearance: none; 
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23D7D7D7' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 1rem center;
+    background-size: 1em;
+}
+
+.custom-select:focus {
+    border-color: var(--primary);
+    background: rgba(0, 0, 0, 0.5);
+    box-shadow: 0 0 0 4px rgba(109, 73, 242, 0.2);
+}
+
+.custom-select option {
+    background: var(--bg-dark);
+    color: var(--white);
+    padding: 10px;
+}
+
+.btn-action.close-ticket {
+    background: rgba(229, 57, 53, 0.1); 
+    color: #FF8A80; 
+    border: 1px solid rgba(229, 57, 53, 0.3); 
+    width: 100%; 
+    padding: 1.2rem;
+    border-radius: 16px; 
+    font-weight: 800; 
+    font-size: 1rem; 
+    display: flex; 
+    justify-content: center; 
+    align-items: center; 
+    gap: 8px;
+    cursor: pointer; 
+    transition: all 0.3s;
+}
+
+.btn-action.close-ticket:hover { 
+    background: var(--error-red); 
+    color: var(--white); 
+    border-color: var(--error-red); 
+    box-shadow: 0 10px 20px rgba(229, 57, 53, 0.3); 
+}
+
+.chat-main-area { 
+    flex-grow: 1; 
+    display: flex; 
+    flex-direction: column; 
+    position: relative; 
+    height: 100%; 
+    background: radial-gradient(circle at center, rgba(109, 73, 242, 0.05) 0%, transparent 60%); 
+}
+
+.chat-header { 
+    height: 80px; 
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08); 
+    display: flex; 
+    align-items: center; 
+    justify-content: space-between; 
+    padding: 0 2rem; 
+}
+
+.chat-header-client { 
+    display: flex; 
+    align-items: center; 
+    gap: 15px; 
+}
+
+.client-avatar-wrapper { 
+    position: relative; 
+    width: 48px; 
+    height: 48px; 
+    border-radius: 50%; 
+    background: rgba(255, 255, 255, 0.05); 
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    border: 2px solid rgba(255, 255, 255, 0.1); 
+}
+
+.client-avatar-wrapper img { 
+    width: 100%; 
+    height: 100%; 
+    border-radius: 50%; 
+    object-fit: cover; 
+}
+
+.client-avatar-wrapper .material-symbols-rounded { 
+    color: rgba(255, 255, 255, 0.5); 
+}
+
+.status-dot { 
+    position: absolute; 
+    bottom: -2px; 
+    right: -2px; 
+    width: 14px; 
+    height: 14px; 
+    border-radius: 50%; 
+    background: var(--dark-grey); 
+    border: 2px solid var(--bg-dark); 
+    transition: background 0.3s; 
+}
+
+.status-dot.online { 
+    background: var(--success-green); 
+    box-shadow: 0 0 10px var(--success-green); 
+}
+
+.client-status-info h2 { 
+    font-size: 1.15rem; 
+    font-weight: 800; 
+    margin-bottom: 2px; 
+}
+
+.status-text { 
+    font-size: 0.85rem; 
+    color: var(--light-purple); 
+    font-weight: 500; 
+}
+
+.mobile-details-toggle { 
+    display: none; 
+    background: rgba(255, 255, 255, 0.05); 
+    border: 1px solid rgba(255, 255, 255, 0.1); 
+    color: var(--white); 
+    cursor: pointer; 
+    padding: 10px; 
+    border-radius: 50%; 
+}
+
+.chat-messages-container { 
+    flex-grow: 1; 
+    padding: 2rem; 
+    overflow-y: auto; 
+    display: flex; 
+    flex-direction: column; 
+    gap: 1.5rem; 
+    scroll-behavior: smooth; 
+}
+
+.history-loader { 
+    text-align: center; 
+    padding: 2rem; 
+    color: var(--primary); 
+    font-weight: 700; 
+    font-size: 1rem; 
+    display: flex; 
+    flex-direction: column; 
+    align-items: center; 
+    gap: 12px; 
+}
+
+.spinner { 
+    animation: spin 1s linear infinite; 
+}
+
+.message { 
+    max-width: 75%; 
+    padding: 16px 20px; 
+    border-radius: 24px; 
+    font-size: 1rem; 
+    line-height: 1.6; 
+    position: relative; 
+    box-shadow: 0 10px 20px rgba(0,0,0,0.2); 
+}
+
+.message.client { 
+    align-self: flex-start; 
+    background: rgba(255, 255, 255, 0.05); 
+    border: 1px solid rgba(255, 255, 255, 0.1); 
+    color: var(--white); 
+    border-bottom-left-radius: 6px; 
+    backdrop-filter: blur(10px); 
+}
+
+.message.agent { 
+    align-self: flex-end; 
+    background: var(--primary); 
+    color: var(--white); 
+    border-bottom-right-radius: 6px; 
+}
+
+.message-time { 
+    display: flex; 
+    align-items: center; 
+    justify-content: flex-end; 
+    gap: 6px; 
+    font-size: 0.75rem; 
+    margin-top: 8px; 
+    opacity: 0.7; 
+    font-weight: 600; 
+}
+
+.chat-typing-indicator { 
+    padding: 0 2.5rem; 
+    height: 24px; 
+    font-size: 0.85rem; 
+    color: var(--light-purple); 
+    font-style: italic; 
+    font-weight: 500; 
+}
+
+.chat-input-area { 
+    padding: 1.5rem 2rem; 
+    border-top: 1px solid rgba(255, 255, 255, 0.08); 
+    display: flex; 
+    align-items: center; 
+    gap: 15px; 
+}
+
+.btn-attach { 
+    background: rgba(255, 255, 255, 0.05); 
+    border: 1px solid rgba(255, 255, 255, 0.1); 
+    color: var(--white); 
+    cursor: pointer; 
+    width: 50px; 
+    height: 50px; 
+    border-radius: 50%; 
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    transition: all 0.3s; 
+}
+
+.btn-attach:hover { 
+    background: var(--primary); 
+    border-color: var(--primary); 
+    transform: rotate(15deg); 
+}
+
+.input-wrapper { 
+    flex-grow: 1; 
+    background: rgba(0, 0, 0, 0.3); 
+    border-radius: 25px; 
+    padding: 6px 24px; 
+    border: 1px solid rgba(255, 255, 255, 0.1); 
+    transition: all 0.3s; 
+}
+
+.input-wrapper:focus-within { 
+    border-color: var(--primary); 
+    background: rgba(0, 0, 0, 0.5); 
+    box-shadow: 0 0 0 4px rgba(109, 73, 242, 0.2); 
+}
+
+.input-wrapper input { 
+    width: 100%; 
+    border: none; 
+    background: transparent; 
+    padding: 14px 0; 
+    font-family: 'Inter', sans-serif; 
+    font-size: 1rem; 
+    color: var(--white); 
+    outline: none; 
+}
+
+.input-wrapper input::placeholder { 
+    color: rgba(255, 255, 255, 0.4); 
+}
+
+.btn-send { 
+    background: var(--primary); 
+    color: var(--bg-dark); 
+    border: none; 
+    width: 55px; 
+    height: 55px; 
+    border-radius: 50%; 
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    cursor: pointer; 
+    box-shadow: 0 5px 15px rgba(109, 73, 242, 0.4); 
+    transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), background 0.2s; 
+}
+
+.btn-send:hover { 
+    transform: scale(1.1); 
+    background: var(--warning-yellow); 
+}
+
+/* =========================================
+   RESPONSIVE DESIGN (DASHBOARD & CHAT)
+   ========================================= */
+@media (max-width: 1024px) {
+    .agent-workspace { 
+        flex-direction: column; 
+    }
+    
+    .agent-sidebar { 
+        width: 100%; 
+        border-right: none; 
+        border-bottom: 1px solid rgba(255,255,255,0.05); 
+        padding: 1.5rem; 
+    }
+    
+    .sidebar-user { 
+        margin-bottom: 1rem; 
+        padding-bottom: 1rem; 
+    }
+    
+    .sidebar-nav { 
+        flex-direction: row; 
+        flex-wrap: wrap; 
+        justify-content: center; 
+    }
+    
+    .nav-btn { 
+        flex: 1; 
+        min-width: 150px; 
+        justify-content: center; 
+    }
+    
+    .charts-grid { 
+        grid-template-columns: 1fr; 
+    }
+    
+    .form-row { 
+        grid-template-columns: 1fr; 
+    }
+}
+
+@media (max-width: 768px) {
+    .agent-main-content { 
+        padding: 1.5rem; 
+    }
+    
+    .nav-btn { 
+        font-size: 0.85rem; 
+        padding: 10px; 
+    }
+    
+    .metric-card { 
+        padding: 1.5rem; 
+    }
+    
+    .profile-edit-wrapper { 
+        padding: 1.5rem; 
+    }
+
+    /* Chat Responsive */
+    .chat-sidebar { 
+        position: absolute; 
+        top: 0; 
+        left: 0; 
+        width: 100%; 
+        height: 100%; 
+        transform: translateX(-100%); 
+        border-right: none; 
+        background: rgba(10, 6, 20, 0.98); 
+    }
+    
+    .chat-sidebar.active { 
+        transform: translateX(0); 
+    }
+    
+    .mobile-details-toggle { 
+        display: block; 
+    }
+    
+    .chat-header { 
+        padding: 0 1.5rem; 
+    }
+    
+    .chat-messages-container { 
+        padding: 1.5rem; 
+    }
+    
+    .message { 
+        max-width: 90%; 
+    }
+    
+    .chat-input-area { 
+        padding: 1rem 1.5rem; 
+        gap: 10px; 
+    }
+    
+    .input-wrapper { 
+        padding: 4px 18px; 
+    }
+}
