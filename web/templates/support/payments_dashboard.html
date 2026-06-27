@@ -1,0 +1,52 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Pasarela de Conciliación de Pagos | CartMaker HQ{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/payments_dashboard.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-header animate__animated animate__fadeIn">
+    <h1>Consola de Conciliación Bancaria</h1>
+    <p>Auditoría y validación inmediata de transferencias para Planes Comerciales y Atlas Plus AI.</p>
+</div>
+
+<div class="payments-matrix-container">
+    <div class="matrix-tabs" style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+            <button class="matrix-tab-btn active" data-target="merchant-deck" onclick="changeDeck(this)">
+                Ecosistema Comercios
+                <span class="badge-count-glow" id="badge-merchant">{{ merchant_pending|length }}</span>
+            </button>
+            <button class="matrix-tab-btn" data-target="atlas-deck" onclick="changeDeck(this)">
+                Módulo Atlas Plus AI
+                <span class="badge-count-glow" id="badge-atlas">{{ atlas_pending|length }}</span>
+            </button>
+        </div>
+        <button class="btn-action" onclick="refreshActiveDeck()" style="display: flex; align-items: center; gap: 5px; padding: 0.5rem 1rem; border-radius: 8px;">
+            <span class="material-symbols-rounded">sync</span> Sincronizar
+        </button>
+    </div>
+
+    <div id="merchant-deck" class="deck-view active animate__animated animate__fadeIn">
+        {% include 'support/partials/merchant_deck_content.html' %}
+    </div>
+
+    <div id="atlas-deck" class="deck-view animate__animated animate__fadeIn">
+        {% include 'support/partials/atlas_deck_content.html' %}
+    </div>
+</div>
+
+<script id="rejection-reasons-source" type="application/json">
+    {{ rejection_choices_json|safe }}
+</script>
+
+<script src="{% static 'js/payments_dashboard.js' %}"></script>
+<script>
+    // Inicialización de constantes de Django en el DOM Scope seguro
+    const ENDPOINT_URI = window.location.href;
+    const APP_CSRF_TOKEN = "{{ csrf_token }}";
+</script>
+{% endblock %}

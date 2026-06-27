@@ -333,7 +333,7 @@ body.unauthenticated-bg .main-content {
 .btn-submit:hover { background-color: var(--dark-purple); }
 
 .dashboard-header { margin-bottom: 2.5rem; }
-.dashboard-header h1 { font-size: clamp(1.5rem, 4vw, 2rem); color: var(--black-text); }
+.dashboard-header h1 { font-size: clamp(1.5rem, 4vw, 2rem); color: var(--white); }
 .dashboard-header p { color: var(--dark-grey); }
 
 .tickets-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 1.5rem; }

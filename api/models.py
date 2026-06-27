@@ -310,6 +310,8 @@ class User(AbstractBaseUser, PermissionsMixin):
     biometric_vector = VectorField(dimensions=192, null=True, blank=True)
     gender = models.IntegerField(choices=UserGender.choices, default=UserGender.MALE)
     is_external_account = models.BooleanField(default=False)
+    can_check_payments = models.BooleanField(default=False, help_text="Puede ingresar al panel de pagos")
+    can_check_support = models.BooleanField(default=False, help_text="Puede ingresar al panel de soporte")
 
     objects = UserManager()
 

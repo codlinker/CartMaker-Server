@@ -1,0 +1,328 @@
+{% extends "admin/index.html" %}
+
+{% block content %}
+    <!-- Script de Chart.js -->
+     {% load static %}
+    <script src="{% static 'js/lib/chart.js' %}"></script>
+
+    <!-- CSS Forzado para saltar las limitaciones del Tailwind pre-compilado de Unfold -->
+    <style>
+        .cm-card { background-color: #ffffff; border-color: #e5e7eb; }
+        .cm-text { color: #1f2937; }
+        .cm-text-muted { color: #6b7280; }
+        .cm-icon-bg { background-color: #f3f4f6; }
+        
+        /* Inputs y Selects */
+        .cm-input { background-color: #f9fafb; border-color: #d1d5db; color: #1f2937; }
+        
+        /* 💡 MODO OSCURO */
+        html.dark .cm-card { background-color: #111827; border-color: #374151; }
+        html.dark .cm-text { color: #f9fafb; }
+        html.dark .cm-text-muted { color: #9ca3af; }
+        html.dark .cm-icon-bg { background-color: rgba(255, 255, 255, 0.05); }
+        html.dark .cm-input { background-color: #1f2937; border-color: #374151; color: #f9fafb; }
+
+        .cm-btn-primary {
+            background: linear-gradient(90deg, #9333ea, #7e22ce);
+            color: white; border: 1px solid #a855f7;
+        }
+        .cm-btn-secondary {
+            background-color: #1f2937; color: white; border: 1px solid #374151;
+        }
+        html.dark .cm-btn-secondary { background-color: #111827; }
+    </style>
+
+    <!-- 💡 BARRA DE FILTROS DE FECHA -->
+    <div class="mb-6 flex flex-col md:flex-row justify-between items-center cm-card p-4 rounded-xl border shadow-sm gap-4 transition-all">
+        <div class="flex items-center cm-text font-bold text-lg">
+            <span class="material-symbols-outlined mr-2 text-purple-500">calendar_month</span>
+            Métricas del Ecosistema
+        </div>
+        
+        <form method="GET" class="flex flex-wrap items-center gap-3 w-full md:w-auto" id="dateFilterForm">
+            <select name="period" id="periodSelect" onchange="toggleCustomDates()" class="cm-input border text-sm rounded-lg focus:ring-purple-500 focus:border-purple-500 block p-2 outline-none transition-colors cursor-pointer">
+                <option value="30d" {% if current_period == '30d' %}selected{% endif %}>Último Mes (30 días)</option>
+                <option value="90d" {% if current_period == '90d' %}selected{% endif %}>Último Trimestre</option>
+                <option value="180d" {% if current_period == '180d' %}selected{% endif %}>Último Semestre</option>
+                <option value="365d" {% if current_period == '365d' %}selected{% endif %}>Último Año</option>
+                <option value="all" {% if current_period == 'all' %}selected{% endif %}>Todo el historial</option>
+                <option value="custom" {% if current_period == 'custom' %}selected{% endif %}>Rango Personalizado...</option>
+            </select>
+
+            <div id="customDateRange" class="flex items-center gap-2 {% if current_period != 'custom' %}hidden{% endif %}">
+                <input type="date" name="start" value="{{ custom_start }}" required class="cm-input border text-sm rounded-lg p-2 outline-none cursor-pointer">
+                <span class="cm-text-muted">a</span>
+                <input type="date" name="end" value="{{ custom_end }}" required class="cm-input border text-sm rounded-lg p-2 outline-none cursor-pointer">
+            </div>
+
+            <button type="submit" class="cm-btn-primary px-4 py-2 rounded-lg font-medium text-sm transition-all flex items-center shadow-sm">
+                Filtrar
+            </button>
+        </form>
+    </div>
+
+    <script>
+        function toggleCustomDates() {
+            const select = document.getElementById('periodSelect');
+            const customDates = document.getElementById('customDateRange');
+            // Si eligen 'custom', mostramos los inputs. Si no, los ocultamos y auto-enviamos el form.
+            if (select.value === 'custom') {
+                customDates.classList.remove('hidden');
+            } else {
+                customDates.classList.add('hidden');
+                document.getElementById('dateFilterForm').submit();
+            }
+        }
+    </script>
+    <!-- 💡 FIN BARRA DE FILTROS -->
+
+    <!-- Botones de Acceso Rápido -->
+    <div class="flex flex-col md:flex-row gap-4 mb-8">
+        <a href="{% url 'web_payments_dashboard' %}" 
+           class="flex-1 cm-btn-primary rounded-lg p-5 flex items-center justify-center text-lg font-medium transition-all shadow-sm">
+            <span class="material-symbols-outlined mr-3 text-2xl">payments</span>
+            Ir al Panel de Pagos
+        </a>
+        <a href="{% url 'web_dashboard' %}" 
+           class="flex-1 cm-btn-secondary rounded-lg p-5 flex items-center justify-center text-lg font-medium transition-all shadow-sm">
+            <span class="material-symbols-outlined mr-3 text-2xl text-purple-500">support_agent</span>
+            Ir al Panel de Soporte
+        </a>
+    </div>
+
+    <!-- KPIs -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div class="cm-card rounded-lg p-6 border shadow-sm flex flex-col justify-between">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-sm font-semibold cm-text-muted uppercase tracking-wider">Usuarios (Total / Activos 30d)</h3>
+                <span class="material-symbols-outlined text-purple-500 cm-icon-bg p-2 rounded-lg">group</span>
+            </div>
+            <p class="text-3xl font-bold cm-text flex items-baseline">
+                {{ kpis.users|default:"0" }}
+                <span class="text-sm font-medium text-green-500 ml-3 bg-green-500/10 px-2 py-1 rounded-md">
+                    {{ kpis.active_users|default:"0" }} activos
+                </span>
+            </p>
+        </div>
+        <div class="cm-card rounded-lg p-6 border shadow-sm flex flex-col justify-between">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-sm font-semibold cm-text-muted uppercase tracking-wider">Órdenes ({{ revenue_label }})</h3>
+                <span class="material-symbols-outlined text-green-500 cm-icon-bg p-2 rounded-lg">local_shipping</span>
+            </div>
+            <p class="text-3xl font-bold cm-text">{{ kpis.orders_month|default:"0" }}</p>
+        </div>
+        <div class="cm-card rounded-lg p-6 border shadow-sm flex flex-col justify-between">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-sm font-semibold cm-text-muted uppercase tracking-wider">Comercios Activos</h3>
+                <span class="material-symbols-outlined text-blue-500 cm-icon-bg p-2 rounded-lg">storefront</span>
+            </div>
+            <p class="text-3xl font-bold cm-text">{{ kpis.active_merchants|default:"0" }}</p>
+        </div>
+        <div class="cm-card rounded-lg p-6 border shadow-sm flex flex-col justify-between">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-sm font-semibold cm-text-muted uppercase tracking-wider">Tickets de Soporte Abiertos</h3>
+                <span class="material-symbols-outlined text-red-500 cm-icon-bg p-2 rounded-lg">headset_mic</span>
+            </div>
+            <p class="text-3xl font-bold cm-text">{{ kpis.open_tickets|default:"0" }}</p>
+        </div>
+    </div>
+
+    <!-- Tendencia Financiera -->
+    <div class="cm-card rounded-lg p-6 border shadow-sm mb-8">
+        <div class="flex flex-col md:flex-row justify-between mb-6">
+            <h3 class="text-lg font-bold cm-text flex items-center">
+                <span class="material-symbols-outlined mr-2 text-green-500">trending_up</span> 
+                Ingresos ({{ revenue_label }})
+            </h3>
+            <div class="text-right">
+                <p class="text-xs cm-text-muted uppercase">Valor actual (Tasa BCV hoy)</p>
+                <span class="text-3xl font-bold text-green-500">${{ kpis.revenue_usd_today|floatformat:"2g" }}</span>
+            </div>
+        </div>
+        
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div class="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
+                <p class="text-xs cm-text-muted">TOTAL EN BOLÍVARES</p>
+                <p class="font-bold cm-text">Bs. {{ kpis.revenue_bs|floatformat:"2g" }}</p>
+            </div>
+            <div class="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
+                <p class="text-xs cm-text-muted">USD (Tasa Histórica)</p>
+                <p class="font-bold cm-text">${{ kpis.revenue_usd_historic|floatformat:"2g" }}</p>
+            </div>
+            <div class="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
+                <p class="text-xs cm-text-muted">Diferencial Cambiario</p>
+                <p class="font-bold {% if kpis.revenue_differential >= 0 %}text-green-500{% else %}text-red-500{% endif %}">
+                    {{ kpis.revenue_differential|floatformat:"2g" }} USD
+                </p> 
+            </div>
+        </div>
+
+        <div style="position: relative; height: 300px; width: 100%;">
+            <canvas id="revenueChart"></canvas>
+        </div>
+    </div>
+
+    <!-- Gráficos -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        
+        <div class="cm-card rounded-lg p-6 border shadow-sm flex flex-col">
+            <h3 class="text-lg font-bold cm-text mb-4 flex items-center">
+                <span class="material-symbols-outlined mr-2 text-purple-500">filter_alt</span> Conversión de Productos
+            </h3>
+            <div style="position: relative; height: 280px; width: 100%;">
+                <canvas id="funnelChart"></canvas>
+            </div>
+        </div>
+        
+        <div class="cm-card rounded-lg p-6 border shadow-sm flex flex-col">
+            <h3 class="text-lg font-bold cm-text mb-4 flex items-center">
+                <span class="material-symbols-outlined mr-2 text-purple-500">radar</span> Demanda Insatisfecha
+            </h3>
+            <div style="position: relative; height: 280px; width: 100%;">
+                <canvas id="unmetDemandChart"></canvas>
+            </div>
+        </div>
+
+        <div class="cm-card rounded-lg p-6 border shadow-sm flex flex-col items-center">
+            <h3 class="text-lg font-bold cm-text mb-4 w-full flex items-center">
+                <span class="material-symbols-outlined mr-2 text-purple-500">pie_chart</span> Estado de Órdenes
+            </h3>
+            <div style="position: relative; height: 250px; width: 100%; display: flex; justify-content: center;">
+                <canvas id="ordersChart"></canvas>
+            </div>
+        </div>
+
+        <div class="cm-card rounded-lg p-6 border shadow-sm flex flex-col items-center">
+            <h3 class="text-lg font-bold cm-text mb-4 w-full flex items-center">
+                <span class="material-symbols-outlined mr-2 text-purple-500">donut_large</span> Ecosistema B2B
+            </h3>
+            <div style="position: relative; height: 250px; width: 100%; display: flex; justify-content: center;">
+                <canvas id="subsChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // 💡 Protección contra fallos: escapejs asegura que las comillas no rompan el string
+            const rawData = '{{ charts_json|escapejs }}';
+            if (!rawData || rawData.trim() === '') {
+                console.warn("Esperando datos del backend para los gráficos...");
+                return; 
+            }
+            
+            const data = JSON.parse(rawData);
+            Chart.defaults.color = '#9ca3af';
+
+            const formatCurrency = (value, showDecimals = true) => {
+                return 'Bs' + new Intl.NumberFormat('es-ES', {
+                    minimumFractionDigits: showDecimals ? 2 : 0,
+                    maximumFractionDigits: showDecimals ? 2 : 0
+                }).format(value);
+            };
+
+            // Formatear el Total del encabezado dinámicamente
+            const totalSpan = document.getElementById('totalRevenueDisplay');
+            if (totalSpan) {
+                // Leemos el número crudo y lo formateamos
+                const rawTotal = parseFloat(totalSpan.innerText.replace('Bs', ''));
+                totalSpan.innerText = formatCurrency(rawTotal);
+            }
+
+            // Tendencia Financiera (Line Chart)
+            new Chart(document.getElementById('revenueChart'), {
+                type: 'line',
+                data: {
+                    labels: data.revenue_labels,
+                    datasets: [{
+                        label: 'Ingresos Aprobados',
+                        data: data.revenue_values,
+                        borderColor: '#10b981',
+                        backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                        borderWidth: 3,
+                        pointBackgroundColor: '#10b981',
+                        pointBorderColor: '#ffffff',
+                        pointRadius: 4,
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: { 
+                    responsive: true, 
+                    maintainAspectRatio: false, 
+                    plugins: { 
+                        legend: { display: false },
+                        tooltip: { 
+                            mode: 'index', 
+                            intersect: false,
+                            callbacks: {
+                                // 💡 Formateamos la cajita de información al pasar el mouse
+                                label: function(context) {
+                                    return ' Ingresos: ' + formatCurrency(context.parsed.y);
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: { 
+                            beginAtZero: true, 
+                            grid: { color: 'rgba(156, 163, 175, 0.1)' },
+                            ticks: {
+                                // 💡 Formateamos el eje Y (sin decimales para no saturar visualmente)
+                                callback: function(value) {
+                                    return formatCurrency(value, false);
+                                }
+                            }
+                        },
+                        x: { grid: { display: false } }
+                    },
+                    interaction: { mode: 'nearest', axis: 'x', intersect: false }
+                }
+            });
+
+            new Chart(document.getElementById('funnelChart'), {
+                type: 'bar',
+                data: {
+                    labels: data.funnel_labels,
+                    datasets: [{
+                        label: 'Interacciones', data: data.funnel_values,
+                        backgroundColor: ['#e9d5ff', '#a855f7', '#7e22ce'], borderRadius: 6,
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+            });
+
+            new Chart(document.getElementById('unmetDemandChart'), {
+                type: 'bar',
+                data: {
+                    labels: data.unmet_labels,
+                    datasets: [{
+                        label: 'Búsquedas fallidas', data: data.unmet_values,
+                        backgroundColor: '#f59e0b', borderRadius: 6,
+                    }]
+                },
+                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+            });
+
+            new Chart(document.getElementById('ordersChart'), {
+                type: 'doughnut',
+                data: {
+                    labels: data.orders_labels,
+                    datasets: [{ data: data.orders_values, backgroundColor: ['#a855f7', '#3b82f6', '#10b981', '#f59e0b', '#ef4444'], borderWidth: 0 }]
+                },
+                options: { responsive: true, cutout: '75%', plugins: { legend: { position: 'bottom' } } }
+            });
+
+            new Chart(document.getElementById('subsChart'), {
+                type: 'doughnut',
+                data: {
+                    labels: data.subs_labels,
+                    datasets: [{ data: data.subs_values, backgroundColor: ['#10b981', '#3b82f6', '#6b7280'], borderWidth: 0 }]
+                },
+                options: { responsive: true, cutout: '75%', plugins: { legend: { position: 'bottom' } } }
+            });
+        });
+    </script>
+
+    {{ block.super }}
+{% endblock %}

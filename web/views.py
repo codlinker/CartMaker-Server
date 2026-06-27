@@ -12,67 +12,46 @@ import requests
 from api.models import *
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.core.paginator import Paginator
+from .decorators import *
 
 # ==============================================================
-# 🌍 VISTA PÚBLICA
-# ==============================================================
-def landing_view(request):
-    """ Exclusivo para branding y descarga de la App """
-    # Traemos los planes ordenados por precio
-    plans = MerchantPlan.objects.all().order_by('price')
-    return render(request, 'home.html', {'plans': plans})
-
-@login_required(login_url='/support/login/')
-@require_POST
-def close_ticket(request, ticket_id):
-    if not request.user.is_superuser:
-        return redirect('web_home')
-        
-    ticket = get_object_or_404(SupportTicket, id=ticket_id)
-    reason_id = request.POST.get('close_reason', 0) # Capturamos el select
-    
-    ticket.closed = True
-    ticket.close_time = timezone.now()
-    ticket.close_reason = int(reason_id)
-    ticket.save(update_fields=['closed', 'close_time', 'close_reason'])
-    
-    # 💡 ALERTAMOS A NODE.JS EN TIEMPO REAL
-    try:
-        requests.post(
-            "http://127.0.0.1:3000/internal/emit-ticket-closed",
-            json={
-                'ticket_id': str(ticket.id), 
-                'reason': ticket.get_close_reason_display(),
-                'client_id': str(ticket.client.id), # 💡 NUEVO
-                'agent_id': str(ticket.agent.id)    # 💡 NUEVO
-            },
-            headers={'X-Microservice-Token': settings.SECRET_KEY},
-            timeout=2
-        )
-    except Exception as e:
-        print(f"Advertencia: No se pudo emitir alerta de cierre de ticket: {e}")
-    
-    messages.success(request, f"El ticket #{ticket.id} fue cerrado correctamente.")
-    return redirect('web_dashboard')
-
-
-# ==============================================================
-# 🔒 VISTAS PRIVADAS (SOPORTE)
+# 🔒 VISTAS DE AUTENTICACIÓN (COMPARTIDAS)
 # ==============================================================
 def login_view(request):
-    # Si ya está logueado y es admin, va al dashboard
-    if request.user.is_authenticated and request.user.is_superuser:
-        return redirect('web_dashboard')
-        
+    # 1. Si ya está logueado, lo enviamos a su área de trabajo
+    if request.user.is_authenticated:
+        if request.user.is_superuser:
+            return redirect('admin')
+        elif getattr(request.user, 'can_check_payments', False):
+            return redirect('web_payments_dashboard')
+        elif getattr(request.user, 'can_check_support', False):
+            return redirect('web_dashboard')
+        else:
+            return redirect('web_logout')
+
+    # 2. Procesamiento del Formulario
     if request.method == 'POST':
         form = AuthenticationForm(request, data=request.POST)
         if form.is_valid():
             user = form.get_user()
             
-            # 💡 FILTRO ESTRICTO: Solo superusuarios entran por la web
-            if user.is_superuser:
+            # 💡 FILTRO CORREGIDO: Verificamos si tiene ALGUN permiso administrativo
+            is_authorized = (
+                user.is_superuser or 
+                getattr(user, 'can_check_support', False) or 
+                getattr(user, 'can_check_payments', False)
+            )
+            
+            if is_authorized:
                 login(request, user)
-                return redirect('web_dashboard')
+                
+                # Redirección dinámica basada en permisos
+                if user.is_superuser:
+                    return redirect('admin:index')
+                elif getattr(user, 'can_check_payments', False):
+                    return redirect('web_payments_dashboard')
+                elif getattr(user, 'can_check_support', False):
+                    return redirect('web_dashboard')
             else:
                 messages.error(request, "Acceso denegado. Solo personal autorizado de CartMaker.")
         else:
@@ -82,17 +61,139 @@ def login_view(request):
         
     return render(request, 'auth/login.html', {'form': form})
 
-@login_required(login_url='/support/login/')
+@login_required(login_url='/auth/login/')
 @require_POST
 def logout_view(request):
     logout(request)
     return redirect('web_login')
 
-@login_required(login_url='/support/login/')
-def dashboard_view(request):
-    if not request.user.is_superuser:
-        return redirect('web_home')
+# ==============================================================
+# 💳 VISTAS PRIVADAS (PAGOS)
+# ==============================================================
+@login_required(login_url='/auth/login/')
+@payments_access_required
+def payments_dashboard_view(request):
+    """
+    Dashboard unificado para la conciliación y aprobación de pagos en CartMaker.
+    """
+    # ==============================================================
+    # 🔄 LÓGICA DE RECARGA DE PANELES VIA AJAX (GET)
+    # ==============================================================
+    if request.method == 'GET' and request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        target_deck = request.GET.get('deck')
+        
+        if target_deck == 'merchant':
+            merchant_pending = MerchantPlanPayment.objects.filter(status=0).select_related('subscription__merchant', 'subscription__plan', 'target_plan').order_by('-creation')
+            merchant_history = MerchantPlanPayment.objects.filter(status__in=[1, 2]).select_related('subscription__merchant', 'subscription__plan', 'target_plan').order_by('-verified_at')[:15]
+            
+            html = render_to_string('support/partials/merchant_deck_content.html', {
+                'merchant_pending': merchant_pending,
+                'merchant_history': merchant_history
+            })
+            return JsonResponse({'success': True, 'html': html, 'pending_count': merchant_pending.count()})
+            
+        elif target_deck == 'atlas':
+            atlas_pending = AtlasPlusPlanPayment.objects.filter(status=0).select_related('plan__user').order_by('-creation')
+            atlas_history = AtlasPlusPlanPayment.objects.filter(status__in=[1, 2]).select_related('plan__user').order_by('-verified_at')[:15]
+            
+            html = render_to_string('support/partials/atlas_deck_content.html', {
+                'atlas_pending': atlas_pending,
+                'atlas_history': atlas_history
+            })
+            return JsonResponse({'success': True, 'html': html, 'pending_count': atlas_pending.count()})
+    # ==============================================================
+    # ⚡ PROCESAMIENTO DE ACCIONES VIA AJAX (POST)
+    # ==============================================================
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            payment_type = data.get('payment_type') # 'merchant' o 'atlas'
+            payment_id = data.get('payment_id')
+            new_status = data.get('status')         # 1 = APPROVED, 2 = REJECTED
+            reason_id = data.get('rejection_reason', None)
 
+            if not payment_id or new_status is None:
+                return JsonResponse({'success': False, 'error': 'Parámetros obligatorios ausentes.'}, status=400)
+
+            # Selección de modelo según el contexto del flujo
+            if payment_type == 'merchant':
+                payment = get_object_or_404(MerchantPlanPayment, pk=payment_id)
+            elif payment_type == 'atlas':
+                payment = get_object_or_404(AtlasPlusPlanPayment, pk=payment_id)
+            else:
+                return JsonResponse({'success': False, 'error': 'Módulo de pago no identificado.'}, status=400)
+
+            # Forzar transiciones de estado válidas basándose en el Enum real (0 = PENDING)
+            if payment.status != 0:
+                return JsonResponse({'success': False, 'error': 'Este pago ya fue procesado previamente.'}, status=400)
+
+            payment.status = int(new_status)
+
+            # Si la acción es rechazar (status = 2), inyectamos la causa tipificada
+            if int(new_status) == 2:
+                if not reason_id:
+                    return JsonResponse({'success': False, 'error': 'Es obligatorio seleccionar un motivo de rechazo.'}, status=400)
+                payment.rejection_reason = int(reason_id)
+
+            # full_clean() disparará las validaciones del modelo y clean() asociados
+            payment.full_clean()
+            payment.save() # Ejecuta el pre_save de tus signals asincrónicas de billetera y notificaciones
+
+            return JsonResponse({
+                'success': True,
+                'message': f'El pago fue {"aprobado" if int(new_status) == 1 else "rechazado"} correctamente.'
+            })
+
+        except ValidationError as e:
+            return JsonResponse({'success': False, 'error': str(e.message_dict)}, status=400)
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': f'Fallo crítico: {str(e)}'}, status=500)
+
+    # ==============================================================
+    # 📊 CARGA OPTIMIZADA DE TABLEROS (GET) - ANTI N+1
+    # ==============================================================
+    # Filtro: status=0 (PENDING)
+    merchant_pending = MerchantPlanPayment.objects.filter(status=0) \
+        .select_related('subscription__merchant', 'subscription__plan', 'target_plan') \
+        .order_by('-creation')
+
+    atlas_pending = AtlasPlusPlanPayment.objects.filter(status=0) \
+        .select_related('plan__user') \
+        .order_by('-creation')
+
+    # Historial reciente de transiciones resueltas (status 1 o 2)
+    merchant_history = MerchantPlanPayment.objects.filter(status__in=[1, 2]) \
+        .select_related('subscription__merchant', 'subscription__plan', 'target_plan') \
+        .order_by('-verified_at')[:15]
+
+    atlas_history = AtlasPlusPlanPayment.objects.filter(status__in=[1, 2]) \
+        .select_related('plan__user') \
+        .order_by('-verified_at')[:15]
+
+    # Reconstrucción limpia de los Enums estructurales para consumo del Front-End sin romper traducciones
+    rejection_choices = [
+        {'id': int(choice[0]), 'label': str(choice[1])} 
+        for choice in RejectionReason.choices
+    ]
+
+    context = {
+        'merchant_pending': merchant_pending,
+        'atlas_pending': atlas_pending,
+        'merchant_history': merchant_history,
+        'atlas_history': atlas_history,
+        'rejection_choices': rejection_choices, 
+        'rejection_choices_json': json.dumps(rejection_choices),
+    }
+
+    return render(request, 'support/payments_dashboard.html', context)
+
+
+# ==============================================================
+# 🎧 VISTAS PRIVADAS (SOPORTE)
+# ==============================================================
+@login_required(login_url='/auth/login/')
+@support_access_required
+def dashboard_view(request):
     # ==============================================================
     # 💡 LÓGICA DE ACTUALIZACIÓN DE PERFIL CON CLASE COS
     # ==============================================================
@@ -147,7 +248,7 @@ def dashboard_view(request):
         .select_related('client')\
         .order_by('-close_time')
 
-    # Configuración de Paginación (ajusta el 15 por 3 si sigues haciendo pruebas)
+    # Configuración de Paginación
     items_per_page = 15
     active_paginator = Paginator(active_tickets, items_per_page)
     closed_paginator = Paginator(closed_tickets, items_per_page)
@@ -208,19 +309,48 @@ def dashboard_view(request):
     refresh = RefreshToken.for_user(request.user)
     
     return render(request, 'support/dashboard.html', {
-        'active_tickets': active_page,  # Retornamos el objeto paginado
-        'closed_tickets': closed_page,  # Retornamos el objeto paginado
+        'active_tickets': active_page,  
+        'closed_tickets': closed_page,  
         'analytics_json': json.dumps(analytics),
-        'analytics_data': analytics,    # Pasamos el diccionario original para el filtro |json_script
+        'analytics_data': analytics,    
         'agent_id': str(request.user.id),
         'jwt_token': str(refresh.access_token)
     })
 
-@login_required(login_url='/support/login/')
+@login_required(login_url='/auth/login/')
+@require_POST
+@support_access_required
+def close_ticket(request, ticket_id):  
+    ticket = get_object_or_404(SupportTicket, id=ticket_id)
+    reason_id = request.POST.get('close_reason', 0) # Capturamos el select
+    
+    ticket.closed = True
+    ticket.close_time = timezone.now()
+    ticket.close_reason = int(reason_id)
+    ticket.save(update_fields=['closed', 'close_time', 'close_reason'])
+    
+    # 💡 ALERTAMOS A NODE.JS EN TIEMPO REAL
+    try:
+        requests.post(
+            "http://127.0.0.1:3000/internal/emit-ticket-closed",
+            json={
+                'ticket_id': str(ticket.id), 
+                'reason': ticket.get_close_reason_display(),
+                'client_id': str(ticket.client.id),
+                'agent_id': str(ticket.agent.id)    
+            },
+            headers={'X-Microservice-Token': settings.SECRET_KEY},
+            timeout=2
+        )
+    except Exception as e:
+        print(f"Advertencia: No se pudo emitir alerta de cierre de ticket: {e}")
+    
+    messages.success(request, f"El ticket #{ticket.id} fue cerrado correctamente.")
+    return redirect('web_dashboard')
+
+@login_required(login_url='/auth/login/')
+@support_access_required
 def support_agent_chat(request, ticket_id):
-    if not request.user.is_superuser:
-        return redirect('web_home')
-        
     ticket = get_object_or_404(SupportTicket, id=ticket_id)
     refresh = RefreshToken.for_user(request.user)
     return render(request, 'support/support_chat.html', {
@@ -228,3 +358,12 @@ def support_agent_chat(request, ticket_id):
         'agent_id': str(request.user.id),
         'jwt_token': str(refresh.access_token)
     })
+
+# ==============================================================
+# 🌍 VISTA PÚBLICA
+# ==============================================================
+def landing_view(request):
+    """ Exclusivo para branding y descarga de la App """
+    # Traemos los planes ordenados por precio
+    plans = MerchantPlan.objects.all().order_by('price')
+    return render(request, 'home.html', {'plans': plans})

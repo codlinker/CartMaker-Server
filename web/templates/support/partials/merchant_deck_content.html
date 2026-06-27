@@ -1,0 +1,108 @@
+<div class="panel-layout-grid">
+    <div class="premium-panel-card">
+        <div class="card-panel-title">
+            <span class="material-symbols-rounded text-warning">hourglass_empty</span>
+            Verificación de Planes Pendientes
+        </div>
+        <div class="table-scroll-container">
+            <table class="cartmaker-table">
+                <thead>
+                    <tr>
+                        <th>Comerciante</th>
+                        <th>Plan Objetivo</th>
+                        <th>No. Referencia</th>
+                        <th>Monto Reportado</th>
+                        <th>Tasa Cambio</th>
+                        <th>Fichero</th>
+                        <th>Acciones de Control</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for payment in merchant_pending %}
+                    <tr id="row-merchant-{{ payment.id }}">
+                        <td>
+                            <div class="identity-block">
+                                <span class="id-main-text">{{ payment.subscription.merchant.first_name }} {{ payment.subscription.merchant.last_name }}</span>
+                                <span class="id-sub-text">{{ payment.subscription.merchant.email }}</span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="identity-block">
+                                <span class="id-main-text text-primary-light">{{ payment.target_plan.name|default:payment.subscription.plan.name }}</span>
+                                <span class="id-sub-text">Costo: {{ payment.target_plan.price|default:payment.subscription.plan.price }}$</span>
+                            </div>
+                        </td>
+                        <td class="font-numeric-mono">{{ payment.reference_number }}</td>
+                        <td class="font-crypto-amount">{{ payment.amount }} <span class="currency-label">Bs.</span></td>
+                        <td class="text-muted">{{ payment.bcv_taxes_to_day }}</td>
+                        <td>
+                            {% if payment.payment_proof_url %}
+                            <button class="action-view-proof" onclick="displayProofModal('{{ payment.get_json.payment_proof_url }}', '{{ payment.reference_number }}')">
+                                <span class="material-symbols-rounded">visibility</span> Ver
+                            </button>
+                            {% else %}
+                            <span class="null-indicator">N/A</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="operational-button-group">
+                                <button class="op-btn op-btn-approve" onclick="triggerApprovalWorkflow('merchant', '{{ payment.id }}')">
+                                    <span class="material-symbols-rounded">check_circle</span> Validar
+                                </button>
+                                <button class="op-btn op-btn-reject" onclick="triggerRejectionWorkflow('merchant', '{{ payment.id }}')">
+                                    <span class="material-symbols-rounded">cancel</span> Rechazar
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" class="empty-table-notice">
+                            Todos los pagos de comercios se encuentran conciliados. Balance limpio.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="premium-panel-card historic-panel">
+        <div class="card-panel-title">
+            <span class="material-symbols-rounded text-primary">history</span>
+            Historial de Operaciones Recientes
+        </div>
+        <div class="table-scroll-container">
+            <table class="cartmaker-table table-compact">
+                <thead>
+                    <tr>
+                        <th>Usuario</th>
+                        <th>Suscripción</th>
+                        <th>Referencia</th>
+                        <th>Monto</th>
+                        <th>Dictamen</th>
+                        <th>Fecha Cierre</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for payment in merchant_history %}
+                    <tr>
+                        <td>{{ payment.subscription.merchant.email }}</td>
+                        <td>{{ payment.subscription.plan.name }}</td>
+                        <td class="font-numeric-mono">{{ payment.reference_number }}</td>
+                        <td>{{ payment.amount }} Bs.</td>
+                        <td>
+                            {% if payment.status == 1 %}
+                            <span class="badge-status-pill status-approved-glow">Aprobado</span>
+                            {% else %}
+                            <span class="badge-status-pill status-rejected-glow" title="{{ payment.get_rejection_reason_display }}">Rechazado</span>
+                            {% endif %}
+                        </td>
+                        <td class="id-sub-text">{{ payment.verified_at|date:"d/m/Y H:i" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>

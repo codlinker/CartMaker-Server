@@ -1,0 +1,312 @@
+/* ==========================================================================
+   CARTMAKER INTERFACE: STYLES FOR PAYMENTS CONCILIATION CONSOLE
+   ========================================================================== */
+
+.payments-matrix-container {
+    width: 100%;
+    margin-top: 1rem;
+}
+
+/* Tabs de Navegación del Panel */
+.matrix-tabs {
+    display: flex;
+    gap: 1.5rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    padding-bottom: 0.25rem;
+    margin-bottom: 2.5rem;
+}
+
+.matrix-tab-btn {
+    background: transparent;
+    border: none;
+    color: var(--dark-grey);
+    font-family: 'Poppins', sans-serif;
+    font-weight: 600;
+    font-size: 1.05rem;
+    cursor: pointer;
+    padding: 0.6rem 0.5rem;
+    transition: all 0.3s ease;
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.matrix-tab-btn:hover {
+    color: var(--white);
+}
+
+.matrix-tab-btn.active {
+    color: var(--warning-yellow);
+}
+
+.matrix-tab-btn.active::after {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    background-color: var(--warning-yellow);
+    box-shadow: 0 0 12px var(--warning-yellow);
+}
+
+.badge-count-glow {
+    background: rgba(109, 73, 242, 0.2);
+    color: #b79df0;
+    border: 1px solid rgba(109, 73, 242, 0.4);
+    font-size: 0.75rem;
+    padding: 0.1rem 0.6rem;
+    border-radius: 12px;
+    font-weight: 700;
+}
+
+/* Manejo de visibilidad de secciones */
+.deck-view {
+    display: none;
+}
+
+.deck-view.active {
+    display: block;
+}
+
+/* Grid Layout */
+.panel-layout-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 3rem;
+}
+
+.premium-panel-card {
+    background: rgba(15, 10, 28, 0.7);
+    border: 1px solid rgba(226, 218, 243, 0.04);
+    border-radius: 1.25rem;
+    padding: 1.75rem;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+}
+
+.historic-panel {
+    opacity: 0.9;
+    background: rgba(10, 6, 20, 0.5);
+}
+
+.card-panel-title {
+    font-family: 'Poppins', sans-serif;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--white);
+    margin-bottom: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.card-panel-title .material-symbols-rounded {
+    font-size: 26px;
+}
+
+/* Modificadores de color semánticos */
+.text-warning { color: var(--warning-yellow); }
+.text-primary { color: var(--primary); }
+.text-primary-light { color: #b79df0; }
+.text-muted { color: var(--dark-grey); font-size: 0.85rem; }
+
+/* Estructura de Tablas Premium */
+.table-scroll-container {
+    width: 100%;
+    overflow-x: auto;
+}
+
+.cartmaker-table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+    font-size: 0.9rem;
+}
+
+.cartmaker-table th {
+    background-color: rgba(109, 73, 242, 0.08);
+    color: var(--light-purple);
+    font-weight: 600;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid rgba(109, 73, 242, 0.2);
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 1px;
+}
+
+.cartmaker-table td {
+    padding: 1.1rem 1.25rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    color: rgba(242, 242, 255, 0.9);
+    vertical-align: middle;
+}
+
+.cartmaker-table tr:hover td {
+    background-color: rgba(255, 255, 255, 0.01);
+}
+
+/* Bloques de identidad */
+.identity-block {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.id-main-text {
+    font-weight: 600;
+    color: var(--white);
+}
+
+.id-sub-text {
+    font-size: 0.8rem;
+    color: var(--dark-grey);
+}
+
+.font-numeric-mono {
+    font-family: 'Courier New', Courier, monospace;
+    font-weight: bold;
+    color: var(--light-grey);
+    letter-spacing: 0.5px;
+}
+
+.font-crypto-amount {
+    font-weight: 700;
+    color: var(--white);
+}
+
+.currency-label {
+    color: var(--warning-yellow);
+    font-size: 0.8rem;
+    font-weight: 500;
+}
+
+.null-indicator {
+    color: rgba(255, 255, 255, 0.15);
+    font-size: 0.85rem;
+}
+
+/* Píldoras de estado y características */
+.badge-core-feature {
+    background: rgba(109, 73, 242, 0.15);
+    color: #b79df0;
+    padding: 0.3rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    border: 1px solid rgba(109, 73, 242, 0.25);
+}
+
+.badge-status-pill {
+    display: inline-flex;
+    padding: 0.25rem 0.6rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.status-approved-glow { background: rgba(76, 175, 80, 0.12); color: var(--success-green); }
+.status-rejected-glow { background: rgba(229, 57, 53, 0.12); color: var(--error-red); }
+
+/* Componentes Interactivos / Botones */
+.action-view-proof {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--white);
+    padding: 0.35rem 0.75rem;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    font-family: 'Inter', sans-serif;
+    transition: all 0.25s ease;
+}
+
+.action-view-proof:hover {
+    background: var(--primary);
+    border-color: var(--primary);
+    box-shadow: 0 0 10px var(--primary-glow);
+}
+
+.action-view-proof .material-symbols-rounded {
+    font-size: 16px;
+}
+
+.operational-button-group {
+    display: flex;
+    gap: 0.6rem;
+}
+
+.op-btn {
+    border: none;
+    padding: 0.45rem 0.85rem;
+    border-radius: 6px;
+    font-weight: 600;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.8rem;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s ease;
+}
+
+.op-btn .material-symbols-rounded {
+    font-size: 16px;
+}
+
+.op-btn-approve {
+    background-color: rgba(76, 175, 80, 0.15);
+    color: var(--success-green);
+    border: 1px solid rgba(76, 175, 80, 0.3);
+}
+
+.op-btn-approve:hover {
+    background-color: var(--success-green);
+    color: var(--white);
+    box-shadow: 0 0 10px rgba(76, 175, 80, 0.4);
+}
+
+.op-btn-reject {
+    background-color: rgba(229, 57, 53, 0.15);
+    color: var(--error-red);
+    border: 1px solid rgba(229, 57, 53, 0.3);
+}
+
+.op-btn-reject:hover {
+    background-color: var(--error-red);
+    color: var(--white);
+    box-shadow: 0 0 10px rgba(229, 57, 53, 0.4);
+}
+
+.empty-table-notice {
+    text-align: center;
+    padding: 3.5rem 0 !important;
+    color: var(--dark-grey);
+    font-style: italic;
+}
+
+/* Select de rechazo inyectado dinámicamente en los modales de Swal */
+.cm-rejection-select {
+    width: 100%;
+    background: #171224;
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    padding: 0.8rem 1rem;
+    border-radius: 12px;
+    margin-top: 15px;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.95rem;
+    outline: none;
+}
+
+.cm-rejection-select:focus {
+    border-color: var(--primary);
+}
+
+.table-compact th { padding: 0.6rem 1rem; }
+.table-compact td { padding: 0.65rem 1rem; font-size: 0.85rem; }

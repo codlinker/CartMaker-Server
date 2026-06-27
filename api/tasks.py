@@ -8,13 +8,16 @@ from django.utils import timezone
 import os
 import subprocess
 import tempfile
+
+import requests
 from api.core.firebase_admin import NotificationManager
 from .core.platinum_manager import PlatinumEvaluator
-from api.models import CompanyVideoStory, InventoryItemOffer, InventoryItem, Order, ProductViewLog, StoreViewLog, UnmetDemandLog, UserNavigationLog, VideoEngagementLog
+from api.models import *
 from django.core.cache import cache
 from django.utils.dateparse import parse_datetime
 from django.conf import settings
 from django.contrib.gis.geos import Point
+from django.db.models import Sum, F, FloatField, ExpressionWrapper
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -541,3 +544,27 @@ def process_analytics_batch():
                 UnmetDemandLog.objects.bulk_create(unmet_logs, batch_size=500)
             except Exception as e:
                 logger.error(f"❌ Error en bulk_create de unmet_demand: {e}")
+
+@shared_task(ignore_result=True)
+def refresh_admin_dashboard_metrics():
+    try:
+        from api.dashboard import build_metrics_for_range
+        logger.info("📊 Calculando métricas del Dashboard Admin...")
+        now = timezone.now()
+        
+        periods = {
+            '30d': now - timedelta(days=30),
+            '90d': now - timedelta(days=90),
+            '180d': now - timedelta(days=180),
+            '365d': now - timedelta(days=365),
+            'all': None
+        }
+        
+        for period, start_date in periods.items():
+            # El constructor ya trae las métricas financieras (Bs, USD Actual, Histórico y Diferencial)
+            metrics = build_metrics_for_range(start_date, now)
+            cache.set(f'admin_dashboard_metrics_{period}', metrics, timeout=86400)
+            
+        logger.info("✅ Métricas actualizadas con éxito.")
+    except Exception as e:
+        logger.error(f"❌ Error al calcular métricas: {e}")

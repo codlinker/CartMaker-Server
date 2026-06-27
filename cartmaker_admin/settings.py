@@ -56,12 +56,13 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django.contrib.humanize',
     'rest_framework',
     'drf_spectacular',
     "colorfield",
     'api',
     'chat',
-    'web'
+    'web',
 ]
 
 MIDDLEWARE = [
@@ -206,6 +207,7 @@ UNFOLD = {
     "SITE_TITLE": "Admin | CartMaker",
     "SITE_HEADER": "CartMaker Core",
     "SITE_SUBHEADER": "Panel de Administración Central",
+    "DASHBOARD_CALLBACK": "api.dashboard.custom_dashboard_context",
     "SITE_LOGO": {
         "light": lambda request: static("img/logo.svg"),  # Asegúrate de tener tu logo
         "dark": lambda request: static("img/logo.svg"),
@@ -396,6 +398,12 @@ CELERY_BEAT_SCHEDULE = {
     'flush-analytics-buffer-every-5m': {
         'task': 'api.tasks.process_analytics_batch',
         'schedule': crontab(minute='*/15'),
+    },
+
+    # Tarea 6: Actualizar el Dashboard Administrativo (Todos los dias a las 8 PM)
+    'refresh-admin-dashboard-nightly': {
+        'task': 'api.tasks.refresh_admin_dashboard_metrics',
+        'schedule': crontab(minute=0, hour=20), 
     },
 }
 
