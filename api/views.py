@@ -5007,6 +5007,25 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
         return self._respond_pre_sliced_data(data_list, request, page, page_size)
 
     @action(detail=False, methods=['get'])
+    def stores_with_tokens(self, request):
+        lat, lng = self._get_coordinates(request)
+        page, page_size = self._get_pagination_params(request)
+        is_home_widget = request.query_params.get('home_widget', 'false').lower() == 'true'
+
+        if lat is None or lng is None:
+            return Response({'error': 'Faltan parámetros obligatorios: lat, lng'}, status=status.HTTP_400_BAD_REQUEST)
+
+        engine = ProductSearchEngine(lat, lng, user=request.user)
+        data_list = engine.get_stores_with_tokens_feed(page=page, page_size=page_size)
+
+        if is_home_widget:
+            top_10 = data_list[:10]
+            # Mantenemos consistencia con la respuesta de 'favorites'
+            return Response({'data': {'results': top_10}}, status=status.HTTP_200_OK)
+            
+        return self._respond_pre_sliced_data(data_list, request, page, page_size)
+
+    @action(detail=False, methods=['get'])
     def text_search(self, request):
         search_query = request.query_params.get('q', '')
         lat, lng = self._get_coordinates(request)

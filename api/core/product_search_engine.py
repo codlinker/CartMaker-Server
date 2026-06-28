@@ -871,3 +871,39 @@ class ProductSearchEngine:
             qs = self._apply_feed_sorting(qs, sort_by, price_order)
             
         return self._get_cached_structural_feed(base_cache_key, qs, page, page_size)
+    
+    def get_stores_with_tokens_feed(self, page: int = 1, page_size: int = 20, max_distance_meters: float = 10000) -> list:
+        if not self.user or not self.user.is_authenticated:
+            return []
+
+        # Filtramos billeteras con saldo > 0 de compañías que tengan tiendas cerca y activas
+        wallets = TokenWallet.objects.select_related('company', 'company__category').filter(
+            user=self.user,
+            balance__gt=0,
+            company__stores__is_active=True,
+            company__stores__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters))
+        ).distinct().order_by('-balance')
+
+        start = (page - 1) * page_size
+        end = start + page_size
+        
+        results = []
+        for wallet in wallets[start:end]:
+            company = wallet.company
+            
+            # Obtenemos la calificación promedio de la compañía
+            avg_rating = MerchantCalification.objects.filter(
+                merchant=company
+            ).aggregate(average=Avg('rating'))['average'] or 0.0
+            
+            results.append({
+                "company_id": str(company.id),
+                "storeName": company.name,
+                "storeProfilePictureUrl": storage_manager.get_url(company.image) if company.image else "",
+                "category": company.category.name if company.category else "Comercio",
+                "isPlatinium": company.is_platinum,
+                "tokens": wallet.balance,
+                "calification": round(avg_rating, 2)
+            })
+            
+        return results

@@ -21,7 +21,7 @@ def login_view(request):
     # 1. Si ya está logueado, lo enviamos a su área de trabajo
     if request.user.is_authenticated:
         if request.user.is_superuser:
-            return redirect('admin')
+            return redirect('admin:index')
         elif getattr(request.user, 'can_check_payments', False):
             return redirect('web_payments_dashboard')
         elif getattr(request.user, 'can_check_support', False):
