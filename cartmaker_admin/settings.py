@@ -407,6 +407,16 @@ CELERY_BEAT_SCHEDULE = {
     },
 }
 
+# CORREO
+
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = env_manager.EMAIL_HOST
+EMAIL_PORT = env_manager.EMAIL_PORT
+EMAIL_HOST_USER = env_manager.EMAIL_HOST_USER
+EMAIL_HOST_PASSWORD = env_manager.EMAIL_HOST_PASSWORD
+EMAIL_USE_TLS = env_manager.EMAIL_USE_TLS
+DEFAULT_FROM_EMAIL = f"CartMaker <{EMAIL_HOST_USER}>"
+
 # FIREBASE
 path_to_json = os.path.join(BASE_DIR, '.', 'firebase-adminsdk.json')
 cred = credentials.Certificate(path_to_json)

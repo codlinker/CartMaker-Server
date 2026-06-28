@@ -194,14 +194,6 @@ def invalidate_atlas_subscriptions_cache(sender, instance, **kwargs):
     if user_id:
         cache.delete(f"cartmaker:tenant:{user_id}:subscriptions")
 
-@receiver(post_save, sender=User)
-def on_user_created(sender, created, instance: User, **kwargs):
-    """
-    Signal encargada de manejar el post de la creacion de un usuario.
-    """
-    if created:
-        UserWallet.objects.create(user=instance)
-
 @receiver(post_save, sender=ProductViewLog)
 def on_view_log_saved(sender, instance, **kwargs):
     """
@@ -304,7 +296,7 @@ def on_user_created(sender, created, instance: User, **kwargs):
     Se dispara UNA SOLA VEZ cuando el usuario se registra.
     """
     if created:
-        UserWallet.objects.create(user=instance)
+        UserWallet.objects.get_or_create(user=instance)
         # 💡 Generamos su estado de Atlas Freemium desde el día 1
         AtlasPlusPlan.objects.create(user=instance)
 

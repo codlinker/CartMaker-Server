@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verifica tu cuenta - CartMaker</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #F2F2FF; /* AppTheme.white */
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+        .email-container {
+            max-width: 480px;
+            margin: 40px auto;
+            background-color: #FFFFFF;
+            padding: 40px 30px;
+            border-radius: 16px; /* Bordes suaves acordes al AppTheme */
+            box-shadow: 0 4px 12px rgba(49, 27, 146, 0.05); /* Sombra muy sutil con darkPurple */
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .logo {
+            height: 50px;
+            width: auto;
+            display: inline-block;
+        }
+        .content {
+            text-align: center;
+            color: #212121; /* AppTheme.blackText */
+        }
+        h1 {
+            font-size: 22px;
+            font-weight: 700;
+            margin-top: 0;
+            margin-bottom: 10px;
+        }
+        p {
+            font-size: 14px; /* AppTheme.bodyMedium */
+            line-height: 1.6;
+            color: #757575; /* AppTheme.darkGrey */
+            margin-top: 0;
+            margin-bottom: 24px;
+        }
+        .otp-box {
+            background-color: #E2DAF3; /* AppTheme.lightPurple */
+            padding: 20px 24px;
+            border-radius: 12px;
+            display: inline-block;
+            margin: 10px 0 24px 0;
+            border: 1px solid rgba(109, 73, 242, 0.1);
+        }
+        .otp-code {
+            font-size: 34px;
+            font-weight: 700;
+            letter-spacing: 8px;
+            color: #6D49F2; /* AppTheme.primary */
+            margin: 0;
+            padding-left: 8px;
+            
+            /* TRUCO PARA SELECCIÓN RÁPIDA (Reemplazo del JS) */
+            user-select: all;
+            -webkit-user-select: all;
+            -moz-user-select: all;
+            -ms-user-select: all;
+            cursor: pointer;
+        }
+        .footer {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #D7D7D7; /* AppTheme.lightGrey */
+            text-align: center;
+            font-size: 12px;
+            color: #757575; /* AppTheme.darkGrey */
+        }
+    </style>
+</head>
+<body>
+    <div style="padding: 20px;">
+        <div class="email-container">
+            <div class="header">
+                <img src="cid:logo_cartmaker" alt="CartMaker" class="logo">
+            </div>
+            <div class="content">
+                <h1>Verifica tu correo</h1>
+                <p>Usa este código de seguridad para continuar.</p>
+                
+                <div class="otp-box">
+                    <h2 class="otp-code">{{ otp_code }}</h2>
+                </div>
+                
+                <p style="font-size: 13px; margin-bottom: 0;">
+                    Este código expira en 60 segundos.<br>Si no solicitaste esto, ignora este mensaje.
+                </p>
+            </div>
+            <div class="footer">
+                &copy; 2026 CartMaker. Todos los derechos reservados.<br>
+                <span style="color: #D7D7D7; font-size: 11px; margin-top: 8px; display: inline-block;">
+                    Código de seguridad generado el {{ timestamp }}
+                </span>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

@@ -37,7 +37,7 @@ from django.utils import timezone
 from .tasks import *
 from django.contrib.gis.geos import Polygon, Point
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
-from .utils import _parse_flexible_date
+from .utils import parse_flexible_date
 from asgiref.sync import sync_to_async, async_to_sync
 from rest_framework.pagination import PageNumberPagination
 from django.db.models.functions import Coalesce, Round
@@ -5557,7 +5557,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
                 # Procesamos la fecha de caducidad usando nuestra función flexible
                 exp_datetime = None
                 if expiration_date_raw:
-                    parsed_date = _parse_flexible_date(expiration_date_raw)
+                    parsed_date = parse_flexible_date(expiration_date_raw)
                     if parsed_date:
                         # Lo hacemos consciente de la zona horaria y lo seteamos al final del día
                         exp_datetime = timezone.make_aware(datetime.combine(parsed_date.date(), datetime.max.time()))

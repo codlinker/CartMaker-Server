@@ -8,6 +8,7 @@ from .models import *
 from api.core import *
 from django.contrib.gis.geos import Point
 from pgvector.django import CosineDistance
+from django.db import transaction
 
 User = get_user_model()
 
@@ -20,14 +21,15 @@ class RegisterSerializer(serializers.ModelSerializer):
         fields = ('email', 'first_name', 'last_name', 'password', 'tokens', 'gender', "id")
 
     def create(self, validated_data):
-        user = User.objects.create_user(
-            email=validated_data['email'],
-            password=validated_data['password'],
-            first_name=validated_data.get('first_name', ''),
-            last_name=validated_data.get('last_name', ''),
-            gender=validated_data['gender']
-        )
-        send_email_otp(validated_data['email'])
+        with transaction.atomic():
+            user = User.objects.create_user(
+                email=validated_data['email'],
+                password=validated_data['password'],
+                first_name=validated_data.get('first_name', ''),
+                last_name=validated_data.get('last_name', ''),
+                gender=validated_data['gender']
+            )
+            send_email_otp(validated_data['email'])
         return user
 
     def get_tokens(self, user):

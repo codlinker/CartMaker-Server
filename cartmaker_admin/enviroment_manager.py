@@ -29,7 +29,12 @@ class EnviromentManager:
         "CEDULAS_API_APP_ID":"App id de la api de consulta de cedulas.",
         "CEDULAS_API_ACCESS_TOKEN":"Access token de la api de consulta de cedulas.",
         "USE_CEDULAS_API":"Indica si se debe usar la api de consulta de cedulas al verificar identidades.",
-        "GEMINI_API_KEY":"API Key de Gemini."
+        "GEMINI_API_KEY":"API Key de Gemini.",
+        "EMAIL_HOST": "Host del servidor SMTP para el envío de correos.",
+        "EMAIL_PORT": "Puerto del servidor SMTP.",
+        "EMAIL_HOST_USER": "Usuario/Dirección de correo remitente.",
+        "EMAIL_HOST_PASSWORD": "Password del correo remitente.",
+        "EMAIL_USE_TLS": "Indica si se usa TLS para la conexión SMTP (0 o 1)."
     }
 
     def __init__(self):
@@ -56,6 +61,11 @@ class EnviromentManager:
         self._use_cedulas_api = None
         self._gemini_api_key = None
         self._openrouter_api_key = None
+        self._email_host = None
+        self._email_port = None
+        self._email_host_user = None
+        self._email_host_password = None
+        self._email_use_tls = None
         self.__execute_sh_file()
         self.__load_enviroment_variables()
 
@@ -202,6 +212,31 @@ class EnviromentManager:
         """
         return self._openrouter_api_key
     
+    @property
+    def EMAIL_HOST(self) -> str:
+        """ Host del servidor SMTP. """
+        return self._email_host
+
+    @property
+    def EMAIL_PORT(self) -> int:
+        """ Puerto del servidor SMTP. """
+        return int(self._email_port) if self._email_port else 0
+
+    @property
+    def EMAIL_HOST_USER(self) -> str:
+        """ Correo remitente. """
+        return self._email_host_user
+
+    @property
+    def EMAIL_HOST_PASSWORD(self) -> str:
+        """ Password del correo remitente. """
+        return self._email_host_password
+
+    @property
+    def EMAIL_USE_TLS(self) -> bool:
+        """ Indica si se usa TLS. """
+        return bool(self._email_use_tls) if self._email_use_tls else False
+    
     def __get_env_variable_description(self, env_variable_name:str)->str:
         """
         Retorna una descripcion para la variable indicada.
@@ -265,6 +300,11 @@ class EnviromentManager:
             "USE_CEDULAS_API":self.__process_boolean_env_variable(os.environ.get('USE_CEDULAS_API')),
             "GEMINI_API_KEY":os.environ.get("GEMINI_API_KEY"),
             "OPENROUTER_API_KEY":os.environ.get('OPENROUTER_API_KEY'),
+            "EMAIL_HOST": os.environ.get("EMAIL_HOST"),
+            "EMAIL_PORT": os.environ.get("EMAIL_PORT"),
+            "EMAIL_HOST_USER": os.environ.get("EMAIL_HOST_USER"),
+            "EMAIL_HOST_PASSWORD": os.environ.get("EMAIL_HOST_PASSWORD"),
+            "EMAIL_USE_TLS": self.__process_boolean_env_variable(os.environ.get("EMAIL_USE_TLS")),
         }
         self.__check_variables(env_variables)
         self._db_name = env_variables['DB_NAME']
@@ -290,6 +330,11 @@ class EnviromentManager:
         self._use_cedulas_api = env_variables['USE_CEDULAS_API']
         self._gemini_api_key = env_variables['GEMINI_API_KEY']
         self._openrouter_api_key = env_variables['OPENROUTER_API_KEY']
+        self._email_host = env_variables['EMAIL_HOST']
+        self._email_port = env_variables['EMAIL_PORT']
+        self._email_host_user = env_variables['EMAIL_HOST_USER']
+        self._email_host_password = env_variables['EMAIL_HOST_PASSWORD']
+        self._email_use_tls = env_variables['EMAIL_USE_TLS']
 
     def __process_boolean_env_variable(self, variable:str)->bool:
         """Procesa la variable indicada en el parametro. Se espera

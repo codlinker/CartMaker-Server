@@ -1,10 +1,15 @@
 from datetime import datetime
+import os
 
 from django.core.cache import cache
 import random
+from django.core.mail import EmailMultiAlternatives
+from django.template.loader import render_to_string
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.db import connection
 from django.db.models import Count, Q
+from django.conf import settings
+from email.mime.image import MIMEImage
 
 def get_tokens_for_user(user):
     refresh = RefreshToken.for_user(user)
@@ -13,17 +18,53 @@ def get_tokens_for_user(user):
         'access': str(refresh.access_token),
     }
 
-def send_email_otp(user_email) -> str:
-    """
-    Genera el otp para el correo del usuario.
-
-    Returns:
-        otp_code(str): Codigo de verificacion de email.
-    """
+def send_email_otp(user_email: str) -> str:
     otp_code = str(random.randint(10000, 99999))
     cache_key = f"otp_verification_{user_email}"
     cache.set(cache_key, otp_code, timeout=60)
-    print(f"OTP CODE GENERADO PARA EL CORREO {user_email}: ", otp_code)
+    
+    context = {
+        'otp_code': otp_code,
+        'timestamp': datetime.now().strftime("%d/%m/%Y %I:%M %p")
+    }
+    
+    subject = "Tu código de verificación de CartMaker"
+    from_email = settings.DEFAULT_FROM_EMAIL
+    
+    try:
+        text_content = render_to_string('emails/otp_verification.txt', context)
+        html_content = render_to_string('emails/otp_verification.html', context)
+        
+        email = EmailMultiAlternatives(
+            subject=subject,
+            body=text_content,
+            from_email=from_email,
+            to=[user_email]
+        )
+        email.attach_alternative(html_content, "text/html")
+        
+        # --- LÓGICA PARA INCRUSTAR EL LOGO (CID INLINE) ---
+        logo_path = os.path.join(settings.BASE_DIR, 'web', 'static', 'img', 'logo_sin_letras.png')
+        
+        try:
+            with open(logo_path, 'rb') as f:
+                logo_image = MIMEImage(f.read())
+                # Le damos el ID exacto que usamos en el src="cid:logo_cartmaker" del HTML
+                logo_image.add_header('Content-ID', '<logo_cartmaker>')
+                # Indicamos que es un elemento en línea, no un archivo adjunto para descargar
+                logo_image.add_header('Content-Disposition', 'inline', filename='logo.png')
+                email.attach(logo_image)
+        except Exception as img_error:
+            print(f"No se pudo cargar el logo para el correo: {img_error}")
+        # --------------------------------------------------
+
+        email.send(fail_silently=False)
+        print(f"OTP ENVIADO CON ÉXITO A {user_email}: {otp_code}")
+        
+    except Exception as e:
+        print(f"Error crítico en el despacho del OTP hacia {user_email}: {str(e)}")
+        raise e 
+
     return otp_code
 
 def get_email_otp(user_email) -> str:
@@ -44,7 +85,7 @@ def activate_pgvector(sender, **kwargs):
 # ==========================================
 # FUNCIÓN AUXILIAR PARA PARSEAR FECHAS FLEXIBLES
 # ==========================================
-def _parse_flexible_date(date_str):
+def parse_flexible_date(date_str):
     if not date_str:
         return None
     # 1. Quitamos cualquier hora extraña que mande Flutter (Ej: "2026-10-25 00:00:00.000" -> "2026-10-25")

@@ -1,0 +1,9 @@
+¡Hola!
+
+Tu código de verificación para CartMaker es: {{ otp_code }}
+
+Este código expirará en 60 segundos. Si no solicitaste este código, puedes ignorar este correo de forma segura.
+
+Atentamente,
+El equipo de CartMaker
+{{ domain }}
