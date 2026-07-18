@@ -93,7 +93,7 @@ class EmployeeStoreAssignmentAdmin(ModelAdmin):
 
 @admin.register(Order)
 class OrderAdmin(ModelAdmin):
-    list_display = ("id", "client", "store", 'delivery_location', "status_pill", "withdrawal_type", "creation")
+    list_display = ("id", "client", "store", 'client_location', "status_pill", "withdrawal_type", "creation")
     list_filter = ("status", "withdrawal_type")
     readonly_fields = ("creation", "end_time")
 

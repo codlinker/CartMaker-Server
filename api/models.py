@@ -1129,7 +1129,7 @@ class Order(models.Model):
     status = models.IntegerField(choices=OrderStatus.choices, default=OrderStatus.WAITING)
     cancellation_topic = models.IntegerField(choices=CancellationReason.choices, null=True, blank=True)
     withdrawal_type = models.IntegerField(choices=WithdrawalType.choices)
-    delivery_location = models.ForeignKey(ClientLocation, on_delete=models.SET_NULL, null=True, blank=True)
+    client_location = models.ForeignKey(ClientLocation, on_delete=models.SET_NULL, null=True, blank=True)
 
 class TokenWallet(models.Model):
     """

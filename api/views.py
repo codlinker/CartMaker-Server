@@ -3415,7 +3415,7 @@ class OrderViewSet(viewsets.ViewSet):
             order = Order.objects.select_related(
                 'store__company', 
                 'store__location',
-                'delivery_location'
+                'client_location'
             ).get(
                 Q(id=pk) & (Q(client=request.user) | Q(store__company__owner=request.user))
             )
@@ -3427,15 +3427,29 @@ class OrderViewSet(viewsets.ViewSet):
             
             store_lat = float(order.store.location.coordinates.y) if hasattr(order.store, 'location') and order.store.location and order.store.location.coordinates else None
             store_lng = float(order.store.location.coordinates.x) if hasattr(order.store, 'location') and order.store.location and order.store.location.coordinates else None
+            store_address = "Dirección no registrada"
+            if hasattr(order.store, 'location') and order.store.location:
+                store_address = order.store.location.name
+            store_email = company.owner.email if company and company.owner else "Sin correo"
             
-            client_lat = float(order.delivery_location.coordinates.y) if order.delivery_location else None
-            client_lng = float(order.delivery_location.coordinates.x) if order.delivery_location else None
-            client_address = order.delivery_location.description if order.delivery_location else None
+            client_lat = float(order.client_location.coordinates.y) if order.client_location else None
+            client_lng = float(order.client_location.coordinates.x) if order.client_location else None
+            client_address = order.client_location.description if order.client_location else None
 
             is_merchant_mode = False
             if hasattr(request.user, 'company'):
                 if request.user.company.id == order.store.company.id:
                     is_merchant_mode = True
+
+            contact_methods_dict = {
+                ContactMethodType(contact.method_type).name.lower(): contact.get_json()
+                for contact in order.client.contact_methods.all()
+            }
+
+            store_contact_methods_dict = {
+                str(ContactMethodType(contact.method_type).name).lower(): contact.get_json()
+                for contact in order.store.contact_methods.all()
+            }
 
             # Mandamos la estructura limpia que espera Flutter
             payload = {
@@ -3448,6 +3462,9 @@ class OrderViewSet(viewsets.ViewSet):
                 'store_image': store_image_url,
                 'store_lat': store_lat,
                 'store_lng': store_lng,
+                'store_contact_methods':store_contact_methods_dict,
+                'store_address': store_address,
+                'store_email': store_email,
                 'cart': order.cart,
                 'creation': creation_str,
                 'client_lat': client_lat,
@@ -3455,6 +3472,10 @@ class OrderViewSet(viewsets.ViewSet):
                 'client_address': client_address,
                 "client_image": storage_manager.get_url(order.client.profile_picture) if order.client.profile_picture else None,
                 'client_name': f"{order.client.first_name} {order.client.last_name}",
+                'client_contact_methods':contact_methods_dict,
+                'end_time': timezone.localtime(order.end_time).strftime("%d/%m/%Y %I:%M %p").lower() if order.end_time else creation_str,
+                'client_cedula': order.client.cedula_number,
+                'client_email': order.client.email,
             }
             
             return Response(payload, status=status.HTTP_200_OK)
@@ -3470,7 +3491,7 @@ class OrderViewSet(viewsets.ViewSet):
         orders = Order.objects.select_related(
             'store__company', 
             'store__location',
-            'delivery_location'
+            'client_location'
         ).prefetch_related(
             'store__contact_methods'
         ).filter(client=request.user).order_by('-creation')
@@ -3493,20 +3514,28 @@ class OrderViewSet(viewsets.ViewSet):
             client_lat = None     # 💡 CORRECCIÓN: Inicializados en None para evitar UnboundLocalError
             client_lng = None     # 💡 CORRECCIÓN: Inicializados en None para evitar UnboundLocalError
             client_address = None
-            
+            store_address = "Dirección no registrada"
+            store_email = "Sin correo"
             if hasattr(order.store, 'location') and order.store.location:
                 location = order.store.location
                 if location.coordinates:
                     store_lat = float(location.coordinates.y)  # Eje Y = Latitud
                     store_lng = float(location.coordinates.x)  # Eje X = Longitud
+                store_address = order.store.location.name
+                store_email = company.owner.email if company and company.owner else "Sin correo"
             
-            if order.delivery_location:
-                client_lat = float(order.delivery_location.coordinates.y)
-                client_lng = float(order.delivery_location.coordinates.x)
-                client_address = order.delivery_location.description
+            if order.client_location:
+                client_lat = float(order.client_location.coordinates.y)
+                client_lng = float(order.client_location.coordinates.x)
+                client_address = order.client_location.description
 
             # 💡 EXTRACCIÓN DE MÉTODOS DE CONTACTO (Tienda -> Cliente)
             contact_methods_dict = {
+                ContactMethodType(contact.method_type).name.lower(): contact.get_json()
+                for contact in order.client.contact_methods.all()
+            }
+
+            store_contact_methods_dict = {
                 str(ContactMethodType(contact.method_type).name).lower(): contact.get_json()
                 for contact in order.store.contact_methods.all()
             }
@@ -3518,14 +3547,20 @@ class OrderViewSet(viewsets.ViewSet):
                 'store_id': str(order.store.id),
                 'store_name': company.name,
                 'store_image': store_image_url,
-                'contact_methods': contact_methods_dict,
+                'store_contact_methods': store_contact_methods_dict,
                 'store_lat': store_lat,
                 'store_lng': store_lng,
+                'store_address': store_address,
+                'store_email': store_email,
                 'cart': order.cart,
                 'creation': creation_str,
                 'client_lat': client_lat,
                 'client_lng': client_lng,
                 'client_address': client_address,
+                'client_contact_methods': contact_methods_dict,
+                'end_time': timezone.localtime(order.end_time).strftime("%d/%m/%Y %I:%M %p").lower() if order.end_time else creation_str,
+                'client_cedula': order.client.cedula_number,
+                'client_email': order.client.email,
             })
 
         return Response({'data': orders_data}, status=status.HTTP_200_OK)
@@ -3533,12 +3568,11 @@ class OrderViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['get'])
     def merchant_orders(self, request):
         """ Retorna las órdenes pertenecientes a las tiendas del comerciante autenticado """
-        # 💡 Añadimos 'store__location' y 'delivery_location' al select_related para evitar latencia N+1 en mapas
         orders = Order.objects.select_related(
             'store__company', 
             'store__location', 
             'client',
-            'delivery_location'
+            'client_location'
         ).prefetch_related(
             'client__contact_methods'
         ).filter(
@@ -3579,10 +3613,10 @@ class OrderViewSet(viewsets.ViewSet):
             client_lat = None
             client_lng = None
             client_address = None
-            if order.delivery_location:
-                client_lat = float(order.delivery_location.coordinates.y)
-                client_lng = float(order.delivery_location.coordinates.x)
-                client_address = order.delivery_location.description
+            if order.client_location:
+                client_lat = float(order.client_location.coordinates.y)
+                client_lng = float(order.client_location.coordinates.x)
+                client_address = order.client_location.description
 
             orders_data.append({
                 'id': order.id,
@@ -4041,11 +4075,10 @@ class CartViewSet(viewsets.ViewSet):
             total_tokens_needed += int(discount.get('tokens', 0))
         # 💡 Buscamos la ubicación de forma segura
         client_location = None
-        if withdrawal_type == 1:
-            try:
-                client_location = ClientLocation.objects.get(id=location_id, user=request.user)
-            except ClientLocation.DoesNotExist:
-                return Response({"error": "La dirección seleccionada no es válida."}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            client_location = ClientLocation.objects.get(id=location_id, user=request.user)
+        except ClientLocation.DoesNotExist:
+            return Response({"error": "La dirección seleccionada no es válida."}, status=status.HTTP_404_NOT_FOUND)
 
         # =========================================================================
         # 2. BLOQUEO ATÓMICO Y HARD RESERVATION
@@ -4176,7 +4209,7 @@ class CartViewSet(viewsets.ViewSet):
                 order = Order.objects.create(
                     store=store,
                     client=request.user,
-                    delivery_location=client_location, # 💡 Anclamos la dirección
+                    client_location=client_location,
                     cart={"items": cart_snapshot, "total": total_price},
                     status=OrderStatus.WAITING, 
                     withdrawal_type=withdrawal_type
