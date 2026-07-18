@@ -1495,6 +1495,10 @@ class MerchantSubscription(models.Model):
     merchant_type = models.IntegerField(choices=MerchantType.choices)
     rif_number = models.CharField(max_length=50, null=True, blank=True)
     company_document_url = models.CharField(max_length=500, null=True, blank=True)
+    # Banderas para notificaciones de renovacion de subscripciones
+    notified_5_days = models.BooleanField(default=False)
+    notified_1_day = models.BooleanField(default=False)
+    notified_hours = models.BooleanField(default=False)
 
     def get_json(self) -> dict:
         prorated_remanent_usd = 0.0

@@ -837,6 +837,10 @@ class UploadSubscriptionPayment(APIView):
                 verified_at=timezone.now() if bank_api_available else None
             )
 
+            if bank_api_available:
+                cache.delete(f"cartmaker:tenant:{request.user.id}:company")
+                cache.delete(f"cartmaker:tenant:{request.user.id}:subscriptions")
+
             # Si la API del banco lo aprobó instantáneamente, se ejecutan las señales de activación de inmediato
             return Response({'payment_data': payment.get_json(), 'subscription_data': atlas_plan.get_json()}, status=status.HTTP_201_CREATED)
 
@@ -1007,9 +1011,22 @@ class FullPaySubscriptionWithWalletView(APIView):
                 if is_plan_change:
                     merchant_subscription.plan = merchant_plan
                 
-                # 5. Activar la suscripción
-                merchant_subscription.valid_until = timezone.now() + relativedelta(months=1)
+                # 5. Activar la suscripción (Con Lógica de Acumulación)
+                now = timezone.now()
+                if merchant_subscription.valid_until and merchant_subscription.valid_until > now:
+                    merchant_subscription.valid_until = merchant_subscription.valid_until + relativedelta(months=1)
+                else:
+                    merchant_subscription.valid_until = now + relativedelta(months=1)
+
+                # Reseteamos las banderas para que el Cron Job vuelva a avisar en el futuro
+                merchant_subscription.notified_5_days = False
+                merchant_subscription.notified_1_day = False
+                merchant_subscription.notified_hours = False
+                
                 merchant_subscription.save()
+
+                cache.delete(f"cartmaker:tenant:{request.user.id}:company")
+                cache.delete(f"cartmaker:tenant:{request.user.id}:subscriptions")
 
                 # 6. Dejar un registro en el historial de pagos
                 merchant_payment = MerchantPlanPayment.objects.create(

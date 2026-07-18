@@ -22,14 +22,12 @@ def on_payment_created(sender, instance: MerchantPlanPayment, **kwargs):
                     merchant = old_instance.subscription.merchant
                     current_subscription = old_instance.subscription
                     
-                    # 💡 Identificamos el plan al que quiere suscribirse (o renovar)
                     target_plan = old_instance.target_plan if old_instance.target_plan else current_subscription.plan
                     plan_name = target_plan.name
                     instance.verified_at = timezone.now()
 
-                    # --- CASO RECHAZADO (Mantenemos tu lógica intacta) ---
+                    # --- CASO RECHAZADO ---
                     if instance.status == PaymentStatus.REJECTED:
-                        # ... (Todo tu bloque de RejectionReason se mantiene idéntico aquí) ...
                         if instance.rejection_reason == RejectionReason.FAKE_PROOF:
                             instance.rejection_help = RejectionHelpText.FAKE_PROOF
                         elif instance.rejection_reason == RejectionReason.NOT_ENOUGH_AMOUNT:
@@ -41,18 +39,23 @@ def on_payment_created(sender, instance: MerchantPlanPayment, **kwargs):
                         elif instance.rejection_reason == RejectionReason.OTHER:
                             instance.rejection_help = RejectionHelpText.OTHER
                         
-                        NotificationManager.notify_payment_check(
-                            merchant.id, plan_name, False, instance.pk,
-                            rejection_reason=instance.get_rejection_reason_display()
-                        )
+                        # 💡 FIX: Capturamos el string de rechazo antes del closure
+                        rejection_msg = instance.get_rejection_reason_display()
+                        
+                        # 💡 FIX: Postergamos la notificación
+                        def notify_merchant_rejected():
+                            NotificationManager.notify_payment_check(
+                                merchant.id, plan_name, False, instance.pk,
+                                rejection_reason=rejection_msg
+                            )
+                        transaction.on_commit(notify_merchant_rejected)
 
                     # --- CASO APROBADO (Con Prorrateo) ---
                     elif instance.status == PaymentStatus.APPROVED:
                         wallet = merchant.wallet
-                        
                         is_plan_change = current_subscription.plan.id != target_plan.id
                         
-                        # 1. 💡 PRORRATEO: Acreditamos el tiempo no consumido si cambia de plan
+                        # 1. PRORRATEO
                         if is_plan_change and current_subscription.valid_until and current_subscription.valid_until > timezone.now():
                             days_left = (current_subscription.valid_until - timezone.now()).total_seconds() / 86400.0
                             daily_rate = float(current_subscription.plan.price) / 30.0
@@ -60,10 +63,8 @@ def on_payment_created(sender, instance: MerchantPlanPayment, **kwargs):
                             
                             if remanent_usd > 0:
                                 wallet.regist_transaction(
-                                    amount=remanent_usd, 
-                                    sub_type='merchant', 
-                                    description=f"Reintegro por cambio de plan ({current_subscription.plan.name})", 
-                                    transaction='add'
+                                    amount=remanent_usd, sub_type='merchant', 
+                                    description=f"Reintegro por cambio de plan ({current_subscription.plan.name})", transaction='add'
                                 )
 
                         # 2. ACREDITAMOS EL PAGO MÓVIL/TRANSFERENCIA
@@ -72,56 +73,54 @@ def on_payment_created(sender, instance: MerchantPlanPayment, **kwargs):
                         monto_pagado_usd = monto_pagado_bs / tasa_bcv
                         
                         wallet.regist_transaction(
-                            amount=monto_pagado_usd, 
-                            sub_type='merchant', 
-                            description=f"Recarga mediante transferencia (Ref: {instance.reference_number})", 
-                            transaction='add'
+                            amount=monto_pagado_usd, sub_type='merchant', 
+                            description=f"Recarga mediante transferencia (Ref: {instance.reference_number})", transaction='add'
                         )
                         
                         # 3. VERIFICAMOS SI ALCANZA PARA EL NUEVO PLAN
                         plan_price_usd = Decimal(str(target_plan.price))
                         
                         if wallet.balance >= plan_price_usd:
-                            # A) Se cobra el plan
                             excedente_usd = wallet.balance - plan_price_usd
                             excedente_bs = round(excedente_usd * tasa_bcv, 2)
                             
                             wallet.regist_transaction(
-                                amount=plan_price_usd, 
-                                sub_type='merchant', 
-                                description=f"Cobro de suscripción: {plan_name}", 
-                                transaction='substract'
+                                amount=plan_price_usd, sub_type='merchant', 
+                                description=f"Cobro de suscripción: {plan_name}", transaction='substract'
                             )
                             
-                            # B) Se actualiza la suscripción al NUEVO plan
-                            subscription_valid_until = timezone.now() + relativedelta(months=1)
+                            # 💡 FIX: Lógica de acumulación de tiempo y limpieza de banderas
+                            now = timezone.now()
+                            if current_subscription.valid_until and current_subscription.valid_until > now:
+                                subscription_valid_until = current_subscription.valid_until + relativedelta(months=1)
+                            else:
+                                subscription_valid_until = now + relativedelta(months=1)
+
                             current_subscription.__class__.objects.filter(pk=current_subscription.pk).update(
-                                plan=target_plan,  # 💡 AQUÍ ocurre el cambio real de plan
+                                plan=target_plan, 
                                 valid_until=subscription_valid_until, 
-                                adquired_at=timezone.now()
-                            )
-                            
-                            NotificationManager.notify_payment_check(
-                                merchant.id, 
-                                plan_name, 
-                                True, 
-                                instance.pk,
-                                surplus_amount=float(excedente_bs)
+                                adquired_at=now,
+                                notified_5_days=False,
+                                notified_1_day=False,
+                                notified_hours=False
                             )
                         else:
                             # 4. SI NO ALCANZA EL DINERO A PESAR DEL REINTEGRO
                             instance.status = PaymentStatus.REJECTED
                             instance.rejection_reason = RejectionReason.NOT_ENOUGH_AMOUNT
                             instance.rejection_help = RejectionHelpText.NOT_ENOUGH_AMOUNT
-                            NotificationManager.notify_payment_check(
-                                merchant.id, plan_name, False, instance.pk,
-                                rejection_reason=f"Pago recibido, pero el monto total fue insuficiente para el nuevo plan. {round(float(monto_pagado_usd), 2)}$ fueron acreditados a tu saldo a favor."
-                            )
+                            
+                            # 💡 FIX: Postergamos la notificación
+                            def notify_insufficient_funds():
+                                NotificationManager.notify_payment_check(
+                                    merchant.id, plan_name, False, instance.pk,
+                                    rejection_reason=f"Pago recibido, pero el monto total fue insuficiente para el nuevo plan. {round(float(monto_pagado_usd), 2)}$ fueron acreditados a tu saldo a favor."
+                                )
+                            transaction.on_commit(notify_insufficient_funds)
 
         except sender.DoesNotExist:
-            pass # Se acaba de crear el pago
+            pass
 
-# 💡 FIX: Agregamos dispatch_uid con un nombre único para evitar ejecuciones dobles
 @receiver(pre_save, sender=AtlasPlusPlanPayment, dispatch_uid="on_atlas_payment_status_changed_unique")
 def on_atlas_payment_status_changed(sender, instance: AtlasPlusPlanPayment, **kwargs):
     if instance.pk:
@@ -137,13 +136,16 @@ def on_atlas_payment_status_changed(sender, instance: AtlasPlusPlanPayment, **kw
 
                     # --- CASO RECHAZADO ---
                     if instance.status == PaymentStatus.REJECTED:
-                        # 💡 Asegúrate de parsearlo a int por si las dudas con los ENUM
                         instance.rejection_help = int(instance.rejection_reason)
-                        NotificationManager.notify_payment_check(
-                            user_id=user.id, subscription_name="Atlas Plus AI", 
-                            approved=False, payment_id=instance.pk, 
-                            rejection_reason=instance.get_rejection_reason_display()
-                        )
+                        rejection_msg = instance.get_rejection_reason_display()
+                        
+                        def notify_atlas_rejected():
+                            NotificationManager.notify_payment_check(
+                                user_id=user.id, subscription_name="Atlas Plus AI", 
+                                approved=False, payment_id=instance.pk, 
+                                rejection_reason=rejection_msg
+                            )
+                        transaction.on_commit(notify_atlas_rejected)
 
                     # --- CASO APROBADO ---
                     elif instance.status == PaymentStatus.APPROVED:
@@ -151,206 +153,161 @@ def on_atlas_payment_status_changed(sender, instance: AtlasPlusPlanPayment, **kw
                         tasa_bcv = Decimal(str(instance.bcv_taxes_to_day))
                         monto_pagado_usd = Decimal(str(instance.amount)) / tasa_bcv
                         
-                        # 1. Acreditamos el pago a la billetera temporalmente
                         wallet.regist_transaction(monto_pagado_usd, 'atlas', f"Abono por Reporte Atlas (Ref: {instance.reference_number})", 'add')
                         
                         plan_price_usd = Decimal(str(config.atlas_plus_price_usd))
                         
-                        # 2. Cobramos el plan directamente
                         if wallet.balance >= plan_price_usd:
                             excedente_usd = wallet.balance - plan_price_usd
                             excedente_bs = round(excedente_usd * tasa_bcv, 2)
                             
                             wallet.regist_transaction(plan_price_usd, 'atlas', "Cobro automático de suscripción Atlas Plus", 'substract')
                             
-                            # Actualización física del plan del usuario
                             atlas_plan.tier = AtlasSubscriptionTier.PREMIUM
                             atlas_plan.valid_until = timezone.now() + relativedelta(months=1)
                             atlas_plan.save()
                             
-                            NotificationManager.notify_payment_check(
-                                user_id=user.id, subscription_name="Atlas Plus AI", 
-                                approved=True, payment_id=instance.pk, surplus_amount=float(excedente_bs)
-                            )
+                            def finalize_atlas_approval():
+                                cache.delete(f"cartmaker:tenant:{user.id}:subscriptions")
+                                NotificationManager.notify_payment_check(
+                                    user_id=user.id, subscription_name="Atlas Plus AI", 
+                                    approved=True, payment_id=instance.pk, surplus_amount=float(excedente_bs)
+                                )
+                            transaction.on_commit(finalize_atlas_approval)
                         else:
-                            # Fondos insuficientes (Monto en Bolívares enviado se quedó corto debido a fluctuación de tasa)
                             instance.status = PaymentStatus.REJECTED
                             instance.rejection_reason = RejectionReason.NOT_ENOUGH_AMOUNT
                             instance.rejection_help = RejectionHelpText.NOT_ENOUGH_AMOUNT
-                            NotificationManager.notify_payment_check(
-                                user_id=user.id, subscription_name="Atlas Plus AI", 
-                                approved=False, payment_id=instance.pk,
-                                rejection_reason=f"Monto insuficiente para Atlas Plus. Los {round(float(monto_pagado_usd), 2)}$ se guardaron en tu monedero."
-                            )
+                            
+                            def notify_atlas_insufficient():
+                                NotificationManager.notify_payment_check(
+                                    user_id=user.id, subscription_name="Atlas Plus AI", 
+                                    approved=False, payment_id=instance.pk,
+                                    rejection_reason=f"Monto insuficiente para Atlas Plus. Los {round(float(monto_pagado_usd), 2)}$ se guardaron en tu monedero."
+                                )
+                            transaction.on_commit(notify_atlas_insufficient)
         except sender.DoesNotExist:
             pass
 
 
-# 💡 FIX: También agregamos el seguro a las señales de la caché para que no hagan el proceso de borrado dos veces
+# ==========================================
+# SECCIÓN REDIS CACHÉ: ENVOLTURA ON_COMMIT 
+# ==========================================
+# Ahora todas las invalidaciones de caché esperan al commit
+# Esto evita que otro hilo reconstruya la caché con datos viejos de la BD.
+
 @receiver(post_save, sender=AtlasPlusPlan, dispatch_uid="invalidate_atlas_plan_cache_unique")
 @receiver(post_save, sender=AtlasPlusPlanPayment, dispatch_uid="invalidate_atlas_payment_cache_unique")
 def invalidate_atlas_subscriptions_cache(sender, instance, **kwargs):
     user_id = instance.user_id if isinstance(instance, AtlasPlusPlan) else instance.plan.user_id
     if user_id:
-        cache.delete(f"cartmaker:tenant:{user_id}:subscriptions")
+        transaction.on_commit(lambda: cache.delete(f"cartmaker:tenant:{user_id}:subscriptions"))
 
 @receiver(post_save, sender=ProductViewLog)
 def on_view_log_saved(sender, instance, **kwargs):
-    """
-    Se dispara cuando se registra una nueva vista o se actualiza 
-    (ej: el usuario lo agregó al carrito minutos después de verlo).
-    """
-    recalculate_item_popularity(instance.inventory_item_id)
+    transaction.on_commit(lambda: recalculate_item_popularity(instance.inventory_item_id))
 
 @receiver(post_delete, sender=ProductViewLog)
 def on_view_log_deleted(sender, instance, **kwargs):
-    """
-    Se dispara si por alguna razón se elimina un log (limpieza de BD, etc).
-    """
-    recalculate_item_popularity(instance.inventory_item_id)
+    transaction.on_commit(lambda: recalculate_item_popularity(instance.inventory_item_id))
 
 @receiver(post_save, sender=InventoryItem)
 def update_item_volatile_cache(sender, instance: InventoryItem, **kwargs):
-    """
-    Cada vez que el stock, precio personalizado o estado de pausa cambie en la BD,
-    actualizamos de inmediato el Nivel Volátil en Redis de forma síncrona.
-    Escribir un string/dict simple en Redis toma menos de 1ms, no bloquea el hilo.
-    """
     cache_key = f"cartmaker:volatile:item:{instance.id}"
     state = {
         "stock": instance.stock,
         "paused": instance.paused,
         "custom_price": float(instance.custom_price) if instance.custom_price else None
     }
-    # Lo guardamos en RAM por 24 horas. Las señales posteriores se encargan de refrescarlo.
-    cache.set(cache_key, state, timeout=86400)
-
+    # Este sí se puede dejar directo porque escribe datos literales (no leídos de otra tabla conflictiva)
+    transaction.on_commit(lambda: cache.set(cache_key, state, timeout=86400))
 
 @receiver(post_delete, sender=InventoryItem)
 def delete_item_volatile_cache(sender, instance: InventoryItem, **kwargs):
-    """
-    Si un lote de inventario se elimina físicamente, limpiamos su estado volátil
-    e invalidamos el caché estructural de su zona geográfica para que desaparezca del esqueleto.
-    """
-    cache_key = f"cartmaker:volatile:item:{instance.id}"
-    cache.delete(cache_key)
-    
-    # Invalidación estructural zonal masiva
-    try:
-        location = instance.store.location
-        approx_lat = round(location.coordinates.y, 3)
-        approx_lng = round(location.coordinates.x, 3)
-        
-        # El método delete_pattern de django-redis busca y borra por comodines en una sola operación
-        cache.delete_pattern(f"cartmaker:struct:home:{approx_lat}:{approx_lng}:*")
-    except Exception:
-        # Blindaje por si la sucursal no tenía una ubicación geográfica configurada todavía
-        pass
-
+    def finalize_item_deletion():
+        cache.delete(f"cartmaker:volatile:item:{instance.id}")
+        try:
+            location = instance.store.location
+            approx_lat = round(location.coordinates.y, 3)
+            approx_lng = round(location.coordinates.x, 3)
+            cache.delete_pattern(f"cartmaker:struct:home:{approx_lat}:{approx_lng}:*")
+        except Exception:
+            pass
+    transaction.on_commit(finalize_item_deletion)
 
 @receiver(post_save, sender=Product)
 def invalidate_structural_cache_on_product_change(sender, instance: Product, **kwargs):
-    """
-    Si los datos estructurales del catálogo maestro cambian (Nombre del producto, descripción, imágenes),
-    debemos invalidar el esqueleto estructural indexado en Redis de las zonas donde se venda.
-    """
-    # Buscamos todas las sucursales que tienen este producto registrado en sus inventarios
-    stores_ids = instance.inventory_items.values_list('store_id', flat=True).distinct()
-    
-    for store_id in stores_ids:
-        try:
-            store_location = StoreLocation.objects.get(store_id=store_id)
-            approx_lat = round(store_location.coordinates.y, 3)
-            approx_lng = round(store_location.coordinates.x, 3)
-            
-            # Borramos el feed estructural de esa coordenada truncada específica
-            cache.delete_pattern(f"cartmaker:struct:home:{approx_lat}:{approx_lng}:*")
-        except StoreLocation.DoesNotExist:
-            continue
+    def clear_structure_cache():
+        stores_ids = instance.inventory_items.values_list('store_id', flat=True).distinct()
+        for store_id in stores_ids:
+            try:
+                store_location = StoreLocation.objects.get(store_id=store_id)
+                approx_lat = round(store_location.coordinates.y, 3)
+                approx_lng = round(store_location.coordinates.x, 3)
+                cache.delete_pattern(f"cartmaker:struct:home:{approx_lat}:{approx_lng}:*")
+            except StoreLocation.DoesNotExist:
+                continue
+    transaction.on_commit(clear_structure_cache)
 
-# ==========================================
-# INVALIDACIÓN GLOBAL (Afecta a todos)
-# ==========================================
+# GLOBAL INVALIDATION
 @receiver(post_save, sender=Mall)
 @receiver(post_delete, sender=Mall)
 def invalidate_malls_cache(sender, instance, **kwargs):
-    cache.delete("cartmaker:global:malls")
+    transaction.on_commit(lambda: cache.delete("cartmaker:global:malls"))
 
 @receiver(post_save, sender=Announcement)
 @receiver(post_delete, sender=Announcement)
 @receiver(post_save, sender=CompanyCategory)
 def invalidate_home_cache(sender, instance, **kwargs):
-    cache.delete("cartmaker:global:home")
+    transaction.on_commit(lambda: cache.delete("cartmaker:global:home"))
 
 @receiver(post_save, sender=Category)
 @receiver(post_save, sender=SubCategory)
 def invalidate_search_cache(sender, instance, **kwargs):
-    cache.delete("cartmaker:global:search")
+    transaction.on_commit(lambda: cache.delete("cartmaker:global:search"))
 
-# ==========================================
-# CREACIÓN DE DEPENDENCIAS INICIALES
-# ==========================================
+# ON CREATED
 @receiver(post_save, sender=User)
 def on_user_created(sender, created, instance: User, **kwargs):
-    """
-    Se dispara UNA SOLA VEZ cuando el usuario se registra.
-    """
     if created:
         UserWallet.objects.get_or_create(user=instance)
-        # 💡 Generamos su estado de Atlas Freemium desde el día 1
-        AtlasPlusPlan.objects.create(user=instance)
+        AtlasPlusPlan.objects.get_or_create(user=instance)
 
-# ==========================================
-# INVALIDACIÓN POR TENANT (Afecta solo al dueño)
-# ==========================================
+# TENANT INVALIDATION
 @receiver(post_save, sender=User)
 def invalidate_user_profile_cache(sender, instance: User, **kwargs):
-    """Se dispara si cambia el nombre, foto, o correo del usuario"""
-    cache.delete(f"cartmaker:tenant:{instance.id}:profile")
+    transaction.on_commit(lambda: cache.delete(f"cartmaker:tenant:{instance.id}:profile"))
 
 @receiver(post_save, sender=ClientLocation)
 @receiver(post_delete, sender=ClientLocation)
 @receiver(post_save, sender=ClientContactMethod)
 @receiver(post_delete, sender=ClientContactMethod)
 def invalidate_user_relations_cache(sender, instance, **kwargs):
-    # En estos modelos, la relación hacia el usuario es 'user' o 'client'
     user_id = getattr(instance, 'user_id', None) or getattr(instance, 'client_id', None)
     if user_id:
-        cache.delete(f"cartmaker:tenant:{user_id}:profile")
+        transaction.on_commit(lambda: cache.delete(f"cartmaker:tenant:{user_id}:profile"))
 
 @receiver(post_save, sender=Company)
 @receiver(post_save, sender=CompanyStore)
 @receiver(post_delete, sender=CompanyStore)
 def invalidate_company_cache(sender, instance, **kwargs):
-    """Si el comerciante actualiza su empresa o agrega una sucursal"""
     company_id = instance.id if isinstance(instance, Company) else instance.company.id
     owner_id = instance.owner_id if isinstance(instance, Company) else instance.company.owner_id
     
-    # 1. Limpiamos el caché del tenant (tu lógica original)
-    cache.delete(f"cartmaker:tenant:{owner_id}:company")
+    def finalize_company_cache():
+        cache.delete(f"cartmaker:tenant:{owner_id}:company")
+        item_ids = list(InventoryItem.objects.filter(store__company_id=company_id).values_list('id', flat=True))
+        keys_to_delete = [f"cartmaker:struct:item:{uid}" for uid in item_ids]
+        if keys_to_delete:
+            cache.delete_many(keys_to_delete)
+            
+    transaction.on_commit(finalize_company_cache)
 
-    # 2. 💡 NUEVO: Invalidación Quirúrgica del Caché Estructural del Carrito
-    # Obtenemos todos los IDs de los productos (InventoryItems) que pertenecen a esta empresa.
-    item_ids = InventoryItem.objects.filter(store__company_id=company_id).values_list('id', flat=True)
-    
-    # Construimos la lista de claves exactas a borrar
-    keys_to_delete = [f"cartmaker:struct:item:{uid}" for uid in item_ids]
-    
-    if keys_to_delete:
-        cache.delete_many(keys_to_delete)
-
-# ==========================================
-# INVALIDACIÓN DEL CACHÉ DE SUSCRIPCIONES Y BILLETERA
-# ==========================================
 @receiver(post_save, sender=UserWallet)
 @receiver(post_save, sender=MerchantSubscription)
 @receiver(post_save, sender=MerchantPlanPayment)
 @receiver(post_save, sender=Notification)
 def invalidate_subscriptions_cache(sender, instance, **kwargs):
-    """
-    Este es el caché más crítico. Si le aprueban un pago, le suman saldo a favor 
-    o le llega una notificación de rechazo de pago, debe refrescarse inmediato.
-    """
     user_id = None
     if isinstance(instance, UserWallet):
         user_id = instance.user_id
@@ -359,9 +316,14 @@ def invalidate_subscriptions_cache(sender, instance, **kwargs):
     elif isinstance(instance, MerchantPlanPayment):
         user_id = instance.subscription.merchant_id
     elif isinstance(instance, Notification):
-        # Solo invalidamos si es una notificación relacionada con pagos
         if instance.category in [NotificationCategory.PAYMENT_REJECTED, NotificationCategory.PAYMENT_APPROVED]:
             user_id = instance.user_id
             
     if user_id:
-        cache.delete(f"cartmaker:tenant:{user_id}:subscriptions")
+        def clear_sub_and_company():
+            cache.delete(f"cartmaker:tenant:{user_id}:subscriptions")
+            # El blindaje final que agregamos en el paso anterior, ahora dentro de on_commit
+            if isinstance(instance, (MerchantSubscription, MerchantPlanPayment)):
+                cache.delete(f"cartmaker:tenant:{user_id}:company")
+                
+        transaction.on_commit(clear_sub_and_company)

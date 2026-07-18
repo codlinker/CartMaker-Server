@@ -8,6 +8,7 @@ urlpatterns = [
     path('', views.landing_view, name='web_home'),
     
     # 🔒 Zona de Autenticación (Compartida)
+    path('auth', views.login_view),
     path('auth/login/', views.login_view, name='web_login'),
     path('auth/logout/', views.logout_view, name='web_logout'),
     

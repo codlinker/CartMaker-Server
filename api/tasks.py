@@ -568,3 +568,69 @@ def refresh_admin_dashboard_metrics():
         logger.info("✅ Métricas actualizadas con éxito.")
     except Exception as e:
         logger.error(f"❌ Error al calcular métricas: {e}")
+
+@shared_task(name="cartmaker.subscriptions.notify_expiring")
+def notify_expiring_subscriptions():
+    """
+    Revisa suscripciones activas y notifica si están próximas a vencer.
+    También auto-resetea las banderas si detecta que una suscripción fue renovada.
+    """
+    try:
+        logger.info("⏳ Revisando suscripciones próximas a vencer...")
+        now = timezone.now()
+        
+        # Filtramos suscripciones activas con fecha de expiración
+        active_subs = MerchantSubscription.objects.select_related('merchant', 'plan').filter(
+            valid_until__isnull=False, 
+            merchant__company__isnull=False
+        )
+        
+        for sub in active_subs:
+            time_left = sub.valid_until - now
+            
+            # Si ya expiró, lo ignoramos en este bucle
+            if time_left.total_seconds() <= 0:
+                continue
+                
+            days_left = time_left.days
+            hours_left = time_left.seconds // 3600
+            
+            # 🔄 AUTO-RESET: Si tiene más de 5 días, es una suscripción sana. Limpiamos.
+            if days_left > 5:
+                if sub.notified_5_days or sub.notified_1_day or sub.notified_hours:
+                    sub.notified_5_days = False
+                    sub.notified_1_day = False
+                    sub.notified_hours = False
+                    sub.save(update_fields=['notified_5_days', 'notified_1_day', 'notified_hours'])
+                continue 
+            
+            # ⚠️ EVALUACIÓN DE ALERTAS
+            if days_left == 5 and not sub.notified_5_days:
+                _send_expiration_push(sub, "5 días")
+                sub.notified_5_days = True
+                sub.save(update_fields=['notified_5_days'])
+                
+            elif days_left == 1 and not sub.notified_1_day:
+                _send_expiration_push(sub, "1 día")
+                sub.notified_1_day = True
+                sub.save(update_fields=['notified_1_day'])
+                
+            elif days_left == 0 and hours_left <= 12 and not sub.notified_hours:
+                _send_expiration_push(sub, f"{hours_left} horas")
+                sub.notified_hours = True
+                sub.save(update_fields=['notified_hours'])
+                
+    except Exception as e:
+        logger.error(f"❌ Error en notify_expiring_subscriptions: {e}")
+
+def _send_expiration_push(subscription, time_str):
+    """ Función helper para disparar la notificación Push usando Firebase """
+    NotificationManager.send_push(
+        user_id=subscription.merchant.id,
+        title="¡Tu suscripción vence pronto! ⚠️",
+        body=f"A tu plan {subscription.plan.name} le quedan {time_str}. Renueva a tiempo para no perder visibilidad.",
+        data={
+            "type": "subscription_expiring",
+            "time_left": time_str
+        }
+    )

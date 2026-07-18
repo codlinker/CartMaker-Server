@@ -405,6 +405,12 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'api.tasks.refresh_admin_dashboard_metrics',
         'schedule': crontab(minute=0, hour=20), 
     },
+
+    # Tarea 7: Alerta de expiración de suscripciones y auto-reset de banderas (Cada hora)
+    'notify-expiring-subscriptions-hourly': {
+        'task': 'cartmaker.subscriptions.notify_expiring',
+        'schedule': crontab(minute=0, hour=0), 
+    },
 }
 
 # CORREO
