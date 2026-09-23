@@ -104,6 +104,15 @@ def on_payment_created(sender, instance: MerchantPlanPayment, **kwargs):
                                 notified_1_day=False,
                                 notified_hours=False
                             )
+                            def notify_merchant_approved():
+                                NotificationManager.notify_payment_check(
+                                    user_id=merchant.id,
+                                    subscription_name=plan_name,
+                                    approved=True,
+                                    payment_id=instance.pk,
+                                    surplus_amount=float(excedente_bs)
+                                )
+                            transaction.on_commit(notify_merchant_approved)
                         else:
                             # 4. SI NO ALCANZA EL DINERO A PESAR DEL REINTEGRO
                             instance.status = PaymentStatus.REJECTED

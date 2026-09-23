@@ -31,16 +31,16 @@ sudo apt install -y postgresql postgresql-contrib build-essential postgresql-ser
 
 # Instalar pgvector
 cd /tmp
-git clone --branch v0.8.2 [https://github.com/pgvector/pgvector.git](https://github.com/pgvector/pgvector.git)
+git clone --branch v0.8.2 https://github.com/pgvector/pgvector.git
 cd pgvector
 make
 sudo make install
 
 # Instalar postgis
-sudo apt install -y postgresql-16-postgis-3
+sudo apt install -y postgresql-18-postgis-3
 
 # Volver al directorio de tu proyecto
-# cd /ruta/a/tu/proyecto
+cd /ruta/a/tu/proyecto
 
 # Crear el entorno virtual (Asegurar Python 3.14.3)
 python3.14 -m venv venv
@@ -57,7 +57,7 @@ pip install celery redis uvicorn django-silk
 
 ```
 
-### 2. Configuración de Infraestructura (Redis)
+### 2. Configuración de Infraestructura (Redis y Node)
 
 ```bash
 sudo apt update
@@ -69,6 +69,9 @@ sudo systemctl enable redis-server
 
 # Verificar conexión (Debe responder PONG)
 redis-cli ping
+
+# Instlar Node JS (Necesario para los websockets)
+sudo apt install nodejs
 
 ```
 
@@ -84,7 +87,7 @@ python3 manage.py migrate
 
 ---
 
-## 📊 Configuración de Monitoreo (PostgreSQL Exporter + Prometheus + Grafana)
+## 📊 Configuración de Monitoreo (PostgreSQL Exporter + Prometheus + Grafana) OPCIONAL - OMITIR
 
 Este sistema permite monitorear el consumo de CPU, memoria, transacciones por segundo (TPS) y bloqueos de PostgreSQL.
 
