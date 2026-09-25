@@ -367,3 +367,7 @@ def landing_view(request):
     # Traemos los planes ordenados por precio
     plans = MerchantPlan.objects.all().order_by('price')
     return render(request, 'home.html', {'plans': plans})
+
+def pitch_deck_view(request):
+    """ Presentación Ejecutiva interactiva para Socios Fundadores """
+    return render(request, 'pitch_deck.html')

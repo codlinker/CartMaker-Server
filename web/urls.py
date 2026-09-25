@@ -6,7 +6,7 @@ from django.conf import settings
 urlpatterns = [
     # 🌍 Zona Pública
     path('', views.landing_view, name='web_home'),
-    
+    path('presentacion/', views.pitch_deck_view, name='web_pitch_deck'),
     # 🔒 Zona de Autenticación (Compartida)
     path('auth', views.login_view),
     path('auth/login/', views.login_view, name='web_login'),

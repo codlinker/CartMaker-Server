@@ -5,3 +5,4 @@ media/
 firebase-adminsdk.json
 celery*
 venv
+cartmaker-key.pem

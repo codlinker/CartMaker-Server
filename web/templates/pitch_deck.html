@@ -1,0 +1,719 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CartMaker — Pitch Deck Ejecutivo</title>
+  <link rel="icon" href="{% static 'img/favicon.ico' %}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      --dark-purple: #311B92;
+      --primary: #6D49F2;
+      --light-purple: #E2DAF3;
+      --warning-orange: #FF9100;
+      --bg-canvas: #F2F2FF;
+      --card-white: #FFFFFF;
+      --black-text: #212121;
+      --dark-grey: #757575;
+      --light-grey: #D7D7D7;
+      --success-green: #2E7D32;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', system-ui, sans-serif; }
+    body { background-color: var(--dark-purple); color: var(--black-text); overflow: hidden; height: 100vh; display: flex; align-items: center; justify-content: center; }
+
+    /* Contenedor Fijo sin Scroll */
+    .deck-viewport {
+      width: 96vw;
+      height: 92vh;
+      background: var(--bg-canvas);
+      border-radius: 24px;
+      box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      border: 3px solid rgba(226, 218, 243, 0.55);
+    }
+
+    /* Barra Superior de Progreso */
+    .deck-top-bar { height: 6px; background: var(--light-purple); width: 100%; position: relative; }
+    .deck-progress-fill { height: 100%; background: linear-gradient(90deg, var(--primary), var(--warning-orange)); width: 10%; transition: width 0.35s ease; }
+
+    /* Diapositiva */
+    .slide {
+      flex: 1;
+      padding: 20px 42px 14px 42px;
+      display: none;
+      flex-direction: column;
+      justify-content: space-between;
+      overflow: hidden;
+    }
+    .slide.active { display: flex; animation: slideIn 0.28s ease-out; }
+
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Cabeceras */
+    .slide-header { margin-bottom: 12px; }
+    .badge-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--light-purple);
+      color: var(--primary);
+      font-weight: 800;
+      font-size: 11px;
+      padding: 4px 12px;
+      border-radius: 20px;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .badge-pill.orange { background: #FFE0B2; color: #E65100; }
+    .badge-pill.green { background: #C8E6C9; color: var(--success-green); }
+
+    h1 { font-size: 28px; color: var(--dark-purple); font-weight: 900; line-height: 1.15; margin-bottom: 2px; }
+    h2 { font-size: 14px; color: var(--dark-grey); font-weight: 600; }
+
+    /* Layout Grids */
+    .grid-split { display: grid; grid-template-columns: 1.35fr 1fr; gap: 26px; align-items: stretch; flex: 1; min-height: 0; }
+    .grid-split-rev { display: grid; grid-template-columns: 1fr 1.35fr; gap: 26px; align-items: stretch; flex: 1; min-height: 0; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; flex: 1; min-height: 0; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; flex: 1; min-height: 0; }
+
+    /* Tarjetas */
+    .glass-card {
+      background: var(--card-white);
+      border: 2px solid var(--light-purple);
+      border-radius: 18px;
+      padding: 20px 22px;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      gap: 10px;
+      box-shadow: 0 6px 20px rgba(109, 73, 242, 0.04);
+      position: relative;
+      height: 100%;
+    }
+    .glass-card.highlight {
+      border-color: var(--primary);
+      background: linear-gradient(180deg, #FFFFFF 0%, #FAF8FF 100%);
+    }
+
+    .card-title {
+      font-size: 21px;
+      font-weight: 900;
+      color: var(--primary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      line-height: 1.2;
+    }
+    .card-title.dark { color: var(--dark-purple); }
+    .card-title.orange { color: var(--warning-orange); }
+
+    .card-text { font-size: 13.5px; color: var(--black-text); line-height: 1.45; font-weight: 500; }
+    
+    .feature-list { list-style: none; display: flex; flex-direction: column; gap: 7px; margin-top: 4px; }
+    .feature-list li {
+      font-size: 13px;
+      color: #333333;
+      position: relative;
+      padding-left: 18px;
+      line-height: 1.35;
+    }
+    .feature-list li::before {
+      content: "•";
+      color: var(--warning-orange);
+      font-weight: 900;
+      font-size: 18px;
+      position: absolute;
+      left: 0;
+      top: -3px;
+    }
+
+    /* MOCKUP VERTICAL MAXIMIZADO (Ocupa todo el alto) */
+    .phone-mockup-wrapper {
+      height: 100%;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 0;
+    }
+    .phone-mockup {
+      height: 100%;
+      max-height: 485px;
+      aspect-ratio: 9 / 19.5;
+      background: #0B071A;
+      border-radius: 36px;
+      border: 8px solid #1C1733;
+      box-shadow: 0 18px 45px rgba(25, 10, 60, 0.4), 0 0 0 1px rgba(255,255,255,0.12);
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .phone-notch {
+      position: absolute;
+      top: 6px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 70px;
+      height: 13px;
+      background: #1C1733;
+      border-radius: 10px;
+      z-index: 10;
+    }
+    .phone-screen {
+      width: 100%;
+      height: 100%;
+      border-radius: 26px;
+      overflow: hidden;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .phone-screen img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center top;
+      display: block;
+    }
+
+    /* Números de Impacto */
+    .stat-huge { font-size: 42px; font-weight: 900; color: var(--primary); line-height: 1; }
+    .stat-huge.orange { color: var(--warning-orange); }
+
+    /* Footer Controls */
+    .deck-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 42px 14px 42px;
+      border-top: 2px solid var(--light-purple);
+      background: rgba(242, 242, 255, 0.95);
+    }
+    .footer-meta { font-size: 12px; font-weight: 700; color: var(--dark-grey); display: flex; align-items: center; gap: 10px; }
+    .nav-controls { display: flex; align-items: center; gap: 8px; }
+    .nav-btn {
+      background: var(--card-white);
+      border: 2px solid var(--light-purple);
+      color: var(--primary);
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      cursor: pointer;
+      font-weight: 900;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+    }
+    .nav-btn:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .slide-indicator { font-size: 13px; font-weight: 800; color: var(--dark-purple); margin: 0 8px; }
+    .fullscreen-btn {
+      background: var(--light-purple);
+      color: var(--primary);
+      border: none;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 800;
+      cursor: pointer;
+      margin-left: 8px;
+    }
+    .fullscreen-btn:hover { background: var(--primary); color: #FFF; }
+  </style>
+</head>
+<body>
+
+<div class="deck-viewport">
+  <div class="deck-top-bar">
+    <div class="deck-progress-fill" id="progressFill"></div>
+  </div>
+
+  <!-- SLIDE 1: PORTADA & INVITACIÓN ESTRATÉGICA -->
+  <div class="slide active">
+    <div class="slide-header">
+      <span class="badge-pill">Invitación a Co-Fundación & Pitch Deck</span>
+      <h1>CartMaker</h1>
+      <h2>La primera Red Social de Comercio Hiperlocal que revoluciona el retail físico</h2>
+    </div>
+    <div class="grid-2">
+      <div class="glass-card highlight" style="gap: 14px;">
+        <div style="display: flex; align-items: center; gap: 16px;">
+          <img src="{% static 'img/logo_sin_letras.svg' %}" style="height: 60px; width: 60px;" alt="CartMaker">
+          <div>
+            <h3 class="card-title dark" style="font-size: 24px;">El Sistema Operativo del Retail</h3>
+            <p style="color: var(--dark-grey); font-weight: 600; font-size: 13.5px;">Comercio geolocalizado + Video Social + Inteligencia Artificial</p>
+          </div>
+        </div>
+        <p class="card-text" style="font-size: 14px;">
+          CartMaker fusiona el descubrimiento dinámico de <b>TikTok</b> con la utilidad y confianza transaccional de <b>Mercado Libre</b>, enfocado exclusivamente en el radio geográfico de cercanía del comprador.
+        </p>
+        <p class="card-text" style="font-size: 13.5px;">
+          Desarrollado para resolver la desconexión entre el comercio físico tradicional y los compradores digitales que buscan inmediatez, stock real y compras seguras.
+        </p>
+        <div style="display: flex; gap: 10px; margin-top: auto;">
+          <span class="badge-pill green">✓ App Flutter 90% Terminada</span>
+          <span class="badge-pill orange">✓ Backend Django 100% Operativo</span>
+        </div>
+      </div>
+
+      <div class="glass-card" style="border-left: 6px solid var(--primary); gap: 12px;">
+        <h3 class="card-title dark">🤝 ¿Por qué estamos hoy aquí?</h3>
+        <p class="card-text">
+          CartMaker no es un proyecto en papel ni una idea abstracta: es una <b>plataforma tecnológica ya funcional</b>, creada para capturar una oportunidad desatendida en el comercio venezolano.
+        </p>
+        <p class="card-text">
+          Esta reunión tiene como propósito <b>evaluar la sinergia para una posible co-fundación</b> integrando dos perfiles fundamentales para la fase de despegue y tracción:
+        </p>
+        <ul class="feature-list" style="margin-top: 4px;">
+          <li><b>Perfil Tech / Escalabilidad:</b> Alguien con alto criterio de ingeniería para coliderar la infraestructura cloud, microservicios y escalado backend.</li>
+          <li><b>Perfil Arte 3D / Growth Marketing:</b> Liderar la experiencia visual interactiva en 3D de malls, la dirección de contenido en video y la captación comercial.</li>
+        </ul>
+        <div style="margin-top: auto; padding: 10px; background: var(--light-purple); border-radius: 12px; text-align: center;">
+          <span style="font-size: 13px; font-weight: 800; color: var(--dark-purple);">El código y la base están listos. Buscamos el equipo ideal para escalar.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 2: VALIDACIÓN DE MERCADO Y DATOS REALES -->
+  <div class="slide">
+    <div class="slide-header">
+      <span class="badge-pill orange">Investigación de Campo en Venezuela</span>
+      <h1>La Realidad del Consumidor Local</h1>
+      <h2>Datos cuantitativos de nuestras encuestas presenciales a compradores y comerciantes</h2>
+    </div>
+    <div class="grid-3">
+      <div class="glass-card">
+        <div class="stat-huge">80%</div>
+        <h3 class="card-title dark">Compra Presencial</h3>
+        <p class="card-text">8 de cada 10 personas prefieren comprar físicamente en la tienda para <b>verificar la calidad, evitar estafas</b> y tener el producto en mano al instante.</p>
+        <ul class="feature-list" style="margin-top: auto;">
+          <li>Están dispuestos a desplazarse entre 15 y 60 minutos si tienen certeza de lo que van a conseguir.</li>
+        </ul>
+      </div>
+      <div class="glass-card highlight">
+        <div class="stat-huge orange">12.5%</div>
+        <h3 class="card-title orange">Tasa de Éxito Actual</h3>
+        <p class="card-text">Solo el 12.5% afirma encontrar siempre lo que busca localmente. La tasa de encuentro entre cliente y comercio <b>no supera el 60%</b>.</p>
+        <ul class="feature-list" style="margin-top: auto;">
+          <li>Las redes sociales tradicionales no informan inventario real ni garantizan horarios vigentes.</li>
+        </ul>
+      </div>
+      <div class="glass-card">
+        <div class="stat-huge" style="color: var(--dark-purple);">El Dolor</div>
+        <h3 class="card-title dark">Incertidumbre Pre-Viaje</h3>
+        <p class="card-text">El dolor real no es la falta de delivery: <b>es la pérdida de tiempo buscando tiendas</b> sin saber si el producto está disponible ni cuánto cuesta.</p>
+        <ul class="feature-list" style="margin-top: auto;">
+          <li>El usuario quiere saber exactamente a qué tienda ir y cuánto gastará antes de salir de su casa.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 3: SOCIAL COMMERCE / FEED EN VIDEO -->
+  <div class="slide">
+    <div class="slide-header">
+      <span class="badge-pill">Social Commerce</span>
+      <h1>Más que un E-commerce: Una Red Social Comercial</h1>
+      <h2>Formato TikTok / Reels conectado en tiempo real al inventario físico</h2>
+    </div>
+    <div class="grid-split">
+      <div class="glass-card">
+        <h3 class="card-title dark">🎬 Vitrina Dinámica en Video Corto</h3>
+        <p class="card-text">Los catálogos estáticos de fotos planas no convierten en la juventud ni en el retail moderno. CartMaker introduce una experiencia social viva:</p>
+        <ul class="feature-list">
+          <li><b>Video Stories Vinculadas:</b> Videos cortos demostrativos enlazados directamente al lote de stock físico disponible.</li>
+          <li><b>Compra Inmediata en Pantalla:</b> Con un toque en el reproductor el cliente puede reservar el producto o ver la ruta a la tienda.</li>
+          <li><b>Dudas y Cierre en Vivo:</b> Comentarios y preguntas preventa polimórficos que notifican al vendedor al instante.</li>
+          <li><b>Algoritmo por Proximidad:</b> El feed muestra primero los productos y videos de tiendas cercanas al usuario.</li>
+        </ul>
+        <div style="margin-top: auto;">
+          <span class="badge-pill green">Atribución de ventas directa generada desde el reproductor</span>
+        </div>
+      </div>
+      <div class="phone-mockup-wrapper">
+        <div class="phone-mockup">
+          <div class="phone-notch"></div>
+          <div class="phone-screen">
+            <img src="{% static 'img/card_feed_social.jpg' %}" alt="Social Feed">
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 4: MAPA HIPERLOCAL Y MALLS -->
+  <div class="slide">
+    <div class="slide-header">
+      <span class="badge-pill">Geolocalización en Vivo</span>
+      <h1>Mapa Hiperlocal y Centros Comerciales</h1>
+      <h2>Encuentra con certeza lo que buscas a la vuelta de la esquina</h2>
+    </div>
+    <div class="grid-split-rev">
+      <div class="phone-mockup-wrapper">
+        <div class="phone-mockup">
+          <div class="phone-notch"></div>
+          <div class="phone-screen">
+            <img src="{% static 'img/card_mapa.jpg' %}" alt="Mapa Hiperlocal">
+          </div>
+        </div>
+      </div>
+      <div class="glass-card">
+        <h3 class="card-title dark">📍 Localización Milimétrica y Piso por Piso</h3>
+        <p class="card-text">Desarrollado sobre PostGIS con algoritmo de <i>Grid Snapping</i> determinista para absorber tráfico masivo sin colapsar el servidor:</p>
+        <ul class="feature-list">
+          <li><b>Tiendas a Pie de Calle:</b> Ubicación con estado en tiempo real (abierto o cerrado según horario operativo y día laboral).</li>
+          <li><b>Estructura por Malls:</b> Mapeo de comercios dentro de centros comerciales con especificación exacta del número de piso.</li>
+          <li><b>Búsqueda de Inventario Real:</b> El mapa no solo muestra tiendas, muestra locales que <b>tienen el producto específico con stock mayor a cero</b>.</li>
+          <li><b>Rutas de Navegación:</b> Indicaciones paso a paso para llegar a pie o en vehículo a retirar la compra.</li>
+        </ul>
+        <div style="margin-top: auto;">
+          <span class="badge-pill">Soporta miles de comercios concurrentes sin latencia</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 5: ATLAS IA -->
+  <div class="slide">
+    <div class="slide-header">
+      <span class="badge-pill">Inteligencia Artificial Práctica</span>
+      <h1>Atlas IA: El Agente Inteligente Dual</h1>
+      <h2>Asistencia de alta precisión para compradores y comerciantes</h2>
+    </div>
+    <div class="grid-split">
+      <div class="glass-card">
+        <div>
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+            <img src="{% static 'img/atlas.svg' %}" style="height: 32px; width: 32px;" alt="Atlas">
+            <h3 class="card-title dark" style="font-size: 21px;">Personal Shopper (B2C)</h3>
+          </div>
+          <p class="card-text">Atlas entiende lenguaje natural y el radio de ubicación del usuario:</p>
+          <ul class="feature-list">
+            <li>"Atlas, ¿dónde consigo una memoria RAM DDR5 cerca de mí que esté abierta ahorita?"</li>
+            <li>Inyecta tarjetas interactivas de productos vivos en el chat con stock y precio.</li>
+            <li><b>Atlas Plus:</b> Plan mensual que amplía el límite diario a 75 consultas e insights predictivos.</li>
+          </ul>
+        </div>
+        <div style="border-top: 1px solid var(--light-purple); padding-top: 10px; margin-top: auto;">
+          <h3 class="card-title orange" style="font-size: 18px;">⚡ Carga Asistida con Visión (B2B)</h3>
+          <p class="card-text">Los comerciantes escanean productos con la cámara de su teléfono y Atlas extrae nombre, categoría sugerida y precios mediante visión artificial.</p>
+        </div>
+      </div>
+      <div class="phone-mockup-wrapper">
+        <div class="phone-mockup">
+          <div class="phone-notch"></div>
+          <div class="phone-screen">
+            <img src="{% static 'img/card_atlas.jpg' %}" alt="Atlas IA">
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 6: ARQUITECTURA TÉCNICA (PARA ARMANDO) -->
+  <div class="slide">
+    <div class="slide-header">
+      <span class="badge-pill">Para Armando (Tech Lead)</span>
+      <h1>Arquitectura y Stack Tecnológico</h1>
+      <h2>Infraestructura desacoplada diseñada para alta concurrencia y tolerancia a fallos</h2>
+    </div>
+    <div class="grid-3">
+      <div class="glass-card">
+        <div>
+          <h3 class="card-title dark">⚙️ Backend & Base de Datos</h3>
+          <p class="card-text" style="margin-top: 4px; font-weight: 700; color: var(--primary);">Núcleo Robusto en Django 5 & PostgreSQL 16</p>
+        </div>
+        <ul class="feature-list">
+          <li><b>Django REST Framework (Python 3.12):</b> Serializadores defensivos y prefetch optimizado para evitar consultas N+1.</li>
+          <li><b>PostGIS 3 Espacial:</b> Índices GIST 2D para radios geoespaciales y consultas poligonales en milisegundos.</li>
+          <li><b>pgvector (HNSW):</b> Indexación biométrica facial en 192 dimensiones para autenticación segura.</li>
+          <li><b>pg_trgm:</b> Búsqueda difusa de productos con tolerancia a errores tipográficos.</li>
+        </ul>
+        <div style="margin-top: auto;">
+          <span class="badge-pill">Transacciones Atómicas ACID</span>
+        </div>
+      </div>
+
+      <div class="glass-card highlight">
+        <div>
+          <h3 class="card-title">🚀 Caché & Tareas Asíncronas</h3>
+          <p class="card-text" style="margin-top: 4px; font-weight: 700; color: var(--dark-purple);">Arquitectura Split-Caching en Redis</p>
+        </div>
+        <ul class="feature-list">
+          <li><b>Estructura vs Volatilidad:</b> Separamos metadatos estáticos de productos del stock volátil en tiempo real vía tuberías MGET.</li>
+          <li><b>Celery Workers + Redis:</b> Transcodificación asíncrona de video stories y recálculo de scores de popularidad en background.</li>
+          <li><b>Node.js Gateway:</b> WebSockets dedicados para eventos de soporte y chat en tiempo real sin trancar Django.</li>
+        </ul>
+        <div style="margin-top: auto;">
+          <span class="badge-pill green">Cero Bloqueo de Servidor Principal</span>
+        </div>
+      </div>
+
+      <div class="glass-card">
+        <div>
+          <h3 class="card-title dark">📱 Frontend Reactivo Flutter</h3>
+          <p class="card-text" style="margin-top: 4px; font-weight: 700; color: var(--primary);">Experiencia Móvil Nativa de 60 FPS</p>
+        </div>
+        <ul class="feature-list">
+          <li><b>Flutter SDK + Dart:</b> Compilación nativa optimizada para Android e iOS.</li>
+          <li><b>Gestión de Estado:</b> Múltiples Providers desacoplados para caché local instantánea.</li>
+          <li><b>Navegación GoRouter:</b> Deep linking y transición cinematográfica de pantallas.</li>
+          <li><b>Firebase FCM:</b> Notificaciones push en tiempo real integradas a nivel de SO.</li>
+        </ul>
+        <div style="margin-top: auto;">
+          <span class="badge-pill">UI/UX Totalmente Reactiva</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 7: FINTECH AUTOCONTENIDA (CHAT Y PAGOS) -->
+  <div class="slide">
+    <div class="slide-header">
+      <span class="badge-pill orange">Realidad Económica Local</span>
+      <h1>Fintech Autocontenida: Cero Dependencias</h1>
+      <h2>Flujo de transacciones y conciliación adaptado al mercado nacional</h2>
+    </div>
+    <div class="grid-split-rev">
+      <div class="phone-mockup-wrapper">
+        <div class="phone-mockup">
+          <div class="phone-notch"></div>
+          <div class="phone-screen">
+            <img src="{% static 'img/card_chat.jpg' %}" alt="Chat de Órdenes">
+          </div>
+        </div>
+      </div>
+      <div class="glass-card">
+        <h3 class="card-title dark">📲 Pagos Directos Validados en el Chat</h3>
+        <p class="card-text">No dependemos de pasarelas bancarias externas que se caen o rechazan transacciones locales:</p>
+        <ul class="feature-list">
+          <li><b>Pago Móvil y Transferencias:</b> El cliente paga directamente a la cuenta del comercio y envía el comprobante dentro del chat de la orden.</li>
+          <li><b>Moneda Dual & Tasa BCV:</b> Sincronización automática de la tasa oficial del Banco Central de Venezuela para cotizaciones transparentes en USD y Bs.</li>
+          <li><b>UserWallet con Prorrateo:</b> Los cambios de plan de comerciante o abonos calculan el remanente de días no consumidos y lo acreditan como saldo a favor en la billetera virtual.</li>
+          <li><b>Seguridad Biométrica:</b> Verificación de identidad con cédula y biometría facial para evitar fraudes entre compradores y vendedores.</li>
+        </ul>
+        <div style="margin-top: auto;">
+          <span class="badge-pill green">El dinero va directo del cliente a la cuenta del vendedor</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 8: 3D, ARTE Y MARKETING (PARA DAVID) -->
+  <div class="slide">
+    <div class="slide-header">
+      <span class="badge-pill">Para David (Creative & Marketing)</span>
+      <h1>Dimensión 3D, Arte y Social Growth</h1>
+      <h2>El terreno visual, experiencial y de adquisición comercial de CartMaker</h2>
+    </div>
+    <div class="grid-3">
+      <div class="glass-card">
+        <div>
+          <h3 class="card-title dark">🏢 Modelado 3D & Malls</h3>
+          <p class="card-text" style="margin-top: 4px; font-weight: 700; color: var(--primary);">Experiencia Espacial de Próxima Generación</p>
+        </div>
+        <ul class="feature-list">
+          <li>Modelado tridimensional interactivo de planos y pisos de centros comerciales clave (Sambil, Líder, Tolón, etc.).</li>
+          <li>Renders de productos destacados y diseño de la identidad visual/mascota de Atlas IA.</li>
+          <li>Recorridos virtuales y vitrinas 3D para tiendas oficiales y marcas patrocinadoras.</li>
+        </ul>
+        <div style="margin-top: auto;">
+          <span class="badge-pill">Diferenciador Visual Único</span>
+        </div>
+      </div>
+
+      <div class="glass-card highlight">
+        <div>
+          <h3 class="card-title">🎬 Video Stories Marketing</h3>
+          <p class="card-text" style="margin-top: 4px; font-weight: 700; color: var(--dark-purple);">Dirección Creativa de Alto Impacto</p>
+        </div>
+        <ul class="feature-list">
+          <li>Creación de manuales y plantillas para que los comercios produzcan videos con alta tasa de conversión.</li>
+          <li>Estrategia de social growth inspirada en dinámicas virales de TikTok/Instagram Reels.</li>
+          <li>Consultoría visual para transformar comerciantes tradicionales en creadores comerciales.</li>
+        </ul>
+        <div style="margin-top: auto;">
+          <span class="badge-pill green">Tracción Orgánica Viral</span>
+        </div>
+      </div>
+
+      <div class="glass-card">
+        <div>
+          <h3 class="card-title orange">🎯 Radar de Demanda</h3>
+          <p class="card-text" style="margin-top: 4px; font-weight: 700; color: var(--warning-orange);">La Herramienta B2B Definitiva</p>
+        </div>
+        <ul class="feature-list">
+          <li>Mapeo en mapa de calor sobre qué productos busca la gente en la zona y nadie tiene en stock.</li>
+          <li><b>Gancho de venta irresistible:</b> Mostrarle a una tienda cuántas personas quisieron comprar sus productos ayer en su cuadra para afiliarla a la plataforma.</li>
+        </ul>
+        <div style="margin-top: auto;">
+          <span class="badge-pill orange">Venta Consultiva B2B</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 9: MODELO DE NEGOCIO, EMPLEADOS & TOKENWALLET (REDIPLAY COMPLETO) -->
+  <div class="slide">
+    <div class="slide-header">
+      <span class="badge-pill green">Monetización Recurrente</span>
+      <h1>Modelo de Negocio, Cuentas de Empleados & Fidelización</h1>
+      <h2>SaaS escalable con ingresos B2B y B2C predecibles</h2>
+    </div>
+    <div class="grid-split">
+      <div style="display: flex; flex-direction: column; gap: 14px; height: 100%;">
+        <!-- Tarjeta B2B Superior -->
+        <div class="glass-card" style="flex: 1.2;">
+          <h3 class="card-title dark">💼 Planes Comerciante (B2B SaaS)</h3>
+          <p class="card-text">Suscripciones mensuales escalables para tiendas físicas e independientes:</p>
+          <ul class="feature-list">
+            <li><b>Emprendedor:</b> Para tiendas iniciales con catálogo básico de productos.</li>
+            <li><b>Negocio:</b> Analíticas de impacto ROI, Video Stories y sistema de tokens de fidelidad.</li>
+            <li><b>Franquicia:</b> Múltiples sucursales, inventarios segmentados y <b>delegación de cuentas para empleados</b> con permisos específicos (atender órdenes y responder dudas) sin dar acceso a las finanzas del dueño.</li>
+          </ul>
+        </div>
+        <!-- Fila Inferior: Atlas B2C + Tokens -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; flex: 1;">
+          <div class="glass-card highlight">
+            <h3 class="card-title" style="font-size: 18px;">🪙 TokenWallet</h3>
+            <p class="card-text" style="font-size: 13px;">Sistema de puntos por comercio: el cliente gana tokens al comprar y los canjea por descuentos en esa tienda, asegurando compras recurrentes.</p>
+          </div>
+          <div class="glass-card">
+            <h3 class="card-title orange" style="font-size: 18px;">🧠 Atlas Plus (B2C)</h3>
+            <p class="card-text" style="font-size: 13px;">Micro-suscripción mensual para compradores frecuentes: 75 consultas diarias de IA, comparador de precios en vivo y ofertas predictivas.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Mockup Grande de TokenWallet (Se ve completo y nítido) -->
+      <div class="phone-mockup-wrapper">
+        <div class="phone-mockup">
+          <div class="phone-notch"></div>
+          <div class="phone-screen">
+            <img src="{% static 'img/card_tokens.jpg' %}" alt="TokenWallet">
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 10: ROADMAP, REUNIÓN ECOM Y CO-FUNDACIÓN -->
+  <div class="slide">
+    <div class="slide-header">
+      <span class="badge-pill">Visión de Futuro & Próximos Pasos</span>
+      <h1>Roadmap de Alianzas y la Oportunidad de Sociedad</h1>
+      <h2>La plataforma está lista. Ahora salimos a validar en el terreno comercial.</h2>
+    </div>
+    <div class="grid-2">
+      <!-- Columna 1: Roadmap e Hito de este Sábado -->
+      <div class="glass-card" style="gap: 14px;">
+        <div>
+          <h3 class="card-title dark">🚀 Roadmap de Integraciones Estratégicas</h3>
+          <ul class="feature-list" style="margin-top: 6px;">
+            <li><b>Alianza BNPL (Cashea):</b> Integración de financiamiento en cuotas sin interés en comercios afiliados a CartMaker.</li>
+            <li><b>Flotas de Delivery (PedidosYa & Yummy):</b> Despacho automatizado mediante API cuando el cliente requiera entrega a domicilio.</li>
+            <li><b>Expansión de Cadenas:</b> Escalamiento del módulo multi-sucursal para redes comerciales y franquicias.</li>
+          </ul>
+        </div>
+
+        <div style="background: #FFF8E1; border: 2px dashed #FFA000; border-radius: 14px; padding: 14px; margin-top: auto;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+            <span class="badge-pill orange" style="margin: 0;">Hito Inmediato</span>
+            <h4 style="color: #E65100; font-size: 15px; font-weight: 900;">📍 Reunión en ECOM este Sábado</h4>
+          </div>
+          <p class="card-text" style="font-size: 13px; color: #5D4037;">
+            Este sábado asistiremos juntos a la reunión/evento de <b>ECOM</b> para analizar a fondo a los competidores, evaluar tendencias de mercado e incorporar aprendizajes clave al modelo antes del lanzamiento piloto.
+          </p>
+        </div>
+      </div>
+
+      <!-- Columna 2: La Propuesta de Sociedad -->
+      <div class="glass-card highlight" style="border-left: 6px solid var(--warning-orange); gap: 12px;">
+        <h3 class="card-title dark" style="font-size: 23px;">🤝 La Propuesta de Co-Fundación</h3>
+        <p class="card-text" style="font-size: 14px;">
+          No les presento una idea en servilleta ni un prototipo en Figma: <b>el sistema operativo de CartMaker está construido, operativo y corriendo en código real</b>.
+        </p>
+        <p class="card-text" style="font-size: 14px;">
+          <b>Nuestra meta del primer mes:</b> Desplegar el piloto en la primera zona comercial estratégica, captar a los primeros <b>30 comercios fundadores</b> y afiliar a la primera comunidad de compradores.
+        </p>
+        <div style="margin-top: auto; padding: 12px; background: var(--light-purple); border-radius: 12px; text-align: center;">
+          <span style="font-size: 15px; font-weight: 900; color: var(--dark-purple);">¿Listos para construir juntos el retail del futuro?</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CONTROLES INFERIORES -->
+  <div class="deck-footer">
+    <div class="footer-meta">
+      <img src="{% static 'img/logo_sin_letras.svg' %}" style="height: 22px; width: 22px;" alt="Logo">
+      <span>CartMaker Pitch Deck • Confidencial</span>
+    </div>
+    <div class="nav-controls">
+      <button class="nav-btn" onclick="prevSlide()" title="Anterior (←)">‹</button>
+      <span class="slide-indicator" id="slideIndicator">01 / 10</span>
+      <button class="nav-btn" onclick="nextSlide()" title="Siguiente (→)">›</button>
+      <button class="fullscreen-btn" onclick="toggleFullscreen()">Pantalla Completa (F)</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  const indicator = document.getElementById('slideIndicator');
+  const progress = document.getElementById('progressFill');
+  let current = 0;
+
+  function updateSlide(index) {
+    slides.forEach((s, i) => s.classList.toggle('active', i === index));
+    indicator.textContent = `${String(index + 1).padStart(2, '0')} / ${String(slides.length).padStart(2, '0')}`;
+    progress.style.width = `${((index + 1) / slides.length) * 100}%`;
+  }
+
+  function nextSlide() {
+    if (current < slides.length - 1) {
+      current++;
+      updateSlide(current);
+    }
+  }
+
+  function prevSlide() {
+    if (current > 0) {
+      current--;
+      updateSlide(current);
+    }
+  }
+
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(err => console.log(err));
+    } else {
+      document.exitFullscreen();
+    }
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') nextSlide();
+    if (e.key === 'ArrowLeft' || e.key === 'PageUp') prevSlide();
+    if (e.key === 'f' || e.key === 'F') toggleFullscreen();
+  });
+</script>
+
+</body>
+</html>

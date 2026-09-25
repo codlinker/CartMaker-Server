@@ -209,8 +209,8 @@ UNFOLD = {
     "SITE_SUBHEADER": "Panel de Administración Central",
     "DASHBOARD_CALLBACK": "api.dashboard.custom_dashboard_context",
     "SITE_LOGO": {
-        "light": lambda request: static("img/logo.svg"),  # Asegúrate de tener tu logo
-        "dark": lambda request: static("img/logo.svg"),
+        "light": lambda request: static("img/logo_sin_letras.svg"),  # Asegúrate de tener tu logo
+        "dark": lambda request: static("img/logo_sin_letras.svg"),
     },
     "SITE_SYMBOL": "speed",  # Ícono alternativo si no carga el logo
     "SITE_URL": "/",
