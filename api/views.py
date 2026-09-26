@@ -5637,7 +5637,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
 
         try:
             # Procesamos la fecha de la oferta
-            parsed_date = _parse_flexible_date(valid_until_raw)
+            parsed_date = parse_flexible_date(valid_until_raw)
             if not parsed_date:
                 return Response({'error': 'La fecha de validez es obligatoria'}, status=status.HTTP_400_BAD_REQUEST)
             
