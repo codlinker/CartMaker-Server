@@ -19,6 +19,7 @@ class EnviromentManager:
             para usar la api de autenticacion de Google.",
         "GOOGLE_MAPS_API_KEY":"Api key de google maps.",
         "DOMAIN":"Dominio del proyecto.",
+        "INTERNAL_WEBSOCKETS_URL":"Url utilizada para obtener la lista de usuarios conectados desde el servidor.",
         "STORAGE_TYPE":"Almacenamiento que se utilizara para guardar toda la media con la \
             que interactuan los usuarios.",
         "AWS_ACCESS_KEY_ID":"Acces key id del bucket de AWS.",
@@ -50,6 +51,7 @@ class EnviromentManager:
         self._google_oauth_client_id = None
         self._google_maps_api_key = None
         self._domain = None
+        self._internal_websockets_url = None
         self._storage_type = None
         self._aws_access_key_id = None
         self._aws_secret_access_key = None
@@ -136,6 +138,13 @@ class EnviromentManager:
         Dominio del proyecto.
         """
         return self._domain
+
+    @property
+    def INTERNAL_WEBSOCKETS_URL(self) -> str:
+        """
+        Url interna para obtener los usuarios conectados en el servidor.
+        """
+        return self._internal_websockets_url
     
     @property
     def STORAGE_TYPE(self) -> str:
@@ -289,6 +298,7 @@ class EnviromentManager:
             "GOOGLE_OAUTH_CLIENT_ID":os.environ.get('GOOGLE_OAUTH_CLIENT_ID'),
             "GOOGLE_MAPS_API_KEY":os.environ.get("GOOGLE_MAPS_API_KEY"),
             "DOMAIN":os.environ.get('DOMAIN'),
+            "INTERNAL_WEBSOCKETS_URL":os.environ.get('INTERNAL_WEBSOCKETS_URL'),
             "STORAGE_TYPE":os.environ.get('STORAGE_TYPE'),
             "AWS_ACCESS_KEY_ID":os.environ.get("AWS_ACCESS_KEY_ID"),
             "AWS_SECRET_ACCESS_KEY":os.environ.get('AWS_SECRET_ACCESS_KEY'),
@@ -319,6 +329,7 @@ class EnviromentManager:
         self._google_oauth_client_id = env_variables['GOOGLE_OAUTH_CLIENT_ID']
         self._google_maps_api_key = env_variables['GOOGLE_MAPS_API_KEY']
         self._domain = env_variables['DOMAIN']
+        self._internal_websockets_url = env_variables['INTERNAL_WEBSOCKETS_URL']
         self._storage_type = env_variables['STORAGE_TYPE']
         self._aws_access_key_id = env_variables['AWS_ACCESS_KEY_ID']
         self._aws_secret_access_key = env_variables['AWS_SECRET_ACCESS_KEY']

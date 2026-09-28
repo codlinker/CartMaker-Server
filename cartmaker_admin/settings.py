@@ -34,6 +34,7 @@ SECRET_KEY = env_manager.DJANGO_SECRET_KEY
 DEBUG = env_manager.DEBUG
 
 DOMAIN = env_manager.DOMAIN
+INTERNAL_WEBSOCKETS_URL = env_manager.INTERNAL_WEBSOCKETS_URL
 
 # settings.py
 if DEBUG:

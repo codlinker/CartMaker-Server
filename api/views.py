@@ -2435,7 +2435,7 @@ class SupportTicketViewSet(viewsets.ViewSet):
         online_users = []
         try:
             resp = requests.get(
-                "http://127.0.0.1:3000/internal/online-users", 
+                f"{settings.INTERNAL_WEBSOCKETS_URL}internal/online-users", 
                 headers={'X-Microservice-Token': settings.SECRET_KEY}, # o env_manager.DJANGO_SECRET_KEY
                 timeout=2
             )
@@ -2471,7 +2471,7 @@ class SupportTicketViewSet(viewsets.ViewSet):
         if best_agent:
             try:
                 requests.post(
-                    "http://127.0.0.1:3000/internal/emit-assignment",
+                    f"{settings.INTERNAL_WEBSOCKETS_URL}internal/emit-assignment",
                     json={
                         'ticket': ticket_json, 
                         'agent_id': str(best_agent.id),
