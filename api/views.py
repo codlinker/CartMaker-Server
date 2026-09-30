@@ -644,24 +644,23 @@ class GetStoreInventoryItems(APIView):
             if store.company.owner.id != request.user.id:
                 return Response({'error': 'No tiene permisos para esta sucursal.'}, status=status.HTTP_406_NOT_ACCEPTABLE)
 
-            # 💡 1. ORM MÁGICO: Categorías únicas del inventario de ESTA sucursal
+            # 1. Categorías únicas del inventario de esta sucursal
             store_categories = SubCategory.objects.filter(
                 product__inventory_items__store=store
             ).distinct().values('id', 'name')
 
             category_id = request.GET.get('category_id')
             page = request.GET.get('page', 1)
-            
-            # 💡 NUEVO: Atrapamos el parámetro de agotados
             out_of_stock = request.GET.get('out_of_stock') == 'true'
 
-            # 💡 2. Filtramos el queryset de lotes si vienen los parámetros
-            items_query = InventoryItem.objects.filter(store=store)
+            # 2. QuerySet base optimizado con select_related
+            items_query = InventoryItem.objects.filter(store=store).select_related(
+                'product', 'product__category', 'offer', 'store__company'
+            )
             
             if category_id:
                 items_query = items_query.filter(product__category_id=category_id)
                 
-            # 💡 NUEVO: Aplicamos el filtro de stock en 0
             if out_of_stock:
                 items_query = items_query.filter(stock=0)
                 
@@ -676,11 +675,86 @@ class GetStoreInventoryItems(APIView):
             except EmptyPage:
                 current_items = []
 
-            items = [item.get_json() for item in current_items]
+            # =========================================================
+            # 💡 CART-6: CÁLCULO DE NÚMEROS Y MÉTRICAS POR LOTE
+            # =========================================================
+            current_items_list = list(current_items)
+            item_ids = [item.id for item in current_items_list]
+            item_ids_str = [str(uid) for uid in item_ids]
+
+            # A. Visualizaciones
+            views_qs = ProductViewLog.objects.filter(
+                inventory_item_id__in=item_ids
+            ).values('inventory_item_id').annotate(total_views=Count('id'))
+            views_map = {v['inventory_item_id']: v['total_views'] for v in views_qs}
+
+            # B. Ventas y unidades egresadas
+            sales_qs = InventoryItemTransaction.objects.filter(
+                item_id__in=item_ids,
+                transaction_type=TransactionType.OUTCOME
+            ).values('item_id').annotate(
+                units_sold=Sum('units'),
+                sales_count=Count('id')
+            )
+            sales_map = {
+                s['item_id']: {
+                    'units_sold': abs(s['units_sold'] or 0),
+                    'sales_count': s['sales_count'] or 0
+                } for s in sales_qs
+            }
+
+            # C. Likes / Favoritos polimórficos
+            item_ct = ContentType.objects.get_for_model(InventoryItem)
+            likes_qs = UniversalLike.objects.filter(
+                content_type=item_ct,
+                object_id__in=item_ids_str
+            ).values('object_id').annotate(total_likes=Count('id'))
+            likes_map = {l['object_id']: l['total_likes'] for l in likes_qs}
+
+            # D. Preguntas / Comentarios polimórficos
+            comments_qs = UniversalComment.objects.filter(
+                content_type=item_ct,
+                object_id__in=item_ids_str
+            ).values('object_id').annotate(total_comments=Count('id'))
+            comments_map = {c['object_id']: c['total_comments'] for c in comments_qs}
+
+            items = []
+            for item in current_items_list:
+                item_json = item.get_json()
+                item_id = item.id
+                item_str = str(item_id)
+                
+                views_count = views_map.get(item_id, 0)
+                sold_info = sales_map.get(item_id, {'units_sold': 0, 'sales_count': 0})
+                units_sold = sold_info['units_sold']
+                sales_count = sold_info['sales_count']
+                likes_count = likes_map.get(item_str, 0)
+                questions_count = comments_map.get(item_str, 0)
+                
+                unit_price = float(item.custom_price if item.custom_price else item.product.price)
+                revenue = round(units_sold * unit_price, 2)
+                
+                metrics = {
+                    'views_count': views_count,
+                    'units_sold': units_sold,
+                    'sales_count': sales_count,
+                    'revenue': revenue,
+                    'likes_count': likes_count,
+                    'questions_count': questions_count,
+                }
+                
+                item_json['metrics'] = metrics
+                item_json['views_count'] = views_count
+                item_json['units_sold'] = units_sold
+                item_json['revenue'] = revenue
+                item_json['likes_count'] = likes_count
+                item_json['questions_count'] = questions_count
+                
+                items.append(item_json)
 
             return Response({
                 'items': items,
-                'store_categories': list(store_categories), # 👈 3. Lo devolvemos
+                'store_categories': list(store_categories),
                 'pagination': {
                     'has_next': current_items.has_next() if current_items else False,
                     'current_page': int(page),
@@ -2435,7 +2509,7 @@ class SupportTicketViewSet(viewsets.ViewSet):
         online_users = []
         try:
             resp = requests.get(
-                "http://127.0.0.1:3000/internal/online-users", 
+                f"{settings.INTERNAL_WEBSOCKETS_URL}internal/online-users", 
                 headers={'X-Microservice-Token': settings.SECRET_KEY}, # o env_manager.DJANGO_SECRET_KEY
                 timeout=2
             )
@@ -2471,7 +2545,7 @@ class SupportTicketViewSet(viewsets.ViewSet):
         if best_agent:
             try:
                 requests.post(
-                    "http://127.0.0.1:3000/internal/emit-assignment",
+                    f"{settings.INTERNAL_WEBSOCKETS_URL}internal/emit-assignment",
                     json={
                         'ticket': ticket_json, 
                         'agent_id': str(best_agent.id),
@@ -3256,15 +3330,92 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
         if not company:
             return Response({"error": "No tienes una compañía registrada."}, status=status.HTTP_403_FORBIDDEN)
 
-        # Traemos los videos ordenados por fecha de creación
-        videos = self.queryset.filter(company=company).order_by('-creation')
+        videos = self.queryset.filter(company=company).select_related(
+            'company', 'associated_item', 'associated_item__product'
+        ).order_by('-creation')
         
         page_number = request.GET.get('page', 1)
-        paginator = Paginator(videos, 10) # 10 videos por página
+        paginator = Paginator(videos, 10)
         page_obj = paginator.get_page(page_number)
 
-        data = [video.get_json() for video in page_obj.object_list]
-        
+        current_videos = list(page_obj.object_list)
+        video_ids = [v.id for v in current_videos]
+        video_ids_str = [str(vid) for vid in video_ids]
+
+        # 1. Telemetría de engagement
+        logs_data = VideoEngagementLog.objects.filter(
+            video_id__in=video_ids
+        ).values('video_id').annotate(
+            total_views=Count('id'),
+            completed_views=Count('id', filter=Q(video_completed=True)),
+            product_clicks=Count('id', filter=Q(interacted_with_product=True)),
+            added_to_cart_count=Count('id', filter=Q(added_to_cart_from_video=True)),
+            sales_count=Count('id', filter=Q(bought_from_video=True)),
+            total_watch_time=Sum('watch_time_seconds')
+        )
+        logs_map = {l['video_id']: l for l in logs_data}
+
+        # 2. Likes polimórficos
+        video_ct = ContentType.objects.get_for_model(CompanyVideoStory)
+        likes_data = UniversalLike.objects.filter(
+            content_type=video_ct,
+            object_id__in=video_ids_str
+        ).values('object_id').annotate(total_likes=Count('id'))
+        likes_map = {l['object_id']: l['total_likes'] for l in likes_data}
+
+        # 3. Preguntas/Comentarios polimórficos
+        comments_data = UniversalComment.objects.filter(
+            content_type=video_ct,
+            object_id__in=video_ids_str
+        ).values('object_id').annotate(total_comments=Count('id'))
+        comments_map = {c['object_id']: c['total_comments'] for c in comments_data}
+
+        data = []
+        for video in current_videos:
+            v_json = video.get_json()
+            vid = video.id
+            vid_str = str(vid)
+            
+            v_log = logs_map.get(vid, {})
+            log_views = v_log.get('total_views', 0)
+            total_views = max(video.views_count, log_views)
+            
+            likes_count = likes_map.get(vid_str, 0)
+            comments_count = comments_map.get(vid_str, 0)
+            product_clicks = v_log.get('product_clicks', 0)
+            sales_count = v_log.get('sales_count', 0)
+            added_to_cart_count = v_log.get('added_to_cart_count', 0)
+            completed_views = v_log.get('completed_views', 0)
+            watch_time = round(float(v_log.get('total_watch_time') or 0.0), 1)
+
+            # Facturación estimada atribuida
+            revenue = 0.0
+            if video.associated_item and sales_count > 0:
+                item_price = float(video.associated_item.custom_price if video.associated_item.custom_price else video.associated_item.product.price)
+                revenue = round(sales_count * item_price, 2)
+
+            metrics = {
+                'views_count': total_views,
+                'likes_count': likes_count,
+                'comments_count': comments_count,
+                'product_clicks': product_clicks,
+                'sales_count': sales_count,
+                'added_to_cart_count': added_to_cart_count,
+                'completed_views': completed_views,
+                'watch_time_seconds': watch_time,
+                'revenue': revenue,
+            }
+
+            v_json['metrics'] = metrics
+            v_json['views_count'] = total_views
+            v_json['likes_count'] = likes_count
+            v_json['comments_count'] = comments_count
+            v_json['sales_count'] = sales_count
+            v_json['product_clicks'] = product_clicks
+            v_json['revenue'] = revenue
+
+            data.append(v_json)
+
         return Response({
             "success": True,
             "data": {

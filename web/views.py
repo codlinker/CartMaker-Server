@@ -13,6 +13,7 @@ from api.models import *
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.core.paginator import Paginator
 from .decorators import *
+from django.conf import settings
 
 # ==============================================================
 # 🔒 VISTAS DE AUTENTICACIÓN (COMPARTIDAS)
@@ -314,7 +315,7 @@ def dashboard_view(request):
         'analytics_json': json.dumps(analytics),
         'analytics_data': analytics,    
         'agent_id': str(request.user.id),
-        'jwt_token': str(refresh.access_token)
+        'jwt_token': str(refresh.access_token),
     })
 
 @login_required(login_url='/auth/login/')
@@ -332,7 +333,7 @@ def close_ticket(request, ticket_id):
     # 💡 ALERTAMOS A NODE.JS EN TIEMPO REAL
     try:
         requests.post(
-            "http://127.0.0.1:3000/internal/emit-ticket-closed",
+            f"{settings.LOCAL_WEBSOCKETS_URL}internal/emit-ticket-closed",
             json={
                 'ticket_id': str(ticket.id), 
                 'reason': ticket.get_close_reason_display(),

@@ -1,7 +1,8 @@
 import os
+import mimetypes
 import boto3
 from django.conf import settings
-from botocore.exceptions import NoCredentialsError, ClientError
+from botocore.exceptions import ClientError
 
 class COS:
     """
@@ -22,80 +23,86 @@ class COS:
             self.bucket_name = settings.AWS_STORAGE_BUCKET_NAME
 
     def save_file(self, file_obj, folder_path, file_name):
-        """
-        Guarda un archivo en el almacenamiento configurado.
-        
-        :param file_obj: El objeto del archivo (ej. request.FILES['archivo'])
-        :param folder_path: Carpeta relativa (ej. 'profiles/avatars')
-        :param file_name: Nombre final del archivo
-        :return: La ruta relativa guardada
-        """
-        full_path = os.path.join(folder_path, file_name)
+        full_path = os.path.join(folder_path, file_name).replace("\\", "/")
 
         if self.storage_type == 'aws':
             try:
+                # Detectamos el MIME type dinámicamente para que el navegador/app lo visualice bien
+                content_type, _ = mimetypes.guess_type(file_name)
+                extra_args = {}
+                if content_type:
+                    extra_args['ContentType'] = content_type
+
+                # Reseteamos el puntero del archivo por seguridad
+                if hasattr(file_obj, 'seek'):
+                    file_obj.seek(0)
+
                 self.s3_client.upload_fileobj(
                     file_obj,
                     self.bucket_name,
                     full_path,
-                    ExtraArgs={'ACL': 'public-read'} # Opcional: ajustar según política
+                    ExtraArgs=extra_args
                 )
                 return full_path
             except ClientError as e:
-                print(f"Error subiendo a AWS: {e}")
+                print(f"❌ Error subiendo a AWS S3: {e}")
                 return None
         else:
             # Lógica Local
             media_path = os.path.join(settings.MEDIA_ROOT, folder_path)
-            
-            # Crear la carpeta si no existe
             if not os.path.exists(media_path):
                 os.makedirs(media_path, exist_ok=True)
             
             save_path = os.path.join(media_path, file_name)
             
+            if hasattr(file_obj, 'seek'):
+                file_obj.seek(0)
+
             with open(save_path, 'wb+') as destination:
-                for chunk in file_obj.chunks():
-                    destination.write(chunk)
+                if hasattr(file_obj, 'chunks'):
+                    for chunk in file_obj.chunks():
+                        destination.write(chunk)
+                else:
+                    destination.write(file_obj.read())
             
             return full_path
 
-    def get_url(self, relative_path:str, skip_media=False):
-        """
-        Devuelve la URL absoluta para acceder al recurso.
-        """
+    def get_url(self, relative_path: str, skip_media=False):
         if not relative_path:
             return None
 
+        # Si ya es una URL absoluta, la devolvemos tal cual
+        if relative_path.startswith('http://') or relative_path.startswith('https://'):
+            return relative_path
+
+        clean_path = relative_path.lstrip('/')
+
         if self.storage_type == 'aws':
-            return f"https://{self.bucket_name}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{relative_path}"
+            return f"https://{self.bucket_name}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{clean_path}"
         else:
-            # Asegura que MEDIA_URL termine en /
             base_url = f"{settings.DOMAIN}{settings.MEDIA_URL}" if not skip_media else settings.DOMAIN
-            if not base_url.endswith('/') and not relative_path.startswith('/'):
+            if not base_url.endswith('/'):
                 base_url += "/"
-            return f"{base_url}{relative_path}"
+            return f"{base_url}{clean_path}"
 
     def delete_file(self, relative_path):
-        """
-        Elimina un archivo del almacenamiento.
-        """
-        if self.storage_type == 'aws':
-            try:
-                self.s3_client.delete_object(Bucket=self.bucket_name, Key=relative_path)
-                return True
-            except ClientError:
-                return False
-        else:
-            full_path = os.path.join(settings.MEDIA_ROOT, relative_path)
-            full_path = full_path.replace(f"{settings.DOMAIN}{settings.MEDIA_URL}", "")
-            if os.path.exists(full_path):
-                print("Si existe")
-                os.remove(full_path)
-                return True
-            else:
-                print("No existe")
+        if not relative_path:
             return False
 
-# Instancia global para importar en los ViewSets o Serializers
+        clean_path = relative_path.lstrip('/')
+
+        if self.storage_type == 'aws':
+            try:
+                self.s3_client.delete_object(Bucket=self.bucket_name, Key=clean_path)
+                return True
+            except ClientError as e:
+                print(f"❌ Error borrando archivo de S3: {e}")
+                return False
+        else:
+            full_path = os.path.join(settings.MEDIA_ROOT, clean_path)
+            if os.path.exists(full_path):
+                os.remove(full_path)
+                return True
+            return False
+
 storage_manager = COS()

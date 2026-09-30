@@ -184,7 +184,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 5. WebSockets y UI en tiempo real
     if (typeof io !== 'undefined' && typeof JWT_TOKEN !== 'undefined') {
-        const socket = io("http://127.0.0.1:3000", {
+        const socket = io(window.location.origin, {
             auth: { token: JWT_TOKEN },
             transports: ['websocket']
         });
