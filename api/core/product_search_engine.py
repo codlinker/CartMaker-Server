@@ -1,17 +1,21 @@
 from datetime import datetime, timedelta
 import hashlib
+import math
+import statistics
 from django.utils import timezone
 from django.contrib.gis.geos import Point
 from django.contrib.gis.db.models.functions import Distance
+from django.contrib.postgres.search import TrigramSimilarity
 from django.db.models import F, Q, CharField, Exists, FloatField, ExpressionWrapper, Avg, OuterRef, Subquery
 from django.db.models.expressions import Window
-from django.db.models.functions import Cast, RowNumber, Coalesce, Power, Extract, Ln
+from django.db.models.functions import Cast, RowNumber, Coalesce, Power, Extract, Ln, Greatest
 from django.db.models.functions import Now
 from django.db.models import Case, When, Value, Count, BooleanField
 from django.contrib.gis.measure import D
 from django.db.models.expressions import RawSQL
 from django.core.cache import cache
 from api.models import *
+from api.core.ve_commerce_lexicon import expand_search_variants, significant_tokens
 
 class ProductSearchEngine:
     """
@@ -578,6 +582,305 @@ class ProductSearchEngine:
                 order_params.extend(['-effective_price', 'id'])
 
         return qs.order_by(*order_params)
+
+    def _annotate_merchant_rating(self, queryset):
+        merchant_avg = MerchantCalification.objects.filter(
+            merchant_id=OuterRef('store__company_id')
+        ).values('merchant_id').annotate(avg=Avg('rating')).values('avg')[:1]
+        return queryset.annotate(
+            merchant_avg_rating=Coalesce(
+                Subquery(merchant_avg, output_field=FloatField()),
+                Value(0.0),
+                output_field=FloatField(),
+            )
+        )
+
+    def _apply_purchase_text_filter(self, queryset, query: str):
+        """Recall alto para Atlas: sinónimos VE + trigram + tokens."""
+        if not query or not str(query).strip():
+            return queryset
+
+        variants = expand_search_variants(query)
+        text_q = Q()
+        for variant in variants:
+            if len(variant) < 2:
+                continue
+            text_q |= (
+                Q(product__name__icontains=variant)
+                | Q(product__description__icontains=variant)
+                | Q(product__category__name__icontains=variant)
+                | Q(store__company__name__icontains=variant)
+                | Q(store__name__icontains=variant)
+            )
+
+        short_query = str(query).strip()[:80]
+        # Coalesce previene errores si description es NULL
+        queryset = queryset.annotate(
+            name_sim=Coalesce(TrigramSimilarity('product__name', short_query), Value(0.0), output_field=FloatField()),
+            desc_sim=Coalesce(TrigramSimilarity('product__description', short_query), Value(0.0), output_field=FloatField()),
+        ).annotate(
+            match_sim=Greatest(F('name_sim'), F('desc_sim'))
+        )
+
+        if text_q:
+            queryset = queryset.filter(text_q | Q(match_sim__gte=0.18))
+        else:
+            queryset = queryset.filter(match_sim__gte=0.22)
+
+        return queryset
+
+    def _purchase_weights(self, mode: str):
+        if mode == 'cheap':
+            return {'price': 0.48, 'distance': 0.22, 'rating': 0.14, 'offer': 0.08, 'open': 0.05, 'platinum': 0.03}
+        if mode == 'nearby':
+            return {'price': 0.22, 'distance': 0.48, 'rating': 0.14, 'offer': 0.06, 'open': 0.07, 'platinum': 0.03}
+        if mode == 'quality':
+            return {'price': 0.18, 'distance': 0.22, 'rating': 0.38, 'offer': 0.06, 'open': 0.06, 'platinum': 0.10}
+        return {'price': 0.32, 'distance': 0.32, 'rating': 0.18, 'offer': 0.08, 'open': 0.06, 'platinum': 0.04}
+
+    def _score_purchase_payloads(self, payloads: list, mode: str = 'best') -> list:
+        if not payloads:
+            return []
+
+        prices = [p.get('effective_price') for p in payloads if p.get('effective_price') is not None]
+        dists = [p.get('distance_meters') for p in payloads if p.get('distance_meters') is not None]
+        median_price = statistics.median(prices) if prices else 1.0
+        median_dist = statistics.median(dists) if dists else 1200.0
+        weights = self._purchase_weights(mode)
+
+        for payload in payloads:
+            price = float(payload.get('effective_price') or median_price or 1.0)
+            meters = float(payload.get('distance_meters') if payload.get('distance_meters') is not None else median_dist)
+            rating = max(
+                float(payload.get('avg_rating') or 0.0),
+                float(payload.get('merchant_avg_rating') or 0.0),
+            )
+            n = int(payload.get('rating_count') or 0)
+            # Shrinkage: pocas estrellas no ganan a un Platinum con historial.
+            bayes_rating = ((rating * n) + (3.6 * 8)) / (n + 8)
+
+            price_score = median_price / max(price, 0.05)
+            price_score = min(price_score, 3.0) / 3.0
+            distance_score = math.exp(-max(meters, 1.0) / 3500.0)
+            rating_score = bayes_rating / 5.0
+            offer_score = 1.0 if (payload.get('offer_percentage') or 0) > 0 else 0.35
+            open_score = 1.0 if payload.get('is_open_now') else 0.45
+            platinum_score = 1.0 if payload.get('is_platinum') else 0.55
+            match_sim = float(payload.get('match_sim') or 0.0)
+
+            raw = (
+                weights['price'] * price_score
+                + weights['distance'] * distance_score
+                + weights['rating'] * rating_score
+                + weights['offer'] * offer_score
+                + weights['open'] * open_score
+                + weights['platinum'] * platinum_score
+            )
+            payload['purchase_score'] = round(raw * (0.82 + min(match_sim, 0.5) * 0.36), 4)
+            payload['triad'] = {
+                'price_usd': round(price, 2),
+                'distance_m': round(meters, 1),
+                'rating': round(bayes_rating, 2),
+                'offer_pct': int(payload.get('offer_percentage') or 0),
+                'open_now': bool(payload.get('is_open_now')),
+                'platinum': bool(payload.get('is_platinum')),
+            }
+        payloads.sort(key=lambda p: p.get('purchase_score', 0), reverse=True)
+        return payloads
+
+    def _diversify_purchase_results(self, payloads: list, limit: int, max_per_company: int = 2) -> list:
+        picked = []
+        per_company = {}
+        overflow = []
+        for payload in payloads:
+            company = str(payload.get('product', {}).get('company_id') or payload.get('company_name'))
+            count = per_company.get(company, 0)
+            if count < max_per_company:
+                picked.append(payload)
+                per_company[company] = count + 1
+            else:
+                overflow.append(payload)
+            if len(picked) >= limit:
+                return picked
+        for payload in overflow:
+            if len(picked) >= limit:
+                break
+            picked.append(payload)
+        return picked
+
+    def _serialize_purchase_item(self, item, location_label: str, query: str) -> dict:
+        payload = item.get_json()
+        payload['nearest_saved_location_name'] = location_label
+        payload['match_query'] = query
+        payload['match_sim'] = float(getattr(item, 'match_sim', 0.0) or 0.0)
+        if payload.get('distance_meters') is None:
+            payload['distance_meters'] = item._distance_meters_value()
+        if payload.get('effective_price') is None:
+            payload['effective_price'] = item.get_effective_price()
+        return payload
+
+    def search_purchase_candidates(
+        self,
+        query: str,
+        max_distance_meters: float = 15000.0,
+        limit: int = 8,
+        location_label: str = 'Tu ubicación actual',
+        mode: str = 'best',
+    ) -> list:
+        """Candidatos para Atlas: stock vivo, geo, matching VE y score de compra."""
+        qs = self._get_base_active_queryset()
+        qs = self._annotate_proximity_flag(qs)
+        qs = self._annotate_merchant_rating(qs)
+        qs = qs.select_related('store__location', 'store__company')
+        qs = qs.filter(
+            store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters))
+        )
+        qs = self._apply_purchase_text_filter(qs, query)
+        qs = qs.annotate(effective_price=Coalesce(F('custom_price'), F('product__price')))
+
+        order_fields = ['real_distance_meters', 'effective_price']
+        if any(f.name == 'match_sim' for f in qs.query.annotations.values()) or 'match_sim' in getattr(qs, 'query', type('q', (), {'annotations': {}})()).annotations:
+            pass
+        qs = qs.order_by('-match_sim' if 'match_sim' in qs.query.annotations else 'real_distance_meters', 'real_distance_meters', 'effective_price')
+
+        pool = []
+        seen = set()
+        for item in qs[:70]:
+            item_id = str(item.id)
+            if item_id in seen:
+                continue
+            seen.add(item_id)
+            pool.append(self._serialize_purchase_item(item, location_label, query))
+
+        scored = self._score_purchase_payloads(pool, mode=mode)
+        return self._diversify_purchase_results(scored, limit=limit, max_per_company=2)
+
+    def resolve_shopping_list(
+        self,
+        needs: list,
+        max_distance_meters: float = 15000.0,
+        location_label: str = 'Tu ubicación actual',
+        mode: str = 'best',
+    ) -> dict:
+        """Arma una lista de compras priorizando un mismo local cuando se puede."""
+        buckets = []
+        for raw_need in (needs or [])[:12]:
+            if isinstance(raw_need, str):
+                query = raw_need
+                qty = ''
+            else:
+                query = (raw_need.get('query') or raw_need.get('name') or '').strip()
+                qty = (raw_need.get('cantidad') or raw_need.get('qty') or '').strip()
+            if not query:
+                continue
+            candidates = self.search_purchase_candidates(
+                query=query,
+                max_distance_meters=max_distance_meters,
+                limit=8,
+                location_label=location_label,
+                mode=mode,
+            )
+            buckets.append({'query': query, 'cantidad': qty, 'candidates': candidates})
+
+        store_coverage = {}
+        for bucket in buckets:
+            need = bucket['query']
+            for candidate in bucket['candidates']:
+                store_id = str(candidate.get('store_id'))
+                slot = store_coverage.setdefault(store_id, {
+                    'store_id': store_id,
+                    'store_name': candidate.get('store_name'),
+                    'company_name': candidate.get('company_name'),
+                    'distance_meters': candidate.get('distance_meters'),
+                    'is_open_now': candidate.get('is_open_now'),
+                    'is_platinum': candidate.get('is_platinum'),
+                    'location_label': candidate.get('nearest_saved_location_name'),
+                    'by_need': {},
+                })
+                prev = slot['by_need'].get(need)
+                if not prev or (candidate.get('purchase_score', 0) > prev.get('purchase_score', 0)):
+                    slot['by_need'][need] = candidate
+
+        def store_rank(slot):
+            items = list(slot['by_need'].values())
+            total = sum(float(i.get('effective_price') or 0) for i in items)
+            dist = float(slot.get('distance_meters') or 99999)
+            return (len(items), -dist, -total)
+
+        ranked_stores = sorted(store_coverage.values(), key=store_rank, reverse=True)
+        primary = ranked_stores[0] if ranked_stores else None
+
+        found_items = []
+        missing = []
+        used_ids = set()
+        if primary:
+            for bucket in buckets:
+                pick = primary['by_need'].get(bucket['query'])
+                if pick:
+                    found_items.append(pick)
+                    used_ids.add(str(pick['id']))
+                else:
+                    missing.append(bucket)
+
+            # Completar faltantes con el mejor candidato global (otra tienda).
+            still_missing = []
+            for bucket in missing:
+                alts = [c for c in bucket['candidates'] if str(c['id']) not in used_ids]
+                if alts:
+                    found_items.append(alts[0])
+                    used_ids.add(str(alts[0]['id']))
+                    bucket['filled_elsewhere'] = alts[0]
+                    still_missing.append(bucket)
+                else:
+                    still_missing.append(bucket)
+            missing = [b for b in still_missing if not b.get('filled_elsewhere')]
+            filled_elsewhere = [b for b in still_missing if b.get('filled_elsewhere')]
+        else:
+            filled_elsewhere = []
+            missing = buckets
+
+        alternatives = []
+        for bucket in buckets:
+            for candidate in bucket['candidates'][:3]:
+                if str(candidate['id']) not in used_ids:
+                    alternatives.append(candidate)
+
+        alternatives = self._score_purchase_payloads(alternatives, mode=mode)[:6]
+        injected = []
+        for item in found_items + alternatives:
+            if str(item['id']) not in {str(x['id']) for x in injected}:
+                injected.append(item)
+
+        total = round(sum(float(i.get('effective_price') or 0) for i in found_items), 2)
+        primary_count = len(primary['by_need']) if primary else 0
+
+        return {
+            'type': 'shopping_plan',
+            'primary_store': {
+                'store_id': primary.get('store_id') if primary else None,
+                'store_name': primary.get('store_name') if primary else None,
+                'company_name': primary.get('company_name') if primary else None,
+                'distance_meters': primary.get('distance_meters') if primary else None,
+                'is_open_now': primary.get('is_open_now') if primary else None,
+                'items_in_store': primary_count,
+                'needs_total': len(buckets),
+            } if primary else None,
+            'found': found_items,
+            'missing_queries': [b['query'] for b in missing],
+            'filled_elsewhere': [
+                {
+                    'query': b['query'],
+                    'item_name': b['filled_elsewhere'].get('product', {}).get('name'),
+                    'store_name': b['filled_elsewhere'].get('store_name'),
+                    'company_name': b['filled_elsewhere'].get('company_name'),
+                }
+                for b in filled_elsewhere
+            ],
+            'alternatives': alternatives,
+            'estimated_total_usd': total,
+            'injected': injected[:16],
+            'needs': [{'query': b['query'], 'cantidad': b.get('cantidad', '')} for b in buckets],
+        }
 
     # =========================================================================
     # MÉTODOS PÚBLICOS

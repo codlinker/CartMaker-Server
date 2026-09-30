@@ -1031,29 +1031,73 @@ class InventoryItem(models.Model):
         help_text="Puntuación precalculada de interacciones (visitas, carritos, compras). Evita JOINs masivos. Usado por el motor de busqueda."
     )
 
+    def _active_offer(self):
+        try:
+            offer = self.offer
+        except Exception:
+            return None
+        if offer and offer.valid_until and offer.valid_until >= timezone.now():
+            return offer
+        return None
+
+    def get_list_price(self) -> float:
+        if self.custom_price is not None:
+            return float(self.custom_price)
+        return float(self.product.price)
+
+    def get_effective_price(self) -> float:
+        base = self.get_list_price()
+        offer = self._active_offer()
+        if not offer:
+            return round(base, 2)
+        pct = max(0, min(100, int(offer.percentage or 0)))
+        return round(base * ((100 - pct) / 100.0), 2)
+
+    def _distance_meters_value(self):
+        for attr in ('real_distance_meters', 'distance_to_user'):
+            distance = getattr(self, attr, None)
+            if distance is None:
+                continue
+            try:
+                meters = float(distance.m) if hasattr(distance, 'm') else float(distance)
+                return round(meters, 1)
+            except (TypeError, ValueError, AttributeError):
+                continue
+        return None
+
     def get_json(self) -> dict:
+        offer = self._active_offer()
+        list_price = self.get_list_price()
+        effective_price = self.get_effective_price()
         return {
             "id": str(self.id),
-            "product": self.product.get_json(), 
+            "product": self.product.get_json(),
             "stock": self.stock,
             "store_id": self.store_id,
+            "store_name": self.store.name,
             "creation": timezone.localtime(self.creation) if self.creation else None,
             "company_name": self.store.company.name,
             "company_image": storage_manager.get_url(self.store.company.image),
             "sold_out_time": timezone.localtime(self.sold_out_time) if self.sold_out_time else None,
             "expiration_date": timezone.localtime(self.expiration_date) if self.expiration_date else None,
-            "custom_price": float(self.custom_price) if self.custom_price else None,
+            "custom_price": float(self.custom_price) if self.custom_price is not None else None,
             "paused": self.paused,
-            "offer": self.offer.get_json() if hasattr(self, 'offer') else None,
+            "offer": offer.get_json() if offer else None,
+            "offer_percentage": int(offer.percentage) if offer else 0,
+            "list_price": round(list_price, 2),
+            "effective_price": effective_price,
             "avg_rating": round(float(getattr(self, 'avg_rating', 0.0)), 2),
             "rating_count": int(getattr(self, 'rating_count', 0)),
+            "merchant_avg_rating": round(float(getattr(self, 'merchant_avg_rating', 0.0)), 2),
+            "is_platinum": bool(getattr(self.store.company, 'is_platinum', False)),
             "is_very_close": bool(getattr(self, 'is_very_close', False)),
             "is_close": bool(getattr(self, 'is_close', False)),
             "is_liked": bool(getattr(self, 'is_liked', False)),
             "likes_count": getattr(self, 'likes_count', 0),
             "work_hours": self.store.effective_work_hours,
-            "work_days": self.store.effective_work_days, 
-            "is_open_now": self.store.is_currently_open, 
+            "work_days": self.store.effective_work_days,
+            "is_open_now": self.store.is_currently_open,
+            "distance_meters": self._distance_meters_value(),
         }
     
     def __str__(self):
