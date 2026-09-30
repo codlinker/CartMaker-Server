@@ -584,12 +584,21 @@ class ProductSearchEngine:
         return qs.order_by(*order_params)
 
     def _annotate_merchant_rating(self, queryset):
-        merchant_avg = MerchantCalification.objects.filter(
+        merchant_sub = MerchantCalification.objects.filter(
             merchant_id=OuterRef('store__company_id')
-        ).values('merchant_id').annotate(avg=Avg('rating')).values('avg')[:1]
+        ).values('merchant_id')
+
+        merchant_avg = merchant_sub.annotate(avg=Avg('rating')).values('avg')[:1]
+        merchant_count = merchant_sub.annotate(cnt=Count('id')).values('cnt')[:1]
+
         return queryset.annotate(
             merchant_avg_rating=Coalesce(
                 Subquery(merchant_avg, output_field=FloatField()),
+                Value(0.0),
+                output_field=FloatField(),
+            ),
+            merchant_rating_count=Coalesce(
+                Subquery(merchant_count, output_field=FloatField()),
                 Value(0.0),
                 output_field=FloatField(),
             )
@@ -651,18 +660,25 @@ class ProductSearchEngine:
         for payload in payloads:
             price = float(payload.get('effective_price') or median_price or 1.0)
             meters = float(payload.get('distance_meters') if payload.get('distance_meters') is not None else median_dist)
-            rating = max(
-                float(payload.get('avg_rating') or 0.0),
-                float(payload.get('merchant_avg_rating') or 0.0),
-            )
-            n = int(payload.get('rating_count') or 0)
-            # Shrinkage: pocas estrellas no ganan a un Platinum con historial.
-            bayes_rating = ((rating * n) + (3.6 * 8)) / (n + 8)
+            
+            # Datos reales del comercio
+            m_rating = float(payload.get('merchant_avg_rating') or 0.0)
+            m_count = int(payload.get('merchant_rating_count') or 0)
+            
+            # Datos reales del producto
+            p_rating = float(payload.get('avg_rating') or 0.0)
+            p_count = int(payload.get('rating_count') or 0)
+
+            # Rating para cálculo algorítmico interno (no penaliza a tiendas nuevas a 3.6)
+            if m_count > 0:
+                calc_rating = ((m_rating * m_count) + (4.0 * 2)) / (m_count + 2)
+            else:
+                calc_rating = 3.8 # Valor neutral de arranque para comercios nuevos
 
             price_score = median_price / max(price, 0.05)
             price_score = min(price_score, 3.0) / 3.0
             distance_score = math.exp(-max(meters, 1.0) / 3500.0)
-            rating_score = bayes_rating / 5.0
+            rating_score = calc_rating / 5.0
             offer_score = 1.0 if (payload.get('offer_percentage') or 0) > 0 else 0.35
             open_score = 1.0 if payload.get('is_open_now') else 0.45
             platinum_score = 1.0 if payload.get('is_platinum') else 0.55
@@ -677,10 +693,15 @@ class ProductSearchEngine:
                 + weights['platinum'] * platinum_score
             )
             payload['purchase_score'] = round(raw * (0.82 + min(match_sim, 0.5) * 0.36), 4)
+            
+            # 💡 AQUÍ PASAMOS LA VERDAD REAL A LA TRÍADA, NADA DE BAYES DISFRAZADO
             payload['triad'] = {
                 'price_usd': round(price, 2),
                 'distance_m': round(meters, 1),
-                'rating': round(bayes_rating, 2),
+                'merchant_rating': round(m_rating, 1),
+                'merchant_reviews_count': m_count,
+                'product_rating': round(p_rating, 1),
+                'product_reviews_count': p_count,
                 'offer_pct': int(payload.get('offer_percentage') or 0),
                 'open_now': bool(payload.get('is_open_now')),
                 'platinum': bool(payload.get('is_platinum')),

@@ -1089,6 +1089,7 @@ class InventoryItem(models.Model):
             "avg_rating": round(float(getattr(self, 'avg_rating', 0.0)), 2),
             "rating_count": int(getattr(self, 'rating_count', 0)),
             "merchant_avg_rating": round(float(getattr(self, 'merchant_avg_rating', 0.0)), 2),
+            "merchant_rating_count": int(getattr(self, 'merchant_rating_count', 0)),
             "is_platinum": bool(getattr(self.store.company, 'is_platinum', False)),
             "is_very_close": bool(getattr(self, 'is_very_close', False)),
             "is_close": bool(getattr(self, 'is_close', False)),

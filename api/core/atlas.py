@@ -441,13 +441,27 @@ class AtlasManager:
                                 p_dist = triad.get('distance_m', it.get('distance_meters', 0))
                                 dist_label = f"{int(p_dist)} m" if p_dist < 1000 else f"{round(p_dist/1000, 1)} km"
                                 p_open = "ABIERTO AHORA" if triad.get('open_now') else "CERRADO"
-                                p_plat = " (Tienda Platinum)" if triad.get('platinum') else ""
-                                p_off = f" [Descuento: {triad.get('offer_pct')}%]" if triad.get('offer_pct') else ""
+                                p_plat = " [Comercio Platinum 🏆]" if triad.get('platinum') else ""
+                                p_off = f" [Oferta: {triad.get('offer_pct')}% off]" if triad.get('offer_pct') else ""
                                 
+                                m_rating = triad.get('merchant_rating', 0.0)
+                                m_count = triad.get('merchant_reviews_count', 0)
+                                p_rating = triad.get('product_rating', 0.0)
+                                p_count = triad.get('product_reviews_count', 0)
+
+                                # Etiqueta transparente para que Gemini sepa exactamente qué decir
+                                if m_count > 0:
+                                    rep_label = f"Reputación Tienda: {m_rating} de 5 estrellas ({m_count} opinión{'es' if m_count > 1 else ''})"
+                                else:
+                                    rep_label = "Reputación Tienda: Comercio nuevo (aún sin calificaciones registradas)"
+
+                                if p_count > 0:
+                                    rep_label += f" | Calificación del producto: {p_rating}★ ({p_count})"
+
                                 formatted_data.append(
                                     f"• [{p_name}] a ${p_price}{p_off} en '{it.get('store_name')}' ({it.get('company_name')}{p_plat}) | "
                                     f"Distancia: {dist_label} de {it.get('nearest_saved_location_name')} | "
-                                    f"Rating: {triad.get('rating', it.get('avg_rating'))}/5 | Estado: {p_open}"
+                                    f"{rep_label} | Estado: {p_open}"
                                 )
                             tool_payload = {"status": "success", "candidatos_reales": formatted_data}
 
