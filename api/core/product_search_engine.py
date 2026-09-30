@@ -738,10 +738,11 @@ class ProductSearchEngine:
         qs = self._apply_purchase_text_filter(qs, query)
         qs = qs.annotate(effective_price=Coalesce(F('custom_price'), F('product__price')))
 
-        order_fields = ['real_distance_meters', 'effective_price']
-        if any(f.name == 'match_sim' for f in qs.query.annotations.values()) or 'match_sim' in getattr(qs, 'query', type('q', (), {'annotations': {}})()).annotations:
-            pass
-        qs = qs.order_by('-match_sim' if 'match_sim' in qs.query.annotations else 'real_distance_meters', 'real_distance_meters', 'effective_price')
+        # Ordenar por similitud semántica si se aplicó el filtro de texto, o por cercanía
+        if 'match_sim' in qs.query.annotations:
+            qs = qs.order_by('-match_sim', 'real_distance_meters', 'effective_price')
+        else:
+            qs = qs.order_by('real_distance_meters', 'effective_price')
 
         pool = []
         seen = set()
