@@ -24,7 +24,7 @@ from api.core.ve_commerce_lexicon import (
     substring_regex,
     lexical_match,
 )
-from api.core.ve_geo import describe_zone
+from api.core.ve_geo import describe_zone, proximity_label
 from api.core.ve_malls import find_mall_near, display_mall_name
 
 class ProductSearchEngine:
@@ -36,7 +36,7 @@ class ProductSearchEngine:
 
     def __init__(self, lat: float, lng: float, user=None, seed: str = 'default'):
         self.user_location = Point(lng, lat, srid=4326)
-        # id de InventoryItem -> {'zone', 'mall_name', 'mall_floor'} de los finalistas de Atlas.
+        # id de InventoryItem -> {'zone', 'address', 'proximity', 'mall_name', 'mall_floor'} de los finalistas de Atlas.
         # Vive fuera del payload para no alterar el JSON que consume Flutter.
         self.purchase_places = {}
         self.user = user
@@ -952,6 +952,8 @@ class ProductSearchEngine:
                 mall_name = nearby_mall['name']
         return {
             'zone': describe_zone(coordinates.y, coordinates.x),
+            'address': (location.name or '').strip() or None,
+            'proximity': proximity_label(item._distance_meters_value()),
             'mall_name': mall_name,
             'mall_floor': mall_floor,
         }

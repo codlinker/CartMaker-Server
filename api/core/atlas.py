@@ -172,7 +172,7 @@ class AtlasManager:
         self.chat_system_instruction = f"""
             # ROL E IDENTIDAD CORE
             Eres 'Atlas', la inteligencia artificial de élite y el corazón operativo de CartMaker, la red de comercio local líder en Venezuela.
-            No eres un simple bot de respuestas. Eres un personal shopper de primer nivel y un estratega de compras. Conoces los inventarios reales de cada tienda, sus precios exactos, su distancia física y si están abiertas ahorita. Tu propósito es resolver compras reales de manera rápida, transparente y óptima.
+            No eres un simple bot de respuestas. Eres un personal shopper de primer nivel y un estratega de compras. Conoces los inventarios reales de cada tienda, sus precios exactos, en qué zona o ciudad de Venezuela queda cada una y si están abiertas ahorita. Tu propósito es resolver compras reales de manera rápida, transparente y óptima.
 
             # PERSONALIDAD Y TONO
             - Voz venezolana educada, moderna, ágil y empática. Usa expresiones naturales sutiles ("cuadrar", "resolver", "de una", "chévere", "fino") sin caer en caricaturas ni exceso de informalidad.
@@ -182,12 +182,12 @@ class AtlasManager:
             # CÓMO ANALIZAR LA TRÍADA (PRECIO, DISTANCIA, REPUTACIÓN)
             La herramienta te devolverá datos exactos calculados matemáticamente:
             - **Precio y Oferta:** Tienes el precio efectivo y el % de descuento si aplica.
-            - **Distancia:** En metros o kilómetros exactos respecto a la ubicación del usuario.
+            - **Ubicación:** Zona, ciudad y, si aplica, centro comercial del comercio, más qué tan cerca queda del usuario en palabras (nunca en cifras).
             - **Estado Operativo:** Sabes si la tienda está ABIERTA o CERRADA en este momento.
             - **Reputación:** Rating bayesiano de 1 a 5 estrellas y si cuenta con insignia Platinum.
 
             Explica siempre los trade-offs con números reales:
-            - "Te conseguí el repuesto a 450 m en [Tienda A] por $12 y están abiertos ahorita. Si quieres ahorrar, en [Tienda B] lo tienen en $9, pero te queda a 4.2 km".
+            - "Te conseguí el repuesto en [Tienda A], aquí mismo en Guatire, por $12 y están abiertos ahorita. Si quieres ahorrar, en [Tienda B] lo tienen en $9, pero queda en Caracas, por Altamira".
 
             # 🚨 MOTOR DE DEDUCCIÓN: ACTÚA PRIMERO, PREGUNTA DESPUÉS (UN SOLO MENSAJE DEBE BASTAR)
             El usuario habla como habla un venezolano: corto, informal, por necesidad, síntoma, ocasión o problema, casi nunca por nombre de producto ("tengo calor", "se me quemó la plancha", "mañana es el cumple de mi sobrino", "el carro no prende"). Tu trabajo es DEDUCIR qué necesita y resolverle la vida en el PRIMER mensaje.
@@ -242,14 +242,23 @@ class AtlasManager:
             - Si una búsqueda no devuelve nada, NO preguntes: reintenta una vez con el nombre de la SUBCATEGORÍA del catálogo como query (ej. 'Electrodomésticos', 'Bebidas', 'Farmacia y Bienestar') o con un sinónimo, y luego usa lo que sí apareció, mencionando brevemente lo que no hubo.
             - En los refinamientos ("más barato", "otro", "el más cerca") reutiliza el producto de la conversación y cambia solo el 'mode', sin preguntar.
             - Solo pregunta ANTES de buscar cuando es imposible deducir cualquier necesidad (ej. el usuario solo dijo "hola" o "ayúdame") o cuando falta un dato crítico y no negociable.
-            - ESTRUCTURA de tu respuesta final (2-5 líneas): (1) una frase corta que muestre que entendiste su situación ("Con este calor, lo más rápido es..."), (2) la mejor opción con números reales (precio, distancia, abierto/cerrado), (3) una alternativa o complemento, (4) una frase corta para afinar ("si buscabas otra cosa, dime y lo cambio"). Nada de sermones ni listas largas.
+            - ESTRUCTURA de tu respuesta final (2-5 líneas): (1) una frase corta que muestre que entendiste su situación ("Con este calor, lo más rápido es..."), (2) la mejor opción con datos reales (precio, nombre de la tienda, en qué zona o ciudad queda, abierto/cerrado), (3) una alternativa o complemento, (4) una frase corta para afinar ("si buscabas otra cosa, dime y lo cambio"). Nada de sermones ni listas largas.
+
+            # 🚫 UBICACIONES EN LENGUAJE HUMANO: PROHIBIDO HABLAR EN METROS O KILÓMETROS
+            CartMaker solo opera en Venezuela y tú hablas con personas reales, no con un GPS. Nadie quiere oír "a 730 m" ni "a 30 km".
+            - PROHIBIDO escribir distancias numéricas o con unidades: metros, m, kilómetros, km, cuadras contadas, minutos de trayecto calculados, ni siquiera aproximadas ("unos 2 km", "a 500 metros").
+            - SIEMPRE ubica los comercios con NOMBRES: urbanización o sector, ciudad y centro comercial. Frases correctas: "en Altamira, en Caracas", "aquí mismo en Guatire", "por Las Mercedes", "en el Sambil Chacao, piso 2", "en tu misma zona", "un poco más lejos, en Petare".
+            - Cada candidato trae 'Zona del comercio', a veces 'Dirección registrada' y 'Cercanía respecto al usuario'. Úsalos así: si trae dirección, extrae de ella el nombre de la urbanización o sector y combínalo con la zona; si no, usa la zona. La 'Cercanía' te dice cómo expresarlo (misma zona, otra zona de la ciudad, otra ciudad), siempre en palabras.
+            - Para comparar opciones usa lenguaje relativo con nombres: "la más a la mano es la de Guatire; la de Caracas te queda más lejos".
+            - Asume la ubicación del usuario con la 'Zona actual deducida por coordenadas' y sus ubicaciones guardadas (por nombre: "tu casa", "tu trabajo"). Nunca preguntes dónde está.
+            - Las medidas de un producto (ej. un sofá de 2 m de ancho) sí se pueden decir; lo prohibido es medir distancias entre el usuario y los comercios.
 
             # VERACIDAD (INNEGOCIABLE)
             - TODO dato de producto, tienda, precio, distancia, reputación, estado abierto/cerrado o insignia Platinum debe salir del JSON que devolvió una herramienta EN ESTE MISMO TURNO. Los mensajes anteriores de la conversación pueden estar desactualizados: nunca los reutilices como fuente de datos.
-            - Si NO llamaste una herramienta en este turno, no puedes nombrar productos, tiendas, precios ni distancias. Llama la herramienta.
+            - Si NO llamaste una herramienta en este turno, no puedes nombrar productos, tiendas, precios ni ubicaciones. Llama la herramienta.
             - Nunca digas que un comercio es Platinum salvo que el candidato lo marque como [Comercio Platinum]. Nunca digas "abierto" o "cerrado" sin que el candidato lo indique.
             - Escribe los nombres de tiendas y productos EXACTAMENTE como vienen en el JSON. Prohibido traducirlos, abreviarlos o "corregirlos".
-            - Las distancias se copian tal cual del JSON (m o km). No las estimes.
+            - Las ubicaciones se copian del JSON (zona, ciudad, dirección registrada, centro comercial). No las inventes.
             - Solo menciona los productos que aparecen en el resultado de la herramienta: esos son los que el usuario verá como tarjetas para comprar. Si no hay resultados, dilo claramente y no ofrezcas productos inexistentes.
 
             # CENTROS COMERCIALES
@@ -259,8 +268,8 @@ class AtlasManager:
             - Usa solo los nombres exactos del JSON; nunca los deduzcas por el nombre de la tienda.
 
             # EXPANSIÓN GEOGRÁFICA AUTOMÁTICA
-            - La herramienta 'buscar_productos_inventario' ya expande sola la búsqueda por anillos cada vez más lejanos si no hay existencias cerca del usuario. NO pidas permiso para ampliar la zona y NO uses 'max_distancia' salvo que el usuario pida expresamente un radio ("a menos de 2 km").
-            - Si la respuesta trae 'busqueda_expandida', ábrela SIEMPRE con la zona del usuario y la zona donde sí hubo, con naturalidad. Ejemplo: "En Guatire no conseguí gorras, lo más cercano que te encontré fue en Caracas (a 38 km)." Luego presenta los productos con precio, tienda y estado, sin inventar zonas distintas a las del JSON.
+            - La herramienta 'buscar_productos_inventario' ya expande sola la búsqueda por anillos cada vez más lejanos si no hay existencias cerca del usuario. NO pidas permiso para ampliar la zona y NO uses 'max_distancia' salvo que el usuario pida expresamente un radio.
+            - Si la respuesta trae 'busqueda_expandida', ábrela SIEMPRE con la zona del usuario y la zona donde sí hubo, con naturalidad. Ejemplo: "En Guatire no conseguí gorras, lo más cercano que te encontré fue en Caracas, por Altamira." Luego presenta los productos con precio, tienda y estado, sin inventar zonas distintas a las del JSON.
             - Si no vino 'busqueda_expandida', habla normal: los resultados están en la zona del usuario.
 
             # RECETAS Y LISTAS MULTI-PRODUCTO
@@ -378,6 +387,23 @@ class AtlasManager:
                 print(f"[ATLAS TELEMETRY ERROR]: {e}")
 
         return {"type": "not_found", "message": f"Cero existencias para '{raw_query}' en todas tus zonas registradas."}
+
+    @staticmethod
+    def _format_place_label(place: Optional[Dict[str, Any]]) -> str:
+        """Texto de ubicación en nombres de zona/ciudad/centro comercial; nunca cifras de distancia."""
+        if not place:
+            return ""
+        parts = []
+        if place.get('zone'):
+            parts.append(f"Zona del comercio: {place['zone']}")
+        if place.get('address'):
+            parts.append(f"Dirección registrada: {place['address']}")
+        if place.get('proximity'):
+            parts.append(f"Cercanía respecto al usuario: {place['proximity']}")
+        mall_label = AtlasManager._format_mall_label(place)
+        if mall_label:
+            parts.append(f"Ubicado en: {mall_label}")
+        return (" | " + " | ".join(parts)) if parts else ""
 
     @staticmethod
     def _format_mall_label(place: Optional[Dict[str, Any]]) -> Optional[str]:
@@ -534,6 +560,67 @@ class AtlasManager:
         re.IGNORECASE,
     )
 
+    _UNIT = r"(?:km|kil[oó]metros?|metros|mts|m)"
+    _TAIL = r"(?:\s+de\s+(?:tu\s+ubicaci[oó]n(?:\s+actual)?|ti|tu\s+zona|aqu[ií]|distancia))?"
+    # Frases tipo "(a 30.7 km)", "a 730 m de tu ubicación", "a unos 2 kilómetros", "38 km de aquí".
+    # Las medidas de producto ("un sofá de 2 m de ancho") NO coinciden: exigen 'a', paréntesis o km.
+    _DISTANCE_PHRASE_PATTERN = re.compile(
+        "|".join([
+            r"\s*\(\s*(?:a\s+|unos\s+)?\d+(?:[.,]\d+)?\s?" + _UNIT + r"\s*\)",
+            r"\s+a\s+(?:unos\s+|unas\s+)?\d+(?:[.,]\d+)?\s?" + _UNIT + r"\b" + _TAIL,
+            r"\s+(?:unos\s+|unas\s+)?\d+(?:[.,]\d+)?\s?(?:km|kil[oó]metros?)\b" + _TAIL,
+        ]),
+        re.IGNORECASE,
+    )
+    _KM_WORD_PATTERN = re.compile(r"\bkm\b|kil[oó]metros?", re.IGNORECASE)
+
+    def _mentions_distance_units(self, text: Optional[str]) -> bool:
+        return bool(text and (self._DISTANCE_PHRASE_PATTERN.search(text) or self._KM_WORD_PATTERN.search(text)))
+
+    def _scrub_distance_phrases(self, text: str) -> str:
+        """Último recurso: elimina frases de distancia numérica que el modelo haya dejado pasar."""
+        cleaned = self._DISTANCE_PHRASE_PATTERN.sub("", text)
+        cleaned = re.sub(r"\s+([,.;:!?])", r"\1", cleaned)
+        return re.sub(r"[ \t]{2,}", " ", cleaned).strip()
+
+    async def _enforce_human_locations(self, text: str, history: list, thread_id: int) -> str:
+        """
+        Atlas jamás debe hablar en metros/kilómetros. Si el borrador lo hace, se le pide
+        reescribirlo con nombres de zonas; si aún así persiste, se eliminan las frases.
+        """
+        if not self._mentions_distance_units(text):
+            return text
+
+        print(f"[ATLAS GUARD] Distancias numéricas en la respuesta; reescribiendo. Texto: {text[:200]}")
+        try:
+            rewrite_history = list(history) + [
+                {"role": "assistant", "content": text},
+                {
+                    "role": "system",
+                    "content": (
+                        "CORRECCIÓN OBLIGATORIA: tu respuesta anterior usó distancias numéricas (metros o kilómetros), "
+                        "lo cual está PROHIBIDO. Reescríbela con el mismo contenido (mismos productos, precios y tiendas) "
+                        "pero ubicando cada comercio SOLO con nombres de urbanización, ciudad o centro comercial "
+                        "(ej. 'aquí mismo en Guatire', 'por Altamira, en Caracas'). No incluyas ninguna cifra de distancia. "
+                        "Responde únicamente con el texto reescrito."
+                    ),
+                },
+            ]
+            response = await self.client.chat.completions.create(
+                model=self.model_name,
+                messages=rewrite_history,
+                temperature=0.2,
+                extra_body={"session_id": f"cartmaker-atlas-thread-{thread_id}"},
+            )
+            rewritten = response.choices[0].message.content or ""
+            if rewritten.strip() and not self._mentions_distance_units(rewritten):
+                return rewritten
+            text = rewritten or text
+        except Exception as e:
+            print(f"[ATLAS GUARD] Error reescribiendo sin distancias: {e}")
+
+        return self._scrub_distance_phrases(text)
+
     def _claims_commerce_data(self, text: Optional[str]) -> bool:
         """True si el texto afirma precios, distancias, Platinum o estado abierto (datos que solo pueden venir de una herramienta)."""
         return bool(text and self._COMMERCE_CLAIM_PATTERN.search(text))
@@ -621,8 +708,6 @@ class AtlasManager:
                                     triad = it.get('triad', {})
                                     p_name = it.get('product', {}).get('name', 'Artículo')
                                     p_price = triad.get('price_usd', it.get('effective_price'))
-                                    p_dist = triad.get('distance_m', it.get('distance_meters', 0))
-                                    dist_label = f"{int(p_dist)} m" if p_dist < 1000 else f"{round(p_dist/1000, 1)} km"
                                     p_open = "ABIERTO AHORA" if triad.get('open_now') else "CERRADO"
                                     p_plat = " [Comercio Platinum 🏆]" if triad.get('platinum') else ""
                                     p_off = f" [Oferta: {triad.get('offer_pct')}% off]" if triad.get('offer_pct') else ""
@@ -643,38 +728,26 @@ class AtlasManager:
 
                                     formatted_data.append(
                                         f"• [{p_name}] a ${p_price}{p_off} en '{it.get('store_name')}' ({it.get('company_name')}{p_plat}) | "
-                                        f"Distancia: {dist_label} de {it.get('nearest_saved_location_name')} | "
                                         f"{rep_label} | Estado: {p_open}"
                                     )
+                                # Ubicación SIEMPRE en nombres de zona (sin metros ni kilómetros)
                                 places = db_res.get("places", {})
                                 for idx, it in enumerate(items):
-                                    mall_label = self._format_mall_label(places.get(str(it.get('id'))))
-                                    if mall_label:
-                                        formatted_data[idx] += f" | Ubicado en: {mall_label}"
+                                    place = places.get(str(it.get('id')))
+                                    formatted_data[idx] += self._format_place_label(place)
                                 tool_payload = {"status": "success", "candidatos_reales": formatted_data}
 
                                 expansion = db_res.get("expansion")
                                 if expansion:
-                                    zones_by_item = expansion.get("zones_by_item", {})
-                                    for idx, it in enumerate(items):
-                                        zone = zones_by_item.get(str(it.get('id')))
-                                        if zone:
-                                            formatted_data[idx] += f" | Zona del comercio: {zone}"
-                                    nearest_m = expansion.get("nearest_distance_meters")
-                                    nearest_label = (
-                                        f"{round(nearest_m / 1000, 1)} km" if nearest_m is not None else "desconocida"
-                                    )
                                     tool_payload["busqueda_expandida"] = {
                                         "zona_del_usuario": expansion.get("origin_zone"),
                                         "zona_donde_se_encontro": expansion.get("found_zone"),
-                                        "distancia_al_mas_cercano": nearest_label,
-                                        "radio_inicial_sin_resultados_km": round(expansion.get("base_radius_meters", 0) / 1000, 1),
                                         "instruccion": (
                                             f"NO había existencias de '{fn_args.get('query')}' en {expansion.get('origin_zone')} "
-                                            f"ni en un radio de {round(expansion.get('base_radius_meters', 0) / 1000)} km. "
-                                            "Díselo al usuario de forma natural y breve, indica que lo más cercano que "
-                                            f"encontraste fue en {expansion.get('found_zone')} (a {nearest_label}), "
-                                            "y presenta los productos. Menciona que queda más lejos de lo habitual."
+                                            "ni en sus alrededores. Díselo al usuario de forma natural y breve, indica que lo "
+                                            f"más cercano que encontraste fue en {expansion.get('found_zone')}, "
+                                            "y presenta los productos. Habla SOLO con nombres de zonas y ciudades; "
+                                            "PROHIBIDO usar metros, kilómetros o cualquier cifra de distancia."
                                         ),
                                     }
 
@@ -702,8 +775,7 @@ class AtlasManager:
                             summary = {
                                 "comercio_principal": store_info.get('store_name') if store_info else "No hubo tienda única",
                                 "ingredientes_en_comercio_principal": f"{store_info.get('items_in_store', 0)} de {store_info.get('needs_total', 0)}" if store_info else "0",
-                                "distancia_comercio_principal_m": store_info.get('distance_meters') if store_info else None,
-                                "completados_en_otras_tiendas": plan.get('filled_elsewhere', []),
+                                    "completados_en_otras_tiendas": plan.get('filled_elsewhere', []),
                                 "ingredientes_sin_stock": plan.get('missing_queries', []),
                                 "total_estimado_usd": plan.get('estimated_total_usd', 0.0)
                             }
@@ -714,6 +786,10 @@ class AtlasManager:
                             malls_in_plan = []
                             for found in plan.get('found', []):
                                 mall_label = self._format_mall_label(plan_places.get(str(found.get('id'))))
+                                if primary_store_id and str(found.get('store_id')) == primary_store_id:
+                                    primary_place = plan_places.get(str(found.get('id'))) or {}
+                                    summary["zona_comercio_principal"] = primary_place.get('zone')
+                                    summary["cercania_comercio_principal"] = primary_place.get('proximity')
                                 if not mall_label:
                                     continue
                                 entry = {
@@ -800,6 +876,8 @@ class AtlasManager:
 
 
             ai_final_text = choice.message.content
+            if ai_final_text:
+                ai_final_text = await self._enforce_human_locations(ai_final_text, history, thread_id)
             if not data_tool_used and self._claims_commerce_data(ai_final_text):
                 print(f"[ATLAS GUARD] Respuesta descartada por datos sin respaldo: {ai_final_text[:200]}")
                 ai_final_text = (
