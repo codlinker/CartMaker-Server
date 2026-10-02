@@ -14,6 +14,7 @@ from django.contrib.gis.measure import D
 from ..models import SubCategory, AtlasThread, AtlasMessage, InventoryItem, ProductViewLog, CompanyStore
 from .product_search_engine import ProductSearchEngine
 from .catalog_taxonomy import render_catalog_for_prompt
+from .ve_geo import describe_zone
 
 # =========================================================================
 # 🛠️ ESQUEMAS DE HERRAMIENTAS (TOOLS) - ESTÁNDAR OPENAI / OPENROUTER
@@ -231,6 +232,17 @@ class AtlasManager:
             - Solo pregunta ANTES de buscar cuando es imposible deducir cualquier necesidad (ej. el usuario solo dijo "hola" o "ayúdame") o cuando falta un dato crítico y no negociable.
             - ESTRUCTURA de tu respuesta final (2-5 líneas): (1) una frase corta que muestre que entendiste su situación ("Con este calor, lo más rápido es..."), (2) la mejor opción con números reales (precio, distancia, abierto/cerrado), (3) una alternativa o complemento, (4) una frase corta para afinar ("si buscabas otra cosa, dime y lo cambio"). Nada de sermones ni listas largas.
 
+            # CENTROS COMERCIALES
+            - Si un candidato trae "Ubicado en: Centro Comercial X, piso N", díselo al usuario con naturalidad y de forma útil: "Lo tienen en el Sambil Chacao, piso 2". Si no trae piso, di solo el centro comercial.
+            - Si varios resultados están en el MISMO centro comercial, destácalo ("puedes resolver todo en el Millennium Mall").
+            - Si el candidato NO trae "Ubicado en", NO menciones ningún centro comercial ni inventes uno: es una tienda a pie de calle o aún no está registrada en uno.
+            - Usa solo los nombres exactos del JSON; nunca los deduzcas por el nombre de la tienda.
+
+            # EXPANSIÓN GEOGRÁFICA AUTOMÁTICA
+            - La herramienta 'buscar_productos_inventario' ya expande sola la búsqueda por anillos cada vez más lejanos si no hay existencias cerca del usuario. NO pidas permiso para ampliar la zona y NO uses 'max_distancia' salvo que el usuario pida expresamente un radio ("a menos de 2 km").
+            - Si la respuesta trae 'busqueda_expandida', ábrela SIEMPRE con la zona del usuario y la zona donde sí hubo, con naturalidad. Ejemplo: "En Guatire no conseguí gorras, lo más cercano que te encontré fue en Caracas (a 38 km)." Luego presenta los productos con precio, tienda y estado, sin inventar zonas distintas a las del JSON.
+            - Si no vino 'busqueda_expandida', habla normal: los resultados están en la zona del usuario.
+
             # RECETAS Y LISTAS MULTI-PRODUCTO
             - Si el usuario dice "quiero cocinar pabellón", "hacer pizza" o te pide varios ingredientes, USA SIEMPRE 'armar_lista_o_receta'.
             - Explica el plan de compra indicando si se consigue todo en un solo comercio principal o si le tocó completar algún ingrediente en otra tienda cercana.
@@ -251,17 +263,43 @@ class AtlasManager:
 
         engine = ProductSearchEngine(lat=self.user_lat, lng=self.user_lng, user=self.user, seed=self.seed)
         
-        # 1. Búsqueda con score matemático de compra
-        candidates = engine.search_purchase_candidates(
-            query=raw_query,
-            max_distance_meters=max_dist,
-            limit=6,
-            location_label="Tu ubicación actual",
-            mode=mode
-        )
+        # 1. Búsqueda con score matemático de compra. Si el usuario no acotó el radio
+        #    a propósito, se expande por anillos disjuntos (sin repetir lo ya buscado).
+        explicit_small_radius = 'max_distancia' in args and max_dist < 15000.0
+        if explicit_small_radius:
+            candidates = engine.search_purchase_candidates(
+                query=raw_query,
+                max_distance_meters=max_dist,
+                limit=6,
+                location_label="Tu ubicación actual",
+                mode=mode
+            )
+            search_outcome = {'results': candidates, 'expanded': False}
+        else:
+            search_outcome = engine.search_purchase_expanding(
+                query=raw_query,
+                base_radius_meters=max_dist,
+                limit=6,
+                location_label="Tu ubicación actual",
+                mode=mode
+            )
 
-        if candidates:
-            return {"type": "results", "data": candidates}
+        if search_outcome['results']:
+            response = {
+                "type": "results",
+                "data": search_outcome['results'],
+                "places": dict(engine.purchase_places),
+            }
+            if search_outcome.get('expanded'):
+                response["expansion"] = {
+                    "origin_zone": search_outcome.get('origin_zone'),
+                    "found_zone": search_outcome.get('found_zone'),
+                    "nearest_distance_meters": search_outcome.get('nearest_distance_meters'),
+                    "searched_radius_meters": search_outcome.get('searched_radius_meters'),
+                    "base_radius_meters": max_dist,
+                    "zones_by_item": search_outcome.get('zones_by_item', {}),
+                }
+            return response
 
         # 2. Manejo de zonas alternativas
         otras_zonas = [
@@ -279,6 +317,7 @@ class AtlasManager:
 
         # 3. Contingencia Multi-Zona
         fallback_results = []
+        fallback_places = {}
         for loc in self.user_locations:
             loc_lat = float(loc.get('latitude', 0.0))
             loc_lng = float(loc.get('longitude', 0.0))
@@ -296,11 +335,12 @@ class AtlasManager:
                 mode=mode
             )
             fallback_results.extend(fb_candidates)
+            fallback_places.update(eng_fb.purchase_places)
             if len(fallback_results) >= 6:
                 break
 
         if fallback_results:
-            return {"type": "results", "data": fallback_results}
+            return {"type": "results", "data": fallback_results, "places": fallback_places}
 
         # 4. Telemetría de Demanda Insatisfecha
         if raw_query:
@@ -319,6 +359,16 @@ class AtlasManager:
 
         return {"type": "not_found", "message": f"Cero existencias para '{raw_query}' en todas tus zonas registradas."}
 
+    @staticmethod
+    def _format_mall_label(place: Optional[Dict[str, Any]]) -> Optional[str]:
+        """'Centro Comercial Sambil Chacao, piso 2' o None si la tienda no está en un centro comercial."""
+        if not place or not place.get('mall_name'):
+            return None
+        label = f"Centro Comercial {place['mall_name']}"
+        if place.get('mall_floor') is not None:
+            label += f", piso {place['mall_floor']}"
+        return label
+
     def _execute_shopping_list(self, args: Dict[str, Any]) -> Dict[str, Any]:
         needs = args.get('items', [])
         mode = args.get('mode', 'best')
@@ -331,6 +381,7 @@ class AtlasManager:
             location_label="Tu ubicación actual",
             mode=mode
         )
+        plan['places'] = dict(engine.purchase_places)
         return plan
 
     def _execute_recommendations(self, args: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -429,7 +480,8 @@ class AtlasManager:
         history.append({
             "role": "system", 
             "content": (
-                f"CONTEXTO ESPACIAL DEL USUARIO:\n{ubicaciones_str}\n\n"
+                f"CONTEXTO ESPACIAL DEL USUARIO:\n{ubicaciones_str}\n"
+                f"Zona actual deducida por coordenadas: {describe_zone(self.user_lat, self.user_lng)}.\n\n"
                 f"CONTEXTO TEMPORAL: {dias[now_local.weekday()]} {now_local.strftime('%I:%M %p')}, {momento}. "
                 "Úsalo para deducir lo que el usuario probablemente necesita sin preguntarle."
             )
@@ -539,7 +591,37 @@ class AtlasManager:
                                     f"Distancia: {dist_label} de {it.get('nearest_saved_location_name')} | "
                                     f"{rep_label} | Estado: {p_open}"
                                 )
+                            places = db_res.get("places", {})
+                            for idx, it in enumerate(items):
+                                mall_label = self._format_mall_label(places.get(str(it.get('id'))))
+                                if mall_label:
+                                    formatted_data[idx] += f" | Ubicado en: {mall_label}"
                             tool_payload = {"status": "success", "candidatos_reales": formatted_data}
+
+                            expansion = db_res.get("expansion")
+                            if expansion:
+                                zones_by_item = expansion.get("zones_by_item", {})
+                                for idx, it in enumerate(items):
+                                    zone = zones_by_item.get(str(it.get('id')))
+                                    if zone:
+                                        formatted_data[idx] += f" | Zona del comercio: {zone}"
+                                nearest_m = expansion.get("nearest_distance_meters")
+                                nearest_label = (
+                                    f"{round(nearest_m / 1000, 1)} km" if nearest_m is not None else "desconocida"
+                                )
+                                tool_payload["busqueda_expandida"] = {
+                                    "zona_del_usuario": expansion.get("origin_zone"),
+                                    "zona_donde_se_encontro": expansion.get("found_zone"),
+                                    "distancia_al_mas_cercano": nearest_label,
+                                    "radio_inicial_sin_resultados_km": round(expansion.get("base_radius_meters", 0) / 1000, 1),
+                                    "instruccion": (
+                                        f"NO había existencias de '{fn_args.get('query')}' en {expansion.get('origin_zone')} "
+                                        f"ni en un radio de {round(expansion.get('base_radius_meters', 0) / 1000)} km. "
+                                        "Díselo al usuario de forma natural y breve, indica que lo más cercano que "
+                                        f"encontraste fue en {expansion.get('found_zone')} (a {nearest_label}), "
+                                        "y presenta los productos. Menciona que queda más lejos de lo habitual."
+                                    ),
+                                }
 
                         elif db_res.get("type") == "ask_confirmation":
                             action_command = {
@@ -570,6 +652,25 @@ class AtlasManager:
                             "ingredientes_sin_stock": plan.get('missing_queries', []),
                             "total_estimado_usd": plan.get('estimated_total_usd', 0.0)
                         }
+
+                        # Centros comerciales de los artículos encontrados (solo los que están en uno)
+                        plan_places = plan.get('places', {})
+                        primary_store_id = str(store_info.get('store_id')) if store_info else None
+                        malls_in_plan = []
+                        for found in plan.get('found', []):
+                            mall_label = self._format_mall_label(plan_places.get(str(found.get('id'))))
+                            if not mall_label:
+                                continue
+                            entry = {
+                                "producto": found.get('product', {}).get('name'),
+                                "tienda": found.get('store_name'),
+                                "ubicado_en": mall_label,
+                            }
+                            malls_in_plan.append(entry)
+                            if primary_store_id and str(found.get('store_id')) == primary_store_id:
+                                summary["comercio_principal_ubicado_en"] = mall_label
+                        if malls_in_plan:
+                            summary["articulos_en_centros_comerciales"] = malls_in_plan
                         tool_payload = {"status": "success", "plan_de_compra": summary}
 
                     # 3. Feed Personalizado

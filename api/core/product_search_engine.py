@@ -23,6 +23,8 @@ from api.core.ve_commerce_lexicon import (
     word_boundary_regex,
     lexical_match,
 )
+from api.core.ve_geo import describe_zone
+from api.core.ve_malls import find_mall_near, display_mall_name
 
 class ProductSearchEngine:
     """
@@ -33,6 +35,9 @@ class ProductSearchEngine:
 
     def __init__(self, lat: float, lng: float, user=None, seed: str = 'default'):
         self.user_location = Point(lng, lat, srid=4326)
+        # id de InventoryItem -> {'zone', 'mall_name', 'mall_floor'} de los finalistas de Atlas.
+        # Vive fuera del payload para no alterar el JSON que consume Flutter.
+        self.purchase_places = {}
         self.user = user
         self.seed = str(seed)
         
@@ -859,8 +864,16 @@ class ProductSearchEngine:
         limit: int = 8,
         location_label: str = 'Tu ubicación actual',
         mode: str = 'best',
+        min_distance_meters: float = 0.0,
     ) -> list:
-        """Candidatos para Atlas: stock vivo, geo, matching VE y score de compra."""
+        """
+        Candidatos para Atlas: stock vivo, geo, matching VE y score de compra.
+
+        Busca en el ANILLO (min_distance_meters, max_distance_meters]. Con
+        min_distance_meters > 0 se omite todo lo ya cubierto por radios menores.
+        Por cada finalista registra en self.purchase_places la zona deducida y el
+        centro comercial (si lo hay), sin tocar las claves del payload.
+        """
         qs = self._get_base_active_queryset()
         qs = self._annotate_proximity_flag(qs)
         qs = self._annotate_merchant_rating(qs)
@@ -871,12 +884,17 @@ class ProductSearchEngine:
             'product__company',
             'store',
             'store__location',
+            'store__location__mall',
             'store__company',
             'store__company__owner__subscription__plan',
         )
         qs = qs.filter(
             store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters))
         )
+        if min_distance_meters and min_distance_meters > 0:
+            qs = qs.filter(
+                store__location__coordinates__distance_gt=(self.user_location, D(m=min_distance_meters))
+            )
         qs = self._apply_purchase_text_filter(qs, query)
         qs = qs.annotate(effective_price=Coalesce(F('custom_price'), F('product__price')))
 
@@ -908,8 +926,111 @@ class ProductSearchEngine:
             payload = self._serialize_purchase_item(light['_item'], location_label, query)
             payload['purchase_score'] = light['purchase_score']
             payload['triad'] = light['triad']
+            self.purchase_places[str(light['_item'].id)] = self._resolve_item_place(light['_item'])
             results.append(payload)
         return results
+
+    def _resolve_item_place(self, item) -> dict:
+        """
+        Zona (ciudad) y centro comercial de la tienda del ítem. El mall asignado en
+        StoreLocation manda; si no hay, se deduce por cercanía con malls.json.
+        """
+        location = item.store.location
+        coordinates = location.coordinates
+        mall_name = None
+        mall_floor = None
+        mall = location.mall
+        if mall is not None:
+            mall_name = display_mall_name(mall.name)
+            mall_floor = location.mall_floor
+        else:
+            nearby_mall = find_mall_near(coordinates.y, coordinates.x)
+            if nearby_mall:
+                mall_name = nearby_mall['name']
+        return {
+            'zone': describe_zone(coordinates.y, coordinates.x),
+            'mall_name': mall_name,
+            'mall_floor': mall_floor,
+        }
+
+    # Anillos de expansión (metros). Cada anillo cubre SOLO la franja entre el
+    # radio anterior y el siguiente: nunca se vuelve a consultar lo ya buscado.
+    PURCHASE_EXPANSION_RADII_M = (40000.0, 100000.0, 250000.0, 600000.0, 1500000.0)
+
+    def search_purchase_expanding(
+        self,
+        query: str,
+        base_radius_meters: float = 15000.0,
+        limit: int = 6,
+        location_label: str = 'Tu ubicación actual',
+        mode: str = 'best',
+    ) -> dict:
+        """
+        Busca en el radio base y, si no hay nada, avanza por anillos concéntricos
+        disjuntos hasta encontrar existencias. Devuelve:
+        {
+            'results': [...payloads sin claves internas...],
+            'expanded': bool,
+            'origin_zone': 'Guatire',
+            'found_zone': 'Caracas' | None,
+            'zones_by_item': {id_item: 'Caracas', ...} (solo si expanded),
+            'nearest_distance_meters': float | None,
+            'searched_radius_meters': float,
+        }
+        """
+        origin_zone = describe_zone(self.user_location.y, self.user_location.x)
+        outcome = {
+            'results': [],
+            'expanded': False,
+            'origin_zone': origin_zone,
+            'found_zone': None,
+            'nearest_distance_meters': None,
+            'searched_radius_meters': float(base_radius_meters),
+        }
+
+        # Anillo 0: círculo base alrededor del usuario.
+        results = self.search_purchase_candidates(
+            query=query,
+            max_distance_meters=base_radius_meters,
+            limit=limit,
+            location_label=location_label,
+            mode=mode,
+        )
+        if results:
+            outcome['results'] = results
+            return outcome
+
+        inner = float(base_radius_meters)
+        for outer in self.PURCHASE_EXPANSION_RADII_M:
+            if outer <= inner:
+                continue
+            results = self.search_purchase_candidates(
+                query=query,
+                max_distance_meters=outer,
+                min_distance_meters=inner,
+                limit=limit,
+                location_label=location_label,
+                mode=mode,
+            )
+            outcome['searched_radius_meters'] = outer
+            if results:
+                zones = [self.purchase_places.get(str(p.get('id')), {}).get('zone') for p in results]
+                distances = [p.get('distance_meters') for p in results if p.get('distance_meters') is not None]
+                nearest_idx = min(
+                    range(len(results)),
+                    key=lambda i: results[i].get('distance_meters') if results[i].get('distance_meters') is not None else float('inf'),
+                )
+                outcome.update({
+                    'results': results,
+                    'expanded': True,
+                    'zones_by_item': {str(p.get('id')): zone for p, zone in zip(results, zones)},
+                    'found_zone': zones[nearest_idx],
+                    'nearest_distance_meters': min(distances) if distances else None,
+                })
+                return outcome
+            inner = outer
+
+        return outcome
 
     def resolve_shopping_list(
         self,
