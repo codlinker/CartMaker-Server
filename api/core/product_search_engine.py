@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 import hashlib
 import math
+import re
 import statistics
 from django.utils import timezone
 from django.contrib.gis.geos import Point
@@ -15,7 +16,13 @@ from django.contrib.gis.measure import D
 from django.db.models.expressions import RawSQL
 from django.core.cache import cache
 from api.models import *
-from api.core.ve_commerce_lexicon import expand_search_variants, significant_tokens
+from api.core.ve_commerce_lexicon import (
+    expand_search_variants,
+    significant_tokens,
+    is_short_term,
+    word_boundary_regex,
+    lexical_match,
+)
 
 class ProductSearchEngine:
     """
@@ -612,15 +619,27 @@ class ProductSearchEngine:
         variants = expand_search_variants(query)
         text_q = Q()
         for variant in variants:
-            if len(variant) < 2:
+            clean_variant = variant.strip()
+            if len(clean_variant) < 2:
                 continue
-            text_q |= (
-                Q(product__name__icontains=variant)
-                | Q(product__description__icontains=variant)
-                | Q(product__category__name__icontains=variant)
-                | Q(store__company__name__icontains=variant)
-                | Q(store__name__icontains=variant)
-            )
+            if is_short_term(clean_variant):
+                # Términos cortos: solo palabra aislada (evita 'res' -> 'refresco').
+                pattern = word_boundary_regex(clean_variant)
+                text_q |= (
+                    Q(product__name__iregex=pattern)
+                    | Q(product__description__iregex=pattern)
+                    | Q(product__category__name__iregex=pattern)
+                    | Q(store__company__name__iregex=pattern)
+                    | Q(store__name__iregex=pattern)
+                )
+            else:
+                text_q |= (
+                    Q(product__name__icontains=clean_variant)
+                    | Q(product__description__icontains=clean_variant)
+                    | Q(product__category__name__icontains=clean_variant)
+                    | Q(store__company__name__icontains=clean_variant)
+                    | Q(store__name__icontains=clean_variant)
+                )
 
         short_query = str(query).strip()[:80]
         # Coalesce previene errores si description es NULL
@@ -631,7 +650,11 @@ class ProductSearchEngine:
             match_sim=Greatest(F('name_sim'), F('desc_sim'))
         )
 
-        if text_q:
+        if text_q and is_short_term(short_query):
+            # La similitud trigram de queries cortas ('res' ~ 'refresco') reintroduce
+            # los falsos positivos: aquí solo cuenta la coincidencia léxica por palabra.
+            queryset = queryset.filter(text_q)
+        elif text_q:
             queryset = queryset.filter(text_q | Q(match_sim__gte=0.18))
         else:
             queryset = queryset.filter(match_sim__gte=0.22)
@@ -647,10 +670,43 @@ class ProductSearchEngine:
             return {'price': 0.18, 'distance': 0.22, 'rating': 0.38, 'offer': 0.06, 'open': 0.06, 'platinum': 0.10}
         return {'price': 0.32, 'distance': 0.32, 'rating': 0.18, 'offer': 0.08, 'open': 0.06, 'platinum': 0.04}
 
+    # Multiplicador severo para ítems sin ninguna coincidencia léxica ni trigram.
+    PURCHASE_IRRELEVANT_PENALTY = 0.05
+
+    def _purchase_payload_is_relevant(self, payload: dict, variants_cache: dict) -> bool:
+        """
+        Compuerta de relevancia. Relevante si hay similitud trigram (match_sim > 0)
+        o coincidencia léxica directa con el query original o sus sinónimos.
+        Los registros ligeros ya traen 'lexical_match' precalculado; los payloads
+        completos (p. ej. alternativas de resolve_shopping_list) se evalúan aquí.
+        """
+        if float(payload.get('match_sim') or 0.0) > 0.0:
+            return True
+        if 'lexical_match' in payload:
+            return bool(payload['lexical_match'])
+
+        query = (payload.get('match_query') or '').strip()
+        if not query:
+            return True
+        if query not in variants_cache:
+            variants_cache[query] = expand_search_variants(query)
+
+        product = payload.get('product') or {}
+        category = product.get('category') or {}
+        texts = [
+            product.get('name'),
+            product.get('description'),
+            category.get('name'),
+            payload.get('company_name'),
+            payload.get('store_name'),
+        ]
+        return lexical_match(texts, variants_cache[query])
+
     def _score_purchase_payloads(self, payloads: list, mode: str = 'best') -> list:
         if not payloads:
             return []
 
+        variants_cache = {}
         prices = [p.get('effective_price') for p in payloads if p.get('effective_price') is not None]
         dists = [p.get('distance_meters') for p in payloads if p.get('distance_meters') is not None]
         median_price = statistics.median(prices) if prices else 1.0
@@ -692,7 +748,14 @@ class ProductSearchEngine:
                 + weights['open'] * open_score
                 + weights['platinum'] * platinum_score
             )
-            payload['purchase_score'] = round(raw * (0.82 + min(match_sim, 0.5) * 0.36), 4)
+            score = raw * (0.82 + min(match_sim, 0.5) * 0.36)
+            is_relevant = self._purchase_payload_is_relevant(payload, variants_cache)
+            if not is_relevant:
+                # La relevancia es una compuerta: un ítem barato pero sin relación
+                # con lo buscado jamás debe superar a un resultado pertinente.
+                score *= self.PURCHASE_IRRELEVANT_PENALTY
+            payload['purchase_score'] = round(score, 4)
+            payload['_is_relevant'] = is_relevant
             
             # 💡 AQUÍ PASAMOS LA VERDAD REAL A LA TRÍADA, NADA DE BAYES DISFRAZADO
             payload['triad'] = {
@@ -706,7 +769,12 @@ class ProductSearchEngine:
                 'open_now': bool(payload.get('is_open_now')),
                 'platinum': bool(payload.get('is_platinum')),
             }
-        payloads.sort(key=lambda p: p.get('purchase_score', 0), reverse=True)
+        payloads.sort(
+            key=lambda p: (bool(p.get('_is_relevant', True)), p.get('purchase_score', 0)),
+            reverse=True,
+        )
+        for payload in payloads:
+            payload.pop('_is_relevant', None)
         return payloads
 
     def _diversify_purchase_results(self, payloads: list, limit: int, max_per_company: int = 2) -> list:
@@ -740,6 +808,50 @@ class ProductSearchEngine:
             payload['effective_price'] = item.get_effective_price()
         return payload
 
+    def _build_purchase_light_record(self, item, variants: list) -> dict:
+        """
+        Registro liviano (dict en memoria) con solo los campos que consumen
+        _score_purchase_payloads y _diversify_purchase_results. Requiere que el
+        item venga con select_related completo para no disparar queries lazy.
+        """
+        product = item.product
+        store = item.store
+        company = store.company
+        category = product.category
+        offer = item._active_offer()
+
+        if variants:
+            matches_lexically = lexical_match(
+                [
+                    product.name,
+                    product.description,
+                    category.name if category else None,
+                    company.name,
+                    store.name,
+                ],
+                variants,
+            )
+        else:
+            matches_lexically = True
+
+        return {
+            '_item': item,
+            'id': str(item.id),
+            'effective_price': item.get_effective_price(),
+            'distance_meters': item._distance_meters_value(),
+            'avg_rating': round(float(getattr(item, 'avg_rating', 0.0) or 0.0), 2),
+            'rating_count': int(getattr(item, 'rating_count', 0) or 0),
+            'merchant_avg_rating': round(float(getattr(item, 'merchant_avg_rating', 0.0) or 0.0), 2),
+            'merchant_rating_count': int(getattr(item, 'merchant_rating_count', 0) or 0),
+            'offer_percentage': int(offer.percentage) if offer else 0,
+            'is_open_now': store.is_currently_open,
+            'is_platinum': bool(getattr(company, 'is_platinum', False)),
+            'match_sim': float(getattr(item, 'match_sim', 0.0) or 0.0),
+            'lexical_match': matches_lexically,
+            'company_name': company.name,
+            'product': {'company_id': product.company_id},
+        }
+
     def search_purchase_candidates(
         self,
         query: str,
@@ -752,7 +864,16 @@ class ProductSearchEngine:
         qs = self._get_base_active_queryset()
         qs = self._annotate_proximity_flag(qs)
         qs = self._annotate_merchant_rating(qs)
-        qs = qs.select_related('store__location', 'store__company')
+        # Un solo JOIN para todo lo que get_json()/is_currently_open/effective_work_* tocan.
+        qs = qs.select_related(
+            'product',
+            'product__category',
+            'product__company',
+            'store',
+            'store__location',
+            'store__company',
+            'store__company__owner__subscription__plan',
+        )
         qs = qs.filter(
             store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters))
         )
@@ -765,6 +886,10 @@ class ProductSearchEngine:
         else:
             qs = qs.order_by('real_distance_meters', 'effective_price')
 
+        query_text = (query or '').strip()
+        variants = expand_search_variants(query_text) if query_text else []
+
+        # Pool ligero: solo los valores necesarios para el score, sin get_json().
         pool = []
         seen = set()
         for item in qs[:70]:
@@ -772,10 +897,19 @@ class ProductSearchEngine:
             if item_id in seen:
                 continue
             seen.add(item_id)
-            pool.append(self._serialize_purchase_item(item, location_label, query))
+            pool.append(self._build_purchase_light_record(item, variants))
 
         scored = self._score_purchase_payloads(pool, mode=mode)
-        return self._diversify_purchase_results(scored, limit=limit, max_per_company=2)
+        finalists = self._diversify_purchase_results(scored, limit=limit, max_per_company=2)
+
+        # Solo los finalistas pagan el costo de la serialización completa.
+        results = []
+        for light in finalists:
+            payload = self._serialize_purchase_item(light['_item'], location_label, query)
+            payload['purchase_score'] = light['purchase_score']
+            payload['triad'] = light['triad']
+            results.append(payload)
+        return results
 
     def resolve_shopping_list(
         self,

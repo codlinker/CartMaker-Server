@@ -188,3 +188,39 @@ def expand_search_variants(query: str) -> List[str]:
 
 def significant_tokens(query: str) -> List[str]:
     return [tok for tok in tokenize_query(query) if len(tok) >= 3]
+
+
+# Términos de esta longitud o menos ('res', 'pan', 'sal', 'gas', 'te') solo
+# deben coincidir como palabra aislada, nunca como subcadena ('refresco', 'empanada', 'salsa').
+SHORT_TERM_MAX_LEN = 4
+
+
+def is_short_term(term: str) -> bool:
+    """True si el término es lo bastante corto como para exigir límite de palabra."""
+    return len((term or '').strip()) <= SHORT_TERM_MAX_LEN
+
+
+def word_boundary_regex(term: str) -> str:
+    """Regex POSIX (PostgreSQL ARE) con límite de palabra `\\y` para usar con `__iregex`."""
+    return r'\y' + re.escape((term or '').strip()) + r'\y'
+
+
+def lexical_match(texts: Iterable[str], variants: Iterable[str]) -> bool:
+    """
+    Coincidencia léxica directa en memoria, espejo del filtro SQL:
+    variantes cortas -> palabra aislada; variantes largas -> subcadena.
+    """
+    folded_texts = [_fold(text) for text in texts if text]
+    if not folded_texts:
+        return False
+    for variant in variants:
+        folded_variant = _fold(variant)
+        if len(folded_variant) < 2:
+            continue
+        if is_short_term(folded_variant):
+            pattern = re.compile(r'\b' + re.escape(folded_variant) + r'\b')
+            if any(pattern.search(text) for text in folded_texts):
+                return True
+        elif any(folded_variant in text for text in folded_texts):
+            return True
+    return False

@@ -984,15 +984,20 @@ class Product(models.Model):
         images = []
         for img_url in self.images:
             images.append(storage_manager.get_url(img_url))
+        category = self.category
+        if category is None:
+            category_data = {"id": None, "name": "General"}
+        else:
+            category_data = {
+                'id': self.category_id,
+                'name': category.name
+            }
         data = {
             "id":str(self.id),
             "name":self.name,
             "price":float(self.price),
             "creation":timezone.localtime(self.creation),
-            "category":{
-                'id':self.category_id,
-                'name':self.category.name
-            },
+            "category":category_data,
             "description":self.description,
             "discounts_by_tokens_active":self.discounts_by_tokens_active if self.company.gamification_enabled else False,
             "discounts_data":self.discounts_data,
