@@ -21,6 +21,7 @@ from api.core.ve_commerce_lexicon import (
     significant_tokens,
     is_short_term,
     word_boundary_regex,
+    substring_regex,
     lexical_match,
 )
 from api.core.ve_geo import describe_zone
@@ -638,12 +639,14 @@ class ProductSearchEngine:
                     | Q(store__name__iregex=pattern)
                 )
             else:
+                # Subcadena sin distinguir tildes ('camara' encuentra 'Cámara Digital').
+                pattern = substring_regex(clean_variant)
                 text_q |= (
-                    Q(product__name__icontains=clean_variant)
-                    | Q(product__description__icontains=clean_variant)
-                    | Q(product__category__name__icontains=clean_variant)
-                    | Q(store__company__name__icontains=clean_variant)
-                    | Q(store__name__icontains=clean_variant)
+                    Q(product__name__iregex=pattern)
+                    | Q(product__description__iregex=pattern)
+                    | Q(product__category__name__iregex=pattern)
+                    | Q(store__company__name__iregex=pattern)
+                    | Q(store__name__iregex=pattern)
                 )
 
         short_query = str(query).strip()[:80]

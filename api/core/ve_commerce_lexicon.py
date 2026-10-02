@@ -107,6 +107,10 @@ SYNONYM_GROUPS: List[List[str]] = [
     ['telefono', 'teléfono', 'celular', 'movil', 'móvil'],
     ['cargador', 'cable usb'],
     ['audifonos', 'audífonos', 'cornetas', 'auriculares'],
+    # Tecnología
+    ['camara', 'cámara', 'camaras', 'cámaras', 'camara fotografica', 'cámara fotográfica', 'camara digital', 'cámara digital'],
+    ['laptop', 'laptops', 'portatil', 'portátil', 'computadora portatil', 'computadora portátil'],
+    ['television', 'televisión', 'tv', 'televisor', 'smart tv'],
     # Salud y bienestar
     ['acetaminofen', 'acetaminofén', 'paracetamol', 'analgesico', 'analgésico', 'atamel'],
     ['jarabe', 'jarabe para la tos', 'antigripal', 'antigripales'],
@@ -244,9 +248,29 @@ def is_short_term(term: str) -> bool:
     return len((term or '').strip()) <= SHORT_TERM_MAX_LEN
 
 
+_ACCENT_CLASSES = {
+    'a': '[aáàä]', 'e': '[eéèë]', 'i': '[iíìï]', 'o': '[oóòö]', 'u': '[uúùü]', 'n': '[nñ]',
+}
+
+
+def accent_insensitive_pattern(term: str) -> str:
+    """
+    Patrón POSIX que ignora tildes: 'camara' y 'cámara' casan con 'Cámara' o 'Camara'.
+    Necesario porque `icontains` de PostgreSQL distingue acentos y los usuarios (y el
+    LLM) escriben sin ellos.
+    """
+    folded = _fold((term or '').strip())
+    return ''.join(_ACCENT_CLASSES.get(ch, re.escape(ch)) for ch in folded)
+
+
+def substring_regex(term: str) -> str:
+    """Regex (PostgreSQL ARE) de subcadena sin distinguir tildes, para `__iregex`."""
+    return accent_insensitive_pattern(term)
+
+
 def word_boundary_regex(term: str) -> str:
-    """Regex POSIX (PostgreSQL ARE) con límite de palabra `\\y` para usar con `__iregex`."""
-    return r'\y' + re.escape((term or '').strip()) + r'\y'
+    """Regex POSIX (PostgreSQL ARE) con límite de palabra `\\y`, sin distinguir tildes, para `__iregex`."""
+    return r'\y' + accent_insensitive_pattern(term) + r'\y'
 
 
 def lexical_match(texts: Iterable[str], variants: Iterable[str]) -> bool:

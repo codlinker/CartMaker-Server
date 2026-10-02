@@ -119,6 +119,18 @@ def _get_tools_schema() -> List[Dict[str, Any]]:
         {
             "type": "function",
             "function": {
+                "name": "responder_conversacion",
+                "description": (
+                    "Úsala SOLO para saludos, agradecimientos o preguntas sobre cómo funciona CartMaker/Atlas que NO "
+                    "requieren datos de productos, precios, tiendas, distancias ni reputación. "
+                    "Si el mensaje menciona cualquier cosa que se pueda comprar o una necesidad, NO uses esta herramienta: busca."
+                ),
+                "parameters": {"type": "object", "properties": {}, "required": []}
+            }
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "explorar_feed_personalizado",
                 "description": "Sugerencias abstractas basadas en el historial del usuario. Usar SOLO cuando no se pueda deducir ninguna necesidad concreta del mensaje (ej. 'sorpréndeme', 'qué me recomiendas'). Si hay una necesidad deducible ('tengo calor', 'tengo hambre'), usa 'buscar_productos_inventario' en su lugar.",
                 "parameters": {
@@ -148,7 +160,7 @@ class AtlasManager:
             }
         )
         
-        self.model_name = 'google/gemini-2.5-flash'
+        self.model_name = getattr(settings, 'ATLAS_MODEL', 'google/gemini-2.5-flash')
         self.user_lat = user_lat
         self.user_lng = user_lng
         self.user_locations = user_locations or []
@@ -231,6 +243,14 @@ class AtlasManager:
             - En los refinamientos ("más barato", "otro", "el más cerca") reutiliza el producto de la conversación y cambia solo el 'mode', sin preguntar.
             - Solo pregunta ANTES de buscar cuando es imposible deducir cualquier necesidad (ej. el usuario solo dijo "hola" o "ayúdame") o cuando falta un dato crítico y no negociable.
             - ESTRUCTURA de tu respuesta final (2-5 líneas): (1) una frase corta que muestre que entendiste su situación ("Con este calor, lo más rápido es..."), (2) la mejor opción con números reales (precio, distancia, abierto/cerrado), (3) una alternativa o complemento, (4) una frase corta para afinar ("si buscabas otra cosa, dime y lo cambio"). Nada de sermones ni listas largas.
+
+            # VERACIDAD (INNEGOCIABLE)
+            - TODO dato de producto, tienda, precio, distancia, reputación, estado abierto/cerrado o insignia Platinum debe salir del JSON que devolvió una herramienta EN ESTE MISMO TURNO. Los mensajes anteriores de la conversación pueden estar desactualizados: nunca los reutilices como fuente de datos.
+            - Si NO llamaste una herramienta en este turno, no puedes nombrar productos, tiendas, precios ni distancias. Llama la herramienta.
+            - Nunca digas que un comercio es Platinum salvo que el candidato lo marque como [Comercio Platinum]. Nunca digas "abierto" o "cerrado" sin que el candidato lo indique.
+            - Escribe los nombres de tiendas y productos EXACTAMENTE como vienen en el JSON. Prohibido traducirlos, abreviarlos o "corregirlos".
+            - Las distancias se copian tal cual del JSON (m o km). No las estimes.
+            - Solo menciona los productos que aparecen en el resultado de la herramienta: esos son los que el usuario verá como tarjetas para comprar. Si no hay resultados, dilo claramente y no ofrezcas productos inexistentes.
 
             # CENTROS COMERCIALES
             - Si un candidato trae "Ubicado en: Centro Comercial X, piso N", díselo al usuario con naturalidad y de forma útil: "Lo tienen en el Sambil Chacao, piso 2". Si no trae piso, di solo el centro comercial.
@@ -504,6 +524,37 @@ class AtlasManager:
             action_command=action_command
         )
 
+    @staticmethod
+    def _data_tools_schema() -> List[Dict[str, Any]]:
+        """Herramientas que consultan datos reales (todas menos la conversacional)."""
+        return [t for t in _get_tools_schema() if t["function"]["name"] != "responder_conversacion"]
+
+    _COMMERCE_CLAIM_PATTERN = re.compile(
+        r"(\$\s?\d)|(\b\d+(?:[.,]\d+)?\s?(?:km|kil[oó]metros?|metros)\b)|(\b\d+\s?m\b)|(platinum)|(abiert[oa]\s+(?:ahora|ahorita))",
+        re.IGNORECASE,
+    )
+
+    def _claims_commerce_data(self, text: Optional[str]) -> bool:
+        """True si el texto afirma precios, distancias, Platinum o estado abierto (datos que solo pueden venir de una herramienta)."""
+        return bool(text and self._COMMERCE_CLAIM_PATTERN.search(text))
+
+    async def _create_completion(self, history: list, thread_id: int, tools: list, tool_choice: str, temperature: float):
+        """Llama al LLM; si el proveedor rechaza tool_choice='required', degrada a 'auto'."""
+        kwargs = dict(
+            model=self.model_name,
+            messages=history,
+            tools=tools,
+            temperature=temperature,
+            extra_body={"session_id": f"cartmaker-atlas-thread-{thread_id}"},
+        )
+        try:
+            return await self.client.chat.completions.create(tool_choice=tool_choice, **kwargs)
+        except Exception as e:
+            if tool_choice == "required":
+                print(f"[ATLAS] tool_choice='required' no soportado, usando 'auto': {e}")
+                return await self.client.chat.completions.create(tool_choice="auto", **kwargs)
+            raise
+
     async def send_chat_message_async(self, thread_id: int, user_text: str, image_base64: str = None) -> Dict[str, Any]:
         try:
             history = await self._get_thread_history(thread_id)
@@ -525,193 +576,236 @@ class AtlasManager:
             else:
                 history.append({"role": "user", "content": user_text})
             
-            response = await self.client.chat.completions.create(
-                model=self.model_name,
-                messages=history,
-                tools=_get_tools_schema(),
-                tool_choice="auto",
-                temperature=0.2,
-                extra_body={"session_id": f"cartmaker-atlas-thread-{thread_id}"}
+            # 'required': el modelo DEBE elegir una herramienta (buscar o 'responder_conversacion'),
+            # así no puede inventar productos, tiendas o precios respondiendo "de memoria".
+            response = await self._create_completion(
+                history, thread_id, _get_tools_schema(), tool_choice="required", temperature=0.2
             )
             
             choice = response.choices[0]
             injected_products = []
             action_command = None
+            data_tool_used = False
 
-            while choice.message.tool_calls:
-                tool_calls = choice.message.tool_calls
-                history.append(choice.message)
+            for _attempt in range(2):
+                while choice.message.tool_calls:
+                    tool_calls = choice.message.tool_calls
+                    history.append(choice.message)
                 
-                for tool_call in tool_calls:
-                    fn_name = tool_call.function.name
-                    fn_args = json.loads(tool_call.function.arguments)
-                    tool_payload = {}
+                    for tool_call in tool_calls:
+                        fn_name = tool_call.function.name
+                        try:
+                            fn_args = json.loads(tool_call.function.arguments or "{}")
+                        except ValueError:
+                            fn_args = {}
+                        tool_payload = {}
+                        if fn_name != "responder_conversacion":
+                            data_tool_used = True
 
-                    # 1. Búsqueda Unitaria / Por Palabras
-                    if fn_name == "buscar_productos_inventario":
-                        db_res = await sync_to_async(self._execute_search)(fn_args)
+                        # 1. Búsqueda Unitaria / Por Palabras
+                        if fn_name == "buscar_productos_inventario":
+                            db_res = await sync_to_async(self._execute_search)(fn_args)
                         
-                        if db_res.get("type") == "results":
-                            items = db_res["data"]
-                            # Deduplicar e inyectar en la lista para Flutter
-                            existing_ids = {str(p.get('id')) for p in injected_products}
-                            for item in items:
-                                if str(item.get('id')) not in existing_ids:
-                                    injected_products.append(item)
-                                    existing_ids.add(str(item.get('id')))
+                            if db_res.get("type") == "results":
+                                items = db_res["data"]
+                                # Deduplicar e inyectar en la lista para Flutter
+                                existing_ids = {str(p.get('id')) for p in injected_products}
+                                for item in items:
+                                    if str(item.get('id')) not in existing_ids:
+                                        injected_products.append(item)
+                                        existing_ids.add(str(item.get('id')))
 
-                            # Formatear la Tríada exacta para el razonamiento de Gemini
-                            formatted_data = []
-                            for it in items:
-                                triad = it.get('triad', {})
-                                p_name = it.get('product', {}).get('name', 'Artículo')
-                                p_price = triad.get('price_usd', it.get('effective_price'))
-                                p_dist = triad.get('distance_m', it.get('distance_meters', 0))
-                                dist_label = f"{int(p_dist)} m" if p_dist < 1000 else f"{round(p_dist/1000, 1)} km"
-                                p_open = "ABIERTO AHORA" if triad.get('open_now') else "CERRADO"
-                                p_plat = " [Comercio Platinum 🏆]" if triad.get('platinum') else ""
-                                p_off = f" [Oferta: {triad.get('offer_pct')}% off]" if triad.get('offer_pct') else ""
+                                # Formatear la Tríada exacta para el razonamiento de Gemini
+                                formatted_data = []
+                                for it in items:
+                                    triad = it.get('triad', {})
+                                    p_name = it.get('product', {}).get('name', 'Artículo')
+                                    p_price = triad.get('price_usd', it.get('effective_price'))
+                                    p_dist = triad.get('distance_m', it.get('distance_meters', 0))
+                                    dist_label = f"{int(p_dist)} m" if p_dist < 1000 else f"{round(p_dist/1000, 1)} km"
+                                    p_open = "ABIERTO AHORA" if triad.get('open_now') else "CERRADO"
+                                    p_plat = " [Comercio Platinum 🏆]" if triad.get('platinum') else ""
+                                    p_off = f" [Oferta: {triad.get('offer_pct')}% off]" if triad.get('offer_pct') else ""
                                 
-                                m_rating = triad.get('merchant_rating', 0.0)
-                                m_count = triad.get('merchant_reviews_count', 0)
-                                p_rating = triad.get('product_rating', 0.0)
-                                p_count = triad.get('product_reviews_count', 0)
+                                    m_rating = triad.get('merchant_rating', 0.0)
+                                    m_count = triad.get('merchant_reviews_count', 0)
+                                    p_rating = triad.get('product_rating', 0.0)
+                                    p_count = triad.get('product_reviews_count', 0)
 
-                                # Etiqueta transparente para que Gemini sepa exactamente qué decir
-                                if m_count > 0:
-                                    rep_label = f"Reputación Tienda: {m_rating} de 5 estrellas ({m_count} opinión{'es' if m_count > 1 else ''})"
-                                else:
-                                    rep_label = "Reputación Tienda: Comercio nuevo (aún sin calificaciones registradas)"
+                                    # Etiqueta transparente para que Gemini sepa exactamente qué decir
+                                    if m_count > 0:
+                                        rep_label = f"Reputación Tienda: {m_rating} de 5 estrellas ({m_count} opinión{'es' if m_count > 1 else ''})"
+                                    else:
+                                        rep_label = "Reputación Tienda: Comercio nuevo (aún sin calificaciones registradas)"
 
-                                if p_count > 0:
-                                    rep_label += f" | Calificación del producto: {p_rating}★ ({p_count})"
+                                    if p_count > 0:
+                                        rep_label += f" | Calificación del producto: {p_rating}★ ({p_count})"
 
-                                formatted_data.append(
-                                    f"• [{p_name}] a ${p_price}{p_off} en '{it.get('store_name')}' ({it.get('company_name')}{p_plat}) | "
-                                    f"Distancia: {dist_label} de {it.get('nearest_saved_location_name')} | "
-                                    f"{rep_label} | Estado: {p_open}"
-                                )
-                            places = db_res.get("places", {})
-                            for idx, it in enumerate(items):
-                                mall_label = self._format_mall_label(places.get(str(it.get('id'))))
-                                if mall_label:
-                                    formatted_data[idx] += f" | Ubicado en: {mall_label}"
-                            tool_payload = {"status": "success", "candidatos_reales": formatted_data}
-
-                            expansion = db_res.get("expansion")
-                            if expansion:
-                                zones_by_item = expansion.get("zones_by_item", {})
+                                    formatted_data.append(
+                                        f"• [{p_name}] a ${p_price}{p_off} en '{it.get('store_name')}' ({it.get('company_name')}{p_plat}) | "
+                                        f"Distancia: {dist_label} de {it.get('nearest_saved_location_name')} | "
+                                        f"{rep_label} | Estado: {p_open}"
+                                    )
+                                places = db_res.get("places", {})
                                 for idx, it in enumerate(items):
-                                    zone = zones_by_item.get(str(it.get('id')))
-                                    if zone:
-                                        formatted_data[idx] += f" | Zona del comercio: {zone}"
-                                nearest_m = expansion.get("nearest_distance_meters")
-                                nearest_label = (
-                                    f"{round(nearest_m / 1000, 1)} km" if nearest_m is not None else "desconocida"
-                                )
-                                tool_payload["busqueda_expandida"] = {
-                                    "zona_del_usuario": expansion.get("origin_zone"),
-                                    "zona_donde_se_encontro": expansion.get("found_zone"),
-                                    "distancia_al_mas_cercano": nearest_label,
-                                    "radio_inicial_sin_resultados_km": round(expansion.get("base_radius_meters", 0) / 1000, 1),
-                                    "instruccion": (
-                                        f"NO había existencias de '{fn_args.get('query')}' en {expansion.get('origin_zone')} "
-                                        f"ni en un radio de {round(expansion.get('base_radius_meters', 0) / 1000)} km. "
-                                        "Díselo al usuario de forma natural y breve, indica que lo más cercano que "
-                                        f"encontraste fue en {expansion.get('found_zone')} (a {nearest_label}), "
-                                        "y presenta los productos. Menciona que queda más lejos de lo habitual."
-                                    ),
+                                    mall_label = self._format_mall_label(places.get(str(it.get('id'))))
+                                    if mall_label:
+                                        formatted_data[idx] += f" | Ubicado en: {mall_label}"
+                                tool_payload = {"status": "success", "candidatos_reales": formatted_data}
+
+                                expansion = db_res.get("expansion")
+                                if expansion:
+                                    zones_by_item = expansion.get("zones_by_item", {})
+                                    for idx, it in enumerate(items):
+                                        zone = zones_by_item.get(str(it.get('id')))
+                                        if zone:
+                                            formatted_data[idx] += f" | Zona del comercio: {zone}"
+                                    nearest_m = expansion.get("nearest_distance_meters")
+                                    nearest_label = (
+                                        f"{round(nearest_m / 1000, 1)} km" if nearest_m is not None else "desconocida"
+                                    )
+                                    tool_payload["busqueda_expandida"] = {
+                                        "zona_del_usuario": expansion.get("origin_zone"),
+                                        "zona_donde_se_encontro": expansion.get("found_zone"),
+                                        "distancia_al_mas_cercano": nearest_label,
+                                        "radio_inicial_sin_resultados_km": round(expansion.get("base_radius_meters", 0) / 1000, 1),
+                                        "instruccion": (
+                                            f"NO había existencias de '{fn_args.get('query')}' en {expansion.get('origin_zone')} "
+                                            f"ni en un radio de {round(expansion.get('base_radius_meters', 0) / 1000)} km. "
+                                            "Díselo al usuario de forma natural y breve, indica que lo más cercano que "
+                                            f"encontraste fue en {expansion.get('found_zone')} (a {nearest_label}), "
+                                            "y presenta los productos. Menciona que queda más lejos de lo habitual."
+                                        ),
+                                    }
+
+                            elif db_res.get("type") == "ask_confirmation":
+                                action_command = {
+                                    "action": "ASK_ZONE_CONFIRMATION",
+                                    "query_to_search": db_res.get("query"),
+                                    "zonas": db_res.get("zonas")
                                 }
+                                tool_payload = {"status": "not_found", "message": db_res.get("message")}
+                            else:
+                                tool_payload = {"status": "not_found", "message": db_res.get("message")}
 
-                        elif db_res.get("type") == "ask_confirmation":
-                            action_command = {
-                                "action": "ASK_ZONE_CONFIRMATION",
-                                "query_to_search": db_res.get("query"),
-                                "zonas": db_res.get("zonas")
-                            }
-                            tool_payload = {"status": "not_found", "message": db_res.get("message")}
-                        else:
-                            tool_payload = {"status": "not_found", "message": db_res.get("message")}
-
-                    # 2. Armar Receta o Lista de Compras
-                    elif fn_name == "armar_lista_o_receta":
-                        plan = await sync_to_async(self._execute_shopping_list)(fn_args)
+                        # 2. Armar Receta o Lista de Compras
+                        elif fn_name == "armar_lista_o_receta":
+                            plan = await sync_to_async(self._execute_shopping_list)(fn_args)
                         
-                        # Inyectamos los productos encontrados a las tarjetas de Flutter
-                        for item in plan.get('injected', []):
-                            if str(item.get('id')) not in {str(p.get('id')) for p in injected_products}:
-                                injected_products.append(item)
+                            # Inyectamos los productos encontrados a las tarjetas de Flutter
+                            for item in plan.get('injected', []):
+                                if str(item.get('id')) not in {str(p.get('id')) for p in injected_products}:
+                                    injected_products.append(item)
 
-                        # Formato claro del plan conjunto para Gemini
-                        store_info = plan.get('primary_store')
-                        summary = {
-                            "comercio_principal": store_info.get('store_name') if store_info else "No hubo tienda única",
-                            "ingredientes_en_comercio_principal": f"{store_info.get('items_in_store', 0)} de {store_info.get('needs_total', 0)}" if store_info else "0",
-                            "distancia_comercio_principal_m": store_info.get('distance_meters') if store_info else None,
-                            "completados_en_otras_tiendas": plan.get('filled_elsewhere', []),
-                            "ingredientes_sin_stock": plan.get('missing_queries', []),
-                            "total_estimado_usd": plan.get('estimated_total_usd', 0.0)
-                        }
-
-                        # Centros comerciales de los artículos encontrados (solo los que están en uno)
-                        plan_places = plan.get('places', {})
-                        primary_store_id = str(store_info.get('store_id')) if store_info else None
-                        malls_in_plan = []
-                        for found in plan.get('found', []):
-                            mall_label = self._format_mall_label(plan_places.get(str(found.get('id'))))
-                            if not mall_label:
-                                continue
-                            entry = {
-                                "producto": found.get('product', {}).get('name'),
-                                "tienda": found.get('store_name'),
-                                "ubicado_en": mall_label,
+                            # Formato claro del plan conjunto para Gemini
+                            store_info = plan.get('primary_store')
+                            summary = {
+                                "comercio_principal": store_info.get('store_name') if store_info else "No hubo tienda única",
+                                "ingredientes_en_comercio_principal": f"{store_info.get('items_in_store', 0)} de {store_info.get('needs_total', 0)}" if store_info else "0",
+                                "distancia_comercio_principal_m": store_info.get('distance_meters') if store_info else None,
+                                "completados_en_otras_tiendas": plan.get('filled_elsewhere', []),
+                                "ingredientes_sin_stock": plan.get('missing_queries', []),
+                                "total_estimado_usd": plan.get('estimated_total_usd', 0.0)
                             }
-                            malls_in_plan.append(entry)
-                            if primary_store_id and str(found.get('store_id')) == primary_store_id:
-                                summary["comercio_principal_ubicado_en"] = mall_label
-                        if malls_in_plan:
-                            summary["articulos_en_centros_comerciales"] = malls_in_plan
-                        tool_payload = {"status": "success", "plan_de_compra": summary}
 
-                    # 3. Feed Personalizado
-                    elif fn_name == "explorar_feed_personalizado":
-                        db_products = await sync_to_async(self._execute_personalized_feed)(fn_args)
-                        for p in db_products:
-                            if str(p.get('id')) not in {str(x.get('id')) for x in injected_products}:
-                                injected_products.append(p)
-                        tool_payload = {
-                            "status": "success" if db_products else "not_found",
-                            "data": [f"{p.get('product',{}).get('name')} a ${p.get('effective_price', p.get('custom_price'))} en {p.get('company_name')}" for p in db_products]
-                        }
+                            # Centros comerciales de los artículos encontrados (solo los que están en uno)
+                            plan_places = plan.get('places', {})
+                            primary_store_id = str(store_info.get('store_id')) if store_info else None
+                            malls_in_plan = []
+                            for found in plan.get('found', []):
+                                mall_label = self._format_mall_label(plan_places.get(str(found.get('id'))))
+                                if not mall_label:
+                                    continue
+                                entry = {
+                                    "producto": found.get('product', {}).get('name'),
+                                    "tienda": found.get('store_name'),
+                                    "ubicado_en": mall_label,
+                                }
+                                malls_in_plan.append(entry)
+                                if primary_store_id and str(found.get('store_id')) == primary_store_id:
+                                    summary["comercio_principal_ubicado_en"] = mall_label
+                            if malls_in_plan:
+                                summary["articulos_en_centros_comerciales"] = malls_in_plan
+                            tool_payload = {"status": "success", "plan_de_compra": summary}
 
-                    # 4. Sugerencias Cruzadas
-                    elif fn_name == "sugerir_productos_relacionados":
-                        db_recs = await sync_to_async(self._execute_recommendations)(fn_args)
-                        for p in db_recs:
-                            if str(p.get('id')) not in {str(x.get('id')) for x in injected_products}:
-                                injected_products.append(p)
-                        tool_payload = {
-                            "status": "success" if db_recs else "not_found",
-                            "data": [f"{p.get('product',{}).get('name')} a ${p.get('custom_price', 0)} en {p.get('company_name')}" for p in db_recs]
-                        }
+                        # 3. Feed Personalizado
+                        elif fn_name == "explorar_feed_personalizado":
+                            db_products = await sync_to_async(self._execute_personalized_feed)(fn_args)
+                            for p in db_products:
+                                if str(p.get('id')) not in {str(x.get('id')) for x in injected_products}:
+                                    injected_products.append(p)
+                            tool_payload = {
+                                "status": "success" if db_products else "not_found",
+                                "data": [f"{p.get('product',{}).get('name')} a ${p.get('effective_price', p.get('custom_price'))} en {p.get('company_name')}" for p in db_products]
+                            }
 
-                    history.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "name": fn_name,
-                        "content": json.dumps(tool_payload)
-                    })
+                        # 3.5 Conversación sin datos de comercio
+                        elif fn_name == "responder_conversacion":
+                            tool_payload = {
+                                "status": "ok",
+                                "instruccion": (
+                                    "Responde de forma breve y cálida SIN mencionar productos, tiendas, precios, "
+                                    "distancias ni reputación. Si el usuario en realidad necesita algo, invítalo a decirte qué busca."
+                                ),
+                            }
 
-                response = await self.client.chat.completions.create(
-                    model=self.model_name,
-                    messages=history,
-                    tools=_get_tools_schema(),
-                    temperature=0.4,
-                    extra_body={"session_id": f"cartmaker-atlas-thread-{thread_id}"}
+                        # 4. Sugerencias Cruzadas
+                        elif fn_name == "sugerir_productos_relacionados":
+                            db_recs = await sync_to_async(self._execute_recommendations)(fn_args)
+                            for p in db_recs:
+                                if str(p.get('id')) not in {str(x.get('id')) for x in injected_products}:
+                                    injected_products.append(p)
+                            tool_payload = {
+                                "status": "success" if db_recs else "not_found",
+                                "data": [f"{p.get('product',{}).get('name')} a ${p.get('custom_price', 0)} en {p.get('company_name')}" for p in db_recs]
+                            }
+
+                        print(f"[ATLAS TOOL] {fn_name}({fn_args}) -> {tool_payload.get('status')} | cards_acumuladas={len(injected_products)}")
+                        history.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "name": fn_name,
+                            "content": json.dumps(tool_payload)
+                        })
+
+                    response = await self.client.chat.completions.create(
+                        model=self.model_name,
+                        messages=history,
+                        tools=_get_tools_schema(),
+                        temperature=0.4,
+                        extra_body={"session_id": f"cartmaker-atlas-thread-{thread_id}"}
+                    )
+                    choice = response.choices[0]
+                if (
+                    data_tool_used
+                    or _attempt == 1
+                    or not self._claims_commerce_data(choice.message.content)
+                ):
+                    break
+
+                # Guardia anti-alucinación: afirmó datos de comercio sin consultar nada.
+                print(f"[ATLAS GUARD] Respuesta con datos sin herramienta; reintentando con búsqueda obligatoria. Texto: {choice.message.content[:200]}")
+                history.append({
+                    "role": "system",
+                    "content": (
+                        "CORRECCIÓN: tu borrador mencionaba productos, precios, distancias o tiendas sin haber consultado "
+                        "ninguna herramienta en este turno. Descártalo. Consulta ahora la herramienta adecuada con el "
+                        "pedido del usuario y responde SOLO con los datos que devuelva."
+                    ),
+                })
+                response = await self._create_completion(
+                    history, thread_id, self._data_tools_schema(), tool_choice="required", temperature=0.2
                 )
                 choice = response.choices[0]
 
+
             ai_final_text = choice.message.content
+            if not data_tool_used and self._claims_commerce_data(ai_final_text):
+                print(f"[ATLAS GUARD] Respuesta descartada por datos sin respaldo: {ai_final_text[:200]}")
+                ai_final_text = (
+                    "Ahorita no pude consultar el inventario para darte datos confiables. "
+                    "¿Me repites lo que buscas para intentarlo de nuevo?"
+                )
             p_ids = [str(p['id']) for p in injected_products if 'id' in p]
             saved_msg = await self._save_message(thread_id, self.ORIGIN_AI, ai_final_text, p_ids, action_command)
 
