@@ -107,6 +107,50 @@ SYNONYM_GROUPS: List[List[str]] = [
     ['telefono', 'teléfono', 'celular', 'movil', 'móvil'],
     ['cargador', 'cable usb'],
     ['audifonos', 'audífonos', 'cornetas', 'auriculares'],
+    # Salud y bienestar
+    ['acetaminofen', 'acetaminofén', 'paracetamol', 'analgesico', 'analgésico', 'atamel'],
+    ['jarabe', 'jarabe para la tos', 'antigripal', 'antigripales'],
+    ['vitamina', 'vitaminas', 'vitamina c', 'multivitaminico', 'multivitamínico'],
+    ['curita', 'curitas', 'tirita', 'banda adhesiva'],
+    ['alcohol', 'alcohol isopropilico', 'alcohol isopropílico'],
+    ['protector solar', 'bloqueador solar', 'bronceador'],
+    ['desodorante', 'desodorantes'],
+    ['shampoo', 'champu', 'champú'],
+    # Emergencias del hogar y ferretería
+    ['vela', 'velas', 'candela'],
+    ['linterna', 'linternas', 'lampara', 'lámpara'],
+    ['pila', 'pilas'],
+    ['bombillo', 'bombillos', 'bombilla', 'foco'],
+    ['extension', 'extensión', 'regleta', 'multitoma'],
+    ['cinta aislante', 'teipe', 'tape'],
+    ['tornillo', 'tornillos', 'clavo', 'clavos'],
+    # Automotriz
+    ['aceite de motor', 'aceite 20w50', 'lubricante', 'lubricante de motor'],
+    ['caucho', 'cauchos', 'neumatico', 'neumático'],
+    ['bateria de carro', 'batería de carro', 'acumulador'],
+    # Mascotas
+    ['alimento para perro', 'perrarina', 'concentrado para perro'],
+    ['alimento para gato', 'gatarina', 'concentrado para gato'],
+    ['arena para gato', 'arena sanitaria'],
+    # Bebés
+    ['formula infantil', 'fórmula infantil', 'leche de formula', 'leche de fórmula'],
+    ['toallitas humedas', 'toallitas húmedas', 'wipes'],
+    ['biberon', 'biberón', 'tetero'],
+    # Fiestas y antojos
+    ['torta', 'pastel', 'bizcocho', 'ponque', 'ponqué'],
+    ['chocolate', 'chocolates', 'bombon', 'bombón'],
+    ['dulce', 'dulces', 'caramelo', 'caramelos'],
+    ['globo', 'globos', 'piñata', 'pinata'],
+    # Papelería, moda, hogar y tecnología
+    ['cuaderno', 'cuadernos', 'libreta'],
+    ['lapiz', 'lápiz', 'lapices', 'lápices', 'boligrafo', 'bolígrafo'],
+    ['mochila', 'morral'],
+    ['zapato', 'zapatos', 'calzado', 'zapatilla', 'zapatillas'],
+    ['franela', 'camiseta', 'camisa'],
+    ['colchon', 'colchón', 'colchoneta'],
+    ['sabanas', 'sábanas', 'juego de sabanas', 'juego de sábanas'],
+    ['toalla', 'toallas'],
+    ['forro', 'forros', 'protector de pantalla', 'vidrio templado'],
 ]
 
 
