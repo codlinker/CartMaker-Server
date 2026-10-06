@@ -198,8 +198,7 @@ class ProductSearchEngine:
             video_file__isnull=False,
             company__stores__is_main_store=True,
             company__stores__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters)),
-            company__owner__subscription__isnull=False,
-            company__owner__subscription__valid_until__gte=now
+            company__stores__is_active=True,
         ).distinct()
 
         # 2. Verificamos si el usuario ya vio el video usando el log de engagement
@@ -254,8 +253,6 @@ class ProductSearchEngine:
         ).filter(
             expires_at__gt=now,
             video_file__isnull=False,
-            company__owner__subscription__isnull=False,
-            company__owner__subscription__valid_until__gte=now
         )
         
         if self.user and self.user.is_authenticated:
@@ -429,7 +426,6 @@ class ProductSearchEngine:
         return top_5_category_ids
 
     def _get_base_active_queryset(self):
-        now = timezone.now()
         qs = InventoryItem.objects.select_related(
             'product',
             'product__category',
@@ -443,14 +439,6 @@ class ProductSearchEngine:
             paused=False,
             stock__gt=0,
             store__is_active=True,
-            store__company__owner__subscription__isnull=False,
-            store__company__owner__subscription__valid_until__gte=now
-        ).filter(
-            Q(store__company__owner__subscription__plan__company_branches=True) |
-            Q(
-                store__company__owner__subscription__plan__company_branches=False,
-                store__is_main_store=True
-            )
         )
 
         # 💡 LÓGICA MOVIDA AQUÍ: Disponible globalmente para todos los endpoints
@@ -470,13 +458,12 @@ class ProductSearchEngine:
                 is_viewed=Exists(is_viewed_subquery)
             )
             
-            # Filtro Anti-Auto-Compra
-            is_active_merchant = MerchantSubscription.objects.filter(
-                merchant=self.user,
-                valid_until__gte=now
-            ).exists()
-            
-            if is_active_merchant:
+            # Un comerciante con compañía no compra su propio inventario.
+            try:
+                self.user.company
+            except Company.DoesNotExist:
+                pass
+            else:
                 qs = qs.exclude(store__company__owner=self.user)
         else:
             qs = qs.annotate(
@@ -889,7 +876,6 @@ class ProductSearchEngine:
             'store__location',
             'store__location__mall',
             'store__company',
-            'store__company__owner__subscription__plan',
         )
         qs = qs.filter(
             store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters))

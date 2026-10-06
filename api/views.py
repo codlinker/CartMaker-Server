@@ -879,7 +879,6 @@ class UploadSubscriptionPayment(APIView):
         data = serializer.validated_data
         
         subscription_type = data['subscription_type']
-        subscription_id = data['subscription_id'] # ID del MerchantPlan o del SystemConfig
         dollar_bcv_tax = Decimal(str(data['dollar_bcv_tax']))
         monto_enviado_bs = Decimal(str(data['amount_sended']))
 
@@ -918,42 +917,11 @@ class UploadSubscriptionPayment(APIView):
             # Si la API del banco lo aprobó instantáneamente, se ejecutan las señales de activación de inmediato
             return Response({'payment_data': payment.get_json(), 'subscription_data': atlas_plan.get_json()}, status=status.HTTP_201_CREATED)
 
-        # =========================================================================
-        # CASO 2: SUSCRIPCIONES COMERCIANTE (Tu código existente integrado con la API del banco)
-        # =========================================================================
         elif subscription_type == 2:
-            try:
-                merchant_plan = MerchantPlan.objects.get(id=subscription_id)
-            except MerchantPlan.DoesNotExist:
-                return Response({'error': 'Plan no encontrado.'}, status=status.HTTP_400_BAD_REQUEST)
-                
-            merchant_subscription, _ = MerchantSubscription.objects.get_or_create(
-                merchant=request.user,
-                defaults={
-                    'merchant_type': MerchantType.BUSINESS if merchant_plan.requires_business else MerchantType.ENTREPRENEUR,
-                    'plan': merchant_plan
-                }
+            return Response(
+                {'error': 'Vender en CartMaker ya no requiere un plan de pago. Configura tu compañía para empezar.'},
+                status=status.HTTP_406_NOT_ACCEPTABLE,
             )
-
-            if MerchantPlanPayment.objects.filter(subscription=merchant_subscription, target_plan=merchant_plan, status=PaymentStatus.PENDING).exists():
-                return Response({'error': "Ya tienes un pago pendiente por verificación por este plan."}, status=status.HTTP_406_NOT_ACCEPTABLE)
-
-            file_obj = data['payment_proof']
-            extension = file_obj.name.split('.')[-1]
-            file_name = f"payment_proof_{merchant_subscription.id}_{timezone.now().strftime('%d-%m-%Y_%H-%M-%S')}.{extension}"
-            relative_path = storage_manager.save_file(file_obj, f"subscriptions/merchant_plans/{merchant_plan.name}", file_name)
-
-            payment = MerchantPlanPayment.objects.create(
-                subscription=merchant_subscription,
-                target_plan=merchant_plan,
-                reference_number=data['reference_number'],
-                payment_proof_url=relative_path,
-                amount=monto_enviado_bs,
-                bcv_taxes_to_day=dollar_bcv_tax,
-                status=PaymentStatus.APPROVED if bank_api_available else PaymentStatus.PENDING,
-                verified_at=timezone.now() if bank_api_available else None
-            )
-            return Response({'payment_data': payment.get_json(), 'subscription_data': merchant_subscription.get_json()}, status=status.HTTP_201_CREATED)
 
 
 class FullPaySubscriptionWithWalletView(APIView):
@@ -965,7 +933,12 @@ class FullPaySubscriptionWithWalletView(APIView):
         try:
             with transaction.atomic():
                 print("REQUEST DATA: ", request.data)
-                plan_id = request.data.get('plan_id')
+                plan_type = request.data.get('plan_type', 'merchant')
+                if plan_type != 'atlas':
+                    return Response({
+                        'success': False,
+                        'message': 'Vender en CartMaker ya no requiere un plan de pago. Configura tu compañía para empezar.'
+                    }, status=status.HTTP_406_NOT_ACCEPTABLE)
 
                 dollar_bcv_tax = 1.0
                 try:
@@ -982,170 +955,53 @@ class FullPaySubscriptionWithWalletView(APIView):
                     print(f"Error obteniendo el precio del dolar bcv: {e}")
                     return Response({'error':"No se pudo determinar la tasa del dolar."}, status=status.HTTP_423_LOCKED)
                 
-                # 1. Obtener el plan y crear la subscripcion u obtenerla si ya existe
-                merchant_plan = MerchantPlan.objects.only('price', 'name').get(id=plan_id)
-                try:
-                    merchant_subscription = MerchantSubscription.objects.select_related('plan').get(
-                        merchant=request.user
-                    )
-                except MerchantSubscription.DoesNotExist:
-                    merchant_subscription = MerchantSubscription(
-                        merchant=request.user,
-                        merchant_type=MerchantType.BUSINESS if merchant_plan.requires_business else MerchantType.ENTREPRENEUR,
-                        plan=merchant_plan
-                    )
-
-                plan_price_usd = Decimal(str(merchant_plan.price))
-
-                plan_type = request.data.get('plan_type', 'merchant')
                 wallet = UserWallet.objects.select_for_update().get(user=request.user)
 
-                if plan_type == 'atlas':
-                    config = SystemConfig.objects.latest('creation')
-                    atlas_plan = AtlasPlusPlan.objects.select_for_update().get(user=request.user)
-                    price_usd = config.atlas_plus_price_usd
-                    
-                    # Lógica de prorrateo para Atlas Plus si cambia/renueva antes de vencer
-                    if atlas_plan.tier == AtlasSubscriptionTier.PREMIUM and atlas_plan.valid_until and atlas_plan.valid_until > timezone.now():
-                        days_left = (atlas_plan.valid_until - timezone.now()).total_seconds() / 86400.0
-                        daily_rate = float(price_usd) / 30.0
-                        remanent_usd = Decimal(str(round(days_left * daily_rate, 2)))
-                        if remanent_usd > 0:
-                            wallet.regist_transaction(remanent_usd, 'atlas', "Reintegro por tiempo no consumido de Atlas Plus", 'add')
+                config = SystemConfig.objects.latest('creation')
+                atlas_plan = AtlasPlusPlan.objects.select_for_update().get(user=request.user)
+                price_usd = config.atlas_plus_price_usd
 
-                    if wallet.balance < price_usd:
-                        return Response({'success': False, 'message': 'Saldo insuficiente para Atlas Plus.'}, status=status.HTTP_400_BAD_REQUEST)
-
-                    wallet.regist_transaction(price_usd, 'atlas', "Pago de suscripción Atlas Plus", 'substract')
-                    
-                    atlas_plan.tier = AtlasSubscriptionTier.PREMIUM
-                    atlas_plan.valid_until = timezone.now() + relativedelta(months=1)
-                    atlas_plan.save()
-                    
-                    # Creamos el registro físico del pago aprobado
-                    atlas_payment = AtlasPlusPlanPayment.objects.create(
-                        plan=atlas_plan,
-                        reference_number=f"WALLET-ATLAS-{uuid.uuid4().hex[:6].upper()}",
-                        amount=0,
-                        bcv_taxes_to_day=dollar_bcv_tax,
-                        status=PaymentStatus.APPROVED,
-                        verified_at=timezone.now()
-                    )
-
-                    # Notificación local de interfaz
-                    Notification.objects.create(
-                        user=request.user,
-                        section=NotificationSection.HOME,
-                        title="¡Atlas Plus Activo!",
-                        body="Tu billetera cubrió la activación. Disfruta de tus 75 interacciones diarias.",
-                        category=NotificationCategory.PAYMENT_APPROVED,
-                        metadata={'payment_id': str(atlas_payment.id)}
-                    )
-                    
-                    return Response({
-                        'success': True,
-                        'message': '¡Atlas Plus activado usando tu saldo a favor!',
-                        'data': {'new_balance': float(wallet.balance), 'valid_until': atlas_plan.valid_until.strftime("%d/%m/%Y, %H:%M:%S")}
-                    }, status=status.HTTP_200_OK)
-
-                # =======================================================
-                # 💡 LÓGICA DE PRORRATEO (Split de saldos a favor)
-                # =======================================================
-                is_plan_change = merchant_subscription.plan.id != int(plan_id)
-                current_plan_name = merchant_subscription.plan.name
-
-                if is_plan_change and merchant_subscription.valid_until and merchant_subscription.valid_until > timezone.now():
-                    days_left = (merchant_subscription.valid_until - timezone.now()).total_seconds() / 86400.0
-                    daily_rate = float(merchant_subscription.plan.price) / 30.0
+                # Lógica de prorrateo para Atlas Plus si cambia/renueva antes de vencer
+                if atlas_plan.tier == AtlasSubscriptionTier.PREMIUM and atlas_plan.valid_until and atlas_plan.valid_until > timezone.now():
+                    days_left = (atlas_plan.valid_until - timezone.now()).total_seconds() / 86400.0
+                    daily_rate = float(price_usd) / 30.0
                     remanent_usd = Decimal(str(round(days_left * daily_rate, 2)))
-                    
                     if remanent_usd > 0:
-                        wallet.regist_transaction(
-                            amount=remanent_usd,
-                            sub_type='merchant',
-                            description=f"Reintegro por tiempo no consumido del plan anterior ({current_plan_name})",
-                            transaction='add'
-                        )
+                        wallet.regist_transaction(remanent_usd, 'atlas', "Reintegro por tiempo no consumido de Atlas Plus", 'add')
 
-                # 3. Validar si tiene saldo suficiente
-                if wallet.balance < plan_price_usd:
-                    return Response({
-                        'success': False,
-                        'message': 'Saldo insuficiente en la billetera.'
-                    }, status=status.HTTP_400_BAD_REQUEST)
+                if wallet.balance < price_usd:
+                    return Response({'success': False, 'message': 'Saldo insuficiente para Atlas Plus.'}, status=status.HTTP_400_BAD_REQUEST)
 
-                # 4. Descontar el dinero de la billetera
-                wallet.regist_transaction(
-                    amount=plan_price_usd,
-                    sub_type='merchant',
-                    description=f"Pago de suscripción con saldo: {merchant_plan.name}",
-                    transaction='substract'
-                )
+                wallet.regist_transaction(price_usd, 'atlas', "Pago de suscripción Atlas Plus", 'substract')
 
-                if is_plan_change:
-                    merchant_subscription.plan = merchant_plan
-                
-                # 5. Activar la suscripción (Con Lógica de Acumulación)
-                now = timezone.now()
-                if merchant_subscription.valid_until and merchant_subscription.valid_until > now:
-                    merchant_subscription.valid_until = merchant_subscription.valid_until + relativedelta(months=1)
-                else:
-                    merchant_subscription.valid_until = now + relativedelta(months=1)
+                atlas_plan.tier = AtlasSubscriptionTier.PREMIUM
+                atlas_plan.valid_until = timezone.now() + relativedelta(months=1)
+                atlas_plan.save()
 
-                # Reseteamos las banderas para que el Cron Job vuelva a avisar en el futuro
-                merchant_subscription.notified_5_days = False
-                merchant_subscription.notified_1_day = False
-                merchant_subscription.notified_hours = False
-                
-                merchant_subscription.save()
-
-                cache.delete(f"cartmaker:tenant:{request.user.id}:company")
-                cache.delete(f"cartmaker:tenant:{request.user.id}:subscriptions")
-
-                # 6. Dejar un registro en el historial de pagos
-                merchant_payment = MerchantPlanPayment.objects.create(
-                    subscription=merchant_subscription,
-                    target_plan=merchant_plan, # 💡 NUEVO: Dejamos el rastro del plan pagado
-                    reference_number=f"WALLET-{uuid.uuid4().hex[:8].upper()}",
+                atlas_payment = AtlasPlusPlanPayment.objects.create(
+                    plan=atlas_plan,
+                    reference_number=f"WALLET-ATLAS-{uuid.uuid4().hex[:6].upper()}",
                     amount=0,
                     bcv_taxes_to_day=dollar_bcv_tax,
                     status=PaymentStatus.APPROVED,
                     verified_at=timezone.now()
                 )
 
-                # 7. Crear la notificacion
-                if is_plan_change:
-                    title = '¡Plan Actualizado!'
-                    body = f'Has cambiado exitosamente al <b>{merchant_plan.name}</b>. El remanente de tu plan anterior fue reintegrado.'
-                else:
-                    title = '¡Pago Validado!'
-                    body = f'Hemos aprobado el pago por la suscripción <b>{merchant_plan.name}</b>. Ya puedes registrar tus productos en CartMaker.'
-                    
                 Notification.objects.create(
                     user=request.user,
                     section=NotificationSection.HOME,
-                    title=title,
-                    body=body,
+                    title="¡Atlas Plus Activo!",
+                    body="Tu billetera cubrió la activación. Disfruta de tus 75 interacciones diarias.",
                     category=NotificationCategory.PAYMENT_APPROVED,
-                    metadata={'payment_id':str(merchant_payment.id)}
+                    metadata={'payment_id': str(atlas_payment.id)}
                 )
 
-                # Mantengo tu cálculo de new_balance exacto (Aunque gracias al Prorrateo, la variable wallet.balance ya lo contempla)
                 return Response({
                     'success': True,
-                    'message': '¡Suscripción renovada exitosamente usando tu saldo a favor!',
-                    'data': {
-                        'new_balance': float(wallet.balance),
-                        'valid_until': merchant_subscription.valid_until.strftime("%d/%m/%Y, %H:%M:%S")
-                    }
+                    'message': '¡Atlas Plus activado usando tu saldo a favor!',
+                    'data': {'new_balance': float(wallet.balance), 'valid_until': atlas_plan.valid_until.strftime("%d/%m/%Y, %H:%M:%S")}
                 }, status=status.HTTP_200_OK)
 
-        except MerchantPlan.DoesNotExist:
-            return Response({
-                'success': False, 
-                'message': 'Suscripción no encontrada.'
-            }, status=status.HTTP_404_NOT_FOUND)
-            
         except UserWallet.DoesNotExist:
             return Response({
                 'success': False, 
@@ -1190,10 +1046,6 @@ class CreateCompanyAPI(APIView):
             return Response({'error':"No existe la categoria de la tienda."}, status=status.HTTP_400_BAD_REQUEST)
         if Company.objects.only('name').filter(name=name).exists():
             return Response({'error':"Ya existe una tienda con ese nombre."}, status=status.HTTP_406_NOT_ACCEPTABLE)
-        try:
-            merchant_subscription = MerchantSubscription.objects.only('plan', 'merchant_type').select_related('plan').get(merchant=request.user)
-        except MerchantSubscription.DoesNotExist:
-            return Response({'error':"Usted no esta asociado a una suscripcion de comerciante.."}, status=status.HTTP_406_NOT_ACCEPTABLE)
         if selected_mall_id != None:
             # Flujo para tienda en centro comercial
             try:
@@ -1204,13 +1056,11 @@ class CreateCompanyAPI(APIView):
                 return Response({'error':"El centro comercial no tiene esa cantidad de pisos."}, status=status.HTTP_400_BAD_REQUEST)
             try:
                 with transaction.atomic():
-                    if not merchant_subscription.plan.requires_business and merchant_subscription.merchant_type != merchant_type:
-                        merchant_subscription.merchant_type = merchant_type
-                        merchant_subscription.save()
                     company = Company.objects.create(
                         name=name,
                         owner=request.user,
-                        category=company_category
+                        category=company_category,
+                        merchant_type=merchant_type,
                     )
                     company_store = CompanyStore.objects.create(
                         company=company,
@@ -1233,13 +1083,11 @@ class CreateCompanyAPI(APIView):
             # Flujo para tienda de otro tipo
             try:
                 with transaction.atomic():
-                    if not merchant_subscription.plan.requires_business and merchant_subscription.merchant_type != merchant_type:
-                        merchant_subscription.merchant_type = merchant_type
-                        merchant_subscription.save()
                     company = Company.objects.create(
                         name=name,
                         owner=request.user,
-                        category=company_category
+                        category=company_category,
+                        merchant_type=merchant_type,
                     )
                     company_store = CompanyStore.objects.create(
                         company=company,
@@ -1270,7 +1118,7 @@ class CheckCompanyNameAvailableAPI(APIView):
 
 class UpdateCompanyAPI(APIView):
     """
-    Este endpoint solo se utiliza en los casos en los que la compania no tiene plan que permita sucursales.
+    Actualiza la compañía y la sucursal principal. Vender no depende de un plan.
     """
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'actions'
@@ -1983,14 +1831,6 @@ class CartMakerMapViewSet(viewsets.ViewSet):
                 global_search_filter = reduce(operator.and_, word_queries)
                 queryset = queryset.filter(global_search_filter).distinct()
 
-            now = timezone.now()
-            queryset = queryset.filter(
-                Q(store__company__owner__subscription__valid_until__gte=now) |
-                Q(store__company__owner__subscription__valid_until__isnull=True),
-                Q(store__company__owner__subscription__plan__company_branches=True) |
-                Q(store__company__owner__subscription__plan__company_branches=False, store__is_main_store=True)
-            )
-
             locations = queryset.values(
                 'store_id', 'coordinates', 'mall_id', 'mall_floor',
                 'store__store_type', 'store__name', 'store__company__name', 
@@ -2073,14 +1913,7 @@ class CartMakerMapViewSet(viewsets.ViewSet):
                     stock__gt=0
                 )
                 
-                # Regla de protección ortodoxa de planes
-                queryset = queryset.filter(
-                    Q(store__company__owner__subscription__plan__company_branches=True) |
-                    Q(
-                        store__company__owner__subscription__plan__company_branches=False,
-                        store__is_main_store=True
-                    )
-                ).annotate(
+                queryset = queryset.annotate(
                     avg_rating=Round(Coalesce(Avg('product__califications__rating'), 0.0), 1),
                     rating_count=Count('product__califications')
                 )
@@ -2172,15 +2005,9 @@ class GetStoresLocations(APIView):
             )
             bbox = Polygon.from_bbox(bbox_coords)
             bbox.srid = 4326
-            now = timezone.now()
-            
-            # Filtro combinado directo
+
             stores = StoreLocation.objects.filter(
-                Q(store__company__owner__subscription__valid_until__gte=now) |
-                Q(store__company__owner__subscription__valid_until__isnull=True),
-                # 💡 REGLA ORTODOXA
-                Q(store__company__owner__subscription__plan__company_branches=True) |
-                Q(store__company__owner__subscription__plan__company_branches=False, store__is_main_store=True),
+                store__is_active=True,
                 coordinates__coveredby=bbox,
             ).values(
                 'id', 
@@ -2242,9 +2069,12 @@ class CompanyCacheAPI(APIView):
         cached_data = cache.get(cache_key)
 
         if cached_data:
-            if "error_status" in cached_data:
+            if cached_data.get("message") == "Suscripción expirada.":
+                cache.delete(cache_key)
+            elif "error_status" in cached_data:
                 return Response({'message': cached_data["message"]}, status=cached_data["error_status"])
-            return Response(cached_data, status=status.HTTP_200_OK)
+            else:
+                return Response(cached_data, status=status.HTTP_200_OK)
             
         try:
             company = Company.objects.get(owner=request.user).get_json()
@@ -2252,37 +2082,28 @@ class CompanyCacheAPI(APIView):
             error_data = {"error_status": status.HTTP_404_NOT_FOUND, "message": "No ha configurado su tienda."}
             cache.set(cache_key, error_data, timeout=300)
             return Response({'message': error_data["message"]}, status=error_data["error_status"])
-            
-        if MerchantSubscription.objects.filter(merchant=request.user, valid_until__gt=timezone.now()).exists():
-            stores = [company_store.get_json() for company_store in CompanyStore.objects.filter(company_id=company['id']).order_by('creation')]
-            
-            # ==========================================
-            # 💡 NUEVO: EXTRAER IDs DE PREGUNTAS PENDIENTES
-            # ==========================================
-            item_ct = ContentType.objects.get(model='inventoryitem')
-            video_ct = ContentType.objects.get(model='companyvideostory')
 
-            items_pks = InventoryItem.objects.filter(store__company_id=company['id']).values_list('id', flat=True)
-            videos_pks = CompanyVideoStory.objects.filter(company_id=company['id']).values_list('id', flat=True)
+        stores = [company_store.get_json() for company_store in CompanyStore.objects.filter(company_id=company['id']).order_by('creation')]
 
-            pending_items = UniversalComment.objects.filter(content_type=item_ct).annotate(
-                object_uuid=Cast('object_id', output_field=UUIDField())
-            ).filter(object_uuid__in=items_pks).filter(Q(answer_text__isnull=True) | Q(answer_text__exact=''))
+        item_ct = ContentType.objects.get(model='inventoryitem')
+        video_ct = ContentType.objects.get(model='companyvideostory')
 
-            pending_videos = UniversalComment.objects.filter(content_type=video_ct).annotate(
-                object_uuid=Cast('object_id', output_field=UUIDField())
-            ).filter(object_uuid__in=videos_pks).filter(Q(answer_text__isnull=True) | Q(answer_text__exact=''))
+        items_pks = InventoryItem.objects.filter(store__company_id=company['id']).values_list('id', flat=True)
+        videos_pks = CompanyVideoStory.objects.filter(company_id=company['id']).values_list('id', flat=True)
 
-            pending_questions = list(pending_items.values_list('id', flat=True)) + list(pending_videos.values_list('id', flat=True))
-            # ==========================================
+        pending_items = UniversalComment.objects.filter(content_type=item_ct).annotate(
+            object_uuid=Cast('object_id', output_field=UUIDField())
+        ).filter(object_uuid__in=items_pks).filter(Q(answer_text__isnull=True) | Q(answer_text__exact=''))
 
-            data = {'company': company, 'stores': stores, 'pending_questions': pending_questions}
-            cache.set(cache_key, data, timeout=3600)
-            return Response(data, status=status.HTTP_200_OK)
-        else:
-            error_data = {"error_status": status.HTTP_406_NOT_ACCEPTABLE, "message": "Suscripción expirada."}
-            cache.set(cache_key, error_data, timeout=300)
-            return Response({'message': error_data["message"]}, status=error_data["error_status"])
+        pending_videos = UniversalComment.objects.filter(content_type=video_ct).annotate(
+            object_uuid=Cast('object_id', output_field=UUIDField())
+        ).filter(object_uuid__in=videos_pks).filter(Q(answer_text__isnull=True) | Q(answer_text__exact=''))
+
+        pending_questions = list(pending_items.values_list('id', flat=True)) + list(pending_videos.values_list('id', flat=True))
+
+        data = {'company': company, 'stores': stores, 'pending_questions': pending_questions}
+        cache.set(cache_key, data, timeout=3600)
+        return Response(data, status=status.HTTP_200_OK)
 
 class SubscriptionsCacheAPI(APIView):
     throttle_classes = [ScopedRateThrottle]
@@ -2656,26 +2477,12 @@ class AnalyticsViewSet(viewsets.ViewSet):
         conversion_rate = round((total_items_sold / total_views * 100), 2) if total_views > 0 else 0.0
         top_products = sorted(product_financials.values(), key=lambda x: x['revenue'], reverse=True)[:5]
 
-        # --- 3. CÁLCULO DE RENTABILIDAD SOBRE EL COSTO DEL PLAN ---
+        # Vender ya no tiene costo de plan. Las claves del JSON se conservan.
         plan_cost = 0.0
-        try:
-            sub = MerchantSubscription.objects.select_related('plan').get(merchant=request.user)
-            plan_cost = float(sub.plan.price)
-        except MerchantSubscription.DoesNotExist:
-            pass
-
-        net_profit = total_revenue - plan_cost
-        roi_percentage = round((net_profit / plan_cost * 100), 1) if plan_cost > 0 else 0.0
+        roi_percentage = 0.0
         is_profitable = total_revenue >= plan_cost
 
-        # --- 4. INSIGHTS CONTEXTUALES GENERADOS POR ATLAS ---
         insights = {'roi': None, 'origin': None, 'products': None}
-
-        if is_profitable and plan_cost > 0:
-            multiplier = round(total_revenue / plan_cost, 1)
-            insights['roi'] = f"¡Excelente! Los ingresos deducidos este mes ya cubrieron tu plan {multiplier} veces. Tu negocio está en números verdes."
-        elif plan_cost > 0 and total_revenue > 0:
-            insights['roi'] = "Estás generando ingresos en inventario, pero aún no cubres el costo de tu suscripción. Intenta potenciar tus ofertas."
 
         if total_items_sold > 0:
             if atlas_sales_count >= organic_sales_count and atlas_sales_count >= video_sales_count:
@@ -4090,7 +3897,7 @@ class CartViewSet(viewsets.ViewSet):
         # RESOLUCIÓN DE CACHE MISS (Solo va a BD por los productos que no están en RAM)
         if missing_ids:
             qs = InventoryItem.objects.select_related(
-                'product', 'offer', 'store__company__owner__subscription__plan'
+                'product', 'offer', 'store__company'
             ).filter(id__in=missing_ids)
             
             new_structs_to_cache = {}
@@ -4168,7 +3975,7 @@ class CartViewSet(viewsets.ViewSet):
         # =========================================================================
         try:
             store = CompanyStore.objects.select_related(
-                'company', 'company__owner__subscription'
+                'company'
             ).get(id=store_id)
             if hasattr(request.user, 'company'):
                 if store.company.id == request.user.company.id:
@@ -4192,17 +3999,6 @@ class CartViewSet(viewsets.ViewSet):
                 "work_days": store.effective_work_days
             }, status=status.HTTP_403_FORBIDDEN)
 
-        try:
-            sub = store.company.owner.subscription
-            if not sub.valid_until or sub.valid_until < timezone.now():
-                return Response({
-                    "error": f"El comercio {store.company.name} no se encuentra habilitado para recibir pedidos en este momento."
-                }, status=status.HTTP_403_FORBIDDEN)
-        except ObjectDoesNotExist:
-            return Response({
-                "error": f"El comercio {store.company.name} no puede procesar compras temporalmente."
-            }, status=status.HTTP_403_FORBIDDEN)
-        
         # Validar que el usuario NO tenga órdenes activas en esta misma tienda
         # (Asumiendo que status 0 = WAITING. Si agregas luego status 1=PREPARANDO, pon status__in=[0, 1])
         has_active_order = Order.objects.filter(
@@ -4588,8 +4384,6 @@ class ClientCompanyViewSet(viewsets.ViewSet):
             # 💡 Agregamos "!= 'null'" por si el frontend manda la palabra string por error en la URL
             if store_id and store_id != 'null': 
                 store = CompanyStore.objects.select_related('company', 'company__category').filter(
-                    Q(company__owner__subscription__plan__company_branches=True) |
-                    Q(company__owner__subscription__plan__company_branches=False, is_main_store=True),
                     id=store_id,
                     is_active=True
                 ).first()
@@ -4609,14 +4403,12 @@ class ClientCompanyViewSet(viewsets.ViewSet):
             elif company_id and company_id != 'null':
                 # Solo entramos aquí si Flutter explícitamente NO mandó un store_id
                 store = CompanyStore.objects.select_related('company', 'company__category').filter(
-                    Q(company__owner__subscription__plan__company_branches=True) |
-                    Q(company__owner__subscription__plan__company_branches=False, is_main_store=True),
                     company_id=company_id, 
                     is_active=True
-                ).order_by('-is_main_store', 'creation').first() # 💡 Priorizamos mostrar la Main Store
+                ).order_by('-is_main_store', 'creation').first()
                 
                 if not store:
-                    return Response({'error': 'La compañía no tiene tiendas activas bajo su plan actual.'}, status=status.HTTP_404_NOT_FOUND)
+                    return Response({'error': 'La compañía no tiene tiendas activas.'}, status=status.HTTP_404_NOT_FOUND)
                 company = store.company
                 
             else:
@@ -4644,17 +4436,10 @@ class ClientCompanyViewSet(viewsets.ViewSet):
                 product__inventory_items__paused=False
             ).distinct().values('id', 'name')
 
-            merchant_subscription = MerchantSubscription.objects.get(merchant=company.owner)
-
-            # 💡 NUEVO: D) Obtenemos todas las sucursales activas permitidas para el Selector
             available_stores_qs = CompanyStore.objects.select_related('location').filter(
                 company=company,
                 is_active=True
             ).order_by('-is_main_store', 'creation')
-
-            # Si el plan NO permite sucursales, solo mandamos la principal para evitar "hackeos"
-            if not merchant_subscription.plan.company_branches:
-                available_stores_qs = available_stores_qs.filter(is_main_store=True)
 
             available_stores = [s.get_json() for s in available_stores_qs]
 
@@ -4665,7 +4450,7 @@ class ClientCompanyViewSet(viewsets.ViewSet):
             company_metadata['avg_rating'] = avg_rating
             company_metadata['total_sales'] = formatted_sales
             company_metadata['total_sales_raw'] = total_sales
-            company_metadata['merchant_type'] = merchant_subscription.get_merchant_type_display()
+            company_metadata['merchant_type'] = company.get_merchant_type_display()
             
             store_metadata = store.get_json()
 

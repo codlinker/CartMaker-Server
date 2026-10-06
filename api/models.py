@@ -580,6 +580,11 @@ class Company(models.Model):
         db_index=True,
         help_text="Si es True, la empresa tiene +4.5 estrellas y alto volumen de ventas. Recibe boost en el motor de búsqueda."
     )
+    merchant_type = models.IntegerField(
+        choices=MerchantType.choices,
+        default=MerchantType.ENTREPRENEUR,
+        help_text="Emprendedor o empresa. Lo define el dueño al configurar la compañía."
+    )
 
     def get_json(self)->dict:
         url = ""
@@ -637,45 +642,20 @@ class CompanyStore(models.Model):
         ]
 
     # =========================================================================
-    # 💡 LÓGICA DE DÍAS Y HORARIOS BASADA EN BENEFICIOS DE SUSCRIPCIÓN
+    # DÍAS Y HORARIOS: la sucursal manda si los configuró; si no, la compañía.
     # =========================================================================
     @property
     def effective_work_days(self) -> list:
-        """Determina los días laborales efectivos basados en la suscripción del dueño."""
-        try:
-            # Verificamos si el dueño tiene el beneficio de múltiples sucursales en su plan activo
-            has_branches_benefit = self.company.owner.subscription.plan.company_branches
-        except Exception:
-            # Falla de seguridad (Si no tiene suscripción por algún motivo, negamos el beneficio)
-            has_branches_benefit = False
-            
-        if not has_branches_benefit:
-            # 1. Si no tiene el beneficio, forzamos los días de la compañía central
-            days = self.company.main_work_days
-        else:
-            # 2. Si tiene el beneficio, verificamos si configuró días propios en esta sucursal
-            has_valid_days = self.work_days and isinstance(self.work_days, list) and len(self.work_days) > 0
-            days = self.work_days if has_valid_days else self.company.main_work_days
-            
-        # Seguro anti-fallos por si la BD devuelve nulo
+        """Días laborales de la sucursal, o los de la compañía si esta sucursal no los configuró."""
+        has_valid_days = self.work_days and isinstance(self.work_days, list) and len(self.work_days) > 0
+        days = self.work_days if has_valid_days else self.company.main_work_days
         return days if days else [0, 1, 2, 3, 4]
 
     @property
     def effective_work_hours(self) -> dict:
-        """Determina el horario laboral efectivo basados en la suscripción del dueño."""
-        try:
-            # Verificamos si el dueño tiene el beneficio de múltiples sucursales
-            has_branches_benefit = self.company.owner.subscription.plan.company_branches
-        except Exception:
-            has_branches_benefit = False
-            
-        if not has_branches_benefit:
-            # 1. Si no tiene el beneficio, forzamos el horario de la compañía central
-            return self.company.main_work_hours
-        else:
-            # 2. Si tiene el beneficio, verificamos si configuró un horario propio en esta sucursal
-            has_valid_hours = self.work_hours and isinstance(self.work_hours, dict) and 'start' in self.work_hours
-            return self.work_hours if has_valid_hours else self.company.main_work_hours
+        """Horario de la sucursal, o el de la compañía si esta sucursal no lo configuró."""
+        has_valid_hours = self.work_hours and isinstance(self.work_hours, dict) and 'start' in self.work_hours
+        return self.work_hours if has_valid_hours else self.company.main_work_hours
 
     # =========================================================================
     # VALIDADORES EN TIEMPO REAL (No cambian, consumen las propiedades superiores)
