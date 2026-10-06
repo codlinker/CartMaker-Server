@@ -1,0 +1,379 @@
+{
+  "coordenadas_corregidas": [
+    {
+      "name": "CC Galerías Los Naranjos",
+      "antes": [
+        "10.441924200827792",
+        "-66.83404666288045"
+      ],
+      "despues": [
+        "10.440089",
+        "-66.836011"
+      ],
+      "metros": 296
+    }
+  ],
+  "coordenadas_sin_verificar_en_osm": [
+    "CC Palo Alto",
+    "CC Parque Esmeralda"
+  ],
+  "pisos_curados_vs_osm": [
+    {
+      "name": "CC Centro Comercial Ciudad Tamanaco (CCCT)",
+      "json": 4,
+      "osm": 10
+    },
+    {
+      "name": "CC Centro Plaza",
+      "json": 4,
+      "osm": 10
+    },
+    {
+      "name": "CC Centro Comercial Lido",
+      "json": 3,
+      "osm": 7
+    },
+    {
+      "name": "CC Merpoeste",
+      "json": 3,
+      "osm": 10
+    },
+    {
+      "name": "CC Paseo Las Mercedes",
+      "json": 4,
+      "osm": 6
+    },
+    {
+      "name": "CC Plaza Las Americas",
+      "json": 4,
+      "osm": 6
+    },
+    {
+      "name": "CC Galerías Prados del Este",
+      "json": 3,
+      "osm": 5
+    },
+    {
+      "name": "CC Manzanares Plaza",
+      "json": 2,
+      "osm": 6
+    },
+    {
+      "name": "CC Millennium Mall",
+      "json": 6,
+      "osm": 7
+    },
+    {
+      "name": "CC Unicentro El Marqués",
+      "json": 2,
+      "osm": 4
+    },
+    {
+      "name": "CC Parque Cerro Verde",
+      "json": 4,
+      "osm": 8
+    },
+    {
+      "name": "CC Galerías Los Naranjos",
+      "json": 4,
+      "osm": 6
+    },
+    {
+      "name": "CC El Recreo",
+      "json": 6,
+      "osm": 7
+    },
+    {
+      "name": "CC City Market",
+      "json": 5,
+      "osm": 7
+    },
+    {
+      "name": "CC Galerías Ávila",
+      "json": 4,
+      "osm": 7
+    },
+    {
+      "name": "CC Galerías Paraíso",
+      "json": 3,
+      "osm": 5
+    },
+    {
+      "name": "CC Multiplaza Paraíso",
+      "json": 4,
+      "osm": 8
+    },
+    {
+      "name": "CC Metrocenter",
+      "json": 3,
+      "osm": 7
+    }
+  ],
+  "pisos_osm_sospechosos_altos": [
+    {
+      "name": "CC Centro Polo",
+      "osm": 10
+    },
+    {
+      "name": "CC Galerías Avanti",
+      "osm": 10
+    },
+    {
+      "name": "CC La Grand Plaz",
+      "osm": 10
+    },
+    {
+      "name": "CC Parque Cristal",
+      "osm": 16
+    },
+    {
+      "name": "CC Candelaria Center",
+      "osm": 8
+    },
+    {
+      "name": "CC Caracas",
+      "osm": 7
+    },
+    {
+      "name": "CC Cediaz",
+      "osm": 10
+    },
+    {
+      "name": "CC Centro Plaza Páez",
+      "osm": 7
+    },
+    {
+      "name": "CC Gallo de Oro",
+      "osm": 7
+    },
+    {
+      "name": "CC La Villa",
+      "osm": 7
+    },
+    {
+      "name": "CC Lord Center",
+      "osm": 8
+    }
+  ],
+  "pisos_sin_dato_osm": [
+    "CC Sambil Chacao (curado: 5)",
+    "CC Centro San Ignacio (curado: 5)",
+    "CC Tolón (curado: 5)",
+    "CC Concresa (curado: 2)",
+    "CC Valle Arriba (curado: 3)",
+    "CC Terras Plaza (curado: 3)",
+    "CC Líder (curado: 6)",
+    "CC Boleíta Center (curado: 5)",
+    "CC Macaracuay Plaza (curado: 3)",
+    "CC Xpress (curado: 2)",
+    "CC Paseo El Hatillo (curado: 7)",
+    "CC Alegría (por defecto 1)",
+    "CC Arta (por defecto 1)",
+    "CC Baruta (por defecto 1)",
+    "CC Bello Campo (por defecto 1)",
+    "CC California Suites & Mall (por defecto 1)",
+    "CC California Sur (por defecto 1)",
+    "CC Caroní (por defecto 1)",
+    "CC Casa Mall (por defecto 1)",
+    "CC Chacaíto (por defecto 1)",
+    "CC Ciudad Center (por defecto 1)",
+    "CC Colinas de Parque Caiza (por defecto 1)",
+    "CC Doral (Chacaíto) (por defecto 1)",
+    "CC El Cafetal (por defecto 1)",
+    "CC El Dorado (por defecto 1)",
+    "CC El Llanito (por defecto 1)",
+    "CC El Marqués (por defecto 1)",
+    "CC El Placer (por defecto 1)",
+    "CC El Sol (por defecto 1)",
+    "CC El Ávila (por defecto 1)",
+    "CC Galerías Sebucán (por defecto 1)",
+    "CC Ibarra (por defecto 1)",
+    "CC La Bonita (por defecto 1)",
+    "CC La Boyera (por defecto 1)",
+    "CC La Pirámide (por defecto 1)",
+    "CC Las Colinas (por defecto 1)",
+    "CC Limón Plaza (por defecto 1)",
+    "CC Los Díaz (por defecto 1)",
+    "CC Los Jardines (por defecto 1)",
+    "CC Los Samanes (por defecto 1)",
+    "CC Metropolitano (por defecto 1)",
+    "CC Miranda (por defecto 1)",
+    "CC Monte Ararat (por defecto 1)",
+    "CC Palo Verde Plaza (por defecto 1)",
+    "CC Parque Humboldt (por defecto 1)",
+    "CC Petare (por defecto 1)",
+    "CC Pin 10 (por defecto 1)",
+    "CC Plaza La Trinidad (por defecto 1)",
+    "CC Plaza Prado (por defecto 1)",
+    "CC Priscos (por defecto 1)",
+    "CC San Francisco (por defecto 1)",
+    "CC Santa Cecilia (por defecto 1)",
+    "CC Santa Eduvigis (por defecto 1)",
+    "CC Santa Fe (por defecto 1)",
+    "CC Santa Inés (por defecto 1)",
+    "CC Santa Paula (por defecto 1)",
+    "CC Santa Paula Plaza 1 (por defecto 1)",
+    "CC Santa Rosa de Lima (por defecto 1)",
+    "CC Sebucán (por defecto 1)",
+    "CC Shopping Mall (por defecto 1)",
+    "CC Somager (por defecto 1)",
+    "CC Sorocaima (por defecto 1)",
+    "CC Supercentro Petare (por defecto 1)",
+    "CC Tata (por defecto 1)",
+    "CC Tiabu (por defecto 1)",
+    "CC TodoTecnología (por defecto 1)",
+    "CC Uache (por defecto 1)",
+    "CC Vista Hermosa (por defecto 1)",
+    "CC Sambil La Candelaria (curado: 6)",
+    "CC Uslar (curado: 2)",
+    "CC Los Molinos (curado: 3)",
+    "CC 777 (por defecto 1)",
+    "CC Bello Monte (por defecto 1)",
+    "CC Caricuao (por defecto 1)",
+    "CC Caricuao II (por defecto 1)",
+    "CC Caricuao Plaza (por defecto 1)",
+    "CC Catia (por defecto 1)",
+    "CC Centro Fénix (por defecto 1)",
+    "CC Centro Parque Carabobo (CPC) (por defecto 1)",
+    "CC Centro Solano Plaza (por defecto 1)",
+    "CC Centro Vista (por defecto 1)",
+    "CC Ciudad Caricuao (por defecto 1)",
+    "CC Colonial (por defecto 1)",
+    "CC Dos Manos (por defecto 1)",
+    "CC Federal (por defecto 1)",
+    "CC Galerías El Pueblo (por defecto 1)",
+    "CC Galerías Perico (por defecto 1)",
+    "CC Hiper Galería (por defecto 1)",
+    "CC La Bandera (por defecto 1)",
+    "CC La Fe (por defecto 1)",
+    "CC La Florida (por defecto 1)",
+    "CC La Hacienda (por defecto 1)",
+    "CC La Quebradita (por defecto 1)",
+    "CC Libertador (por defecto 1)",
+    "CC Los Chaguaramos (por defecto 1)",
+    "CC Los Ilustres (por defecto 1)",
+    "CC Los Próceres (por defecto 1)",
+    "CC Los Ángeles (por defecto 1)",
+    "CC Maracaibo (por defecto 1)",
+    "CC Merposur (por defecto 1)",
+    "CC Pasaje Zingg (por defecto 1)",
+    "CC Plaza Broadway (por defecto 1)",
+    "CC Plaza Santa Mónica (por defecto 1)",
+    "CC Prado de María (por defecto 1)",
+    "CC Páez (por defecto 1)",
+    "CC San Jorge (por defecto 1)",
+    "CC San Miguel (por defecto 1)",
+    "CC Santa Mónica (por defecto 1)",
+    "CC Victoria Plaza (por defecto 1)",
+    "CC del Este (por defecto 1)",
+    "CC del Oeste (por defecto 1)",
+    "CC para la Economía Popular de Quinta Crespo (por defecto 1)",
+    "CC Automercado (por defecto 1)",
+    "CC El Patio (por defecto 1)",
+    "CC El Hatillo (por defecto 1)",
+    "CC Buenaventura (curado Guatire)",
+    "CC Vista Place (curado Guatire)",
+    "CC Castillejo (curado Guatire)",
+    "CC La Parada (curado Guatire)",
+    "CC Oasis Center (curado Guatire)",
+    "CC Daymar (curado Guatire)",
+    "CC Guatire Plaza (curado Guatire)",
+    "CC Mega Center (curado Guatire)",
+    "CC Palo Alto (curado Guatire)",
+    "CC Parque Esmeralda (curado Guatire)",
+    "CC Saman Plaza (por defecto 1)",
+    "CC Miranda (Guarenas) (por defecto 1)",
+    "CC Trapichito (por defecto 1)",
+    "CC Ventura (por defecto 1)",
+    "CC Ciudad Plaza Mayor (por defecto 1)",
+    "CC San Nicolás de Bari (por defecto 1)",
+    "CC Nueva Casarapa (por defecto 1)",
+    "CC Ciudad Casarapa (por defecto 1)",
+    "CC La Entrada (por defecto 1)",
+    "CC Center Plaza Guatire (por defecto 1)",
+    "CC La Hacienda (Guatire) (por defecto 1)",
+    "CC Villa Ávila (por defecto 1)"
+  ],
+  "pisos_tomados_de_osm": [
+    "CC Alto Prado",
+    "CC Caurimare",
+    "CC Centro Polo",
+    "CC Ceres",
+    "CC Diana",
+    "CC Expreso Baruta",
+    "CC Expreso Chacaíto",
+    "CC Expreso La Trinidad",
+    "CC Galerías Avanti",
+    "CC Galerías Pantín",
+    "CC La Grand Plaz",
+    "CC La Mansión",
+    "CC La Tahona",
+    "CC Las Cúpulas",
+    "CC Las Vegas",
+    "CC Lomas de la Lagunita",
+    "CC Los Geranios",
+    "CC Los Guayabitos",
+    "CC Los Ruices",
+    "CC Los Ruiseñores",
+    "CC Macaracuay",
+    "CC Mayca",
+    "CC Morichal",
+    "CC Parque Cristal",
+    "CC Plaza La Boyera",
+    "CC Puerta del Este",
+    "CC San Luis",
+    "CC Santa Marta",
+    "CC Santa Sofía",
+    "CC Terraza",
+    "CC Trinalta",
+    "CC Trinidad Tepuy",
+    "CC Vizcaya",
+    "CC Yamin Gourmet",
+    "CC Único",
+    "CC Candelaria Center",
+    "CC Candoral",
+    "CC Caracas",
+    "CC Caracas Mall",
+    "CC Caricuao I",
+    "CC Casa Bera",
+    "CC Cediaz",
+    "CC Centro Atlántico",
+    "CC Centro Parque Caracas",
+    "CC Centro Plaza Páez",
+    "CC Coche",
+    "CC Doral (Centro)",
+    "CC Doral Baralt",
+    "CC El Lago",
+    "CC El Valle",
+    "CC Euba",
+    "CC Galerías Capitolio",
+    "CC Galerías Edsan",
+    "CC Gallo de Oro",
+    "CC La Laguna",
+    "CC La Vega",
+    "CC La Villa",
+    "CC Lord Center",
+    "CC Madison",
+    "CC Montalbán",
+    "CC Plaza Capitolio",
+    "CC Procar (Victoria)",
+    "CC Sabana Grande",
+    "CC San Bernardino",
+    "CC San Martín",
+    "CC Galerías El Recreo",
+    "CC Nueva Guarenas",
+    "CC Valle Arriba (Guatire)",
+    "CC Girazoles"
+  ],
+  "_nota": "Generado desde OpenStreetMap (Overpass). building:levels de OSM cuenta niveles del edificio completo (puede incluir oficinas/estacionamiento); verificar pisos comerciales reales.",
+  "coordenadas_verificadas_guatire_osm_<60m": [
+    "CC Buenaventura",
+    "CC Vista Place",
+    "CC Castillejo",
+    "CC La Parada",
+    "CC Oasis Center",
+    "CC Daymar",
+    "CC Guatire Plaza",
+    "CC Mega Center"
+  ]
+}

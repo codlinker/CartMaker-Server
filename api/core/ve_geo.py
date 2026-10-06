@@ -8,36 +8,14 @@ lo más cercano estuvo en Caracas" sin geocodificación de pago.
 import math
 from typing import List, Optional, Tuple
 
+from api.core.ve_caracas_zones import CARACAS_ZONES
+
 # (nombre, latitud, longitud)
 VE_PLACES: List[Tuple[str, float, float]] = [
     # Miranda / Distrito Capital / La Guaira
     ('Caracas', 10.4806, -66.9036),
-    # Sectores y urbanizaciones de Caracas (para hablar en nombres de zona, no en distancias)
-    ('Altamira, Caracas', 10.4967, -66.8486),
-    ('La Castellana, Caracas', 10.5010, -66.8530),
-    ('Los Palos Grandes, Caracas', 10.4980, -66.8420),
-    ('Chacao, Caracas', 10.4958, -66.8531),
-    ('El Rosal, Caracas', 10.4925, -66.8590),
-    ('Chacaíto, Caracas', 10.4900, -66.8700),
-    ('Las Mercedes, Caracas', 10.4846, -66.8648),
-    ('Sabana Grande, Caracas', 10.4890, -66.8750),
-    ('Colinas de Bello Monte, Caracas', 10.4750, -66.8870),
-    ('Plaza Venezuela, Caracas', 10.4910, -66.8920),
-    ('El Cafetal, Caracas', 10.4560, -66.8500),
-    ('Prados del Este, Caracas', 10.4430, -66.8650),
-    ('La Trinidad, Caracas', 10.4400, -66.8700),
-    ('Santa Fe, Caracas', 10.4560, -66.8700),
-    ('Los Ruices, Caracas', 10.4900, -66.8195),
-    ('La Urbina, Caracas', 10.4700, -66.8190),
-    ('Boleíta, Caracas', 10.4975, -66.8180),
-    ('El Marqués, Caracas', 10.4930, -66.8070),
-    ('Macaracuay, Caracas', 10.4700, -66.8120),
     ('El Hatillo', 10.4222, -66.8247),
     ('Baruta', 10.4333, -66.8750),
-    ('Centro de Caracas', 10.5061, -66.9146),
-    ('La Candelaria, Caracas', 10.5050, -66.9040),
-    ('El Paraíso, Caracas', 10.4950, -66.9300),
-    ('Catia, Caracas', 10.5150, -66.9500),
     ('Petare', 10.4764, -66.8097),
     ('Guarenas', 10.4693, -66.6102),
     ('Guatire', 10.4736, -66.5413),
@@ -97,6 +75,9 @@ VE_PLACES: List[Tuple[str, float, float]] = [
     ('Tucupita', 9.0614, -62.0517),
     ('Puerto Ayacucho', 5.6639, -67.6236),
 ]
+
+# Zonas de Caracas (OpenStreetMap): permiten hablar de "Altamira" o "Las Mercedes" en vez de distancias.
+VE_PLACES = VE_PLACES + CARACAS_ZONES
 
 
 def haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:

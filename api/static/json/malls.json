@@ -42,6 +42,97 @@
         "lng": "-66.8555390537725",
         "floors_quantity": 3,
         "img_url": "static/img/malls/merpoeste.jpg"
+      },
+      {
+        "name": "CC Arta",
+        "lat": "10.490395",
+        "lng": "-66.867738",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Bello Campo",
+        "lat": "10.493494",
+        "lng": "-66.851124",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Chacaíto",
+        "lat": "10.492044",
+        "lng": "-66.869137",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Doral (Chacaíto)",
+        "lat": "10.491780",
+        "lng": "-66.867550",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Expreso Chacaíto",
+        "lat": "10.491330",
+        "lng": "-66.867780",
+        "floors_quantity": 5,
+        "img_url": ""
+      },
+      {
+        "name": "CC Galerías Pantín",
+        "lat": "10.490369",
+        "lng": "-66.855678",
+        "floors_quantity": 2,
+        "img_url": ""
+      },
+      {
+        "name": "CC Las Cúpulas",
+        "lat": "10.502932",
+        "lng": "-66.844473",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Metropolitano",
+        "lat": "10.493219",
+        "lng": "-66.857592",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Parque Cristal",
+        "lat": "10.497603",
+        "lng": "-66.843168",
+        "floors_quantity": 16,
+        "img_url": ""
+      },
+      {
+        "name": "CC Yamin Gourmet",
+        "lat": "10.498779",
+        "lng": "-66.849080",
+        "floors_quantity": 4,
+        "img_url": ""
+      },
+      {
+        "name": "CC Único",
+        "lat": "10.490326",
+        "lng": "-66.868261",
+        "floors_quantity": 3,
+        "img_url": ""
+      },
+      {
+        "name": "CC 777",
+        "lat": "10.490059",
+        "lng": "-66.869366",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC El Patio",
+        "lat": "10.504168",
+        "lng": "-66.843553",
+        "floors_quantity": 1,
+        "img_url": ""
       }
     ],
     "Baruta": [
@@ -100,6 +191,293 @@
         "lng": "-66.88324727386885",
         "floors_quantity": 2,
         "img_url": "static/img/malls/manzanares_plaza.jpg"
+      },
+      {
+        "name": "CC Alto Prado",
+        "lat": "10.439281",
+        "lng": "-66.892692",
+        "floors_quantity": 2,
+        "img_url": ""
+      },
+      {
+        "name": "CC Baruta",
+        "lat": "10.435891",
+        "lng": "-66.872167",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC California Suites & Mall",
+        "lat": "10.481289",
+        "lng": "-66.862282",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Caroní",
+        "lat": "10.485377",
+        "lng": "-66.875620",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Caurimare",
+        "lat": "10.472259",
+        "lng": "-66.838003",
+        "floors_quantity": 2,
+        "img_url": ""
+      },
+      {
+        "name": "CC Centro Polo",
+        "lat": "10.486281",
+        "lng": "-66.874899",
+        "floors_quantity": 10,
+        "img_url": ""
+      },
+      {
+        "name": "CC Ceres",
+        "lat": "10.484046",
+        "lng": "-66.862649",
+        "floors_quantity": 3,
+        "img_url": ""
+      },
+      {
+        "name": "CC Diana",
+        "lat": "10.474724",
+        "lng": "-66.877855",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC El Cafetal",
+        "lat": "10.461384",
+        "lng": "-66.829377",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC El Placer",
+        "lat": "10.411413",
+        "lng": "-66.873805",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC El Sol",
+        "lat": "10.463527",
+        "lng": "-66.833215",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Expreso Baruta",
+        "lat": "10.433171",
+        "lng": "-66.870131",
+        "floors_quantity": 6,
+        "img_url": ""
+      },
+      {
+        "name": "CC Expreso La Trinidad",
+        "lat": "10.437217",
+        "lng": "-66.866796",
+        "floors_quantity": 4,
+        "img_url": ""
+      },
+      {
+        "name": "CC Galerías Avanti",
+        "lat": "10.482140",
+        "lng": "-66.856119",
+        "floors_quantity": 10,
+        "img_url": ""
+      },
+      {
+        "name": "CC Ibarra",
+        "lat": "10.486948",
+        "lng": "-66.874025",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC La Bonita",
+        "lat": "10.445672",
+        "lng": "-66.850163",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC La Grand Plaz",
+        "lat": "10.483174",
+        "lng": "-66.858061",
+        "floors_quantity": 10,
+        "img_url": ""
+      },
+      {
+        "name": "CC La Mansión",
+        "lat": "10.483135",
+        "lng": "-66.862400",
+        "floors_quantity": 3,
+        "img_url": ""
+      },
+      {
+        "name": "CC La Pirámide",
+        "lat": "10.452983",
+        "lng": "-66.871227",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC La Tahona",
+        "lat": "10.436909",
+        "lng": "-66.857101",
+        "floors_quantity": 2,
+        "img_url": ""
+      },
+      {
+        "name": "CC Las Colinas",
+        "lat": "10.451485",
+        "lng": "-66.850357",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Los Guayabitos",
+        "lat": "10.410398",
+        "lng": "-66.871091",
+        "floors_quantity": 3,
+        "img_url": ""
+      },
+      {
+        "name": "CC Los Samanes",
+        "lat": "10.454594",
+        "lng": "-66.856989",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Morichal",
+        "lat": "10.451702",
+        "lng": "-66.885316",
+        "floors_quantity": 2,
+        "img_url": ""
+      },
+      {
+        "name": "CC Parque Humboldt",
+        "lat": "10.450561",
+        "lng": "-66.872509",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Plaza La Trinidad",
+        "lat": "10.441763",
+        "lng": "-66.865519",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Plaza Prado",
+        "lat": "10.444927",
+        "lng": "-66.890756",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC San Luis",
+        "lat": "10.468426",
+        "lng": "-66.842835",
+        "floors_quantity": 2,
+        "img_url": ""
+      },
+      {
+        "name": "CC Santa Fe",
+        "lat": "10.466477",
+        "lng": "-66.871408",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Santa Inés",
+        "lat": "10.458572",
+        "lng": "-66.859195",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Santa Marta",
+        "lat": "10.477684",
+        "lng": "-66.844388",
+        "floors_quantity": 6,
+        "img_url": ""
+      },
+      {
+        "name": "CC Santa Paula",
+        "lat": "10.460809",
+        "lng": "-66.833630",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Santa Paula Plaza 1",
+        "lat": "10.462888",
+        "lng": "-66.839716",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Santa Rosa de Lima",
+        "lat": "10.468982",
+        "lng": "-66.859612",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Santa Sofía",
+        "lat": "10.473115",
+        "lng": "-66.842599",
+        "floors_quantity": 2,
+        "img_url": ""
+      },
+      {
+        "name": "CC Shopping Mall",
+        "lat": "10.480538",
+        "lng": "-66.860388",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Sorocaima",
+        "lat": "10.434454",
+        "lng": "-66.863001",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Trinalta",
+        "lat": "10.430813",
+        "lng": "-66.845685",
+        "floors_quantity": 2,
+        "img_url": ""
+      },
+      {
+        "name": "CC Trinidad Tepuy",
+        "lat": "10.431053",
+        "lng": "-66.848878",
+        "floors_quantity": 4,
+        "img_url": ""
+      },
+      {
+        "name": "CC Vizcaya",
+        "lat": "10.457930",
+        "lng": "-66.843059",
+        "floors_quantity": 4,
+        "img_url": ""
+      },
+      {
+        "name": "CC Automercado",
+        "lat": "10.485816",
+        "lng": "-66.865011",
+        "floors_quantity": 1,
+        "img_url": ""
       }
     ],
     "Sucre": [
@@ -144,6 +522,230 @@
         "lng": "-66.8178894572209",
         "floors_quantity": 2,
         "img_url": "static/img/malls/xpress.jpg"
+      },
+      {
+        "name": "CC Alegría",
+        "lat": "10.502518",
+        "lng": "-66.820388",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC California Sur",
+        "lat": "10.474868",
+        "lng": "-66.820007",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Ciudad Center",
+        "lat": "10.496987",
+        "lng": "-66.822904",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Colinas de Parque Caiza",
+        "lat": "10.468867",
+        "lng": "-66.746558",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC El Dorado",
+        "lat": "10.479275",
+        "lng": "-66.815789",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC El Llanito",
+        "lat": "10.467531",
+        "lng": "-66.806155",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC El Marqués",
+        "lat": "10.495574",
+        "lng": "-66.810996",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC El Ávila",
+        "lat": "10.498016",
+        "lng": "-66.795139",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Galerías Sebucán",
+        "lat": "10.508154",
+        "lng": "-66.832186",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Las Vegas",
+        "lat": "10.477465",
+        "lng": "-66.805623",
+        "floors_quantity": 4,
+        "img_url": ""
+      },
+      {
+        "name": "CC Limón Plaza",
+        "lat": "10.473982",
+        "lng": "-66.775058",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Los Díaz",
+        "lat": "10.474168",
+        "lng": "-66.775598",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Los Jardines",
+        "lat": "10.483104",
+        "lng": "-66.807026",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Los Ruices",
+        "lat": "10.492625",
+        "lng": "-66.829053",
+        "floors_quantity": 3,
+        "img_url": ""
+      },
+      {
+        "name": "CC Los Ruiseñores",
+        "lat": "10.475448",
+        "lng": "-66.827989",
+        "floors_quantity": 2,
+        "img_url": ""
+      },
+      {
+        "name": "CC Macaracuay",
+        "lat": "10.469548",
+        "lng": "-66.818913",
+        "floors_quantity": 4,
+        "img_url": ""
+      },
+      {
+        "name": "CC Mayca",
+        "lat": "10.484036",
+        "lng": "-66.785193",
+        "floors_quantity": 2,
+        "img_url": ""
+      },
+      {
+        "name": "CC Miranda",
+        "lat": "10.489840",
+        "lng": "-66.777122",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Monte Ararat",
+        "lat": "10.478317",
+        "lng": "-66.811604",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Palo Verde Plaza",
+        "lat": "10.478616",
+        "lng": "-66.797168",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Petare",
+        "lat": "10.478465",
+        "lng": "-66.813790",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Pin 10",
+        "lat": "10.496752",
+        "lng": "-66.805174",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Puerta del Este",
+        "lat": "10.485402",
+        "lng": "-66.822669",
+        "floors_quantity": 3,
+        "img_url": ""
+      },
+      {
+        "name": "CC San Francisco",
+        "lat": "10.499132",
+        "lng": "-66.810763",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Santa Cecilia",
+        "lat": "10.490240",
+        "lng": "-66.833699",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Santa Eduvigis",
+        "lat": "10.503898",
+        "lng": "-66.839581",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Sebucán",
+        "lat": "10.508322",
+        "lng": "-66.837647",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Supercentro Petare",
+        "lat": "10.479280",
+        "lng": "-66.807738",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Tiabu",
+        "lat": "10.477992",
+        "lng": "-66.780391",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC TodoTecnología",
+        "lat": "10.490539",
+        "lng": "-66.826186",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Uache",
+        "lat": "10.494899",
+        "lng": "-66.809175",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Vista Hermosa",
+        "lat": "10.484371",
+        "lng": "-66.785562",
+        "floors_quantity": 1,
+        "img_url": ""
       }
     ],
     "El Hatillo": [
@@ -163,10 +765,80 @@
       },
       {
         "name": "CC Galerías Los Naranjos",
-        "lat": "10.441924200827792",
-        "lng": "-66.83404666288045",
+        "lat": "10.440089",
+        "lng": "-66.836011",
         "floors_quantity": 4,
         "img_url": "static/img/malls/galerias_los_naranjos.jpg"
+      },
+      {
+        "name": "CC Casa Mall",
+        "lat": "10.446875",
+        "lng": "-66.830969",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC La Boyera",
+        "lat": "10.426993",
+        "lng": "-66.837692",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Lomas de la Lagunita",
+        "lat": "10.421095",
+        "lng": "-66.803006",
+        "floors_quantity": 2,
+        "img_url": ""
+      },
+      {
+        "name": "CC Los Geranios",
+        "lat": "10.427765",
+        "lng": "-66.840083",
+        "floors_quantity": 4,
+        "img_url": ""
+      },
+      {
+        "name": "CC Plaza La Boyera",
+        "lat": "10.428641",
+        "lng": "-66.839316",
+        "floors_quantity": 5,
+        "img_url": ""
+      },
+      {
+        "name": "CC Priscos",
+        "lat": "10.422529",
+        "lng": "-66.824334",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Somager",
+        "lat": "10.425630",
+        "lng": "-66.825435",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Tata",
+        "lat": "10.425373",
+        "lng": "-66.825158",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Terraza",
+        "lat": "10.420994",
+        "lng": "-66.802310",
+        "floors_quantity": 2,
+        "img_url": ""
+      },
+      {
+        "name": "CC El Hatillo",
+        "lat": "10.426899",
+        "lng": "-66.828820",
+        "floors_quantity": 1,
+        "img_url": ""
       }
     ],
     "Guatire": [
@@ -234,11 +906,118 @@
         "img_url": "static/img/malls/parque_esmeralda.jpg"
       },
       {
-        "name":"CC Mega Center",
-        "lat":"10.465244320950328",
-        "lng":"-66.57373785048165",
-        "floors_quantity":4,
-        "img_url":"static/img/malls/mega_center.jpg"
+        "name": "CC Mega Center",
+        "lat": "10.465244320950328",
+        "lng": "-66.57373785048165",
+        "floors_quantity": 4,
+        "img_url": "static/img/malls/mega_center.jpg"
+      },
+      {
+        "name": "CC La Entrada",
+        "lat": "10.464077",
+        "lng": "-66.518537",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Center Plaza Guatire",
+        "lat": "10.469670",
+        "lng": "-66.540500",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC La Hacienda (Guatire)",
+        "lat": "10.470278",
+        "lng": "-66.549382",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Villa Ávila",
+        "lat": "10.473787",
+        "lng": "-66.564273",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Valle Arriba (Guatire)",
+        "lat": "10.487188",
+        "lng": "-66.530043",
+        "floors_quantity": 2,
+        "img_url": ""
+      },
+      {
+        "name": "CC Girazoles",
+        "lat": "10.476835",
+        "lng": "-66.531487",
+        "floors_quantity": 4,
+        "img_url": ""
+      }
+    ],
+    "Guarenas": [
+      {
+        "name": "CC Saman Plaza",
+        "lat": "10.470581",
+        "lng": "-66.606281",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Miranda (Guarenas)",
+        "lat": "10.471773",
+        "lng": "-66.607490",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Trapichito",
+        "lat": "10.470376",
+        "lng": "-66.607342",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Ventura",
+        "lat": "10.472080",
+        "lng": "-66.616287",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Nueva Guarenas",
+        "lat": "10.468373",
+        "lng": "-66.603678",
+        "floors_quantity": 4,
+        "img_url": ""
+      },
+      {
+        "name": "CC Ciudad Plaza Mayor",
+        "lat": "10.469518",
+        "lng": "-66.594790",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC San Nicolás de Bari",
+        "lat": "10.463712",
+        "lng": "-66.589040",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Nueva Casarapa",
+        "lat": "10.470887",
+        "lng": "-66.588744",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Ciudad Casarapa",
+        "lat": "10.455887",
+        "lng": "-66.599483",
+        "floors_quantity": 1,
+        "img_url": ""
       }
     ]
   },
@@ -313,6 +1092,503 @@
         "lng": "-66.91686027478657",
         "floors_quantity": 3,
         "img_url": "static/img/malls/metrocenter.jpg"
+      },
+      {
+        "name": "CC Bello Monte",
+        "lat": "10.489793",
+        "lng": "-66.880823",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Candelaria Center",
+        "lat": "10.504381",
+        "lng": "-66.904671",
+        "floors_quantity": 8,
+        "img_url": ""
+      },
+      {
+        "name": "CC Candoral",
+        "lat": "10.506349",
+        "lng": "-66.904500",
+        "floors_quantity": 4,
+        "img_url": ""
+      },
+      {
+        "name": "CC Caracas",
+        "lat": "10.472312",
+        "lng": "-66.960245",
+        "floors_quantity": 7,
+        "img_url": ""
+      },
+      {
+        "name": "CC Caracas Mall",
+        "lat": "10.493927",
+        "lng": "-66.884222",
+        "floors_quantity": 4,
+        "img_url": ""
+      },
+      {
+        "name": "CC Caricuao",
+        "lat": "10.432562",
+        "lng": "-66.965753",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Caricuao I",
+        "lat": "10.437433",
+        "lng": "-66.992111",
+        "floors_quantity": 2,
+        "img_url": ""
+      },
+      {
+        "name": "CC Caricuao II",
+        "lat": "10.433423",
+        "lng": "-67.001856",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Caricuao Plaza",
+        "lat": "10.434376",
+        "lng": "-67.000045",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Casa Bera",
+        "lat": "10.506186",
+        "lng": "-66.904010",
+        "floors_quantity": 4,
+        "img_url": ""
+      },
+      {
+        "name": "CC Catia",
+        "lat": "10.515584",
+        "lng": "-66.937794",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Cediaz",
+        "lat": "10.493113",
+        "lng": "-66.878278",
+        "floors_quantity": 10,
+        "img_url": ""
+      },
+      {
+        "name": "CC Centro Atlántico",
+        "lat": "10.504536",
+        "lng": "-66.949139",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Centro Fénix",
+        "lat": "10.498066",
+        "lng": "-66.925986",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Centro Parque Carabobo (CPC)",
+        "lat": "10.501926",
+        "lng": "-66.906458",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Centro Parque Caracas",
+        "lat": "10.503404",
+        "lng": "-66.900816",
+        "floors_quantity": 2,
+        "img_url": ""
+      },
+      {
+        "name": "CC Centro Plaza Páez",
+        "lat": "10.490312",
+        "lng": "-66.924987",
+        "floors_quantity": 7,
+        "img_url": ""
+      },
+      {
+        "name": "CC Centro Solano Plaza",
+        "lat": "10.494713",
+        "lng": "-66.876758",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Centro Vista",
+        "lat": "10.483789",
+        "lng": "-66.954830",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Ciudad Caricuao",
+        "lat": "10.433258",
+        "lng": "-66.971823",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Coche",
+        "lat": "10.448571",
+        "lng": "-66.924646",
+        "floors_quantity": 3,
+        "img_url": ""
+      },
+      {
+        "name": "CC Colonial",
+        "lat": "10.469459",
+        "lng": "-66.947914",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Doral (Centro)",
+        "lat": "10.505793",
+        "lng": "-66.911430",
+        "floors_quantity": 5,
+        "img_url": ""
+      },
+      {
+        "name": "CC Doral Baralt",
+        "lat": "10.497807",
+        "lng": "-66.919620",
+        "floors_quantity": 3,
+        "img_url": ""
+      },
+      {
+        "name": "CC Dos Manos",
+        "lat": "10.434483",
+        "lng": "-66.969433",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC El Lago",
+        "lat": "10.513157",
+        "lng": "-66.948012",
+        "floors_quantity": 2,
+        "img_url": ""
+      },
+      {
+        "name": "CC El Valle",
+        "lat": "10.467310",
+        "lng": "-66.904699",
+        "floors_quantity": 5,
+        "img_url": ""
+      },
+      {
+        "name": "CC Euba",
+        "lat": "10.471860",
+        "lng": "-66.958850",
+        "floors_quantity": 3,
+        "img_url": ""
+      },
+      {
+        "name": "CC Federal",
+        "lat": "10.509015",
+        "lng": "-66.947944",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Galerías Capitolio",
+        "lat": "10.504620",
+        "lng": "-66.918203",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Galerías Edsan",
+        "lat": "10.505764",
+        "lng": "-66.912642",
+        "floors_quantity": 5,
+        "img_url": ""
+      },
+      {
+        "name": "CC Galerías El Pueblo",
+        "lat": "10.514150",
+        "lng": "-66.934211",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Galerías Perico",
+        "lat": "10.503215",
+        "lng": "-66.908709",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Gallo de Oro",
+        "lat": "10.504152",
+        "lng": "-66.911670",
+        "floors_quantity": 7,
+        "img_url": ""
+      },
+      {
+        "name": "CC Hiper Galería",
+        "lat": "10.493078",
+        "lng": "-66.937805",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC La Bandera",
+        "lat": "10.478657",
+        "lng": "-66.901587",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC La Fe",
+        "lat": "10.427663",
+        "lng": "-67.019757",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC La Florida",
+        "lat": "10.501101",
+        "lng": "-66.873348",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC La Hacienda",
+        "lat": "10.432466",
+        "lng": "-66.958977",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC La Laguna",
+        "lat": "10.515026",
+        "lng": "-66.952265",
+        "floors_quantity": 4,
+        "img_url": ""
+      },
+      {
+        "name": "CC La Quebradita",
+        "lat": "10.491641",
+        "lng": "-66.943134",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC La Vega",
+        "lat": "10.474046",
+        "lng": "-66.946484",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC La Villa",
+        "lat": "10.473390",
+        "lng": "-66.956084",
+        "floors_quantity": 7,
+        "img_url": ""
+      },
+      {
+        "name": "CC Libertador",
+        "lat": "10.497288",
+        "lng": "-66.876044",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Lord Center",
+        "lat": "10.505995",
+        "lng": "-66.899981",
+        "floors_quantity": 8,
+        "img_url": ""
+      },
+      {
+        "name": "CC Los Chaguaramos",
+        "lat": "10.486332",
+        "lng": "-66.884385",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Los Ilustres",
+        "lat": "10.482554",
+        "lng": "-66.896052",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Los Próceres",
+        "lat": "10.472964",
+        "lng": "-66.894976",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Los Ángeles",
+        "lat": "10.431736",
+        "lng": "-66.974930",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Madison",
+        "lat": "10.494950",
+        "lng": "-66.879286",
+        "floors_quantity": 6,
+        "img_url": ""
+      },
+      {
+        "name": "CC Maracaibo",
+        "lat": "10.493302",
+        "lng": "-66.935757",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Merposur",
+        "lat": "10.480809",
+        "lng": "-66.918486",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Montalbán",
+        "lat": "10.472273",
+        "lng": "-66.953802",
+        "floors_quantity": 3,
+        "img_url": ""
+      },
+      {
+        "name": "CC Pasaje Zingg",
+        "lat": "10.503467",
+        "lng": "-66.913953",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Plaza Broadway",
+        "lat": "10.491587",
+        "lng": "-66.870150",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Plaza Capitolio",
+        "lat": "10.505081",
+        "lng": "-66.916891",
+        "floors_quantity": 6,
+        "img_url": ""
+      },
+      {
+        "name": "CC Plaza Santa Mónica",
+        "lat": "10.471832",
+        "lng": "-66.891276",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Prado de María",
+        "lat": "10.482257",
+        "lng": "-66.910061",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Procar (Victoria)",
+        "lat": "10.433751",
+        "lng": "-66.963175",
+        "floors_quantity": 3,
+        "img_url": ""
+      },
+      {
+        "name": "CC Páez",
+        "lat": "10.472071",
+        "lng": "-66.956100",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Sabana Grande",
+        "lat": "10.494524",
+        "lng": "-66.878249",
+        "floors_quantity": 4,
+        "img_url": ""
+      },
+      {
+        "name": "CC San Bernardino",
+        "lat": "10.507658",
+        "lng": "-66.901489",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC San Jorge",
+        "lat": "10.479371",
+        "lng": "-66.916211",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC San Martín",
+        "lat": "10.491482",
+        "lng": "-66.939375",
+        "floors_quantity": 6,
+        "img_url": ""
+      },
+      {
+        "name": "CC San Miguel",
+        "lat": "10.512276",
+        "lng": "-66.948784",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Santa Mónica",
+        "lat": "10.478685",
+        "lng": "-66.892306",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Victoria Plaza",
+        "lat": "10.486271",
+        "lng": "-66.909323",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC del Este",
+        "lat": "10.494333",
+        "lng": "-66.879908",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC del Oeste",
+        "lat": "10.514665",
+        "lng": "-66.933453",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC para la Economía Popular de Quinta Crespo",
+        "lat": "10.494871",
+        "lng": "-66.920308",
+        "floors_quantity": 1,
+        "img_url": ""
+      },
+      {
+        "name": "CC Galerías El Recreo",
+        "lat": "10.491815",
+        "lng": "-66.877516",
+        "floors_quantity": 3,
+        "img_url": ""
       }
     ]
   }

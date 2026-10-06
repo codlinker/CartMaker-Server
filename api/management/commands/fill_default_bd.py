@@ -309,7 +309,7 @@ class Command(BaseCommand):
                                     name=mall['name'],
                                     coordinates=ubicacion,
                                     floors_quantity=mall['floors_quantity'],
-                                    img_url=mall['img_url']
+                                    img_url=mall.get('img_url') or 'static/img/no_image.jpg'
                                 )
                             )
                         except (ValueError, TypeError):
