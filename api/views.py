@@ -25,14 +25,16 @@ from rest_framework.permissions import IsAuthenticated
 import openpyxl
 from rest_framework import viewsets, mixins
 from rest_framework.decorators import action
+import random
 import secrets
 from django.contrib.auth.hashers import check_password
 from .cos import storage_manager
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
-from datetime import datetime
+from datetime import datetime, timedelta
 import requests
 from django.db import transaction
 from .core import *
+from django.core.cache import cache
 from django.utils import timezone
 from .tasks import *
 from django.contrib.gis.geos import Polygon, Point
@@ -1714,6 +1716,11 @@ class CartMakerMapViewSet(viewsets.ViewSet):
     """
     permission_classes = [IsAuthenticated]
 
+    def get_permissions(self):
+        if self.action in ('get_locations', 'store_products'):
+            return [AllowAny()]
+        return [IsAuthenticated()]
+
     def _snap_to_grid(self, val: float, step: float = 0.04) -> float:
         """
         Redondea una coordenada a una cuadrícula virtual determinista.
@@ -1992,7 +1999,7 @@ class GetStoresLocations(APIView):
     """
     Endpoint optimizado para cargar tiendas basadas en el área visible del mapa.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request):
         try:
@@ -2042,7 +2049,7 @@ class GetMallsCache(APIView):
     """
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'actions'
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request):
         cache_key = "cartmaker:global:malls"
@@ -2173,6 +2180,7 @@ class SystemConfigCacheAPI(APIView):
             'atlas_plus_price_usd': float(config.atlas_plus_price_usd),
             'atlas_plus_daily_limit': config.atlas_plus_daily_limit,
             'atlas_free_daily_limit': config.atlas_free_daily_limit,
+            'atlas_anonymous_daily_limit': config.atlas_anonymous_daily_limit,
             'platinum_min_rating_promedy_requirement': config.platinum_min_rating_promedy_requirement,
             'platinum_min_sells_per_month_requirement': config.platinum_min_sells_per_month_requirement
         }
@@ -2223,7 +2231,7 @@ class UserCacheAPI(APIView):
 class HomeCacheAPI(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'navigation'
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request):
         """
@@ -2262,7 +2270,7 @@ class HomeCacheAPI(APIView):
 class SearchCacheAPI(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'navigation'
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request):
         """
@@ -4364,6 +4372,11 @@ class ClientCompanyViewSet(viewsets.ViewSet):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'navigation'
 
+    def get_permissions(self):
+        if self.action == 'profile':
+            return [AllowAny()]
+        return [IsAuthenticated()]
+
     @action(detail=False, methods=['get'])
     def profile(self, request):
         """
@@ -4454,7 +4467,10 @@ class ClientCompanyViewSet(viewsets.ViewSet):
             
             store_metadata = store.get_json()
 
-            token_wallet = company.issued_wallets.filter(user=request.user).first()
+            if request.user.is_authenticated:
+                token_wallet = company.issued_wallets.filter(user=request.user).first()
+            else:
+                token_wallet = None
 
             return Response({
                 'store_metadata': store_metadata,
@@ -4562,6 +4578,11 @@ class UniversalConversationViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'navigation'
+
+    def get_permissions(self):
+        if self.action in ('list_comments', 'single_feed_post'):
+            return [AllowAny()]
+        return [IsAuthenticated()]
 
     @action(detail=False, methods=['get'])
     def merchant_items_summary(self, request):
@@ -4840,6 +4861,14 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'navigation'
+
+    def get_permissions(self):
+        public_reads = (
+            'category', 'store', 'offers', 'text_search', 'home_feed', 'item_details',
+        )
+        if self.action in public_reads:
+            return [AllowAny()]
+        return [IsAuthenticated()]
     
     # ------------------------------------------------------------------------
     # HELPERS
@@ -5188,9 +5217,80 @@ class AtlasViewSet(viewsets.ViewSet):
     API integral para todas las interacciones con Atlas (IA de CartMaker).
     """
     permission_classes = [IsAuthenticated]
+    GUEST_HEADER = 'HTTP_X_CARTMAKER_GUEST'
+
+    def get_permissions(self):
+        if self.action in ('guest_session', 'current_thread', 'message'):
+            return [AllowAny()]
+        return [IsAuthenticated()]
 
     # 💡 LÍMITE DIARIO CONFIGURABLE
     DAILY_FREE_LIMIT = 15
+
+    def _client_ip(self, request) -> str:
+        forwarded = request.META.get('HTTP_X_FORWARDED_FOR', '')
+        if forwarded:
+            return forwarded.split(',')[0].strip()
+        return request.META.get('REMOTE_ADDR') or 'unknown'
+
+    def _seconds_until_midnight(self) -> int:
+        now_local = timezone.localtime(timezone.now())
+        tomorrow = (now_local + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        return max(1, int((tomorrow - now_local).total_seconds()))
+
+    def _anonymous_daily_limit(self) -> int:
+        return SystemConfig.objects.latest('creation').atlas_anonymous_daily_limit
+
+    def _guest_token_from_request(self, request) -> str:
+        return (request.META.get(self.GUEST_HEADER) or '').strip()
+
+    def _known_guest(self, token: str) -> bool:
+        if not token:
+            return False
+        return cache.get(f"cartmaker:atlas:guest-known:{token}") is not None
+
+    def _remember_guest(self, token: str) -> None:
+        cache.set(f"cartmaker:atlas:guest-known:{token}", 1, timeout=60 * 60 * 24 * 30)
+
+    def _anon_used(self, token: str, ip: str) -> int:
+        used_token = cache.get(f"cartmaker:atlas:anon:{token}") or 0
+        used_ip = cache.get(f"cartmaker:atlas:anon-ip:{ip}") or 0
+        return max(int(used_token), int(used_ip))
+
+    def _anon_remaining(self, token: str, ip: str) -> int:
+        return max(0, self._anonymous_daily_limit() - self._anon_used(token, ip))
+
+    def _consume_anon(self, token: str, ip: str) -> bool:
+        if self._anon_remaining(token, ip) <= 0:
+            return False
+        timeout = self._seconds_until_midnight()
+        for key in (f"cartmaker:atlas:anon:{token}", f"cartmaker:atlas:anon-ip:{ip}"):
+            if cache.get(key) is None:
+                cache.set(key, 1, timeout=timeout)
+            else:
+                try:
+                    cache.incr(key)
+                except ValueError:
+                    cache.set(key, 1, timeout=timeout)
+        return True
+
+    def _refund_anon(self, token: str, ip: str) -> None:
+        for key in (f"cartmaker:atlas:anon:{token}", f"cartmaker:atlas:anon-ip:{ip}"):
+            try:
+                current = cache.get(key)
+                if current and int(current) > 0:
+                    cache.decr(key)
+            except Exception:
+                pass
+
+    def _login_required_payload(self, daily_limit: int) -> dict:
+        return {
+            'error': 'Inicia sesión para seguir hablando con Atlas.',
+            'free_interactions_left': 0,
+            'login_required': True,
+            'daily_limit': daily_limit,
+            'is_premium': False,
+        }
 
     def _get_user_plan(self, user):
         try:
@@ -5358,22 +5458,73 @@ class AtlasViewSet(viewsets.ViewSet):
         return Response(resultado, status=status.HTTP_200_OK)
 
     # ------------------------------------------------------------------------
+    # ENDPOINT: POST /api/v1/atlas/guest-session/
+    # ------------------------------------------------------------------------
+    @action(detail=False, methods=['post'], url_path='guest-session')
+    def guest_session(self, request):
+        if request.user.is_authenticated:
+            free_left = self._get_free_interactions_left(request.user)
+            plan = self._get_user_plan(request.user)
+            is_premium = bool(
+                plan and plan.tier == AtlasSubscriptionTier.PREMIUM
+                and plan.valid_until and plan.valid_until >= timezone.now()
+            )
+            return Response({
+                'guest_token': None,
+                'free_interactions_left': free_left,
+                'daily_limit': self._get_daily_limit(request.user),
+                'is_premium': is_premium,
+                'login_required': False,
+            }, status=status.HTTP_200_OK)
+
+        daily_limit = self._anonymous_daily_limit()
+        ip = self._client_ip(request)
+        token = self._guest_token_from_request(request)
+        if not self._known_guest(token):
+            if (cache.get(f"cartmaker:atlas:anon-ip:{ip}") or 0) >= daily_limit:
+                return Response(self._login_required_payload(daily_limit), status=status.HTTP_403_FORBIDDEN)
+            token = secrets.token_urlsafe(32)
+            self._remember_guest(token)
+        else:
+            self._remember_guest(token)
+
+        remaining = self._anon_remaining(token, ip)
+        return Response({
+            'guest_token': token,
+            'free_interactions_left': remaining,
+            'daily_limit': daily_limit,
+            'is_premium': False,
+            'login_required': remaining <= 0,
+        }, status=status.HTTP_200_OK)
+
+    # ------------------------------------------------------------------------
     # ENDPOINT: GET /api/v1/atlas/current_thread/
     # ------------------------------------------------------------------------
     @action(detail=False, methods=['get'])
     def current_thread(self, request):
-        plan = request.user.atlas_plan 
-        is_premium = plan.tier == AtlasSubscriptionTier.PREMIUM and plan.valid_until and plan.valid_until >= timezone.now()
-        free_left = self._get_free_interactions_left(request.user)
-        
-        latest_thread = AtlasThread.objects.filter(plan=plan).order_by('-id').first()
-        
-        if not latest_thread:
-            # 1. Creamos el hilo nuevo
-            latest_thread = AtlasThread.objects.create(plan=plan)
-            
-            # Extraemos el nombre del usuario (o usamos un genérico si no lo ha configurado)
+        if request.user.is_authenticated:
+            plan = request.user.atlas_plan
+            is_premium = plan.tier == AtlasSubscriptionTier.PREMIUM and plan.valid_until and plan.valid_until >= timezone.now()
+            free_left = self._get_free_interactions_left(request.user)
+            latest_thread = AtlasThread.objects.filter(plan=plan).order_by('-id').first()
             nombre_usuario = request.user.first_name if request.user.first_name else "mi pana"
+        else:
+            token = self._guest_token_from_request(request)
+            if not self._known_guest(token):
+                return Response(
+                    self._login_required_payload(self._anonymous_daily_limit()),
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+            is_premium = False
+            free_left = self._anon_remaining(token, self._client_ip(request))
+            latest_thread = AtlasThread.objects.filter(guest_key=token).order_by('-id').first()
+            nombre_usuario = "mi pana"
+
+        if not latest_thread:
+            if request.user.is_authenticated:
+                latest_thread = AtlasThread.objects.create(plan=request.user.atlas_plan)
+            else:
+                latest_thread = AtlasThread.objects.create(guest_key=token, plan=None)
             
             # 💡 2. BANCO DE SALUDOS INICIALES DINÁMICOS (Anti-bot)
             saludos_templates = [
@@ -5455,10 +5606,19 @@ class AtlasViewSet(viewsets.ViewSet):
                 "action_command": cmd # 💡 Usamos la variable limpia
             })
 
+        if request.user.is_authenticated:
+            daily_limit = self._get_daily_limit(request.user)
+            login_required = False
+        else:
+            daily_limit = self._anonymous_daily_limit()
+            login_required = free_left <= 0
+
         return Response({
             'thread_id': latest_thread.id,
             'free_interactions_left': free_left,
             'is_premium': is_premium,
+            'daily_limit': daily_limit,
+            'login_required': login_required,
             'messages': messages_data
         }, status=status.HTTP_200_OK)
 
@@ -5473,41 +5633,76 @@ class AtlasViewSet(viewsets.ViewSet):
         
         if not text:
             return Response({'error': 'El texto del mensaje es obligatorio.'}, status=status.HTTP_400_BAD_REQUEST)
-            
-        plan = request.user.atlas_plan
-        is_premium = plan.tier == AtlasSubscriptionTier.PREMIUM and plan.valid_until and plan.valid_until >= timezone.now()
-        
-        # 💡 FIX: Consumimos la interacción para TODOS. 
-        # La función _consume_free_interaction ya sabe si el límite es 15 o 75.
-        if not self._consume_free_interaction(request.user):
-            mensaje_error = 'Has agotado tus interacciones de Atlas Plus por hoy.' if is_premium else 'Has agotado tus interacciones gratuitas por hoy.'
-            return Response({
-                'error': mensaje_error,
-                'free_interactions_left': 0
-            }, status=status.HTTP_403_FORBIDDEN)
-        
+
+        guest_token = None
+        guest_ip = None
+        if request.user.is_authenticated:
+            try:
+                thread = AtlasThread.objects.get(pk=pk, plan=request.user.atlas_plan)
+            except AtlasThread.DoesNotExist:
+                return Response({'error': 'El hilo no existe.'}, status=status.HTTP_404_NOT_FOUND)
+            plan = request.user.atlas_plan
+            is_premium = plan.tier == AtlasSubscriptionTier.PREMIUM and plan.valid_until and plan.valid_until >= timezone.now()
+            if not self._consume_free_interaction(request.user):
+                mensaje_error = 'Has agotado tus interacciones de Atlas Plus por hoy.' if is_premium else 'Has agotado tus interacciones gratuitas por hoy.'
+                return Response({
+                    'error': mensaje_error,
+                    'free_interactions_left': 0,
+                    'login_required': False,
+                }, status=status.HTTP_403_FORBIDDEN)
+            atlas_user = request.user
+        else:
+            guest_token = self._guest_token_from_request(request)
+            if not self._known_guest(guest_token):
+                return Response(
+                    self._login_required_payload(self._anonymous_daily_limit()),
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+            try:
+                thread = AtlasThread.objects.get(pk=pk, guest_key=guest_token)
+            except AtlasThread.DoesNotExist:
+                return Response({'error': 'El hilo no existe.'}, status=status.HTTP_404_NOT_FOUND)
+            guest_ip = self._client_ip(request)
+            is_premium = False
+            if not self._consume_anon(guest_token, guest_ip):
+                return Response(
+                    self._login_required_payload(self._anonymous_daily_limit()),
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            atlas_user = None
+
+        # Flutter manda la coordenada: dispositivo si es invitado, ubicación elegida si hay sesión.
         lat = float(request.data.get('lat', 0.0))
         lng = float(request.data.get('lng', 0.0))
-        user_locations = request.data.get('locations', [])
-        
+        user_locations = request.data.get('locations', []) or []
+
         atlas_manager = atlas.AtlasManager(
-            user_lat=lat, 
-            user_lng=lng, 
-            user_locations=user_locations, 
-            user=request.user, 
-            seed=str(pk)
+            user_lat=lat,
+            user_lng=lng,
+            user_locations=user_locations,
+            user=atlas_user,
+            seed=str(thread.id)
         )
 
         # 💡 PASAMOS LA FOTO AL MOTOR DE ATLAS
-        resultado = async_to_sync(atlas_manager.send_chat_message_async)(thread_id=pk, user_text=text, image_base64=image_base64)
+        resultado = async_to_sync(atlas_manager.send_chat_message_async)(thread_id=thread.id, user_text=text, image_base64=image_base64)
         
         if not resultado.get('success'):
-            if not is_premium:
+            if guest_token:
+                self._refund_anon(guest_token, guest_ip)
+            elif not is_premium:
                 try: cache.decr(f"cartmaker:atlas:daily_usage:{request.user.id}")
                 except: pass
             return Response({'error': resultado.get('error')}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-            
-        free_left = self._get_free_interactions_left(request.user)
+
+        if guest_token:
+            free_left = self._anon_remaining(guest_token, guest_ip)
+            daily_limit = self._anonymous_daily_limit()
+            login_required = free_left <= 0
+        else:
+            free_left = self._get_free_interactions_left(request.user)
+            daily_limit = self._get_daily_limit(request.user)
+            login_required = False
             
         # 💡 Nos aseguramos de imprimir para debuguear si está saliendo bien
         print(f"📦 [VIEWS] Comando enviado al Frontend: {resultado.get('action_command')}")
@@ -5516,8 +5711,10 @@ class AtlasViewSet(viewsets.ViewSet):
             'response': resultado['response'],
             'message_id': resultado['message_id'],
             'free_interactions_left': free_left,
+            'daily_limit': daily_limit,
+            'login_required': login_required,
             'injected_products': resultado.get('injected_products'),
-            'action_command': resultado.get('action_command') # <-- Esto es crucial
+            'action_command': resultado.get('action_command')
         }, status=status.HTTP_200_OK)
 
 class InventoryItemViewSet(viewsets.ModelViewSet):

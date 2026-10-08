@@ -109,7 +109,7 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_THROTTLE_RATES': {
         'auth': '5/minute', # Para registro, login.
-        'navigation': '30/minute', # Para navegacion entre vistas.
+        'navigation': '120/minute', # Mapa y feeds. Sin sesión el cupo es por IP.
         'actions': '50/minute', # Para visualizacion de productos.
         'anti_bots':"1/second",
     }

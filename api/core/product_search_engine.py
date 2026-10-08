@@ -1162,6 +1162,32 @@ class ProductSearchEngine:
     # CORE: ORQUESTADOR DE CACHÉ ESTRUCTURAL
     # =========================================================================
 
+    def _stamp_viewer_likes(self, items: list) -> list:
+        """is_liked sale del usuario que pide el feed, no del que llenó el caché."""
+        if not items:
+            return items
+        if not self.user or not self.user.is_authenticated:
+            for item in items:
+                if isinstance(item, dict) and 'is_liked' in item:
+                    item['is_liked'] = False
+            return items
+        product_ids = [
+            str(item.get('id')) for item in items
+            if isinstance(item, dict) and item.get('feed_type') != 'video' and item.get('id')
+        ]
+        liked = set()
+        if product_ids:
+            product_ct = ContentType.objects.get_for_model(InventoryItem)
+            liked = set(UniversalLike.objects.filter(
+                user=self.user,
+                content_type=product_ct,
+                object_id__in=product_ids,
+            ).values_list('object_id', flat=True))
+        for item in items:
+            if isinstance(item, dict) and 'is_liked' in item:
+                item['is_liked'] = str(item.get('id')) in liked
+        return items
+
     def _get_cached_structural_feed(self, base_cache_key: str, queryset, page: int, page_size: int) -> list:
         """
         Abstracción DRY para resolver el Nivel Estructural de CUALQUIER feed.
@@ -1186,8 +1212,10 @@ class ProductSearchEngine:
             
             # 3. Guardamos la estructura en Redis por 10 minutos
             cache.set(cache_key, structural_feed, timeout=600)
-            
-        # 4. Stitching Volátil: Inyectamos stock y precios en milisegundos
+
+        # Copia: is_liked es del espectador y no puede quedar pegado en el caché compartido.
+        structural_feed = [dict(item) for item in structural_feed]
+        structural_feed = self._stamp_viewer_likes(structural_feed)
         return self._stitch_and_filter_results(structural_feed)
 
     def get_category_feed(self, sub_category_id: int, page: int = 1, page_size: int = 20, sort_by: str = 'relevance', price_order: str = None, max_distance_meters: float = 10000) -> list:
@@ -1384,7 +1412,8 @@ class ProductSearchEngine:
             cache.set(cache_key, structural_page_feed, timeout=600)
             
         # 4. STITCHING VOLÁTIL
-        final_feed = self._stitch_and_filter_results(structural_page_feed)
+        final_feed = self._stitch_and_filter_results([dict(item) for item in structural_page_feed])
+        final_feed = self._stamp_viewer_likes(final_feed)
         
         response_data = {"results": final_feed}
         

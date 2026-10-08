@@ -1725,11 +1725,22 @@ class AtlasThread(models.Model):
     Contexto de conversación persistente con la IA.
 
     Attributes:
-        plan (ForeignKey): Suscripción asociada.
+        plan (ForeignKey): Suscripción asociada. Null si el hilo es de un invitado.
+        guest_key (str): Token de invitado. Null en hilos de usuarios con cuenta.
         summary (str): Resumen generado por la IA sobre la conversación.
     """
-    plan = models.ForeignKey(AtlasPlusPlan, on_delete=models.CASCADE, related_name='threads')
+    plan = models.ForeignKey(AtlasPlusPlan, on_delete=models.CASCADE, related_name='threads', null=True, blank=True)
+    guest_key = models.CharField(max_length=64, null=True, blank=True, db_index=True)
     summary = models.TextField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            UniqueConstraint(
+                fields=['guest_key'],
+                condition=Q(guest_key__isnull=False),
+                name='unique_atlas_thread_guest_key',
+            )
+        ]
 
 class AtlasMessage(models.Model):
     """
@@ -1801,6 +1812,7 @@ class SystemConfig(models.Model):
     atlas_plus_price_usd = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('2.99'))
     atlas_plus_daily_limit = models.IntegerField(default=75)
     atlas_free_daily_limit = models.IntegerField(default=15)
+    atlas_anonymous_daily_limit = models.IntegerField(default=3)
 
 class Announcement(models.Model):
     """
