@@ -887,13 +887,13 @@ class AtlasManager:
             p_ids = [str(p['id']) for p in injected_products if 'id' in p]
             saved_msg = await self._save_message(thread_id, self.ORIGIN_AI, ai_final_text, p_ids, action_command)
 
-            # Telemetría de productos vistos mediante Atlas
-            if injected_products:
+            # Telemetría solo con cuenta. Un invitado no deja ProductViewLog.
+            if injected_products and self.user and self.user.is_authenticated:
                 now = timezone.now()
                 logs = [
                     ProductViewLog(
                         inventory_item_id=p['id'],
-                        client_id=self.user.id if self.user and self.user.is_authenticated else None,
+                        client_id=self.user.id,
                         start_time=now,
                         origin_source='atlas',
                         search_prompt=user_text[:150],
