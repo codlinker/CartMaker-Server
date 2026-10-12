@@ -2234,9 +2234,6 @@ class HomeCacheAPI(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
-        """
-        Caché Global: Anuncios y UI del Home.
-        """
         cache_key = "cartmaker:global:home"
         cached_data = cache.get(cache_key)
 
@@ -2245,7 +2242,9 @@ class HomeCacheAPI(APIView):
 
         # Cache Miss
         announcements = [announcement.get_json() for announcement in Announcement.objects.filter(active=True).order_by('-creation')]
-        company_categories = [category.get_json() for category in CompanyCategory.objects.all()]
+        
+        # 👈 AQUÍ: aseguramos la iteración limpia usando el modelo Category
+        company_categories = [cat.get_json() for cat in CompanyCategory.objects.all()]
         
         company_section_images = {
             "administrar_inventario": storage_manager.get_url('static/img/company_section_buttons/administrar_inventario.jpg', True),
@@ -2266,7 +2265,6 @@ class HomeCacheAPI(APIView):
         
         cache.set(cache_key, data, timeout=86400) # 24h
         return Response(data, status=status.HTTP_200_OK)
-
 class SearchCacheAPI(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'navigation'

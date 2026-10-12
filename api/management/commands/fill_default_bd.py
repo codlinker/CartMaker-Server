@@ -95,92 +95,149 @@ class Command(BaseCommand):
         
         # Estructura centralizada con rutas completamente hardcodeadas para fácil edición futura.
         catalogo_estructura = {
-            'Alimentos y Bebidas': {
+            'Alimentos y Bebidas (Supermercado)': {
                 'img_url': 'static/img/categories/alimentos_y_bebidas.jpg',
                 'subcategories': [
-                    {'name': 'Víveres y Despensa', 'img_url': 'static/img/categories/sub_categories/viveres_y_despensa.jpg'},
-                    {'name': 'Carnes y Aves', 'img_url': 'static/img/categories/sub_categories/carnes_y_aves.jpg'},
-                    {'name': 'Frutas y Verduras', 'img_url': 'static/img/categories/sub_categories/frutas_y_verduras.jpg'},
-                    {'name': 'Charcutería', 'img_url': 'static/img/categories/sub_categories/charcuteria.jpg'},
-                    {'name': 'Licores y Bebidas', 'img_url': 'static/img/categories/sub_categories/licores_y_bebidas.jpg'},
+                    {'name': 'Despensa y Víveres', 'img_url': 'static/img/categories/sub_categories/despensa_y_viveres.jpg'},
+                    {'name': 'Frescos', 'img_url': 'static/img/categories/sub_categories/frescos.jpg'},
+                    {'name': 'Charcutería y Lácteos', 'img_url': 'static/img/categories/sub_categories/charcuteria_y_lacteos.jpg'},
+                    {'name': 'Bebidas', 'img_url': 'static/img/categories/sub_categories/bebidas.jpg'},
+                    {'name': 'Licores', 'img_url': 'static/img/categories/sub_categories/licores.jpg'},
                     {'name': 'Snacks y Dulces', 'img_url': 'static/img/categories/sub_categories/snacks_y_dulces.jpg'},
+                    {'name': 'Limpieza del Hogar', 'img_url': 'static/img/categories/sub_categories/limpieza_del_hogar.jpg'},
                 ]
             },
-            'Moda y Textil': {
-                'img_url': 'static/img/categories/moda_y_textil.jpg',
+            'Tecnología y Electrónica': {
+                'img_url': 'static/img/categories/tecnologia_y_electronica.jpg',
+                'subcategories': [
+                    {'name': 'Celulares y Tablets', 'img_url': 'static/img/categories/sub_categories/celulares_y_tablets.jpg'},
+                    {'name': 'Computación', 'img_url': 'static/img/categories/sub_categories/computacion.jpg'},
+                    {'name': 'Periféricos y Accesorios', 'img_url': 'static/img/categories/sub_categories/perifericos_y_accesorios.jpg'},
+                    {'name': 'TV, Audio y Video', 'img_url': 'static/img/categories/sub_categories/tv_audio_y_video.jpg'},
+                    {'name': 'Videojuegos y Consolas', 'img_url': 'static/img/categories/sub_categories/videojuegos_y_consolas.jpg'},
+                    {'name': 'Wearables', 'img_url': 'static/img/categories/sub_categories/wearables.jpg'},
+                    {'name': 'Cámaras y Fotografía', 'img_url': 'static/img/categories/sub_categories/camaras_y_fotografia.jpg'},
+                ]
+            },
+            'Moda y Accesorios': {
+                'img_url': 'static/img/categories/moda_y_accesorios.jpg',
                 'subcategories': [
                     {'name': 'Ropa Femenina', 'img_url': 'static/img/categories/sub_categories/ropa_femenina.jpg'},
                     {'name': 'Ropa Masculina', 'img_url': 'static/img/categories/sub_categories/ropa_masculina.jpg'},
-                    {'name': 'Moda Infantil', 'img_url': 'static/img/categories/sub_categories/moda_infantil.jpg'},
+                    {'name': 'Ropa Infantil', 'img_url': 'static/img/categories/sub_categories/ropa_infantil.jpg'},
                     {'name': 'Calzado', 'img_url': 'static/img/categories/sub_categories/calzado.jpg'},
-                    {'name': 'Accesorios de Moda', 'img_url': 'static/img/categories/sub_categories/accesorios_de_moda.jpg'},
-                ]
-            },
-            'Tecnología': {
-                'img_url': 'static/img/categories/tecnologia.jpg',
-                'subcategories': [
-                    {'name': 'Teléfonos y Tablets', 'img_url': 'static/img/categories/sub_categories/telefonos_y_tablets.jpg'},
-                    {'name': 'Computación', 'img_url': 'static/img/categories/sub_categories/computacion.jpg'},
-                    {'name': 'Audio y Video', 'img_url': 'static/img/categories/sub_categories/audio_y_video.jpg'},
-                    {'name': 'Smartwatches', 'img_url': 'static/img/categories/sub_categories/smartwatches.jpg'},
-                    {'name': 'Accesorios Tecnológicos', 'img_url': 'static/img/categories/sub_categories/accesorios_tecnologicos.jpg'},
+                    {'name': 'Bolsos y Carteras', 'img_url': 'static/img/categories/sub_categories/bolsos_y_carteras.jpg'},
+                    {'name': 'Accesorios y Joyería', 'img_url': 'static/img/categories/sub_categories/accesorios_y_joyeria.jpg'},
                 ]
             },
             'Salud y Belleza': {
                 'img_url': 'static/img/categories/salud_y_belleza.jpg',
                 'subcategories': [
-                    {'name': 'Medicamentos y Farmacia', 'img_url': 'static/img/categories/sub_categories/medicamentos_y_farmacia.jpg'},
                     {'name': 'Cuidado Personal', 'img_url': 'static/img/categories/sub_categories/cuidado_personal.jpg'},
-                    {'name': 'Maquillaje y Cosméticos', 'img_url': 'static/img/categories/sub_categories/maquillaje_y_cosmeticos.jpg'},
+                    {'name': 'Skincare y Cuidado Facial', 'img_url': 'static/img/categories/sub_categories/skincare_y_cuidado_facial.jpg'},
+                    {'name': 'Maquillaje', 'img_url': 'static/img/categories/sub_categories/maquillaje.jpg'},
                     {'name': 'Perfumería', 'img_url': 'static/img/categories/sub_categories/perfumeria.jpg'},
+                    {'name': 'Farmacia y Bienestar', 'img_url': 'static/img/categories/sub_categories/farmacia_y_bienestar.jpg'},
                 ]
             },
-            'Hogar y Decoración': {
-                'img_url': 'static/img/categories/hogar_y_decoracion.jpg',
+            'Hogar, Muebles y Jardín': {
+                'img_url': 'static/img/categories/hogar_muebles_y_jardin.jpg',
                 'subcategories': [
                     {'name': 'Electrodomésticos', 'img_url': 'static/img/categories/sub_categories/electrodomesticos.jpg'},
                     {'name': 'Muebles', 'img_url': 'static/img/categories/sub_categories/muebles.jpg'},
-                    {'name': 'Artículos de Dormitorio', 'img_url': 'static/img/categories/sub_categories/articulos_de_dormitorio.jpg'},
-                    {'name': 'Artículos de Baño', 'img_url': 'static/img/categories/sub_categories/articulos_de_bano.jpg'},
-                    {'name': 'Artículos de Limpieza', 'img_url': 'static/img/categories/sub_categories/articulos_de_limpieza.jpg'},
+                    {'name': 'Dormitorio', 'img_url': 'static/img/categories/sub_categories/dormitorio.jpg'},
+                    {'name': 'Baño', 'img_url': 'static/img/categories/sub_categories/bano.jpg'},
+                    {'name': 'Decoración', 'img_url': 'static/img/categories/sub_categories/decoracion.jpg'},
+                    {'name': 'Jardín y Exteriores', 'img_url': 'static/img/categories/sub_categories/jardin_y_exteriores.jpg'},
                 ]
             },
             'Ferretería y Construcción': {
                 'img_url': 'static/img/categories/ferreteria_y_construccion.jpg',
                 'subcategories': [
                     {'name': 'Herramientas', 'img_url': 'static/img/categories/sub_categories/herramientas.jpg'},
-                    {'name': 'Materiales Eléctricos', 'img_url': 'static/img/categories/sub_categories/materiales_electricos.jpg'},
+                    {'name': 'Electricidad e Iluminación', 'img_url': 'static/img/categories/sub_categories/electricidad_e_iluminacion.jpg'},
                     {'name': 'Plomería', 'img_url': 'static/img/categories/sub_categories/plomeria.jpg'},
-                    {'name': 'Pinturas y Acabados', 'img_url': 'static/img/categories/sub_categories/pinturas_y_acabados.jpg'},
+                    {'name': 'Materiales de Construcción', 'img_url': 'static/img/categories/sub_categories/materiales_de_construccion.jpg'},
+                    {'name': 'Seguridad y Domótica', 'img_url': 'static/img/categories/sub_categories/seguridad_y_domotica.jpg'},
                 ]
             },
-            'Automotriz': {
-                'img_url': 'static/img/categories/automotriz.jpg',
+            'Carros, Motos y Otros': {
+                'img_url': 'static/img/categories/carros_motos_y_otros.jpg',
                 'subcategories': [
-                    {'name': 'Repuestos', 'img_url': 'static/img/categories/sub_categories/repuestos.jpg'},
+                    {'name': 'Venta de Autos', 'img_url': 'static/img/categories/sub_categories/venta_de_autos.jpg'},
+                    {'name': 'Venta de Motos', 'img_url': 'static/img/categories/sub_categories/venta_de_motos.jpg'},
+                    {'name': 'Repuestos para Autos', 'img_url': 'static/img/categories/sub_categories/repuestos_para_autos.jpg'},
                     {'name': 'Lubricantes y Fluidos', 'img_url': 'static/img/categories/sub_categories/lubricantes_y_fluidos.jpg'},
-                    {'name': 'Neumáticos', 'img_url': 'static/img/categories/sub_categories/neumaticos.jpg'},
+                    {'name': 'Neumáticos y Rines', 'img_url': 'static/img/categories/sub_categories/neumaticos_y_rines.jpg'},
+                    {'name': 'Accesorios para Vehículos', 'img_url': 'static/img/categories/sub_categories/accesorios_para_vehiculos.jpg'},
+                    {'name': 'Motos', 'img_url': 'static/img/categories/sub_categories/motos.jpg'},
                 ]
             },
-            'Deportes y Entretenimiento': {
-                'img_url': 'static/img/categories/deportes_y_entretenimiento.jpg',
+            'Deportes y Fitness': {
+                'img_url': 'static/img/categories/deportes_y_fitness.jpg',
                 'subcategories': [
-                    {'name': 'Ropa Deportiva', 'img_url': 'static/img/categories/sub_categories/ropa_deportiva.jpg'},
-                    {'name': 'Equipos de Ejercicio', 'img_url': 'static/img/categories/sub_categories/equipos_de_ejercicio.jpg'},
-                    {'name': 'Juguetes', 'img_url': 'static/img/categories/sub_categories/juguetes.jpg'},
-                    {'name': 'Libros y Papelería', 'img_url': 'static/img/categories/sub_categories/libros_y_papeleria.jpg'},
+                    {'name': 'Fitness y Musculación', 'img_url': 'static/img/categories/sub_categories/fitness_y_musculacion.jpg'},
+                    {'name': 'Ropa y Calzado Deportivo', 'img_url': 'static/img/categories/sub_categories/ropa_y_calzado_deportivo.jpg'},
+                    {'name': 'Deportes Específicos', 'img_url': 'static/img/categories/sub_categories/deportes_especificos.jpg'},
+                    {'name': 'Camping y Outdoors', 'img_url': 'static/img/categories/sub_categories/camping_y_outdoors.jpg'},
+                ]
+            },
+            'Bebés y Maternidad': {
+                'img_url': 'static/img/categories/bebes_y_maternidad.jpg',
+                'subcategories': [
+                    {'name': 'Pañales y Toallitas', 'img_url': 'static/img/categories/sub_categories/panales_y_toallitas.jpg'},
+                    {'name': 'Lactancia y Alimentación', 'img_url': 'static/img/categories/sub_categories/lactancia_y_alimentacion.jpg'},
+                    {'name': 'Paseo y Viaje', 'img_url': 'static/img/categories/sub_categories/paseo_y_viaje.jpg'},
+                    {'name': 'Higiene y Cuidado del Bebé', 'img_url': 'static/img/categories/sub_categories/higiene_y_cuidado_del_bebe.jpg'},
+                    {'name': 'Cuarto del Bebé', 'img_url': 'static/img/categories/sub_categories/cuarto_del_bebe.jpg'},
+                ]
+            },
+            'Juegos y Juguetes': {
+                'img_url': 'static/img/categories/juegos_y_juguetes.jpg',
+                'subcategories': [
+                    {'name': 'Juguetes para Bebés', 'img_url': 'static/img/categories/sub_categories/juguetes_para_bebes.jpg'},
+                    {'name': 'Muñecas y Peluches', 'img_url': 'static/img/categories/sub_categories/munecas_y_peluches.jpg'},
+                    {'name': 'Figuras de Acción', 'img_url': 'static/img/categories/sub_categories/figuras_de_accion.jpg'},
+                    {'name': 'Juegos de Mesa y Rompecabezas', 'img_url': 'static/img/categories/sub_categories/juegos_de_mesa_y_rompecabezas.jpg'},
+                    {'name': 'Bloques y Construcción', 'img_url': 'static/img/categories/sub_categories/bloques_y_construccion.jpg'},
+                    {'name': 'Juguetes de Exterior', 'img_url': 'static/img/categories/sub_categories/juguetes_de_exterior.jpg'},
                 ]
             },
             'Mascotas': {
                 'img_url': 'static/img/categories/mascotas.jpg',
                 'subcategories': [
-                    {'name': 'Alimentos para Mascotas', 'img_url': 'static/img/categories/sub_categories/alimentos_para_mascotas.jpg'},
-                    {'name': 'Higiene Animal', 'img_url': 'static/img/categories/sub_categories/higiene_animal.jpg'},
-                    {'name': 'Accesorios para Mascotas', 'img_url': 'static/img/categories/sub_categories/accesorios_para_mascotas.jpg'},
+                    {'name': 'Perros', 'img_url': 'static/img/categories/sub_categories/perros.jpg'},
+                    {'name': 'Gatos', 'img_url': 'static/img/categories/sub_categories/gatos.jpg'},
+                    {'name': 'Higiene y Salud Animal', 'img_url': 'static/img/categories/sub_categories/higiene_y_salud_animal.jpg'},
                 ]
-            }
-        }
-
+            },
+            'Papelería, Oficina y Libros': {
+                'img_url': 'static/img/categories/papeleria_oficina_y_libros.jpg',
+                'subcategories': [
+                    {'name': 'Útiles Escolares', 'img_url': 'static/img/categories/sub_categories/utiles_escolares.jpg'},
+                    {'name': 'Oficina', 'img_url': 'static/img/categories/sub_categories/oficina.jpg'},
+                    {'name': 'Libros', 'img_url': 'static/img/categories/sub_categories/libros.jpg'},
+                ]
+            },
+            'Instrumentos Musicales': {
+                'img_url': 'static/img/categories/instrumentos_musicales.jpg',
+                'subcategories': [
+                    {'name': 'Guitarras y Bajos', 'img_url': 'static/img/categories/sub_categories/guitarras_y_bajos.jpg'},
+                    {'name': 'Teclados y Pianos', 'img_url': 'static/img/categories/sub_categories/teclados_y_pianos.jpg'},
+                    {'name': 'Baterías y Percusión', 'img_url': 'static/img/categories/sub_categories/baterias_y_percusion.jpg'},
+                    {'name': 'Instrumentos de Viento', 'img_url': 'static/img/categories/sub_categories/instrumentos_de_viento.jpg'},
+                    {'name': 'Instrumentos de Cuerda', 'img_url': 'static/img/categories/sub_categories/instrumentos_de_cuerda.jpg'},
+                    {'name': 'Audio Profesional y DJ', 'img_url': 'static/img/categories/sub_categories/audio_profesional_y_dj.jpg'},
+                    {'name': 'Accesorios Musicales', 'img_url': 'static/img/categories/sub_categories/accesorios_musicales.jpg'},
+                ]
+            },
+            'Otras Categorías (Varios)': {
+        'img_url': 'static/img/categories/otras_categorias.jpg',
+        'subcategories': [
+            {'name': 'Otros', 'img_url': 'static/img/categories/sub_categories/otros.jpg'},
+        ]
+    }
+}
         # 1. Preparar y crear Categorías Principales
         categories_data = [
             {'name': cat_name, 'img_url': cat_info['img_url']} 
@@ -309,7 +366,7 @@ class Command(BaseCommand):
                                     name=mall['name'],
                                     coordinates=ubicacion,
                                     floors_quantity=mall['floors_quantity'],
-                                    img_url=mall.get('img_url') or 'static/img/no_image.jpg'
+                                    img_url=mall['img_url']
                                 )
                             )
                         except (ValueError, TypeError):
