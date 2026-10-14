@@ -56,6 +56,7 @@ from django.db.models.functions import Cast
 
 class RegistDeviceView(APIView):
     serializer_class = RegistDeviceSerializer
+    permission_classes = [IsAuthenticated]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'auth'
 
@@ -84,6 +85,7 @@ class BiometricLoginView(APIView):
     """
     Endpoint para autenticación mediante vectores biométricos.
     """
+    permission_classes = [AllowAny]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'auth'
 
@@ -141,6 +143,7 @@ class CartMakerTokenView(TokenObtainPairView):
     """
     Vista personalizada para el login que devuelve datos extendidos del perfil.
     """
+    permission_classes = [AllowAny]
     serializer_class = CartMakerTokenSerializer
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'auth'
@@ -149,6 +152,7 @@ class GoogleClientId(APIView):
     """
     API para obtener el Google Client Id.
     """
+    permission_classes = [AllowAny]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'auth'
 
@@ -159,6 +163,7 @@ class GoogleRegistView(APIView):
     """
     API para el registro de usuarios a traves de Google OAuth.
     """
+    permission_classes = [AllowAny]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'auth'
 
@@ -173,13 +178,13 @@ class GoogleRegistView(APIView):
             last_name = idinfo.get('family_name', '')
             profile_pic = idinfo.get('picture', '')
             random_password = secrets.token_urlsafe(32)
-            user = User.objects.create(
+            user = User.objects.create_user(
                 email=email,
+                password=random_password,
                 first_name=first_name,
                 last_name=last_name,
                 profile_picture=profile_pic,
                 email_verified=True,
-                password=random_password,
                 is_external_account=True
             )
             tokens = get_tokens_for_user(user) 
@@ -203,6 +208,7 @@ class GoogleLoginView(APIView):
     """
     API para autenticacion con Google OAuth.
     """
+    permission_classes = [AllowAny]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'auth'
 
@@ -235,6 +241,7 @@ class GoogleLoginView(APIView):
             return Response({"error": "Token inválido"}, status=400)
 
 class RegisterView(generics.CreateAPIView):
+    permission_classes = [AllowAny]
     queryset = User.objects.none()
     serializer_class = RegisterSerializer
     throttle_classes = [ScopedRateThrottle]
@@ -781,6 +788,44 @@ class GetCartMakerAccounts(APIView):
         return Response({'data':[bank.get_json() for bank in CartMakerBankAccount.objects.filter(active=True)]}, status=status.HTTP_200_OK)
 
 
+def _get_cached_bcv_rate(default: float = 0.0, raise_on_failure: bool = False) -> float:
+    """
+    Obtiene la tasa oficial del BCV desde caché en Redis (TTL 1h) o desde dolarapi.com con timeout estricto.
+    """
+    cache_key = "cartmaker:global:bcv_rate"
+    fallback_key = "cartmaker:global:bcv_rate_fallback"
+    cached_rate = cache.get(cache_key)
+    if cached_rate is not None:
+        return float(cached_rate)
+
+    try:
+        response = requests.get('https://ve.dolarapi.com/v1/estado', timeout=4)
+        response.raise_for_status()
+        data = response.json()
+        api_available = data.get('estado') == 'Disponible' if data.get('estado') else False
+        if api_available:
+            response = requests.get('https://ve.dolarapi.com/v1/dolares/oficial', timeout=4)
+            response.raise_for_status()
+            data = response.json()
+            rate = float(data.get('promedio', default) or default)
+            if rate > 0:
+                cache.set(cache_key, rate, timeout=3600)
+                cache.set(fallback_key, rate, timeout=86400 * 7)
+                return rate
+    except Exception as e:
+        print(f"Error obteniendo el precio del dolar bcv: {e}")
+        fallback_rate = cache.get(fallback_key)
+        if fallback_rate is not None:
+            return float(fallback_rate)
+        if raise_on_failure:
+            raise
+
+    fallback_rate = cache.get(fallback_key)
+    if fallback_rate is not None:
+        return float(fallback_rate)
+    return float(default)
+
+
 class GetMerchantPlans(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'actions'
@@ -791,20 +836,8 @@ class GetMerchantPlans(APIView):
         Devuelve todas los planes disponibles para comerciantes.
         """
         plans = [mp.get_json() for mp in MerchantPlan.objects.all().order_by('price')]
-        dollar_bcv_tax = 0.0
+        dollar_bcv_tax = _get_cached_bcv_rate(default=0.0)
         bs_price = 0.0
-        try:
-            response = requests.get('https://ve.dolarapi.com/v1/estado')
-            response.raise_for_status()
-            data = response.json()
-            api_available = data.get('estado') == 'Disponible' if data.get('estado') else False
-            if api_available:
-                response = requests.get('https://ve.dolarapi.com/v1/dolares/oficial')
-                response.raise_for_status()
-                data = response.json()
-                dollar_bcv_tax = data.get('promedio', 0.0)
-        except Exception as e:
-            print(f"Error obteniendo el precio del dolar bcv: {e}")
         for plan in plans:
             if dollar_bcv_tax > 0.0:
                 bs_price = plan['price'] * dollar_bcv_tax
@@ -824,23 +857,8 @@ class GetAtlasPlusPlanDetails(APIView):
         """
         config = SystemConfig.objects.latest('creation')
         
-        dollar_bcv_tax = 1.0
+        dollar_bcv_tax = _get_cached_bcv_rate(default=1.0)
         bs_price = 0.0
-        
-        # Consumimos la tasa oficial en vivo al igual que con los comercios
-        try:
-            response = requests.get('https://ve.dolarapi.com/v1/estado')
-            response.raise_for_status()
-            data = response.json()
-            api_available = data.get('estado') == 'Disponible' if data.get('estado') else False
-            
-            if api_available:
-                response = requests.get('https://ve.dolarapi.com/v1/dolares/oficial')
-                response.raise_for_status()
-                data = response.json()
-                dollar_bcv_tax = float(data.get('promedio', 1.0))
-        except Exception as e:
-            print(f"Error obteniendo el precio del dolar bcv para Atlas: {e}")
 
         price_usd = float(config.atlas_plus_price_usd)
         if dollar_bcv_tax > 0.0:
@@ -933,30 +951,21 @@ class FullPaySubscriptionWithWalletView(APIView):
 
     def post(self, request, *args, **kwargs):
         try:
-            with transaction.atomic():
-                print("REQUEST DATA: ", request.data)
-                plan_type = request.data.get('plan_type', 'merchant')
-                if plan_type != 'atlas':
-                    return Response({
-                        'success': False,
-                        'message': 'Vender en CartMaker ya no requiere un plan de pago. Configura tu compañía para empezar.'
-                    }, status=status.HTTP_406_NOT_ACCEPTABLE)
+            plan_type = request.data.get('plan_type', 'merchant')
+            if plan_type != 'atlas':
+                return Response({
+                    'success': False,
+                    'message': 'Vender en CartMaker ya no requiere un plan de pago. Configura tu compañía para empezar.'
+                }, status=status.HTTP_406_NOT_ACCEPTABLE)
 
-                dollar_bcv_tax = 1.0
-                try:
-                    response = requests.get('https://ve.dolarapi.com/v1/estado')
-                    response.raise_for_status()
-                    data = response.json()
-                    api_available = data.get('estado') == 'Disponible' if data.get('estado') else False
-                    if api_available:
-                        response = requests.get('https://ve.dolarapi.com/v1/dolares/oficial')
-                        response.raise_for_status()
-                        data = response.json()
-                        dollar_bcv_tax = data.get('promedio', 1.0)
-                except Exception as e:
-                    print(f"Error obteniendo el precio del dolar bcv: {e}")
-                    return Response({'error':"No se pudo determinar la tasa del dolar."}, status=status.HTTP_423_LOCKED)
-                
+            # Obtenemos la tasa BCV FUERA de la transacción atómica para no retener bloqueos de fila durante llamadas de red
+            try:
+                dollar_bcv_tax = _get_cached_bcv_rate(default=1.0, raise_on_failure=True)
+            except Exception as e:
+                print(f"Error obteniendo el precio del dolar bcv: {e}")
+                return Response({'error': "No se pudo determinar la tasa del dolar."}, status=status.HTTP_423_LOCKED)
+
+            with transaction.atomic():
                 wallet = UserWallet.objects.select_for_update().get(user=request.user)
 
                 config = SystemConfig.objects.latest('creation')
@@ -997,6 +1006,9 @@ class FullPaySubscriptionWithWalletView(APIView):
                     category=NotificationCategory.PAYMENT_APPROVED,
                     metadata={'payment_id': str(atlas_payment.id)}
                 )
+
+                user_id = request.user.id
+                transaction.on_commit(lambda: cache.delete(f"cartmaker:tenant:{user_id}:subscriptions"))
 
                 return Response({
                     'success': True,
@@ -1133,12 +1145,14 @@ class UpdateCompanyAPI(APIView):
         try:
             company = Company.objects.get(id=data['company_id'])
         except Company.DoesNotExist:
-            return Response({'No se encontro la compania.'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'error': 'No se encontro la compania.'}, status=status.HTTP_404_NOT_FOUND)
+        if company.owner_id != request.user.id:
+            return Response({'error': 'No tienes permisos para modificar esta compañía.'}, status=status.HTTP_403_FORBIDDEN)
         main_store = company.stores.filter(is_main_store=True).first()
         if main_store == None:
             first = company.stores.all().order_by('-creation').first()
             if first == None:
-                return Response({'No hay una tienda configurada'}, status=status.HTTP_409_CONFLICT)
+                return Response({'error': 'No hay una tienda configurada'}, status=status.HTTP_409_CONFLICT)
             first.is_main_store = True
             first.save()
             main_store = first
@@ -1275,10 +1289,6 @@ class UpdateCompanyAPI(APIView):
             if work_hours:
                 company.main_work_hours = work_hours 
                 company_has_changed = True
-
-            if work_hours:
-                company.main_work_hours = work_hours 
-                company_has_changed = True
                 
             # <-- 2. Agrega este bloque para work_days
             if work_days is not None: 
@@ -1354,9 +1364,13 @@ class UpdateCompanyAPI(APIView):
         return Response({'message': 'Compañía actualizada exitosamente'}, status=status.HTTP_200_OK)
     
 class CompanyStoreViewSet(viewsets.ModelViewSet):
+    queryset = CompanyStore.objects.select_related('company').all()
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'actions'
     permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return CompanyStore.objects.select_related('company').filter(company__owner=self.request.user)
 
     @action(detail=True, methods=['post'])
     def set_main_store(self, request, pk=None):
@@ -1691,14 +1705,14 @@ class DeleteStoreContactMethodAPI(APIView):
         try:
             contact_method = StoreContactMethod.objects.prefetch_related('store__company__owner').get(id=method_id)
             if not request.user.id == contact_method.store.company.owner.id:
-                return Response({'Usted no es propietario de esta compania.'}, status=status.HTTP_406_NOT_ACCEPTABLE)
+                return Response({'error': 'Usted no es propietario de esta compania.'}, status=status.HTTP_406_NOT_ACCEPTABLE)
         except StoreContactMethod.DoesNotExist:
-            return Response({'No existe ese metodo de contacto.'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'error': 'No existe ese metodo de contacto.'}, status=status.HTTP_404_NOT_FOUND)
         try:
             contact_method.delete()
         except Exception as e:
             print(f"Error al eliminar el metodo de contacto: {e}")
-            return Response({f"{e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error': f"{e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         return Response({'text':"Exito"}, status=status.HTTP_204_NO_CONTENT)
 
 
@@ -2425,6 +2439,25 @@ class AnalyticsViewSet(viewsets.ViewSet):
 
         product_financials = {}
 
+        # Pre-cargamos en lote los timestamps de engagement de video y de Atlas IA para eliminar N+1 queries
+        video_engagement_rows = VideoEngagementLog.objects.filter(
+            video__company=company,
+            video__associated_item__isnull=False,
+            timestamp__gte=time_horizon - timedelta(hours=2)
+        ).values_list('video__associated_item_id', 'timestamp')
+        video_ts_by_item = {}
+        for item_id_val, ts_val in video_engagement_rows:
+            video_ts_by_item.setdefault(item_id_val, []).append(ts_val)
+
+        atlas_view_rows = ProductViewLog.objects.filter(
+            inventory_item__store__company=company,
+            origin_source='atlas',
+            start_time__gte=time_horizon - timedelta(days=7)
+        ).values_list('inventory_item_id', 'start_time')
+        atlas_ts_by_item = {}
+        for item_id_val, ts_val in atlas_view_rows:
+            atlas_ts_by_item.setdefault(item_id_val, []).append(ts_val)
+
         for trans in sales_transactions:
             qty = abs(trans.units)
             total_items_sold += qty
@@ -2437,13 +2470,14 @@ class AnalyticsViewSet(viewsets.ViewSet):
             # --- ATRIBUCIÓN LOGÍSTICA-TELEMETRÍCA (Sin Tabla de Órdenes) ---
             # Correlacionamos el momento exacto del egreso con los logs de interacción del cliente
             is_attributed = False
+            tx_time = trans.creation
+            window_video_start = tx_time - timedelta(hours=2)
 
             # A. Verificación de canal de Video Historias (Ventana de interacción de 2 horas previas)
-            has_video_engagement = VideoEngagementLog.objects.filter(
-                video__associated_item=trans.item,
-                timestamp__lte=trans.creation,
-                timestamp__gte=trans.creation - timedelta(hours=2)
-            ).exists()
+            has_video_engagement = any(
+                window_video_start <= ts <= tx_time
+                for ts in video_ts_by_item.get(trans.item_id, ())
+            )
 
             if has_video_engagement:
                 video_sales_count += qty
@@ -2451,12 +2485,11 @@ class AnalyticsViewSet(viewsets.ViewSet):
 
             # B. Verificación de recomendación de Atlas IA (Ventana de influencia de 7 días previos)
             if not is_attributed:
-                has_atlas_influence = ProductViewLog.objects.filter(
-                    inventory_item=trans.item,
-                    origin_source='atlas',
-                    start_time__lte=trans.creation,
-                    start_time__gte=trans.creation - timedelta(days=7)
-                ).exists()
+                window_atlas_start = tx_time - timedelta(days=7)
+                has_atlas_influence = any(
+                    window_atlas_start <= ts <= tx_time
+                    for ts in atlas_ts_by_item.get(trans.item_id, ())
+                )
 
                 if has_atlas_influence:
                     atlas_sales_count += qty
@@ -2534,13 +2567,13 @@ class AnalyticsViewSet(viewsets.ViewSet):
             return Response({'error': 'Compañía no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
 
         time_horizon = timezone.now() - timedelta(days=30)
-        logs = VideoEngagementLog.objects.filter(video__company=company, timestamp__gte=time_horizon)
+        logs = list(VideoEngagementLog.objects.filter(video__company=company, timestamp__gte=time_horizon))
 
-        total_views = logs.count()
-        completed_views = logs.filter(video_completed=True).count()
+        total_views = len(logs)
+        completed_views = sum(1 for l in logs if l.video_completed)
         abandoned_views = total_views - completed_views
-        interacted = logs.filter(interacted_with_product=True).count()
-        added_to_cart = logs.filter(added_to_cart_from_video=True).count()
+        interacted = sum(1 for l in logs if l.interacted_with_product)
+        added_to_cart = sum(1 for l in logs if l.added_to_cart_from_video)
         
         completion_rate = round((completed_views / total_views * 100), 1) if total_views > 0 else 0.0
 
@@ -2548,7 +2581,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
         total_video_revenue = 0.0
         total_watch_time_seconds_clean = 0.0
 
-        company_videos = CompanyVideoStory.objects.filter(company=company)
+        company_videos = list(CompanyVideoStory.objects.filter(company=company))
         for v in company_videos:
             video_stats[str(v.id)] = {
                 'id': str(v.id),
@@ -2559,8 +2592,11 @@ class AnalyticsViewSet(viewsets.ViewSet):
                 'revenue': 0.0, 'units_sold': 0, 'interacted': 0
             }
 
+        purchase_ts_by_video = {}
         for log in logs:
             vid = str(log.video_id)
+            if log.bought_from_video:
+                purchase_ts_by_video.setdefault(vid, []).append(log.timestamp)
             if vid in video_stats:
                 video_stats[vid]['views'] += 1
                 
@@ -2578,26 +2614,27 @@ class AnalyticsViewSet(viewsets.ViewSet):
                 if log.video_completed: video_stats[vid]['completions'] += 1
                 if log.interacted_with_product: video_stats[vid]['interacted'] += 1
 
-        # --- AUDITORÍA DE FACTURACIÓN POR VIDEO USANDO DIARIO CONTABLE ---
-        # Buscamos todos los egresos físicos vinculados a productos asociados a los videos
-        for vid, stats in video_stats.items():
-            video_obj = next((v for v in company_videos if str(v.id) == vid), None)
-            if video_obj and video_obj.associated_item_id:
-                # Rastreamos los egresos físicos que ocurrieron en la ventana temporal del video
-                related_txs = InventoryItemTransaction.objects.filter(
-                    item_id=video_obj.associated_item_id,
-                    transaction_type=TransactionType.OUTCOME,
-                    creation__gte=time_horizon
-                )
-                for tx in related_txs:
-                    # Correlacionamos si existen logs de compra atribuidos por video
-                    has_purchase_log = VideoEngagementLog.objects.filter(
-                        video_id=vid,
-                        bought_from_video=True,
-                        timestamp__lte=tx.creation,
-                        timestamp__gte=tx.creation - timedelta(hours=2)
-                    ).exists()
+        # --- AUDITORÍA DE FACTURACIÓN POR VIDEO USANDO DIARIO CONTABLE (SIN N+1) ---
+        associated_item_ids = {v.associated_item_id for v in company_videos if v.associated_item_id}
+        txs_by_item = {}
+        if associated_item_ids:
+            all_related_txs = InventoryItemTransaction.objects.filter(
+                item_id__in=associated_item_ids,
+                transaction_type=TransactionType.OUTCOME,
+                creation__gte=time_horizon
+            ).select_related('item__product')
+            for tx in all_related_txs:
+                txs_by_item.setdefault(tx.item_id, []).append(tx)
 
+        for v in company_videos:
+            vid = str(v.id)
+            if v.associated_item_id and v.associated_item_id in txs_by_item:
+                vid_purchase_ts = purchase_ts_by_video.get(vid, ())
+                if not vid_purchase_ts:
+                    continue
+                for tx in txs_by_item[v.associated_item_id]:
+                    window_start = tx.creation - timedelta(hours=2)
+                    has_purchase_log = any(window_start <= ts <= tx.creation for ts in vid_purchase_ts)
                     if has_purchase_log:
                         units = abs(tx.units)
                         price = float(tx.item.custom_price if tx.item.custom_price else tx.item.product.price)
@@ -3089,9 +3126,22 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
     """
     queryset = CompanyVideoStory.objects.all()
     serializer_class = CompanyVideoStorySerializer
+    permission_classes = [IsAuthenticated]
     
     # 💡 MUY IMPORTANTE: Habilitamos a Django para recibir archivos pesados
-    parser_classes = (MultiPartParser, FormParser)
+    parser_classes = (MultiPartParser, FormParser, JSONParser)
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.company.owner != request.user:
+            return Response({"error": "No tienes permiso para modificar este video."}, status=status.HTTP_403_FORBIDDEN)
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.company.owner != request.user:
+            return Response({"error": "No tienes permiso para modificar este video."}, status=status.HTTP_403_FORBIDDEN)
+        return super().partial_update(request, *args, **kwargs)
 
     @action(detail=False, methods=['get'])
     def available_items(self, request):
@@ -3753,108 +3803,114 @@ class OrderViewSet(viewsets.ViewSet):
 
         try:
             with transaction.atomic():
-                # Buscamos si quien ejecuta es el cliente o el comerciante
-                order = Order.objects.select_related('store__company').get(id=order_id)
+                # Bloqueamos la fila de la orden para evitar condiciones de carrera y doble acreditación de tokens
+                order = Order.objects.select_for_update().select_related('store__company').get(id=order_id)
                 is_client = order.client == request.user
                 is_merchant = order.store.company.owner == request.user
 
                 if not is_client and not is_merchant:
                     return Response({"error": "No tienes permisos sobre esta orden."}, status=status.HTTP_403_FORBIDDEN)
 
-                if order.status == OrderStatus.COMPLETED: # COMPLETED
+                if order.status == OrderStatus.COMPLETED:
                     return Response({"error": "Esta orden ya se encuentra completada."}, status=status.HTTP_400_BAD_REQUEST)
 
-                with transaction.atomic():
-                    order.status = OrderStatus.COMPLETED # COMPLETED
-                    order.end_time = timezone.now()
-                    order.save()
+                if order.status in (OrderStatus.CANCELLED, OrderStatus.SOLVED):
+                    return Response({"error": "No se puede completar una orden cancelada o cerrada."}, status=status.HTTP_400_BAD_REQUEST)
 
-                    cart_items = order.cart.get('items', [])
-                    for item in cart_items:
-                        inv_item_id = item.get('inventory_item_id')
-                        qty = int(item.get('quantity', 0))
-                        
-                        # 💡 EXTRAEMOS LA ETIQUETA DEL VIDEO DEL SNAPSHOT DE LA ORDEN
-                        source_video_id = item.get('source_video_id')
-                        
-                        if inv_item_id and qty > 0:
-                            try:
-                                inv_item = InventoryItem.objects.get(id=inv_item_id)
-                                InventoryItemTransaction.objects.create(
-                                    item=inv_item,
-                                    units=qty,
-                                    transaction_type=TransactionType.OUTCOME
-                                )
-                            except InventoryItem.DoesNotExist:
-                                pass # Si el producto ya no existe, ignoramos
+                order.status = OrderStatus.COMPLETED
+                order.end_time = timezone.now()
+                order.save()
 
-                        # =========================================================
-                        # 💡 REGISTRO DE COMPRA DE VIDEO (Atribución Real en Checkout)
-                        # =========================================================
-                        if source_video_id:
-                            try:
-                                # ⚠️ MUY IMPORTANTE: Usamos order.client, NO request.user, 
-                                # porque el que completa la orden podría ser el comerciante.
-                                log = VideoEngagementLog.objects.filter(
-                                    client=order.client,
-                                    video_id=source_video_id
-                                ).order_by('-timestamp').first()
-
-                                if log:
-                                    log.bought_from_video = True
-                                    log.save(update_fields=['bought_from_video'])
-                                else:
-                                    # Fallback de seguridad
-                                    VideoEngagementLog.objects.create(
-                                        client=order.client,
-                                        video_id=source_video_id,
-                                        bought_from_video=True
-                                    )
-                                print(f"✅ ATRIBUCIÓN DE COMPRA REGISTRADA PARA EL VIDEO: {source_video_id}")
-                            except Exception as e:
-                                print(f"❌ Error actualizando atribución de video: {e}")
+                cart_items = order.cart.get('items', [])
+                for item in cart_items:
+                    inv_item_id = item.get('inventory_item_id')
+                    qty = int(item.get('quantity', 0))
                     
+                    # 💡 EXTRAEMOS LA ETIQUETA DEL VIDEO DEL SNAPSHOT DE LA ORDEN
+                    source_video_id = item.get('source_video_id')
+                    
+                    if inv_item_id and qty > 0:
+                        try:
+                            inv_item = InventoryItem.objects.get(id=inv_item_id)
+                            InventoryItemTransaction.objects.create(
+                                item=inv_item,
+                                units=qty,
+                                transaction_type=TransactionType.OUTCOME
+                            )
+                        except InventoryItem.DoesNotExist:
+                            pass # Si el producto ya no existe, ignoramos
 
-                    Notification.objects.filter(metadata__order_id=str(order.id), is_read=False).update(is_read=True)
+                    # =========================================================
+                    # 💡 REGISTRO DE COMPRA DE VIDEO (Atribución Real en Checkout)
+                    # =========================================================
+                    if source_video_id:
+                        try:
+                            # ⚠️ MUY IMPORTANTE: Usamos order.client, NO request.user, 
+                            # porque el que completa la orden podría ser el comerciante.
+                            log = VideoEngagementLog.objects.filter(
+                                client=order.client,
+                                video_id=source_video_id
+                            ).order_by('-timestamp').first()
 
-                    # El cliente califica (Solo si la petición viene del cliente real)
-                    if is_client:
-                        if merchant_rating and float(merchant_rating) > 0:
-                            MerchantCalification.objects.create(merchant=order.store.company, client=request.user, rating=float(merchant_rating))
-                        for pr in product_ratings:
-                            rating_val = pr.get('rating', 0)
-                            product_id = pr.get('product_id')
-                            if product_id and float(rating_val) > 0:
-                                ProductCalification.objects.create(product_id=product_id, client=request.user, rating=float(rating_val))
+                            if log:
+                                log.bought_from_video = True
+                                log.save(update_fields=['bought_from_video'])
+                            else:
+                                # Fallback de seguridad
+                                VideoEngagementLog.objects.create(
+                                    client=order.client,
+                                    video_id=source_video_id,
+                                    bought_from_video=True
+                                )
+                            print(f"✅ ATRIBUCIÓN DE COMPRA REGISTRADA PARA EL VIDEO: {source_video_id}")
+                        except Exception as e:
+                            print(f"❌ Error actualizando atribución de video: {e}")
 
+                Notification.objects.filter(metadata__order_id=str(order.id), is_read=False).update(is_read=True)
+
+                # El cliente califica (Solo si la petición viene del cliente real y validando rango [1.0, 5.0])
                 if is_client:
-                    NotificationManager.notify_order_status_change(
-                        user_id=order.store.company.owner.id,
-                        order_id=order.id,
-                        title="Cliente confirmó entrega",
-                        body=f"El cliente de la orden N° {order.id} la ha marcado como completada.",
-                        is_merchant=True,
-                        new_status=OrderStatus.COMPLETED # 💡 AÑADIDO
-                    )
-                elif is_merchant:
-                    NotificationManager.notify_order_status_change(
-                        user_id=order.client.id,
-                        order_id=order.id,
-                        title="Tu orden fue completada",
-                        body=f"{order.store.company.name} ha marcado tu pedido como completado exitosamente.",
-                        is_merchant=False,
-                        new_status=OrderStatus.COMPLETED # 💡 AÑADIDO
-                    )
+                    try:
+                        m_rating_val = float(merchant_rating or 0)
+                    except (ValueError, TypeError):
+                        m_rating_val = 0.0
+                    if m_rating_val > 0:
+                        clamped_m_rating = min(5.0, max(1.0, m_rating_val))
+                        MerchantCalification.objects.create(
+                            merchant=order.store.company,
+                            client=request.user,
+                            rating=clamped_m_rating
+                        )
+                    valid_product_ids = {str(item.get('product_id')) for item in cart_items if item.get('product_id')}
+                    if isinstance(product_ratings, list):
+                        for pr in product_ratings:
+                            if not isinstance(pr, dict):
+                                continue
+                            product_id = pr.get('product_id')
+                            try:
+                                rating_val = float(pr.get('rating', 0) or 0)
+                            except (ValueError, TypeError):
+                                rating_val = 0.0
+                            if product_id and str(product_id) in valid_product_ids and rating_val > 0:
+                                clamped_p_rating = min(5.0, max(1.0, rating_val))
+                                ProductCalification.objects.create(
+                                    product_id=product_id,
+                                    client=request.user,
+                                    rating=clamped_p_rating
+                                )
 
                 tokens_earned = 0.0
                 company = order.store.company
 
                 if company.gamification_enabled and company.gamification_tokens_per_dollar > 0:
-                    order_total = float(order.cart.get('total', 0.0))
+                    order_total = max(0.0, float(order.cart.get('total', 0.0)))
                     tokens_earned = int(order_total * company.gamification_tokens_per_dollar)
                     
                     if tokens_earned > 0:
-                        wallet, _ = TokenWallet.objects.get_or_create(user=order.client, company=company)
+                        wallet, _ = TokenWallet.objects.select_for_update().get_or_create(
+                            user=order.client,
+                            company=company
+                        )
                         wallet.balance += tokens_earned
                         wallet.save(update_fields=['balance'])
                         
@@ -3863,12 +3919,35 @@ class OrderViewSet(viewsets.ViewSet):
                             transaction_type=TransactionType.INCOME, order=order
                         )
 
+                owner_id = order.store.company.owner.id
+                client_id = order.client.id
+                company_name = order.store.company.name
+                oid = order.id
+
+                if is_client:
+                    transaction.on_commit(lambda: NotificationManager.notify_order_status_change(
+                        user_id=owner_id,
+                        order_id=oid,
+                        title="Cliente confirmó entrega",
+                        body=f"El cliente de la orden N° {oid} la ha marcado como completada.",
+                        is_merchant=True,
+                        new_status=OrderStatus.COMPLETED
+                    ))
+                elif is_merchant:
+                    transaction.on_commit(lambda: NotificationManager.notify_order_status_change(
+                        user_id=client_id,
+                        order_id=oid,
+                        title="Tu orden fue completada",
+                        body=f"{company_name} ha marcado tu pedido como completado exitosamente.",
+                        is_merchant=False,
+                        new_status=OrderStatus.COMPLETED
+                    ))
+
                 return Response({
                     "success": True, 
-                    "tokens_earned": round(float(tokens_earned), 2) , # 👈 Ahora sí enviamos el número real
+                    "tokens_earned": round(float(tokens_earned), 2),
                     "message": "Orden completada con éxito."
                 }, status=status.HTTP_200_OK)
-            return Response({'error':"Error interno en el servidor."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         except Order.DoesNotExist:
             return Response({"error": "La orden no existe."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -3971,10 +4050,31 @@ class CartViewSet(viewsets.ViewSet):
 
         print("REQUEST DATA EN CREATE ORDER: ", request.data)
 
-        if not store_id or not items_data:
+        if not store_id or not items_data or not isinstance(items_data, list):
             return Response({
                 "error": "El carrito está vacío o faltan datos para procesar tu orden."
             }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Validamos estructura y cantidades estrictamente positivas (> 0)
+        item_qty_map = {}
+        item_discount_map = {}
+        for item_entry in items_data:
+            if not isinstance(item_entry, dict) or not item_entry.get('id'):
+                return Response({"error": "Formato de productos inválido."}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                qty_val = int(item_entry.get('quantity', 0))
+            except (ValueError, TypeError):
+                qty_val = 0
+            if qty_val <= 0:
+                return Response({
+                    "error": "La cantidad de cada producto debe ser mayor a cero."
+                }, status=status.HTTP_400_BAD_REQUEST)
+            entry_id = str(item_entry['id'])
+            item_qty_map[entry_id] = item_qty_map.get(entry_id, 0) + qty_val
+            if item_entry.get('selected_discount'):
+                item_discount_map[entry_id] = item_entry.get('selected_discount')
+
+        item_ids = list(item_qty_map.keys())
 
         # =========================================================================
         # 1. VALIDACIONES PRELIMINARES (Ahorran recursos)
@@ -4006,7 +4106,6 @@ class CartViewSet(viewsets.ViewSet):
             }, status=status.HTTP_403_FORBIDDEN)
 
         # Validar que el usuario NO tenga órdenes activas en esta misma tienda
-        # (Asumiendo que status 0 = WAITING. Si agregas luego status 1=PREPARANDO, pon status__in=[0, 1])
         has_active_order = Order.objects.filter(
             client=request.user, 
             store_id=store_id, 
@@ -4019,13 +4118,6 @@ class CartViewSet(viewsets.ViewSet):
                 "message": f"Ya tienes un pedido en curso en {store.company.name}. Por favor espera a que finalice o cancélalo si deseas modificar tu compra."
             }, status=status.HTTP_409_CONFLICT)
 
-        item_ids = [item['id'] for item in items_data]
-        item_qty_map = {item['id']: int(item['quantity']) for item in items_data}
-        item_discount_map = {item.get('id'): item.get('selected_discount') for item in items_data if item.get('selected_discount')}
-        # Calculamos cuántos tokens en total le va a costar esta orden al usuario
-        total_tokens_needed = 0
-        for item_id, discount in item_discount_map.items():
-            total_tokens_needed += int(discount.get('tokens', 0))
         # 💡 Buscamos la ubicación de forma segura
         client_location = None
         try:
@@ -4038,7 +4130,65 @@ class CartViewSet(viewsets.ViewSet):
         # =========================================================================
         try:
             with transaction.atomic():
-                inventory_items = InventoryItem.objects.select_for_update().filter(id__in=item_ids)
+                # Filtramos explícitamente por store=store para impedir inyección de ítems de otras tiendas
+                inventory_items = list(
+                    InventoryItem.objects.select_for_update()
+                    .select_related('product', 'offer')
+                    .filter(id__in=item_ids, store=store)
+                )
+
+                # 💡 CASO 1: Un producto fue borrado de la BD o no pertenece a la tienda
+                if len(inventory_items) != len(item_ids):
+                    found_ids = set(str(item.id) for item in inventory_items)
+                    missing_ids = set(item_ids) - found_ids
+                    return Response({
+                        "error": "PRODUCTO_ELIMINADO",
+                        "product_id": list(missing_ids)[0],
+                        "message": "Uno de los productos en tu carrito fue retirado del catálogo por el vendedor. Hemos actualizado tu carrito."
+                    }, status=status.HTTP_404_NOT_FOUND)
+
+                # Validamos en servidor los descuentos por tokens contra item.product.discounts_data real en BD
+                validated_discount_map = {}
+                total_tokens_needed = 0
+                for item in inventory_items:
+                    item_id_str = str(item.id)
+                    req_discount = item_discount_map.get(item_id_str)
+                    if not req_discount:
+                        continue
+                    if not isinstance(req_discount, dict):
+                        return Response({"error": "Formato de descuento inválido."}, status=status.HTTP_400_BAD_REQUEST)
+                    if not store.company.gamification_enabled or not item.product.discounts_by_tokens_active:
+                        return Response({
+                            "error": "DESCUENTO_NO_DISPONIBLE",
+                            "message": f"Los descuentos por tokens no están habilitados para '{item.product.name}'."
+                        }, status=status.HTTP_409_CONFLICT)
+                    try:
+                        req_tokens = int(req_discount.get('tokens', 0))
+                        req_pct = float(req_discount.get('percentage', 0))
+                    except (ValueError, TypeError):
+                        return Response({"error": "Valores de descuento inválidos."}, status=status.HTTP_400_BAD_REQUEST)
+
+                    matched_tier = None
+                    for tier in (item.product.discounts_data or []):
+                        if not isinstance(tier, dict):
+                            continue
+                        try:
+                            tier_tokens = int(tier.get('tokens', -1))
+                            tier_pct = float(tier.get('percentage', -1))
+                        except (ValueError, TypeError):
+                            continue
+                        if tier_tokens == req_tokens and abs(tier_pct - req_pct) < 0.01 and tier_tokens > 0 and 0 < tier_pct <= 100:
+                            matched_tier = {'tokens': tier_tokens, 'percentage': tier_pct}
+                            break
+
+                    if not matched_tier:
+                        return Response({
+                            "error": "DESCUENTO_INVALIDO",
+                            "message": f"El descuento por tokens seleccionado para '{item.product.name}' ya no es válido."
+                        }, status=status.HTTP_409_CONFLICT)
+
+                    validated_discount_map[item_id_str] = matched_tier
+                    total_tokens_needed += matched_tier['tokens']
 
                 # 💡 BLOQUEO ATÓMICO 1: Validamos que el cliente SÍ tenga los tokens en esta compañía
                 token_wallet = None
@@ -4055,17 +4205,6 @@ class CartViewSet(viewsets.ViewSet):
                             "error": "SIN_BILLETERA",
                             "message": "No tienes tokens registrados con este comercio."
                         }, status=status.HTTP_409_CONFLICT)
-                    
-                # 💡 CASO 1: Un producto fue borrado de la BD por el comerciante
-                if inventory_items.count() != len(item_ids):
-                    found_ids = set(str(item.id) for item in inventory_items)
-                    missing_ids = set(item_ids) - found_ids
-                    # Retornamos el primer ID faltante para que Flutter lo limpie
-                    return Response({
-                        "error": "PRODUCTO_ELIMINADO",
-                        "product_id": list(missing_ids)[0],
-                        "message": "Uno de los productos en tu carrito fue retirado del catálogo por el vendedor. Hemos actualizado tu carrito."
-                    }, status=status.HTTP_404_NOT_FOUND)
 
                 cart_snapshot = []
                 total_price = 0.0
@@ -4086,13 +4225,10 @@ class CartViewSet(viewsets.ViewSet):
                         if item.stock == 0:
                             msg = f"¡Ups! Alguien más acaba de comprar la última unidad de '{item.product.name}'. Lo hemos retirado de tu carrito."
                         else:
-                            # =========================================================
-                            # ✨ MENSAJE ULTRA-DESCRIPTIVO (Lo que pediste)
-                            # =========================================================
                             msg = f"Hemos ajustado tu pedido de '{item.product.name}' de {requested_qty} a {item.stock} unidades, que es el stock disponible actualmente."
                             
                         return Response({
-                            "error": "STOCK_INSUFICIENTE",
+                            "error": "STOCK_INSUFICIENTES" if False else "STOCK_INSUFICIENTE",
                             "product_id": str(item.id),
                             "available_stock": item.stock,
                             "message": msg
@@ -4103,7 +4239,6 @@ class CartViewSet(viewsets.ViewSet):
                     if item.stock <= 0:
                         item.sold_out_time = timezone.now()
                         if item.stock < 0:
-                            # Corregir en caso de error
                             item.stock = 0
                     item.save()
 
@@ -4117,7 +4252,7 @@ class CartViewSet(viewsets.ViewSet):
                         base_unit_price = base_unit_price - (base_unit_price * (standard_offer_pct / 100.0))
 
                     # 💡 2. REGLA DE NEGOCIO: EXCLUSIVIDAD MUTUA
-                    applied_token_discount = item_discount_map.get(str(item.id))
+                    applied_token_discount = validated_discount_map.get(str(item.id))
                     
                     # Si el producto tiene oferta de tienda Y el usuario intentó usar tokens: ¡Rechazamos!
                     if standard_offer_pct and applied_token_discount:
@@ -4129,19 +4264,17 @@ class CartViewSet(viewsets.ViewSet):
                     # El subtotal arranca asumiendo que todas valen el base_unit_price (ya rebajado si había oferta estándar)
                     subtotal = base_unit_price * requested_qty
 
-                    # 💡 3. APLICAMOS DESCUENTO POR TOKENS (Afecta solo a 1 UNIDAD)
+                    # 💡 3. APLICAMOS DESCUENTO POR TOKENS VALIDADO EN SERVIDOR (Afecta solo a 1 UNIDAD)
                     if applied_token_discount:
-                        pct = float(applied_token_discount.get('percentage', 0))
+                        pct = float(applied_token_discount['percentage'])
                         ahorro = base_unit_price * (pct / 100.0)
-                        subtotal -= ahorro 
+                        subtotal = max(0.0, subtotal - ahorro)
 
                     img_url = storage_manager.get_url(item.product.images[0]) if item.product.images else ""
 
                     original_item_req = next((req_item for req_item in items_data if str(req_item['id']) == str(item.id)), {})
                     source_video_id = original_item_req.get('source_video_id')
                     is_from_atlas = original_item_req.get('isFromAtlas', False)
-
-                    img_url = storage_manager.get_url(item.product.images[0]) if item.product.images else ""
 
                     cart_snapshot.append({
                         "product_id": str(item.product.id),
@@ -4180,21 +4313,24 @@ class CartViewSet(viewsets.ViewSet):
                         order=order
                     )
                 
-                # Invalidamos caché volátil
-                for item in inventory_items:
-                    cache.delete(f"cartmaker:volatile:item:{item.id}")
+                # Invalidamos caché volátil y notificamos tras commit exitoso
+                volatile_keys_to_del = [f"cartmaker:volatile:item:{item.id}" for item in inventory_items]
+                merchant_id = store.company.owner.id
+                final_order_id = order.id
+                final_store_name = store.name
+                final_total = order.cart.get('total', 0.0)
 
-            # Obtenemos el ID del dueño de la empresa (Comerciante)
-            merchant_id = store.company.owner.id
-            total_price = order.cart.get('total', 0.0)
-            
-            # Lanzamos la alerta al panel administrativo
-            firebase_admin.NotificationManager.notify_order_created(
-                merchant_id=merchant_id,
-                order_id=order.id,
-                store_name=store.name,
-                total=total_price
-            )
+                def _post_order_commit():
+                    for v_key in volatile_keys_to_del:
+                        cache.delete(v_key)
+                    firebase_admin.NotificationManager.notify_order_created(
+                        merchant_id=merchant_id,
+                        order_id=final_order_id,
+                        store_name=final_store_name,
+                        total=final_total
+                    )
+
+                transaction.on_commit(_post_order_commit)
 
             return Response({
                 "success": True, 
@@ -4246,14 +4382,18 @@ class InteractionLogViewSet(viewsets.ViewSet):
         if not item_id or not start_time_raw:
             return Response({'error': 'item_id y start_time son obligatorios.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Preparamos el payload añadiendo el ID del usuario
+        # Preparamos el payload añadiendo el ID del usuario y metadatos de atribución (Atlas IA / Orgánico)
         payload = {
             'client_id': str(request.user.id),
             'item_id': str(item_id),
             'added_to_cart': data.get('added_to_cart', False),
             'bought': data.get('bought', False),
             'start_time': start_time_raw,
-            'end_time': data.get('end_time')
+            'end_time': data.get('end_time'),
+            'origin_source': data.get('origin_source', 'organic'),
+            'search_prompt': data.get('search_prompt'),
+            'ai_keywords': data.get('ai_keywords'),
+            'atlas_message_id': data.get('atlas_message_id'),
         }
 
         try:
@@ -5799,24 +5939,17 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
 
         try:
             with transaction.atomic():
-                # 1. Actualizamos el stock
-                item.stock += units
-                
-                # NO SE LIMPIA EL SOLD OUT TIME PORQUE AYUDA A SABER LA ULTIMA VEZ QUE SE AGOTO...
-                # # 2. Si estaba agotado y ahora tiene stock, limpiamos el 'sold_out_time'
-                # if item.stock > 0 and item.sold_out_time is not None:
-                #     item.sold_out_time = None
-                item.creation = timezone.now()
-                item.save()
+                locked_item = InventoryItem.objects.select_for_update().get(pk=item.pk)
+                # 1. Actualizamos el stock de forma atómica
+                locked_item.stock += units
+                locked_item.creation = timezone.now()
+                locked_item.save()
 
-                # 3. Registramos el movimiento en el historial
-                # 💡 IMPORTANTE: Reemplaza el '1' por el valor que corresponda a "Entrada/Reposición"
-                # en tu clase TransactionType (ej. TransactionType.REPOSICION)
-                from .models import InventoryItemTransaction # Ajusta la ruta si es necesario
+                # 2. Registramos el movimiento en el historial como INGRESO DE STOCK (TransactionType.INCOME = 0)
                 InventoryItemTransaction.objects.create(
-                    item=item,
+                    item=locked_item,
                     units=units,
-                    transaction_type=1 
+                    transaction_type=TransactionType.INCOME
                 )
 
             item.refresh_from_db()

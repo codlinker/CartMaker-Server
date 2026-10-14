@@ -44,7 +44,6 @@ class RegisterSerializer(serializers.ModelSerializer):
         representation['user_id'] = representation.pop('id')
         representation['user_type'] = instance.user_type 
         representation['gender'] = instance.gender
-        representation['email_otp_code'] = get_email_otp(instance.email)
         representation['email_verified'] = instance.email_verified
         return representation
 
@@ -132,12 +131,15 @@ class ClientContactMethodSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
     
     def update(self, instance, validated_data):
-        if validated_data['method_type'] in [1, 2]:
-            if len(validated_data['value']) != 11:
+        method_type = validated_data.get('method_type', instance.method_type)
+        value = validated_data.get('value', instance.value)
+        if method_type in [1, 2]:
+            if len(value) != 11:
                 raise serializers.ValidationError("Debes ingresar un número telefónico válido. No uses el +58."
                 )
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
+        for attr, val in validated_data.items():
+            setattr(instance, attr, val)
+        instance.save()
         return instance
 
     def to_representation(self, instance):
@@ -196,14 +198,6 @@ class ProductImageSerializer(serializers.Serializer):
     apply_transparency = serializers.BooleanField(default=False)
     transparency_color = serializers.CharField(max_length=7, required=False, allow_null=True)
 
-class ProductSerializer(serializers.ModelSerializer):
-    # Esto te permite validar la estructura del JSON al recibir datos
-    images = ProductImageSerializer(many=True)
-
-    class Meta:
-        model = Product
-        fields = '__all__'
-
 class VerifyUserSerializer(serializers.Serializer):
     first_name = serializers.CharField(max_length=150, required=True)
     last_name = serializers.CharField(max_length=150, required=True)
@@ -228,7 +222,8 @@ class VerifyUserSerializer(serializers.Serializer):
             # En FaceNet/InsightFace, una distancia < 0.15 - 0.20 suele indicar la misma persona.
             THRESHOLD = 0.18 
             
-            current_user = self.context['request']
+            req_ctx = self.context['request']
+            current_user = req_ctx.user if hasattr(req_ctx, 'user') else req_ctx
 
             # 2. Ejecutamos la búsqueda vectorial en la DB.
             # Gracias al HnswIndex, esto es O(log n) en lugar de O(n).
@@ -248,6 +243,8 @@ class VerifyUserSerializer(serializers.Serializer):
                 raise serializers.ValidationError(
                     "Esta identidad biométrica ya está vinculada a otra cuenta verificada."
                 )
+        except serializers.ValidationError:
+            raise
         except Exception as e:
             print(f"Error al validar la biometria: {e}")
             raise serializers.ValidationError(

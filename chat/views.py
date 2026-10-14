@@ -11,6 +11,25 @@ from django.db import transaction
 from django.utils import timezone
 from api.cos import storage_manager
 
+ALLOWED_CHAT_MEDIA_EXTENSIONS = {
+    'jpg', 'jpeg', 'png', 'webp', 'gif',
+    'mp3', 'wav', 'ogg', 'm4a', 'aac',
+    'mp4', 'mov', 'pdf'
+}
+MAX_CHAT_MEDIA_SIZE_BYTES = 15 * 1024 * 1024  # 15 MB
+
+
+def _validate_chat_media(file_obj):
+    if not file_obj:
+        return None, Response({"error": "No se envió ningún archivo"}, status=status.HTTP_400_BAD_REQUEST)
+    if file_obj.size > MAX_CHAT_MEDIA_SIZE_BYTES:
+        return None, Response({"error": "El archivo supera el tamaño máximo permitido (15MB)."}, status=status.HTTP_400_BAD_REQUEST)
+    extension = file_obj.name.rsplit('.', 1)[-1].lower() if '.' in file_obj.name else ''
+    if extension not in ALLOWED_CHAT_MEDIA_EXTENSIONS:
+        return None, Response({"error": "Formato de archivo no permitido."}, status=status.HTTP_400_BAD_REQUEST)
+    return extension, None
+
+
 # =========================================================================
 # 1. ENDPOINT PARA FLUTTER (Historial)
 # =========================================================================
@@ -28,7 +47,7 @@ class ChatViewSet(viewsets.ViewSet):
             return Response({"error": "Falta el ID de la orden."}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            order = Order.objects.get(id=order_id)
+            order = Order.objects.select_related('store__company').get(id=order_id)
             is_client = order.client == request.user
             is_merchant = order.store.company.owner == request.user
 
@@ -55,10 +74,10 @@ class ChatViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['post'], url_path='upload-media')
     def upload_media(self, request):
         file_obj = request.FILES.get('file')
-        if not file_obj:
-            return Response({"error": "No se envió ningún archivo"}, status=status.HTTP_400_BAD_REQUEST)
+        extension, error_response = _validate_chat_media(file_obj)
+        if error_response:
+            return error_response
         
-        extension = file_obj.name.split('.')[-1]
         file_name = f"chat_{request.user.id}_{timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')}.{extension}"
         folder = "chat_media"
         
@@ -84,7 +103,7 @@ class ChatViewSet(viewsets.ViewSet):
             return Response({"error": "Falta el ID de la orden."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            order = Order.objects.get(id=order_id)
+            order = Order.objects.select_related('store__company').get(id=order_id)
             company = order.store.company
             
             # Validamos que el usuario logueado sea el dueño
@@ -135,6 +154,13 @@ class SupportChatViewSet(viewsets.ViewSet):
         
         try:
             ticket = SupportTicket.objects.get(id=ticket_id)
+            is_client = (ticket.client_id == request.user.id)
+            is_agent = (ticket.agent_id == request.user.id)
+            is_staff_support = request.user.is_superuser or getattr(request.user, 'can_check_support', False)
+
+            if not (is_client or is_agent or is_staff_support):
+                return Response({"error": "No tienes acceso a este ticket."}, status=status.HTTP_403_FORBIDDEN)
+
             messages = SupportMessage.objects.filter(ticket=ticket).select_related('sender').order_by('-created_at')[offset:offset+limit]
             data = [msg.get_json() for msg in messages][::-1]
             return Response({'data': data, 'next_offset': offset + limit if len(data) == limit else None}, status=status.HTTP_200_OK)
@@ -144,10 +170,10 @@ class SupportChatViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['post'], url_path='upload-media')
     def upload_media(self, request):
         file_obj = request.FILES.get('file')
-        if not file_obj:
-            return Response({"error": "No se envió ningún archivo"}, status=status.HTTP_400_BAD_REQUEST)
+        extension, error_response = _validate_chat_media(file_obj)
+        if error_response:
+            return error_response
         
-        extension = file_obj.name.split('.')[-1]
         # Le ponemos "support_" al inicio para identificarlo rápido en el Storage
         file_name = f"support_{request.user.id}_{timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')}.{extension}"
         
@@ -180,7 +206,10 @@ class ChatWebhookViewSet(viewsets.ViewSet):
         recipient_connected = request.data.get('recipient_connected', False)
 
         try:
-            order = Order.objects.get(id=order_id)
+            order = Order.objects.select_related('store__company').get(id=order_id)
+            if str(sender_id) not in (str(order.client_id), str(order.store.company.owner_id)):
+                return Response({"error": "No tienes permiso para enviar mensajes en esta orden"}, status=status.HTTP_403_FORBIDDEN)
+
             if order.status >= 3:
                 return Response({"error": "Orden cerrada"}, status=status.HTTP_403_FORBIDDEN)
 
@@ -210,13 +239,20 @@ class ChatWebhookViewSet(viewsets.ViewSet):
         order_id = request.data.get('order_id')
         reader_id = request.data.get('user_id') # Quién abrió el chat
         
-        with transaction.atomic():
-            ChatMessage.objects.filter(
-                order_id=order_id, 
-                status__lt=3
-            ).exclude(sender_id=reader_id).update(status=3)
-            
-        return Response({"success": True}, status=status.HTTP_200_OK)
+        try:
+            order = Order.objects.select_related('store__company').get(id=order_id)
+            if str(reader_id) not in (str(order.client_id), str(order.store.company.owner_id)):
+                return Response({"error": "No tienes acceso a esta sala"}, status=status.HTTP_403_FORBIDDEN)
+
+            with transaction.atomic():
+                ChatMessage.objects.filter(
+                    order_id=order_id, 
+                    status__lt=3
+                ).exclude(sender_id=reader_id).update(status=3)
+                
+            return Response({"success": True}, status=status.HTTP_200_OK)
+        except Order.DoesNotExist:
+            return Response({"error": "Orden no encontrada"}, status=status.HTTP_404_NOT_FOUND)
     
     @action(detail=False, methods=['post'], url_path='process_support_message')
     def process_support_message(self, request):
@@ -226,6 +262,14 @@ class ChatWebhookViewSet(viewsets.ViewSet):
         
         try:
             ticket = SupportTicket.objects.get(id=ticket_id)
+            if ticket.closed:
+                return Response({"error": "Ticket cerrado"}, status=status.HTTP_403_FORBIDDEN)
+
+            allowed_senders = {str(ticket.client_id)}
+            if ticket.agent_id:
+                allowed_senders.add(str(ticket.agent_id))
+            if str(sender_id) not in allowed_senders:
+                return Response({"error": "No tienes acceso a este ticket"}, status=status.HTTP_403_FORBIDDEN)
             
             # Determinamos si se marca como LEÍDO o ENVIADO dependiendo de si la otra persona está en el chat
             msg_status = SupportMessage.DeliveryStatus.READ if recipient_connected else SupportMessage.DeliveryStatus.SENT
@@ -243,9 +287,15 @@ class ChatWebhookViewSet(viewsets.ViewSet):
             is_client = (str(sender_id) == str(ticket.client.id))
             recipient_id = str(ticket.agent.id) if is_client and ticket.agent else str(ticket.client.id)
 
-            # (Opcional) Tu lógica de notificaciones Push Firebase aquí si el usuario no está conectado
             if not recipient_connected:
-                pass 
+                try:
+                    NotificationManager.notify_new_support_message(
+                        ticket=ticket,
+                        sender_id=sender_id,
+                        text=request.data.get('text') or "🖼️ Archivo"
+                    )
+                except Exception as e:
+                    print(f"⚠️ Error enviando push de soporte: {e}")
             
             return Response({
                 "success": True, 
@@ -259,6 +309,17 @@ class ChatWebhookViewSet(viewsets.ViewSet):
     
     @action(detail=False, methods=['post'], url_path='mark_support_room_as_read')
     def mark_support_room_as_read(self, request):
-        SupportMessage.objects.filter(ticket_id=request.data.get('ticket_id'), status__lt=3).exclude(sender_id=request.data.get('user_id')).update(status=3)
-        return Response({"success": True}, status=status.HTTP_200_OK)
-    
+        ticket_id = request.data.get('ticket_id')
+        user_id = request.data.get('user_id')
+        try:
+            ticket = SupportTicket.objects.get(id=ticket_id)
+            allowed_users = {str(ticket.client_id)}
+            if ticket.agent_id:
+                allowed_users.add(str(ticket.agent_id))
+            if str(user_id) not in allowed_users:
+                return Response({"error": "No tienes acceso a este ticket"}, status=status.HTTP_403_FORBIDDEN)
+
+            SupportMessage.objects.filter(ticket_id=ticket_id, status__lt=3).exclude(sender_id=user_id).update(status=3)
+            return Response({"success": True}, status=status.HTTP_200_OK)
+        except SupportTicket.DoesNotExist:
+            return Response({"error": "Ticket no encontrado"}, status=status.HTTP_404_NOT_FOUND)

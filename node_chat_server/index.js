@@ -166,19 +166,6 @@ io.on('connection', (socket) => {
     if (!orderId) return;
 
     const roomName = `order_${orderId}`;
-    socket.join(roomName);
-    activeChats.set(socket.id, roomName);
-
-    console.log(`✅ Usuario [ID: ${socket.user_id}] entró a la sala de la orden: ${orderId}`);
-
-    socket.to(roomName).emit('presence_change', { user_id: socket.user_id, status: 'online' });
-
-    const room = io.sockets.adapter.rooms.get(roomName);
-    if (room && room.size > 1) {
-      socket.emit('presence_change', { status: 'online' });
-    } else {
-      socket.emit('presence_change', { status: 'offline' });
-    }
 
     try {
       const markReadUrl = DJANGO_WEBHOOK_URL.replace('process_message/', 'mark_room_as_read/');
@@ -187,8 +174,26 @@ io.on('connection', (socket) => {
         user_id: socket.user_id
       }, { headers: { 'X-Microservice-Token': INTERNAL_SECRET } });
 
+      socket.join(roomName);
+      activeChats.set(socket.id, roomName);
+
+      console.log(`✅ Usuario [ID: ${socket.user_id}] entró a la sala de la orden: ${orderId}`);
+
+      socket.to(roomName).emit('presence_change', { user_id: socket.user_id, status: 'online' });
+
+      const room = io.sockets.adapter.rooms.get(roomName);
+      if (room && room.size > 1) {
+        socket.emit('presence_change', { status: 'online' });
+      } else {
+        socket.emit('presence_change', { status: 'offline' });
+      }
+
       socket.to(roomName).emit('room_read_receipt', { order_id: orderId });
     } catch (err) {
+      if (err.response && (err.response.status === 403 || err.response.status === 404)) {
+        socket.emit('chat_error', { message: "No tienes acceso a esta sala." });
+        return;
+      }
       console.error("❌ Error sincronizando lecturas de orden:", err.message);
     }
   });
@@ -246,19 +251,6 @@ io.on('connection', (socket) => {
     if (!ticketId) return;
 
     const roomName = `support_${ticketId}`;
-    socket.join(roomName);
-    activeChats.set(socket.id, roomName);
-
-    console.log(`✅ Usuario [ID: ${socket.user_id}] entró al ticket de soporte: ${ticketId}`);
-
-    socket.to(roomName).emit('support_presence_change', { user_id: socket.user_id, status: 'online' });
-
-    const room = io.sockets.adapter.rooms.get(roomName);
-    if (room && room.size > 1) {
-      socket.emit('support_presence_change', { status: 'online' });
-    } else {
-      socket.emit('support_presence_change', { status: 'offline' });
-    }
 
     try {
       const markReadUrl = DJANGO_SUPPORT_WEBHOOK_URL.replace('process_support_message/', 'mark_support_room_as_read/');
@@ -267,8 +259,26 @@ io.on('connection', (socket) => {
         user_id: socket.user_id
       }, { headers: { 'X-Microservice-Token': INTERNAL_SECRET } });
 
+      socket.join(roomName);
+      activeChats.set(socket.id, roomName);
+
+      console.log(`✅ Usuario [ID: ${socket.user_id}] entró al ticket de soporte: ${ticketId}`);
+
+      socket.to(roomName).emit('support_presence_change', { user_id: socket.user_id, status: 'online' });
+
+      const room = io.sockets.adapter.rooms.get(roomName);
+      if (room && room.size > 1) {
+        socket.emit('support_presence_change', { status: 'online' });
+      } else {
+        socket.emit('support_presence_change', { status: 'offline' });
+      }
+
       socket.to(roomName).emit('support_room_read_receipt', { ticket_id: ticketId });
     } catch (err) {
+      if (err.response && (err.response.status === 403 || err.response.status === 404)) {
+        socket.emit('chat_error', { message: "No tienes acceso a este ticket de soporte." });
+        return;
+      }
       console.error("❌ Error sincronizando lecturas de soporte:", err.message);
     }
   });

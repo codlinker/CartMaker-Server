@@ -12,13 +12,13 @@ from django.core.cache import cache
 def on_payment_created(sender, instance: MerchantPlanPayment, **kwargs):
     if instance.pk:
         try:
-            # Traemos las relaciones necesarias, incluyendo el target_plan
-            old_instance = sender.objects.select_related(
-                'subscription__merchant', 'subscription__plan', 'subscription__merchant__wallet', 'target_plan'
-            ).get(pk=instance.pk)
+            with transaction.atomic():
+                # Bloqueamos la fila del pago para evitar condiciones de carrera (doble aprobación simultánea)
+                old_instance = sender.objects.select_for_update().select_related(
+                    'subscription__merchant', 'subscription__plan', 'subscription__merchant__wallet', 'target_plan'
+                ).get(pk=instance.pk)
 
-            if old_instance.status == PaymentStatus.PENDING and instance.status != old_instance.status:
-                with transaction.atomic():
+                if old_instance.status == PaymentStatus.PENDING and instance.status != old_instance.status:
                     merchant = old_instance.subscription.merchant
                     current_subscription = old_instance.subscription
                     
@@ -52,7 +52,7 @@ def on_payment_created(sender, instance: MerchantPlanPayment, **kwargs):
 
                     # --- CASO APROBADO (Con Prorrateo) ---
                     elif instance.status == PaymentStatus.APPROVED:
-                        wallet = merchant.wallet
+                        wallet = UserWallet.objects.select_for_update().get(user=merchant)
                         is_plan_change = current_subscription.plan.id != target_plan.id
                         
                         # 1. PRORRATEO
@@ -134,12 +134,13 @@ def on_payment_created(sender, instance: MerchantPlanPayment, **kwargs):
 def on_atlas_payment_status_changed(sender, instance: AtlasPlusPlanPayment, **kwargs):
     if instance.pk:
         try:
-            old_instance = sender.objects.select_related('plan__user__wallet').get(pk=instance.pk)
-            
-            if old_instance.status == PaymentStatus.PENDING and instance.status != old_instance.status:
-                with transaction.atomic():
+            with transaction.atomic():
+                # Bloqueamos la fila del pago para evitar doble acreditación simultánea
+                old_instance = sender.objects.select_for_update().select_related('plan__user__wallet').get(pk=instance.pk)
+                
+                if old_instance.status == PaymentStatus.PENDING and instance.status != old_instance.status:
                     user = old_instance.plan.user
-                    atlas_plan = old_instance.plan
+                    atlas_plan = AtlasPlusPlan.objects.select_for_update().get(pk=old_instance.plan_id)
                     instance.verified_at = timezone.now()
                     config = SystemConfig.objects.latest('creation')
 
@@ -158,7 +159,7 @@ def on_atlas_payment_status_changed(sender, instance: AtlasPlusPlanPayment, **kw
 
                     # --- CASO APROBADO ---
                     elif instance.status == PaymentStatus.APPROVED:
-                        wallet = user.wallet
+                        wallet = UserWallet.objects.select_for_update().get(user=user)
                         tasa_bcv = Decimal(str(instance.bcv_taxes_to_day))
                         monto_pagado_usd = Decimal(str(instance.amount)) / tasa_bcv
                         

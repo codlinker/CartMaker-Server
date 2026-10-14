@@ -6,3 +6,5 @@ firebase-adminsdk.json
 celery*
 venv
 cartmaker-key.pem
+.antigravity
+.agents

@@ -13,6 +13,7 @@ import requests
 from api.core.firebase_admin import NotificationManager
 from .core.platinum_manager import PlatinumEvaluator
 from api.models import *
+from .utils import recalculate_item_popularity
 from django.core.cache import cache
 from django.utils.dateparse import parse_datetime
 from django.conf import settings
@@ -176,7 +177,10 @@ def optimize_and_transcode_video_story(story_id):
         # =========================================================================
         if matrix_data:
             logger.info(f"🎨 Matriz de color detectada para la historia {story_id}. Procesando...")
-            matrix = json.loads(matrix_data) if isinstance(matrix_data, str) else matrix_data
+            raw_matrix = json.loads(matrix_data) if isinstance(matrix_data, str) else matrix_data
+            if not isinstance(raw_matrix, list) or len(raw_matrix) < 14:
+                raise ValueError("Matriz de filtro inválida o incompleta.")
+            matrix = [round(float(val), 6) for val in raw_matrix[:20]]
             
             vf_string = (
                 f"colorchannelmixer="
@@ -413,6 +417,50 @@ def process_analytics_batch():
         if parsed and timezone.is_naive(parsed):
             return timezone.make_aware(parsed)
         return parsed
+
+    # ==========================================
+    # 0. PRODUCT VIEWS (Bulk Create + Popularity Recalc)
+    # ==========================================
+    if raw_products:
+        product_logs = []
+        affected_item_ids = set()
+        for item_bytes in raw_products:
+            try:
+                data = json.loads(item_bytes.decode('utf-8'))
+                inv_item_id = data.get('item_id') or data.get('inventory_item_id')
+                start_dt = parse_aware_datetime(data.get('start_time'))
+                if not inv_item_id or not start_dt or not data.get('client_id'):
+                    continue
+                origin_src = data.get('origin_source') or 'organic'
+                if origin_src not in ('organic', 'atlas'):
+                    origin_src = 'organic'
+                product_logs.append(ProductViewLog(
+                    client_id=data['client_id'],
+                    inventory_item_id=inv_item_id,
+                    added_to_cart=bool(data.get('added_to_cart', False)),
+                    bought=bool(data.get('bought', False)),
+                    start_time=start_dt,
+                    end_time=parse_aware_datetime(data.get('end_time')),
+                    origin_source=origin_src,
+                    search_prompt=data.get('search_prompt'),
+                    ai_keywords=data.get('ai_keywords'),
+                    atlas_message_id=data.get('atlas_message_id'),
+                ))
+                affected_item_ids.add(str(inv_item_id))
+            except Exception as e:
+                logger.warning(f"⚠️ Error parseando log de ProductViewLog (se omitirá): {e}")
+
+        if product_logs:
+            try:
+                ProductViewLog.objects.bulk_create(product_logs, batch_size=500)
+                # bulk_create no dispara señales post_save; recalculamos popularidad por ítem afectado
+                for item_id_str in affected_item_ids:
+                    try:
+                        recalculate_item_popularity(item_id_str)
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.error(f"❌ Error en bulk_create de product_views: {e}")
 
     # ==========================================
     # 1. STORE VIEWS (Bulk Create)

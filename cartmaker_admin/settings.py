@@ -105,7 +105,7 @@ REST_FRAMEWORK = {
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
     'DEFAULT_PERMISSION_CLASSES': [
-        # 'rest_framework.permissions.IsAuthenticated',
+        'rest_framework.permissions.IsAuthenticated',
     ],
     'DEFAULT_THROTTLE_RATES': {
         'auth': '5/minute', # Para registro, login.
@@ -186,7 +186,7 @@ USE_I18N = True
 
 USE_TZ = True
 
-LOGIN_URL = '/support/login/'
+LOGIN_URL = '/auth/login/'
 
 
 # Static files (CSS, JavaScript, Images)

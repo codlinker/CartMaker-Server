@@ -120,9 +120,9 @@ class NotificationManager:
             
         try:
             user = User.objects.prefetch_related('fcm_tokens').get(id=user_id)
-        except User.DoesNotExists:
+        except User.DoesNotExist:
             print("Error en Notification Manager -> No se encontro el usuario con id: ", user_id)
-            raise User.DoesNotExist
+            raise
             
         cls._send_multicast(user=user, title=title, body=body.replace('<b>', '').replace('</b>', ''), data_payload=data)
 
@@ -240,7 +240,7 @@ class NotificationManager:
         Notifica un nuevo mensaje de chat cruzado entre cliente y vendedor.
         Agrupa inteligentemente los mensajes para no saturar la BD.
         """
-        is_client_sender = (order.client.id == sender_id)
+        is_client_sender = (str(order.client.id) == str(sender_id))
         
         if is_client_sender:
             receiver = order.store.company.owner
@@ -305,7 +305,7 @@ class NotificationManager:
 
     @classmethod
     def notify_new_support_message(cls, ticket, sender_id: int, text: str) -> None:
-        is_client_sender = (ticket.client.id == sender_id)
+        is_client_sender = (str(ticket.client.id) == str(sender_id))
         if is_client_sender: return
         receiver = ticket.client
         title = "Nuevo mensaje de Soporte CartMaker"

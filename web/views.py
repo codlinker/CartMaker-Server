@@ -6,6 +6,7 @@ from django.contrib.auth.decorators import login_required
 from django.template.loader import render_to_string
 from django.views.decorators.http import require_POST
 from django.contrib import messages
+from django.db import transaction
 from django.db.models import Count, Avg, F, Q, OuterRef, Subquery
 import json
 import requests
@@ -116,29 +117,33 @@ def payments_dashboard_view(request):
             if not payment_id or new_status is None:
                 return JsonResponse({'success': False, 'error': 'Parámetros obligatorios ausentes.'}, status=400)
 
-            # Selección de modelo según el contexto del flujo
-            if payment_type == 'merchant':
-                payment = get_object_or_404(MerchantPlanPayment, pk=payment_id)
-            elif payment_type == 'atlas':
-                payment = get_object_or_404(AtlasPlusPlanPayment, pk=payment_id)
-            else:
-                return JsonResponse({'success': False, 'error': 'Módulo de pago no identificado.'}, status=400)
+            if int(new_status) not in (1, 2):
+                return JsonResponse({'success': False, 'error': 'Estado de pago inválido.'}, status=400)
 
-            # Forzar transiciones de estado válidas basándose en el Enum real (0 = PENDING)
-            if payment.status != 0:
-                return JsonResponse({'success': False, 'error': 'Este pago ya fue procesado previamente.'}, status=400)
+            with transaction.atomic():
+                # Selección de modelo con bloqueo de fila (select_for_update) para impedir doble aprobación simultánea
+                if payment_type == 'merchant':
+                    payment = get_object_or_404(MerchantPlanPayment.objects.select_for_update(), pk=payment_id)
+                elif payment_type == 'atlas':
+                    payment = get_object_or_404(AtlasPlusPlanPayment.objects.select_for_update(), pk=payment_id)
+                else:
+                    return JsonResponse({'success': False, 'error': 'Módulo de pago no identificado.'}, status=400)
 
-            payment.status = int(new_status)
+                # Forzar transiciones de estado válidas basándose en el Enum real (0 = PENDING)
+                if payment.status != 0:
+                    return JsonResponse({'success': False, 'error': 'Este pago ya fue procesado previamente.'}, status=400)
 
-            # Si la acción es rechazar (status = 2), inyectamos la causa tipificada
-            if int(new_status) == 2:
-                if not reason_id:
-                    return JsonResponse({'success': False, 'error': 'Es obligatorio seleccionar un motivo de rechazo.'}, status=400)
-                payment.rejection_reason = int(reason_id)
+                payment.status = int(new_status)
 
-            # full_clean() disparará las validaciones del modelo y clean() asociados
-            payment.full_clean()
-            payment.save() # Ejecuta el pre_save de tus signals asincrónicas de billetera y notificaciones
+                # Si la acción es rechazar (status = 2), inyectamos la causa tipificada
+                if int(new_status) == 2:
+                    if not reason_id:
+                        return JsonResponse({'success': False, 'error': 'Es obligatorio seleccionar un motivo de rechazo.'}, status=400)
+                    payment.rejection_reason = int(reason_id)
+
+                # full_clean() disparará las validaciones del modelo y clean() asociados
+                payment.full_clean()
+                payment.save() # Ejecuta el pre_save de tus signals asincrónicas de billetera y notificaciones
 
             return JsonResponse({
                 'success': True,
@@ -333,12 +338,12 @@ def close_ticket(request, ticket_id):
     # 💡 ALERTAMOS A NODE.JS EN TIEMPO REAL
     try:
         requests.post(
-            f"{settings.LOCAL_WEBSOCKETS_URL}internal/emit-ticket-closed",
+            f"{settings.INTERNAL_WEBSOCKETS_URL}internal/emit-ticket-closed",
             json={
                 'ticket_id': str(ticket.id), 
                 'reason': ticket.get_close_reason_display(),
                 'client_id': str(ticket.client.id),
-                'agent_id': str(ticket.agent.id)    
+                'agent_id': str(ticket.agent.id) if ticket.agent else None
             },
             headers={'X-Microservice-Token': settings.SECRET_KEY},
             timeout=2
