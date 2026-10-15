@@ -324,6 +324,28 @@ class UpdateStoreSerializer(serializers.Serializer):
     selected_mall_id = serializers.IntegerField(required=False, allow_null=True)
     selected_mall_floor = serializers.IntegerField(required=False, allow_null=True)
 
+class CreateCompanySerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=20)
+    comercial_entity_type = serializers.IntegerField()
+    store_type = serializers.IntegerField()
+    company_category = serializers.IntegerField()
+    selected_mall_id = serializers.IntegerField(required=False, allow_null=True)
+    selected_mall_floor = serializers.IntegerField(required=False, allow_null=True)
+    lat = serializers.FloatField(required=False, allow_null=True)
+    lng = serializers.FloatField(required=False, allow_null=True)
+    address = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    # --- CAMPOS KYB OPCIONALES (Requeridos cuando comercial_entity_type == 1) ---
+    rif_number = serializers.CharField(max_length=20, required=False, allow_null=True, allow_blank=True)
+    razon_social = serializers.CharField(max_length=180, required=False, allow_null=True, allow_blank=True)
+    mercantil_oficina = serializers.CharField(max_length=150, required=False, allow_null=True, allow_blank=True)
+    mercantil_numero = serializers.CharField(max_length=50, required=False, allow_null=True, allow_blank=True)
+    mercantil_tomo = serializers.CharField(max_length=50, required=False, allow_null=True, allow_blank=True)
+    representante_cedula = serializers.CharField(max_length=25, required=False, allow_null=True, allow_blank=True)
+    kyb_ocr_verified = serializers.BooleanField(required=False, default=False)
+    kyb_confidence_score = serializers.IntegerField(required=False, default=0)
+    rif_document = serializers.ImageField(required=False, allow_null=True)
+    mercantil_document = serializers.ImageField(required=False, allow_null=True)
+
 class CreateStoreSerializer(serializers.Serializer):
     company_id = serializers.UUIDField(required=True)
     name = serializers.CharField(required=True, max_length=255)

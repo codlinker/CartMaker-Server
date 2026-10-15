@@ -585,6 +585,18 @@ class Company(models.Model):
         default=MerchantType.ENTREPRENEUR,
         help_text="Emprendedor o empresa. Lo define el dueño al configurar la compañía."
     )
+    rif_number = models.CharField(max_length=20, null=True, blank=True, db_index=True)
+    razon_social = models.CharField(max_length=180, null=True, blank=True)
+    mercantil_oficina = models.CharField(max_length=150, null=True, blank=True)
+    mercantil_numero = models.CharField(max_length=50, null=True, blank=True)
+    mercantil_tomo = models.CharField(max_length=50, null=True, blank=True)
+    representante_cedula = models.CharField(max_length=25, null=True, blank=True)
+    rif_document_url = models.URLField(max_length=500, null=True, blank=True)
+    mercantil_document_url = models.URLField(max_length=500, null=True, blank=True)
+    kyb_ocr_verified = models.BooleanField(default=False)
+    kyb_confidence_score = models.IntegerField(default=0)
+    # 0 = No aplica (Emprendedor), 1 = Pendiente/En revisión, 2 = Verificada, 3 = Rechazada
+    kyb_status = models.IntegerField(default=0)
 
     def get_json(self)->dict:
         url = ""
@@ -608,7 +620,18 @@ class Company(models.Model):
             "main_work_hours":self.main_work_hours,
             "main_work_days":self.main_work_days,
             "presentation_video_thumbnail":presentation_video_thumbnail,
-            "is_platinum":self.is_platinum
+            "is_platinum":self.is_platinum,
+            'rif_number': self.rif_number,
+            'razon_social': self.razon_social,
+            'mercantil_oficina': self.mercantil_oficina,
+            'mercantil_numero': self.mercantil_numero,
+            'mercantil_tomo': self.mercantil_tomo,
+            'representante_cedula': self.representante_cedula,
+            'rif_document_url': self.rif_document_url,
+            'mercantil_document_url': self.mercantil_document_url,
+            'kyb_ocr_verified': self.kyb_ocr_verified,
+            'kyb_confidence_score': self.kyb_confidence_score,
+            'kyb_status': self.kyb_status,
         }
     
     def __str__(self):

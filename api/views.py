@@ -1030,96 +1030,105 @@ class FullPaySubscriptionWithWalletView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class CreateCompanyAPI(APIView):
-    throttle_classes = [ScopedRateThrottle]
-    throttle_scope = 'actions'
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    serializer_class = CreateCompanySerializer
 
     def post(self, request):
-        data = request.data
-        name = request.data.get('name')
-        comercial_entity_type = request.data.get('comercial_entity_type')
-        store_type = request.data.get('store_type')
-        selected_mall_id = request.data.get('selected_mall_id')
-        selected_mall_floor = request.data.get('selected_mall_floor')
-        company_category = request.data.get('company_category')
-        lat = request.data.get('lat')
-        lng = request.data.get('lng')
-        address = request.data.get('address')
-        print("DATA: ", data)
+        serializer = self.serializer_class(data=request.data)
+        if not serializer.is_valid():
+            print("ERRORES DE SERIALIZER:", serializer.errors)
+            return Response({"error": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+        user = request.user
+        if user.user_type == 1:
+            return Response({"error": "Este usuario ya posee una compañia."}, status=status.HTTP_400_BAD_REQUEST)
+        company_name = serializer.validated_data["name"]
+        comercial_entity_type = serializer.validated_data["comercial_entity_type"]
+        store_type = serializer.validated_data["store_type"]
+        selected_mall_id = serializer.validated_data.get("selected_mall_id")
+        selected_mall_floor = serializer.validated_data.get("selected_mall_floor")
+        company_category_id = serializer.validated_data["company_category"]
+        lat = serializer.validated_data.get("lat")
+        lng = serializer.validated_data.get("lng")
+        address = serializer.validated_data.get("address")
+        # --- DATOS KYB (SI ES EMPRESA: comercial_entity_type == 1) ---
+        rif_number = serializer.validated_data.get("rif_number")
+        razon_social = serializer.validated_data.get("razon_social")
+        mercantil_oficina = serializer.validated_data.get("mercantil_oficina")
+        mercantil_numero = serializer.validated_data.get("mercantil_numero")
+        mercantil_tomo = serializer.validated_data.get("mercantil_tomo")
+        representante_cedula = serializer.validated_data.get("representante_cedula")
+        kyb_ocr_verified = serializer.validated_data.get("kyb_ocr_verified", False)
+        kyb_confidence_score = serializer.validated_data.get("kyb_confidence_score", 0)
+        rif_file = serializer.validated_data.get("rif_document")
+        mercantil_file = serializer.validated_data.get("mercantil_document")
+        if Company.objects.filter(name__iexact=company_name).exists():
+            return Response({'error': 'El nombre de la compañia no esta disponible.'}, status=status.HTTP_400_BAD_REQUEST)
+        # Si es Empresa (1), validamos que no exista otra empresa con el mismo RIF
+        if comercial_entity_type == 1:
+            if not rif_number or not razon_social:
+                return Response({'error': 'Debe consignar el RIF y la Razón Social de la empresa.'}, status=status.HTTP_400_BAD_REQUEST)
+            if Company.objects.filter(rif_number__iexact=rif_number).exists():
+                return Response({'error': f'El RIF {rif_number} ya se encuentra registrado en otra empresa.'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            store_type = StoreType(store_type)
-        except ValueError:
-            return Response({'error':"Tipo de tienda no reconocido."}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            merchant_type = MerchantType(comercial_entity_type)
-        except ValueError:
-            return Response({'error':"Tipo de entidad comercial no reconocido."}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            company_category = CompanyCategory.objects.get(id=int(company_category))
+            company_category = CompanyCategory.objects.get(id=company_category_id)
         except CompanyCategory.DoesNotExist:
-            return Response({'error':"No existe la categoria de la tienda."}, status=status.HTTP_400_BAD_REQUEST)
-        if Company.objects.only('name').filter(name=name).exists():
-            return Response({'error':"Ya existe una tienda con ese nombre."}, status=status.HTTP_406_NOT_ACCEPTABLE)
-        if selected_mall_id != None:
-            # Flujo para tienda en centro comercial
+            return Response({"error": "La categoria especificada no existe."}, status=status.HTTP_400_BAD_REQUEST)
+        if store_type == 0:
+            if selected_mall_id is None or selected_mall_floor is None:
+                return Response({'error': 'Debes especificar el centro comercial y el piso.'}, status=status.HTTP_400_BAD_REQUEST)
             try:
-                mall = Mall.objects.get(id=int(selected_mall_id))
+                mall = Mall.objects.get(id=selected_mall_id)
+                location = mall.coords
+                address = mall.name
             except Mall.DoesNotExist:
-                return Response({'error':"No encontramos ese centro comercial."}, status=status.HTTP_400_BAD_REQUEST)
-            if selected_mall_floor > mall.floors_quantity:
-                return Response({'error':"El centro comercial no tiene esa cantidad de pisos."}, status=status.HTTP_400_BAD_REQUEST)
-            try:
-                with transaction.atomic():
-                    company = Company.objects.create(
-                        name=name,
-                        owner=request.user,
-                        category=company_category,
-                        merchant_type=merchant_type,
-                    )
-                    company_store = CompanyStore.objects.create(
-                        company=company,
-                        name=name, # Por defecto la primera sucursal tiene el nombre de la empresa
-                        store_type=store_type,
-                        is_main_store=True
-                    )
-                    StoreLocation.objects.create(
-                        store=company_store,
-                        mall=mall,
-                        mall_floor=selected_mall_floor,
-                        coordinates=mall.coordinates,
-                        name=address
-                    )
-                    request.user.user_type = UserType.MERCHANT
-                    request.user.save()
-            except Exception as e:
-                return Response({'error':f"{e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                return Response({'error': 'El centro comercial seleccionado no existe.'}, status=status.HTTP_404_NOT_FOUND)
         else:
-            # Flujo para tienda de otro tipo
-            try:
-                with transaction.atomic():
-                    company = Company.objects.create(
-                        name=name,
-                        owner=request.user,
-                        category=company_category,
-                        merchant_type=merchant_type,
-                    )
-                    company_store = CompanyStore.objects.create(
-                        company=company,
-                        name=name, 
-                        store_type=store_type,
-                        is_main_store=True 
-                    )
-                    StoreLocation.objects.create(
-                        store=company_store,
-                        coordinates=Point(x=lng, y=lat),
-                        name=address
-                    )
-                    request.user.user_type = UserType.MERCHANT
-                    request.user.save()
-            except Exception as e:
-                print("Error: ", e)
-                return Response({'error':f"{e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        return Response({"data":"Compañía registrada exitosamente."}, status=status.HTTP_201_CREATED)
+            if lat is None or lng is None or address is None:
+                return Response({'error': 'Debes especificar las coordenadas y la dirección.'}, status=status.HTTP_400_BAD_REQUEST)
+            location = Point(float(lng), float(lat), srid=4326)
+            mall = None
+        # Subida de documentos KYB a Cloud Object Storage (si aplica)
+        rif_doc_url = None
+        mercantil_doc_url = None
+        if comercial_entity_type == 1:
+            if rif_file:
+                rif_doc_url = storage_manager.save_file(rif_file, folder="companies/kyb/rif")
+            if mercantil_file:
+                mercantil_doc_url = storage_manager.save_file(mercantil_file, folder="companies/kyb/mercantil")
+        with transaction.atomic():
+            company = Company.objects.create(
+                name=company_name,
+                comercial_entity_type=comercial_entity_type,
+                category=company_category,
+                user=user,
+                rif_number=rif_number if comercial_entity_type == 1 else None,
+                razon_social=razon_social if comercial_entity_type == 1 else None,
+                mercantil_oficina=mercantil_oficina if comercial_entity_type == 1 else None,
+                mercantil_numero=mercantil_numero if comercial_entity_type == 1 else None,
+                mercantil_tomo=mercantil_tomo if comercial_entity_type == 1 else None,
+                representante_cedula=representante_cedula if comercial_entity_type == 1 else None,
+                rif_document_url=rif_doc_url,
+                mercantil_document_url=mercantil_doc_url,
+                kyb_ocr_verified=kyb_ocr_verified if comercial_entity_type == 1 else False,
+                kyb_confidence_score=kyb_confidence_score if comercial_entity_type == 1 else 0,
+                # kyb_status: 2 = Verificada por OCR (si score >= 80), 1 = En revisión manual, 0 = Emprendedor
+                kyb_status=(2 if (kyb_ocr_verified and kyb_confidence_score >= 80) else 1) if comercial_entity_type == 1 else 0,
+            )
+            Store.objects.create(
+                company=company,
+                name="Sucursal Principal",
+                store_type=store_type,
+                is_mall=(store_type == 0),
+                mall=mall,
+                mall_floor=selected_mall_floor if store_type == 0 else None,
+                location=location,
+                address=address,
+                is_main_store=True,
+            )
+            user.user_type = 1
+            user.save()
+        return Response({"message": "Compañía creada exitosamente."}, status=status.HTTP_201_CREATED)
 
 class CheckCompanyNameAvailableAPI(APIView):
     throttle_classes = [ScopedRateThrottle]
