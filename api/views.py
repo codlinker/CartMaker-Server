@@ -4121,8 +4121,8 @@ class OrderViewSet(viewsets.ViewSet):
 
         try:
             with transaction.atomic():
-                # Bloqueamos la fila de la orden para evitar condiciones de carrera y doble acreditación de tokens
-                order = Order.objects.select_for_update().select_related('store__company').get(id=order_id)
+                # Bloqueamos únicamente la fila de la orden (of=('self',)) para evitar bloqueos innecesarios en tablas relacionadas
+                order = Order.objects.select_for_update(of=('self',)).select_related('store__company').get(id=order_id)
                 is_client = order.client == request.user
                 is_merchant = order.store.company.owner == request.user
 
@@ -4438,19 +4438,22 @@ class CartViewSet(viewsets.ViewSet):
 
         # 💡 Buscamos la ubicación de forma segura
         client_location = None
-        try:
-            client_location = ClientLocation.objects.get(id=location_id, user=request.user)
-        except ClientLocation.DoesNotExist:
-            return Response({"error": "La dirección seleccionada no es válida."}, status=status.HTTP_404_NOT_FOUND)
+        if location_id is not None:
+            try:
+                client_location = ClientLocation.objects.get(id=location_id, user=request.user)
+            except (ClientLocation.DoesNotExist, ValueError, TypeError):
+                return Response({"error": "La dirección seleccionada no es válida."}, status=status.HTTP_404_NOT_FOUND)
+        elif withdrawal_type == WithdrawalType.DELIVERY:
+            return Response({"error": "Debes seleccionar una dirección de entrega para pedidos con delivery."}, status=status.HTTP_400_BAD_REQUEST)
 
         # =========================================================================
         # 2. BLOQUEO ATÓMICO Y HARD RESERVATION
         # =========================================================================
         try:
             with transaction.atomic():
-                # Filtramos explícitamente por store=store para impedir inyección de ítems de otras tiendas
+                # Filtramos explícitamente por store=store y usamos of=('self',) porque 'offer' es un OneToOne inverso (LEFT OUTER JOIN en PostgreSQL)
                 inventory_items = list(
-                    InventoryItem.objects.select_for_update()
+                    InventoryItem.objects.select_for_update(of=('self',))
                     .select_related('product', 'offer')
                     .filter(id__in=item_ids, store=store)
                 )
@@ -4657,6 +4660,7 @@ class CartViewSet(viewsets.ViewSet):
             }, status=status.HTTP_201_CREATED)
 
         except Exception as e:
+            logger.exception(f"Error en create_order: {e}")
             return Response({"error": "Ocurrió un error inesperado al procesar tu compra. Por favor, intenta de nuevo."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class InteractionLogViewSet(viewsets.ViewSet):
