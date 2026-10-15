@@ -585,18 +585,64 @@ class Company(models.Model):
         default=MerchantType.ENTREPRENEUR,
         help_text="Emprendedor o empresa. Lo define el dueño al configurar la compañía."
     )
-    rif_number = models.CharField(max_length=20, unique=True, null=True, blank=True, db_index=True)
-    razon_social = models.CharField(max_length=180, null=True, blank=True, db_index=True)
-    mercantil_oficina = models.CharField(max_length=140, null=True, blank=True)
-    mercantil_numero = models.CharField(max_length=40, null=True, blank=True)
-    mercantil_tomo = models.CharField(max_length=40, null=True, blank=True)
-    representante_cedula = models.CharField(max_length=25, null=True, blank=True)
-    rif_document_url = models.URLField(max_length=500, null=True, blank=True)
-    mercantil_document_url = models.URLField(max_length=500, null=True, blank=True)
-    rif_document_sha256 = models.CharField(max_length=64, null=True, blank=True, db_index=True)
-    mercantil_document_sha256 = models.CharField(max_length=64, null=True, blank=True, db_index=True)
+    rif_number = models.CharField(
+        max_length=20,
+        unique=True,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="RIF normalizado SENIAT (ej. J-31234567-8)"
+    )
+    razon_social = models.CharField(
+        max_length=180,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Denominación o Razón Social fiscal según SENIAT/SAREN"
+    )
+    mercantil_oficina = models.CharField(
+        max_length=140,
+        null=True,
+        blank=True,
+        help_text="Circunscripción / Oficina de Registro Mercantil (SAREN)"
+    )
+    mercantil_numero = models.CharField(
+        max_length=40,
+        null=True,
+        blank=True,
+        help_text="Número de Registro / Expediente Mercantil"
+    )
+    mercantil_tomo = models.CharField(
+        max_length=40,
+        null=True,
+        blank=True,
+        help_text="Tomo del Registro Mercantil (ej. 128-A)"
+    )
+    representante_cedula = models.CharField(
+        max_length=25,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Cédula del Socio/Representante Legal tomada de request.user.cedula_number"
+    )
     kyb_ocr_verified = models.BooleanField(default=False)
     kyb_confidence_score = models.PositiveSmallIntegerField(default=0)
+    rif_document_url = models.URLField(max_length=500, null=True, blank=True)
+    mercantil_document_url = models.URLField(max_length=500, null=True, blank=True)
+    rif_image_sha256 = models.CharField(
+        max_length=64,
+        unique=True,
+        null=True,
+        blank=True,
+        db_index=True
+    )
+    mercantil_image_sha256 = models.CharField(
+        max_length=64,
+        unique=True,
+        null=True,
+        blank=True,
+        db_index=True
+    )
 
     def get_json(self)->dict:
         url = ""

@@ -133,23 +133,31 @@ def recalculate_item_popularity(inventory_item_id: str):
         cached_popularity_score=total_popularity
     )
 
-def validate_venezuelan_rif_modulo11(raw_rif: str) -> tuple[bool, str]:
-    cleaned = re.sub(r'[^A-Z0-9]', '', (raw_rif or '').upper().strip())
-    if len(cleaned) < 9 or len(cleaned) > 10:
-        return False, ''
-    prefix = cleaned[0]
-    weights = {'V': 4, 'E': 8, 'J': 12, 'P': 16, 'G': 20, 'C': 12}
-    if prefix not in weights:
-        return False, ''
-    digits = cleaned[1:]
-    if not digits.isdigit():
-        return False, ''
-    body_and_check = digits.zfill(9)
-    body8 = body_and_check[:8]
-    provided_check = int(body_and_check[8])
+def validate_venezuelan_rif_modulo11(raw_rif: str):
+    """
+    Valida sintaxis y dígito verificador Módulo 11 del SENIAT en el servidor.
+    Retorna (is_valid: bool, normalized_rif: str, error_msg: str | None)
+    """
+    if not raw_rif:
+        return False, "", "El número de RIF es obligatorio."
+    cleaned = re.sub(r"[^A-Z0-9]", "", raw_rif.upper())
+    match = re.match(r"^([JGVEP])(\d{8})(\d)$", cleaned)
+    if not match:
+        return False, "", "Formato de RIF inválido. Ejemplo válido: J-31234567-8."
+    letter, body_digits, check_str = match.groups()
+    provided_check = int(check_str)
+    prefix_weights = {"V": 4, "E": 8, "J": 12, "P": 16, "G": 20}
     multipliers = [3, 2, 7, 6, 5, 4, 3, 2]
-    total = weights[prefix] + sum(int(body8[i]) * multipliers[i] for i in range(8))
+    total = prefix_weights.get(letter, 0)
+    for i in range(8):
+        total += int(body_digits[i]) * multipliers[i]
     remainder = 11 - (total % 11)
     expected_check = 0 if remainder >= 10 else remainder
-    normalized = f"{prefix}-{body8}-{provided_check}"
-    return (provided_check == expected_check), normalized
+    normalized = f"{letter}-{body_digits}-{provided_check}"
+    if provided_check != expected_check:
+        return (
+            False,
+            normalized,
+            f"El RIF {normalized} no supera la validación matemática Módulo 11 del SENIAT (dígito esperado: -{expected_check})."
+        )
+    return True, normalized, None

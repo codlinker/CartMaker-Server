@@ -1033,7 +1033,7 @@ class CreateCompanyAPI(APIView):
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     serializer_class = CreateCompanySerializer
-
+    
     def post(self, request):
         serializer = self.serializer_class(data=request.data)
         if not serializer.is_valid():
@@ -1042,7 +1042,7 @@ class CreateCompanyAPI(APIView):
         user = request.user
         if user.user_type == 1:
             return Response({"error": "Este usuario ya posee una compañia."}, status=status.HTTP_400_BAD_REQUEST)
-        company_name = serializer.validated_data["name"]
+        company_name = serializer.validated_data["name"].strip()
         comercial_entity_type = serializer.validated_data["comercial_entity_type"]
         store_type = serializer.validated_data["store_type"]
         selected_mall_id = serializer.validated_data.get("selected_mall_id")
@@ -1052,24 +1052,78 @@ class CreateCompanyAPI(APIView):
         lng = serializer.validated_data.get("lng")
         address = serializer.validated_data.get("address")
         # --- DATOS KYB (SI ES EMPRESA: comercial_entity_type == 1) ---
-        rif_number = serializer.validated_data.get("rif_number")
-        razon_social = serializer.validated_data.get("razon_social")
-        mercantil_oficina = serializer.validated_data.get("mercantil_oficina")
-        mercantil_numero = serializer.validated_data.get("mercantil_numero")
-        mercantil_tomo = serializer.validated_data.get("mercantil_tomo")
-        representante_cedula = serializer.validated_data.get("representante_cedula")
+        rif_number = (serializer.validated_data.get("rif_number") or "").strip()
+        razon_social = (serializer.validated_data.get("razon_social") or "").strip()
+        mercantil_oficina = (serializer.validated_data.get("mercantil_oficina") or "").strip()
+        mercantil_numero = (serializer.validated_data.get("mercantil_numero") or "").strip()
+        mercantil_tomo = (serializer.validated_data.get("mercantil_tomo") or "").strip()
+        client_rep_cedula = (serializer.validated_data.get("representante_cedula") or "").strip()
         kyb_ocr_verified = serializer.validated_data.get("kyb_ocr_verified", False)
         kyb_confidence_score = serializer.validated_data.get("kyb_confidence_score", 0)
         rif_file = serializer.validated_data.get("rif_document")
         mercantil_file = serializer.validated_data.get("mercantil_document")
         if Company.objects.filter(name__iexact=company_name).exists():
             return Response({'error': 'El nombre de la compañia no esta disponible.'}, status=status.HTTP_400_BAD_REQUEST)
-        # Si es Empresa (1), validamos que no exista otra empresa con el mismo RIF
+        locked_representante_cedula = None
+        # =====================================================================
+        # VALIDACIÓN ESTRICTA KYB (CAMINO 1) SI ES EMPRESA CONSTITUIDA (1)
+        # =====================================================================
         if comercial_entity_type == 1:
-            if not rif_number or not razon_social:
-                return Response({'error': 'Debe consignar el RIF y la Razón Social de la empresa.'}, status=status.HTTP_400_BAD_REQUEST)
+            # 1. Exigir que la cuenta de CartMaker tenga su Cédula verificada biométricamente
+            if not getattr(user, "cedula_verified", False) or not getattr(user, "cedula_number", None):
+                return Response(
+                    {'error': 'Debes verificar tu Cédula de Identidad biométricamente antes de registrar una Empresa Constituida.'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            # 2. Bloquear la Cédula del representante directamente a la del titular autenticado en BD
+            user_digits = re.sub(r"[^0-9]", "", str(user.cedula_number))
+            if client_rep_cedula:
+                client_digits = re.sub(r"[^0-9]", "", client_rep_cedula)
+                if client_digits and client_digits != user_digits:
+                    return Response(
+                        {'error': 'Alerta Antifraude: La Cédula del representante no coincide con la Cédula verificada de tu cuenta.'},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+            nac_prefix = (getattr(user, "nacionality", "V") or "V").upper()
+            if nac_prefix not in ("V", "E"):
+                nac_prefix = "V"
+            locked_representante_cedula = f"{nac_prefix}-{user_digits}"
+            # 3. Validar campos obligatorios y documentos físicos escaneados
+            if not rif_number or not razon_social or not mercantil_oficina or not mercantil_numero or not mercantil_tomo:
+                return Response(
+                    {'error': 'Debe consignar todos los datos mercantiles (RIF, Razón Social, Oficina, Número y Tomo).'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            if not rif_file or not mercantil_file:
+                return Response(
+                    {'error': 'Debe adjuntar las capturas escaneadas del Comprobante RIF y del Registro Mercantil.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            # 4. Validar Checksum Módulo 11 del RIF en el servidor (protección contra Postman/scripts)
+            is_valid_rif, normalized_rif, rif_error = validate_venezuelan_rif_modulo11(rif_number)
+            if not is_valid_rif:
+                return Response({'error': rif_error}, status=status.HTTP_400_BAD_REQUEST)
+            rif_number = normalized_rif
+            # 5. Validar que no exista otra empresa con el mismo RIF, Razón Social o Asiento Mercantil
             if Company.objects.filter(rif_number__iexact=rif_number).exists():
-                return Response({'error': f'El RIF {rif_number} ya se encuentra registrado en otra empresa.'}, status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {'error': f'El RIF {rif_number} ya se encuentra registrado en otra empresa.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            if Company.objects.filter(razon_social__iexact=razon_social).exists():
+                return Response(
+                    {'error': f'La Razón Social "{razon_social}" ya se encuentra registrada en otra empresa.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            if Company.objects.filter(
+                mercantil_oficina__iexact=mercantil_oficina,
+                mercantil_numero__iexact=mercantil_numero,
+                mercantil_tomo__iexact=mercantil_tomo,
+            ).exists():
+                return Response(
+                    {'error': f'El asiento mercantil (Nro. {mercantil_numero}, Tomo {mercantil_tomo}) ya fue registrado por otra empresa.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
         try:
             company_category = CompanyCategory.objects.get(id=company_category_id)
         except CompanyCategory.DoesNotExist:
@@ -1092,10 +1146,8 @@ class CreateCompanyAPI(APIView):
         rif_doc_url = None
         mercantil_doc_url = None
         if comercial_entity_type == 1:
-            if rif_file:
-                rif_doc_url = storage_manager.save_file(rif_file, folder="companies/kyb/rif")
-            if mercantil_file:
-                mercantil_doc_url = storage_manager.save_file(mercantil_file, folder="companies/kyb/mercantil")
+            rif_doc_url = storage_manager.save_file(rif_file, folder="companies/kyb/rif")
+            mercantil_doc_url = storage_manager.save_file(mercantil_file, folder="companies/kyb/mercantil")
         with transaction.atomic():
             company = Company.objects.create(
                 name=company_name,
@@ -1107,7 +1159,8 @@ class CreateCompanyAPI(APIView):
                 mercantil_oficina=mercantil_oficina if comercial_entity_type == 1 else None,
                 mercantil_numero=mercantil_numero if comercial_entity_type == 1 else None,
                 mercantil_tomo=mercantil_tomo if comercial_entity_type == 1 else None,
-                representante_cedula=representante_cedula if comercial_entity_type == 1 else None,
+                # Siempre guardamos la Cédula bloqueada del titular autenticado (nunca un string libre)
+                representante_cedula=locked_representante_cedula if comercial_entity_type == 1 else None,
                 rif_document_url=rif_doc_url,
                 mercantil_document_url=mercantil_doc_url,
                 kyb_ocr_verified=kyb_ocr_verified if comercial_entity_type == 1 else False,
@@ -1420,63 +1473,89 @@ class CompanyStoreViewSet(viewsets.ModelViewSet):
 
 class CheckCompanyKybAvailableAPI(APIView):
     """
-    Verifica en tiempo real al pulsar 'Confirmar Expediente Mercantil' que:
-    1. El RIF sea matemáticamente válido (SENIAT Módulo 11) y no esté registrado en BD.
-    2. La Razón Social no esté registrada por otra empresa.
-    3. El asiento de Registro Mercantil (Oficina + Número + Tomo) no esté registrado.
-    4. La Cédula del Representante Legal coincida con la Cédula verificada (KYC) del usuario.
+    Verifica en tiempo real (Etapa 2.5):
+    1. Que el usuario autenticado tenga KYC biométrico verificado (Camino 1 Estricto).
+    2. Que el RIF sea válido en Módulo 11 (SENIAT).
+    3. Que ni el RIF, ni la Razón Social, ni el asiento mercantil (Oficina + Número + Tomo)
+       estén ya registrados por otra empresa en CartMaker.
     """
     permission_classes = [IsAuthenticated]
-    
     def post(self, request):
-        raw_rif = (request.data.get('rif_number') or '').strip()
-        razon_social = (request.data.get('razon_social') or '').strip().upper()
-        mercantil_oficina = (request.data.get('mercantil_oficina') or '').strip()
-        mercantil_numero = (request.data.get('mercantil_numero') or '').strip()
-        mercantil_tomo = (request.data.get('mercantil_tomo') or '').strip().upper()
-        rep_cedula = (request.data.get('representante_cedula') or '').strip().upper()
-        is_valid_rif, normalized_rif = validate_venezuelan_rif_modulo11(raw_rif)
+        user = request.user
+        # 1. CAMINO 1 (ESTRICTO): Exigir KYC biométrico activo en la cuenta del titular
+        if not getattr(user, "cedula_verified", False) or not getattr(user, "cedula_number", None):
+            return Response(
+                {
+                    "available": False,
+                    "error": "Tu cuenta personal debe tener la Cédula verificada biométricamente antes de registrar una Empresa Constituida."
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        rif_raw = (request.data.get("rif_number") or "").strip()
+        razon_social = (request.data.get("razon_social") or "").strip()
+        mercantil_oficina = (request.data.get("mercantil_oficina") or "").strip()
+        mercantil_numero = (request.data.get("mercantil_numero") or "").strip()
+        mercantil_tomo = (request.data.get("mercantil_tomo") or "").strip()
+        # 2. Validar que si el cliente envía representante_cedula, coincida con request.user.cedula_number
+        client_rep_cedula = (request.data.get("representante_cedula") or "").strip()
+        user_digits = re.sub(r"[^0-9]", "", str(user.cedula_number))
+        client_digits = re.sub(r"[^0-9]", "", client_rep_cedula)
+        if client_digits and user_digits != client_digits:
+            return Response(
+                {
+                    "available": False,
+                    "error": "Alerta Antifraude: La Cédula del representante no coincide con la Cédula verificada del titular de la cuenta."
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        # 3. Validar Módulo 11 del RIF
+        is_valid_rif, normalized_rif, rif_error = validate_venezuelan_rif_modulo11(rif_raw)
         if not is_valid_rif:
-            return Response({
-                "available": False,
-                "error": "El RIF ingresado no supera la validación matemática Módulo 11 del SENIAT."
-            }, status=status.HTTP_200_OK)
-        # 1. Unicidad de RIF en BD
+            return Response(
+                {"available": False, "error": rif_error},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # 4. Verificar duplicidad de RIF
         if Company.objects.filter(rif_number__iexact=normalized_rif).exists():
-            return Response({
-                "available": False,
-                "error": f"El RIF {normalized_rif} ya se encuentra registrado por otra empresa en CartMaker."
-            }, status=status.HTTP_200_OK)
-        # 2. Unicidad de Razón Social en BD
+            return Response(
+                {
+                    "available": False,
+                    "error": f"El RIF {normalized_rif} ya se encuentra registrado por otra empresa en CartMaker."
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        # 5. Verificar duplicidad de Razón Social
         if razon_social and Company.objects.filter(razon_social__iexact=razon_social).exists():
-            return Response({
-                "available": False,
-                "error": f"La Razón Social '{razon_social}' ya está registrada en CartMaker."
-            }, status=status.HTTP_200_OK)
-        # 3. Unicidad de Asiento Mercantil (Oficina + Número + Tomo)
+            return Response(
+                {
+                    "available": False,
+                    "error": f"La Razón Social '{razon_social}' ya se encuentra registrada en CartMaker."
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        # 6. Verificar duplicidad de Asiento en Registro Mercantil (Oficina + Número + Tomo)
         if mercantil_oficina and mercantil_numero and mercantil_tomo:
-            if Company.objects.filter(
+            asiento_duplicado = Company.objects.filter(
                 mercantil_oficina__iexact=mercantil_oficina,
                 mercantil_numero__iexact=mercantil_numero,
                 mercantil_tomo__iexact=mercantil_tomo,
-            ).exists():
-                return Response({
-                    "available": False,
-                    "error": f"El Registro Mercantil (N° {mercantil_numero}, Tomo {mercantil_tomo}) ya fue registrado anteriormente."
-                }, status=status.HTTP_200_OK)
-        # 4. Blindaje Antifraude: Cruce con la Cédula biométrica del usuario logueado
-        user_cedula_digits = re.sub(r'[^0-9]', '', getattr(request.user, 'cedula_number', '') or '')
-        rep_cedula_digits = re.sub(r'[^0-9]', '', rep_cedula)
-        if getattr(request.user, 'cedula_verified', False) and user_cedula_digits:
-            if user_cedula_digits != rep_cedula_digits:
-                return Response({
-                    "available": False,
-                    "error": "La Cédula del Representante Legal no coincide con la Cédula verificada biométricamente de tu cuenta."
-                }, status=status.HTTP_200_OK)
-        return Response({
-            "available": True,
-            "normalized_rif": normalized_rif
-        }, status=status.HTTP_200_OK)
+            ).exists()
+            if asiento_duplicado:
+                return Response(
+                    {
+                        "available": False,
+                        "error": f"El asiento mercantil (Nro. {mercantil_numero}, Tomo {mercantil_tomo}) ya fue registrado por otra empresa."
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+        return Response(
+            {
+                "available": True,
+                "normalized_rif": normalized_rif,
+                "locked_representante_cedula": user_digits,
+            },
+            status=status.HTTP_200_OK,
+        )
     
 class CreateStoreAPI(APIView):
     throttle_classes = [ScopedRateThrottle]
