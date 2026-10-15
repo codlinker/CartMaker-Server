@@ -325,8 +325,9 @@ class UpdateStoreSerializer(serializers.Serializer):
     selected_mall_floor = serializers.IntegerField(required=False, allow_null=True)
 
 class CreateCompanySerializer(serializers.Serializer):
-    name = serializers.CharField(max_length=20)
-    comercial_entity_type = serializers.IntegerField()
+    name = serializers.CharField(max_length=255)
+    comercial_entity_type = serializers.IntegerField(required=False, allow_null=True)
+    merchant_type = serializers.IntegerField(required=False, allow_null=True)
     store_type = serializers.IntegerField()
     company_category = serializers.IntegerField()
     selected_mall_id = serializers.IntegerField(required=False, allow_null=True)
@@ -345,6 +346,17 @@ class CreateCompanySerializer(serializers.Serializer):
     kyb_confidence_score = serializers.IntegerField(required=False, default=0)
     rif_document = serializers.ImageField(required=False, allow_null=True)
     mercantil_document = serializers.ImageField(required=False, allow_null=True)
+    rif_image_sha256 = serializers.CharField(max_length=64, required=False, allow_null=True, allow_blank=True)
+    mercantil_image_sha256 = serializers.CharField(max_length=64, required=False, allow_null=True, allow_blank=True)
+
+    def validate(self, attrs):
+        entity_type = attrs.get("comercial_entity_type")
+        if entity_type is None:
+            entity_type = attrs.get("merchant_type")
+        if entity_type is None:
+            raise serializers.ValidationError({"comercial_entity_type": "Este campo es requerido."})
+        attrs["comercial_entity_type"] = entity_type
+        return attrs
 
 class CreateStoreSerializer(serializers.Serializer):
     company_id = serializers.UUIDField(required=True)

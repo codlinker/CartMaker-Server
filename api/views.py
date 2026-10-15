@@ -2,6 +2,7 @@ import csv
 import hashlib
 import io
 import json
+import re
 from django.core.exceptions import ObjectDoesNotExist
 from dateutil.relativedelta import relativedelta
 from rest_framework import parsers
@@ -1033,14 +1034,26 @@ class CreateCompanyAPI(APIView):
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     serializer_class = CreateCompanySerializer
-    
+
+    @staticmethod
+    def _compute_file_sha256(file_obj) -> str:
+        file_obj.seek(0)
+        hasher = hashlib.sha256()
+        if hasattr(file_obj, "chunks"):
+            for chunk in file_obj.chunks():
+                hasher.update(chunk)
+        else:
+            hasher.update(file_obj.read())
+        file_obj.seek(0)
+        return hasher.hexdigest()
+
     def post(self, request):
         serializer = self.serializer_class(data=request.data)
         if not serializer.is_valid():
             print("ERRORES DE SERIALIZER:", serializer.errors)
             return Response({"error": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
         user = request.user
-        if user.user_type == 1:
+        if user.user_type == UserType.MERCHANT or Company.objects.filter(owner=user).exists():
             return Response({"error": "Este usuario ya posee una compañia."}, status=status.HTTP_400_BAD_REQUEST)
         company_name = serializer.validated_data["name"].strip()
         comercial_entity_type = serializer.validated_data["comercial_entity_type"]
@@ -1065,10 +1078,12 @@ class CreateCompanyAPI(APIView):
         if Company.objects.filter(name__iexact=company_name).exists():
             return Response({'error': 'El nombre de la compañia no esta disponible.'}, status=status.HTTP_400_BAD_REQUEST)
         locked_representante_cedula = None
+        rif_sha256 = None
+        mercantil_sha256 = None
         # =====================================================================
         # VALIDACIÓN ESTRICTA KYB (CAMINO 1) SI ES EMPRESA CONSTITUIDA (1)
         # =====================================================================
-        if comercial_entity_type == 1:
+        if comercial_entity_type == MerchantType.BUSINESS:
             # 1. Exigir que la cuenta de CartMaker tenga su Cédula verificada biométricamente
             if not getattr(user, "cedula_verified", False) or not getattr(user, "cedula_number", None):
                 return Response(
@@ -1084,7 +1099,11 @@ class CreateCompanyAPI(APIView):
                         {'error': 'Alerta Antifraude: La Cédula del representante no coincide con la Cédula verificada de tu cuenta.'},
                         status=status.HTTP_403_FORBIDDEN
                     )
-            nac_prefix = (getattr(user, "nacionality", "V") or "V").upper()
+            raw_nac = getattr(user, "nacionality", UserNacionality.VENEZOLANO)
+            if isinstance(raw_nac, str):
+                nac_prefix = raw_nac.strip().upper()
+            else:
+                nac_prefix = "E" if raw_nac == UserNacionality.EXTRANJERO else "V"
             if nac_prefix not in ("V", "E"):
                 nac_prefix = "V"
             locked_representante_cedula = f"{nac_prefix}-{user_digits}"
@@ -1104,7 +1123,25 @@ class CreateCompanyAPI(APIView):
             if not is_valid_rif:
                 return Response({'error': rif_error}, status=status.HTTP_400_BAD_REQUEST)
             rif_number = normalized_rif
-            # 5. Validar que no exista otra empresa con el mismo RIF, Razón Social o Asiento Mercantil
+            # 5. Calcular y validar hashes SHA-256 de las imágenes de RIF y Registro Mercantil
+            rif_sha256 = self._compute_file_sha256(rif_file)
+            mercantil_sha256 = self._compute_file_sha256(mercantil_file)
+            if rif_sha256 == mercantil_sha256:
+                return Response(
+                    {'error': 'Las imágenes del Comprobante RIF y del Registro Mercantil no pueden ser el mismo archivo.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            if Company.objects.filter(Q(rif_image_sha256=rif_sha256) | Q(mercantil_image_sha256=rif_sha256)).exists():
+                return Response(
+                    {'error': 'La imagen del Comprobante RIF ya fue utilizada en otro registro.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            if Company.objects.filter(Q(mercantil_image_sha256=mercantil_sha256) | Q(rif_image_sha256=mercantil_sha256)).exists():
+                return Response(
+                    {'error': 'La imagen del Registro Mercantil ya fue utilizada en otro registro.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            # 6. Validar que no exista otra empresa con el mismo RIF, Razón Social o Asiento Mercantil
             if Company.objects.filter(rif_number__iexact=rif_number).exists():
                 return Response(
                     {'error': f'El RIF {rif_number} ya se encuentra registrado en otra empresa.'},
@@ -1128,13 +1165,14 @@ class CreateCompanyAPI(APIView):
             company_category = CompanyCategory.objects.get(id=company_category_id)
         except CompanyCategory.DoesNotExist:
             return Response({"error": "La categoria especificada no existe."}, status=status.HTTP_400_BAD_REQUEST)
-        if store_type == 0:
+        if store_type == StoreType.IN_MALL:
             if selected_mall_id is None or selected_mall_floor is None:
                 return Response({'error': 'Debes especificar el centro comercial y el piso.'}, status=status.HTTP_400_BAD_REQUEST)
             try:
                 mall = Mall.objects.get(id=selected_mall_id)
-                location = mall.coords
-                address = mall.name
+                location = mall.coordinates
+                if not address:
+                    address = mall.name
             except Mall.DoesNotExist:
                 return Response({'error': 'El centro comercial seleccionado no existe.'}, status=status.HTTP_404_NOT_FOUND)
         else:
@@ -1145,43 +1183,65 @@ class CreateCompanyAPI(APIView):
         # Subida de documentos KYB a Cloud Object Storage (si aplica)
         rif_doc_url = None
         mercantil_doc_url = None
-        if comercial_entity_type == 1:
-            rif_doc_url = storage_manager.save_file(rif_file, folder="companies/kyb/rif")
-            mercantil_doc_url = storage_manager.save_file(mercantil_file, folder="companies/kyb/mercantil")
+        if comercial_entity_type == MerchantType.BUSINESS:
+            dtnow_str = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
+            rif_ext = rif_file.name.rsplit('.', 1)[-1].lower() if '.' in getattr(rif_file, 'name', '') else 'jpg'
+            mercantil_ext = mercantil_file.name.rsplit('.', 1)[-1].lower() if '.' in getattr(mercantil_file, 'name', '') else 'jpg'
+            rif_filename = f"rif_{user.id}_{dtnow_str}.{rif_ext}"
+            mercantil_filename = f"mercantil_{user.id}_{dtnow_str}.{mercantil_ext}"
+            rif_rel_path = storage_manager.save_file(rif_file, "companies/kyb/rif", rif_filename)
+            mercantil_rel_path = storage_manager.save_file(mercantil_file, "companies/kyb/mercantil", mercantil_filename)
+            if not rif_rel_path or not mercantil_rel_path:
+                return Response(
+                    {'error': 'Error al almacenar los documentos mercantiles en el servidor. Intente nuevamente.'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+            rif_doc_url = storage_manager.get_url(rif_rel_path)
+            mercantil_doc_url = storage_manager.get_url(mercantil_rel_path)
         with transaction.atomic():
             company = Company.objects.create(
+                owner=user,
                 name=company_name,
-                comercial_entity_type=comercial_entity_type,
+                merchant_type=comercial_entity_type,
                 category=company_category,
-                user=user,
-                rif_number=rif_number if comercial_entity_type == 1 else None,
-                razon_social=razon_social if comercial_entity_type == 1 else None,
-                mercantil_oficina=mercantil_oficina if comercial_entity_type == 1 else None,
-                mercantil_numero=mercantil_numero if comercial_entity_type == 1 else None,
-                mercantil_tomo=mercantil_tomo if comercial_entity_type == 1 else None,
+                rif_number=rif_number if comercial_entity_type == MerchantType.BUSINESS else None,
+                razon_social=razon_social if comercial_entity_type == MerchantType.BUSINESS else None,
+                mercantil_oficina=mercantil_oficina if comercial_entity_type == MerchantType.BUSINESS else None,
+                mercantil_numero=mercantil_numero if comercial_entity_type == MerchantType.BUSINESS else None,
+                mercantil_tomo=mercantil_tomo if comercial_entity_type == MerchantType.BUSINESS else None,
                 # Siempre guardamos la Cédula bloqueada del titular autenticado (nunca un string libre)
-                representante_cedula=locked_representante_cedula if comercial_entity_type == 1 else None,
+                representante_cedula=locked_representante_cedula if comercial_entity_type == MerchantType.BUSINESS else None,
                 rif_document_url=rif_doc_url,
                 mercantil_document_url=mercantil_doc_url,
-                kyb_ocr_verified=kyb_ocr_verified if comercial_entity_type == 1 else False,
-                kyb_confidence_score=kyb_confidence_score if comercial_entity_type == 1 else 0,
-                # kyb_status: 2 = Verificada por OCR (si score >= 80), 1 = En revisión manual, 0 = Emprendedor
-                kyb_status=(2 if (kyb_ocr_verified and kyb_confidence_score >= 80) else 1) if comercial_entity_type == 1 else 0,
+                rif_image_sha256=rif_sha256 if comercial_entity_type == MerchantType.BUSINESS else None,
+                mercantil_image_sha256=mercantil_sha256 if comercial_entity_type == MerchantType.BUSINESS else None,
+                kyb_ocr_verified=kyb_ocr_verified if comercial_entity_type == MerchantType.BUSINESS else False,
+                kyb_confidence_score=kyb_confidence_score if comercial_entity_type == MerchantType.BUSINESS else 0,
             )
-            Store.objects.create(
+            main_store = CompanyStore.objects.create(
                 company=company,
                 name="Sucursal Principal",
                 store_type=store_type,
-                is_mall=(store_type == 0),
-                mall=mall,
-                mall_floor=selected_mall_floor if store_type == 0 else None,
-                location=location,
-                address=address,
                 is_main_store=True,
+                is_active=True,
             )
-            user.user_type = 1
-            user.save()
-        return Response({"message": "Compañía creada exitosamente."}, status=status.HTTP_201_CREATED)
+            StoreLocation.objects.create(
+                store=main_store,
+                mall=mall if store_type == StoreType.IN_MALL else None,
+                mall_floor=selected_mall_floor if store_type == StoreType.IN_MALL else None,
+                coordinates=location,
+                name=address or company_name,
+            )
+            user.user_type = UserType.MERCHANT
+            user.save(update_fields=['user_type'])
+        return Response(
+            {
+                "message": "Compañía creada exitosamente.",
+                "company": company.get_json(),
+                "store": main_store.get_json(),
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 class CheckCompanyNameAvailableAPI(APIView):
     throttle_classes = [ScopedRateThrottle]
@@ -1548,6 +1608,37 @@ class CheckCompanyKybAvailableAPI(APIView):
                     },
                     status=status.HTTP_409_CONFLICT,
                 )
+        # 7. Verificar duplicidad de hashes SHA-256 de imágenes si el cliente los envía
+        rif_sha256 = (request.data.get("rif_image_sha256") or "").strip().lower()
+        mercantil_sha256 = (request.data.get("mercantil_image_sha256") or "").strip().lower()
+        if rif_sha256 and mercantil_sha256 and rif_sha256 == mercantil_sha256:
+            return Response(
+                {
+                    "available": False,
+                    "error": "Las imágenes del Comprobante RIF y del Registro Mercantil no pueden ser el mismo archivo."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if rif_sha256 and Company.objects.filter(
+            Q(rif_image_sha256__iexact=rif_sha256) | Q(mercantil_image_sha256__iexact=rif_sha256)
+        ).exists():
+            return Response(
+                {
+                    "available": False,
+                    "error": "La imagen del Comprobante RIF ya fue utilizada en otro registro en CartMaker."
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        if mercantil_sha256 and Company.objects.filter(
+            Q(mercantil_image_sha256__iexact=mercantil_sha256) | Q(rif_image_sha256__iexact=mercantil_sha256)
+        ).exists():
+            return Response(
+                {
+                    "available": False,
+                    "error": "La imagen del Registro Mercantil ya fue utilizada en otro registro en CartMaker."
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
         return Response(
             {
                 "available": True,

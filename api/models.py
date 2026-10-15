@@ -644,6 +644,18 @@ class Company(models.Model):
         db_index=True
     )
 
+    @property
+    def kyb_status(self) -> int:
+        """
+        Estado KYB derivado dinámicamente:
+        0 = Emprendedor (no requiere KYB mercantil)
+        1 = Empresa en revisión manual
+        2 = Empresa verificada por OCR (score >= 80)
+        """
+        if self.merchant_type != MerchantType.BUSINESS:
+            return 0
+        return 2 if (self.kyb_ocr_verified and (self.kyb_confidence_score or 0) >= 80) else 1
+
     def get_json(self)->dict:
         url = ""
         if self.image:
@@ -654,11 +666,22 @@ class Company(models.Model):
         presentation_video_thumbnail = ""
         if self.presentation_video_thumbnail:
             presentation_video_thumbnail = storage_manager.get_url(self.presentation_video_thumbnail)
+        rif_doc_url = (
+            self.rif_document_url
+            if (self.rif_document_url and str(self.rif_document_url).startswith(("http://", "https://")))
+            else (storage_manager.get_url(self.rif_document_url) if self.rif_document_url else None)
+        )
+        mercantil_doc_url = (
+            self.mercantil_document_url
+            if (self.mercantil_document_url and str(self.mercantil_document_url).startswith(("http://", "https://")))
+            else (storage_manager.get_url(self.mercantil_document_url) if self.mercantil_document_url else None)
+        )
         return {
             'id':self.id,
             'name':self.name,
             'creation':timezone.localtime(self.creation).strftime("%d/%m/%Y, %H:%M:%S"),
-            'category':self.category.name,
+            'category':self.category.name if self.category else "",
+            'merchant_type': self.merchant_type,
             'image':url,
             'presentation_video_url':presentation_url,
             "gamification_enabled":self.gamification_enabled,
@@ -673,8 +696,8 @@ class Company(models.Model):
             'mercantil_numero': self.mercantil_numero,
             'mercantil_tomo': self.mercantil_tomo,
             'representante_cedula': self.representante_cedula,
-            'rif_document_url': self.rif_document_url,
-            'mercantil_document_url': self.mercantil_document_url,
+            'rif_document_url': rif_doc_url,
+            'mercantil_document_url': mercantil_doc_url,
             'kyb_ocr_verified': self.kyb_ocr_verified,
             'kyb_confidence_score': self.kyb_confidence_score,
             'kyb_status': self.kyb_status,
