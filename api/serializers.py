@@ -208,49 +208,69 @@ class VerifyUserSerializer(serializers.Serializer):
     nacionality = serializers.CharField(max_length=1, required=True)
     biometry = serializers.ListField(
         child=serializers.FloatField(),
-        min_length=192,
-        max_length=192,
+        min_length=BIOMETRIC_VECTOR_DIMENSIONS,
+        max_length=BIOMETRIC_VECTOR_DIMENSIONS,
         required=True
     )
-    
+
+    def _get_current_user(self):
+        req_ctx = self.context.get('request')
+        return req_ctx.user if hasattr(req_ctx, 'user') else req_ctx
+
+    def validate_cedula_number(self, value):
+        cleaned = str(value).strip().upper()
+        current_user = self._get_current_user()
+        qs = User.objects.filter(cedula_number__iexact=cleaned, is_active=True)
+        if current_user and getattr(current_user, 'id', None):
+            qs = qs.exclude(id=current_user.id)
+        if qs.exists():
+            raise serializers.ValidationError(
+                f"Ya existe un usuario registrado con la cédula {cleaned}."
+            )
+        return cleaned
+
     def validate_biometry(self, value):
         """
-        Validación de identidad duplicada usando el índice HNSW y Distancia del Coseno.
+        Validación matemática y detección de identidad duplicada (1:N) en 512 dimensiones
+        usando normalización L2 sobre la hiperesfera unitaria S^511, índice HNSW y Distancia Coseno.
         """
-        try:
-            # 1. Definimos el umbral de Distancia del Coseno.
-            # En FaceNet/InsightFace, una distancia < 0.15 - 0.20 suele indicar la misma persona.
-            THRESHOLD = 0.18 
-            
-            req_ctx = self.context['request']
-            current_user = req_ctx.user if hasattr(req_ctx, 'user') else req_ctx
+        is_valid_vec, normalized_vector, vec_error = normalize_biometric_vector(
+            value, expected_dim=BIOMETRIC_VECTOR_DIMENSIONS
+        )
+        if not is_valid_vec:
+            raise serializers.ValidationError(vec_error)
 
-            # 2. Ejecutamos la búsqueda vectorial en la DB.
-            # Gracias al HnswIndex, esto es O(log n) en lugar de O(n).
-            closest_match = User.objects.exclude(id=current_user.id).filter(
+        try:
+            current_user = self._get_current_user()
+            qs = User.objects.filter(
                 cedula_verified=True,
-                biometric_vector__isnull=False
-            ).annotate(
-                distance=CosineDistance('biometric_vector', value)
+                biometric_vector__isnull=False,
+                is_active=True,
+            )
+            if current_user and getattr(current_user, 'id', None):
+                qs = qs.exclude(id=current_user.id)
+
+            closest_match = qs.annotate(
+                distance=CosineDistance('biometric_vector', normalized_vector)
             ).order_by('distance').first()
 
-            # 3. Verificamos si el más cercano es "demasiado" parecido
-            if closest_match and closest_match.distance < THRESHOLD:
-                # Log para auditoría interna
-                print(f"🚨 ALERTA DE SEGURIDAD: Intento de duplicado. Distancia: {closest_match.distance}")
-                print(f"Comparado con C.I: {closest_match.cedula_number}")
-                
+            if closest_match and closest_match.distance is not None and closest_match.distance < BIOMETRIC_KYC_DUPLICATE_THRESHOLD:
+                print(
+                    f"🚨 ALERTA DE SEGURIDAD BIOMÉTRICA (512-D): Intento de multicuenta bloqueado. "
+                    f"Distancia Coseno: {closest_match.distance:.4f} (< {BIOMETRIC_KYC_DUPLICATE_THRESHOLD}) "
+                    f"contra C.I: {closest_match.cedula_number}"
+                )
                 raise serializers.ValidationError(
-                    "Esta identidad biométrica ya está vinculada a otra cuenta verificada."
+                    "Esta identidad biométrica ya está vinculada a otra cuenta verificada en CartMaker."
                 )
         except serializers.ValidationError:
             raise
         except Exception as e:
             print(f"Error al validar la biometria: {e}")
             raise serializers.ValidationError(
-                    'Error interno al validar la biometría. Por favor, intentelo de nuevo.'
-                )
-        return value
+                'Error interno al validar la biometría. Por favor, inténtelo de nuevo.'
+            )
+        return normalized_vector
 
 class UploadSubscriptionPaymentSerializer(serializers.Serializer):
     reference_number = serializers.CharField(required=True)

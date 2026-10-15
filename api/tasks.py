@@ -13,11 +13,17 @@ import requests
 from api.core.firebase_admin import NotificationManager
 from .core.platinum_manager import PlatinumEvaluator
 from api.models import *
-from .utils import recalculate_item_popularity
+from .utils import (
+    recalculate_item_popularity,
+    normalize_biometric_vector,
+    BIOMETRIC_VECTOR_DIMENSIONS,
+    BIOMETRIC_LOGIN_THRESHOLD_PERFECT,
+)
 from django.core.cache import cache
 from django.utils.dateparse import parse_datetime
 from django.conf import settings
 from django.contrib.gis.geos import Point
+from django.db import transaction
 from django.db.models import Sum, F, FloatField, ExpressionWrapper
 
 logger = logging.getLogger(__name__)
@@ -26,22 +32,46 @@ User = get_user_model()
 @shared_task(ignore_result=True)
 def update_rolling_template(user_id, new_vector):
     try:
-        user = User.objects.only('biometric_vector').get(id=user_id)
-        old_vector = user.biometric_vector
-        if old_vector is None or len(old_vector) == 0:
+        is_valid_new, norm_new, _ = normalize_biometric_vector(
+            new_vector, expected_dim=BIOMETRIC_VECTOR_DIMENSIONS
+        )
+        if not is_valid_new:
             return
 
-        # Alpha 0.1 (Aprendizaje suave)
-        alpha = 0.1
-        updated_vector = [(1 - alpha) * o + alpha * n for o, n in zip(old_vector, new_vector)]
-        
-        user.biometric_vector = updated_vector
-        user.save(update_fields=['biometric_vector'])
-        
-        logger.info(f"✅ Rolling Template actualizado para el usuario {user_id}")
-        
+        with transaction.atomic():
+            user = User.objects.select_for_update().only('biometric_vector').get(id=user_id)
+            old_vector = user.biometric_vector
+            if old_vector is None or len(old_vector) != BIOMETRIC_VECTOR_DIMENSIONS:
+                return
+
+            is_valid_old, norm_old, _ = normalize_biometric_vector(
+                list(old_vector), expected_dim=BIOMETRIC_VECTOR_DIMENSIONS
+            )
+            if not is_valid_old:
+                return
+
+            # Defensa en profundidad: verificar distancia coseno antes de mezclar plantillas
+            cosine_sim = sum(o * n for o, n in zip(norm_old, norm_new))
+            cosine_dist = 1.0 - cosine_sim
+            if cosine_dist < 0.06 or cosine_dist > BIOMETRIC_LOGIN_THRESHOLD_PERFECT:
+                return
+
+            # Adaptación conservadora (alpha = 0.05) + re-proyección a la hiperesfera unitaria S^511 (||v||_2 = 1.0)
+            alpha = 0.05
+            blended = [(1.0 - alpha) * o + alpha * n for o, n in zip(norm_old, norm_new)]
+            is_valid_blend, norm_blended, _ = normalize_biometric_vector(
+                blended, expected_dim=BIOMETRIC_VECTOR_DIMENSIONS
+            )
+            if not is_valid_blend:
+                return
+
+            user.biometric_vector = norm_blended
+            user.save(update_fields=['biometric_vector'])
+
+        logger.info(f"✅ Rolling Template (512-D L2-normalizado) actualizado para el usuario {user_id}")
+
     except User.DoesNotExist:
-        pass 
+        pass
     except Exception as e:
         logger.error(f"❌ Error en update_rolling_template: {e}")
 

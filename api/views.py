@@ -84,61 +84,106 @@ class RegistDeviceView(APIView):
 
 class BiometricLoginView(APIView):
     """
-    Endpoint para autenticación mediante vectores biométricos.
+    Endpoint para autenticación mediante vectores biométricos de 512 dimensiones.
+    Soporta:
+    - Modo 1:1 (si el cliente envía 'user_id' o 'email' vinculado al dispositivo).
+    - Modo 1:N con blindaje matemático: Normalización L2 en S^511, umbral estricto (<= 0.26)
+      y prueba de margen contra el 2.do vecino más cercano (Lowe's Margin >= 0.08).
     """
     permission_classes = [AllowAny]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'auth'
 
     def post(self, request):
-        vector = request.data.get('biometry')
-        
-        if not vector or not isinstance(vector, list) or len(vector) != 192:
+        raw_vector = request.data.get('biometry')
+        is_valid_vec, vector, vec_error = normalize_biometric_vector(
+            raw_vector, expected_dim=BIOMETRIC_VECTOR_DIMENSIONS
+        )
+        if not is_valid_vec:
             return Response(
-                {"error": "Vector biométrico inválido o incompleto."}, 
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": vec_error or "Vector biométrico inválido o incompleto."},
+                status=status.HTTP_400_BAD_REQUEST,
             )
-        THRESHOLD_PERFECT = 0.35
-        THRESHOLD_ACCEPTABLE = 0.45
-        closest_user = User.objects.filter(
+
+        target_user_id = request.data.get('user_id')
+        target_email = (request.data.get('email') or '').strip()
+
+        base_qs = User.objects.filter(
             cedula_verified=True,
             biometric_vector__isnull=False,
-            is_active=True
+            is_active=True,
         ).annotate(
             distance=CosineDistance('biometric_vector', vector)
-        ).order_by('distance').first()
-
-        if closest_user is None:
-            return Response({
-                'error':"Identidad biométrica no reconocida o no registrada."}, 
-                status=status.HTTP_401_UNAUTHORIZED)
-        
-        if closest_user.is_superuser:
-            return Response({
-                'error':"No se permite acceso a cuentas administrativas."
-            }, status=status.HTTP_406_NOT_ACCEPTABLE)
-
-        print("USUARIO OBTENIDO: ", closest_user)
-        print("CLOSEST USER DISTANCE: ", closest_user.distance)
-        if closest_user.distance <= THRESHOLD_ACCEPTABLE:
-            if closest_user.distance > THRESHOLD_PERFECT:
-                update_rolling_template.delay(closest_user.id, vector)
-            refresh = RefreshToken.for_user(closest_user)
-            return Response({
-                'refresh': str(refresh),
-                'access': str(refresh.access_token),
-                'user_id': closest_user.id,
-                'user_type': closest_user.user_type,
-                'email': closest_user.email,
-                'first_name': closest_user.first_name.strip(),
-                'last_name': closest_user.last_name.strip(),
-                'email_verified': closest_user.email_verified,
-                'gender': closest_user.gender,
-            }, status=status.HTTP_200_OK)
-        return Response(
-            {"error": "Identidad no verificada. Por favor, asegúrese de tener buena iluminación o no usar accesorios."}, 
-            status=status.HTTP_401_UNAUTHORIZED
         )
+
+        # Modo 1:1 (si el cliente indica la cuenta esperada) vs Modo 1:N global
+        is_one_to_one = bool(target_user_id or target_email)
+        if target_user_id:
+            base_qs = base_qs.filter(id=target_user_id)
+        elif target_email:
+            base_qs = base_qs.filter(email__iexact=target_email)
+
+        top_matches = list(base_qs.order_by('distance')[:2])
+        if not top_matches:
+            return Response(
+                {'error': "Identidad biométrica no reconocida o no registrada."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        closest_user = top_matches[0]
+        if closest_user.is_superuser:
+            return Response(
+                {'error': "No se permite acceso biométrico a cuentas administrativas."},
+                status=status.HTTP_406_NOT_ACCEPTABLE,
+            )
+
+        effective_threshold = (
+            BIOMETRIC_LOGIN_THRESHOLD_1TO1
+            if is_one_to_one
+            else BIOMETRIC_LOGIN_THRESHOLD_ACCEPTABLE
+        )
+
+        print("USUARIO OBTENIDO (512-D): ", closest_user)
+        print("CLOSEST USER DISTANCE: ", closest_user.distance)
+
+        if closest_user.distance is None or closest_user.distance > effective_threshold:
+            return Response(
+                {"error": "Identidad no verificada. Por favor, asegúrese de tener buena iluminación o no usar accesorios."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        # En búsqueda global 1:N, exigimos margen claro respecto al 2.do usuario más parecido
+        if not is_one_to_one and len(top_matches) > 1:
+            second_user = top_matches[1]
+            if second_user.distance is not None:
+                margin = second_user.distance - closest_user.distance
+                if margin < BIOMETRIC_LOGIN_MIN_MARGIN:
+                    print(
+                        f"🚨 LOGIN BIOMÉTRICO RECHAZADO POR AMBIGÜEDAD: "
+                        f"Top1={closest_user.distance:.4f}, Top2={second_user.distance:.4f}, Margen={margin:.4f}"
+                    )
+                    return Response(
+                        {"error": "Coincidencia biométrica ambigua. Por seguridad, inicie sesión con su correo y contraseña."},
+                        status=status.HTTP_401_UNAUTHORIZED,
+                    )
+
+        # Solo adaptamos el rolling template cuando la coincidencia es de altísima confianza (<= 0.18),
+        # evitando contaminar el vector con capturas dudosas o de terceros.
+        if 0.06 <= closest_user.distance <= BIOMETRIC_LOGIN_THRESHOLD_PERFECT:
+            update_rolling_template.delay(closest_user.id, vector)
+
+        refresh = RefreshToken.for_user(closest_user)
+        return Response({
+            'refresh': str(refresh),
+            'access': str(refresh.access_token),
+            'user_id': closest_user.id,
+            'user_type': closest_user.user_type,
+            'email': closest_user.email,
+            'first_name': closest_user.first_name.strip(),
+            'last_name': closest_user.last_name.strip(),
+            'email_verified': closest_user.email_verified,
+            'gender': closest_user.gender,
+        }, status=status.HTTP_200_OK)
 
 class CartMakerTokenView(TokenObtainPairView):
     """
@@ -404,43 +449,77 @@ class VerifyUser(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        serializer = VerifyUserSerializer(data=request.data,
-                                          context={"request":request.user})
+        if getattr(request.user, 'cedula_verified', False):
+            return Response(
+                {"error": "Tu identidad ya se encuentra verificada en CartMaker."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        serializer = VerifyUserSerializer(
+            data=request.data,
+            context={"request": request.user},
+        )
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         user = request.user
         try:
+            file_obj = data['cedula_photo']
+            extension = file_obj.name.split('.')[-1]
+            file_name = f"cedula_{user.id}.{extension}"
+            folder = "identity_verifications"
+            cedula_rel_path = storage_manager.save_file(file_obj, folder, file_name)
+            if not cedula_rel_path:
+                return Response(
+                    {"error": "Error al guardar el archivo de la cédula en el servidor."},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+
+            selfie_obj = data['selfie_photo']
+            selfie_ext = selfie_obj.name.split('.')[-1]
+            selfie_name = f"selfie_{user.id}.{selfie_ext}"
+            selfie_rel_path = storage_manager.save_file(selfie_obj, folder, selfie_name)
+            if not selfie_rel_path:
+                return Response(
+                    {"error": "Error al guardar la selfie de verificación en el servidor."},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+
             with transaction.atomic():
-                file_obj = data['cedula_photo']
-                extension = file_obj.name.split('.')[-1]
-                file_name = f"cedula_{user.id}.{extension}"
-                folder = "identity_verifications"
-                relative_path = storage_manager.save_file(file_obj, folder, file_name)
-                print("RUTA RELATIVA A LA CEDULA DEL USUARIO: ", relative_path)
-                if relative_path:
-                    user.cedula_document = relative_path
-                else:
-                    raise Exception("Error al guardar el archivo de la cedula en el storage.")
-                file_obj = data['selfie_photo']
-                extension = file_obj.name.split('.')[-1]
-                file_name = f"selfie_{user.id}.{extension}"
-                folder = "identity_verifications"
-                relative_path = storage_manager.save_file(file_obj, folder, file_name)
-                print("RUTA RELATIVA A LA SELFIE DEL USUARIO: ", relative_path)
-                user.first_name = str(data['first_name']).capitalize()
-                user.last_name = str(data['last_name']).capitalize()
-                user.cedula_number = data['cedula_number']
-                user.nacionality = UserNacionality.VENEZOLANO if str(data['nacionality']).upper() == "V" else UserNacionality.EXTRANJERO
-                user.biometric_vector = data['biometry']
-                user.birth_date = data['birth_date']
-                user.cedula_verified = True
-                user.save()
-                return Response({
-                    "message": "Identidad confirmada. Ahora eres un usuario verificado en CartMaker."
-                }, status=status.HTTP_200_OK) 
+                locked_user = User.objects.select_for_update().get(pk=user.pk)
+                if locked_user.cedula_verified:
+                    return Response(
+                        {"error": "Tu identidad ya se encuentra verificada en CartMaker."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                if User.objects.exclude(pk=locked_user.pk).filter(
+                    cedula_number__iexact=data['cedula_number'], is_active=True
+                ).exists():
+                    return Response(
+                        {"error": f"Ya existe un usuario registrado con la cédula {data['cedula_number']}."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                locked_user.cedula_document = cedula_rel_path
+                locked_user.first_name = str(data['first_name']).capitalize()
+                locked_user.last_name = str(data['last_name']).capitalize()
+                locked_user.cedula_number = data['cedula_number']
+                locked_user.nacionality = (
+                    UserNacionality.VENEZOLANO
+                    if str(data['nacionality']).upper() == "V"
+                    else UserNacionality.EXTRANJERO
+                )
+                locked_user.biometric_vector = data['biometry']
+                locked_user.birth_date = data['birth_date']
+                locked_user.cedula_verified = True
+                locked_user.save()
+                return Response(
+                    {"message": "Identidad confirmada. Ahora eres un usuario verificado en CartMaker."},
+                    status=status.HTTP_200_OK,
+                )
         except Exception as e:
             print(f"Error al verificar al usuario: {e}")
-            raise Exception("Hubo un problema al procesar tu verificación. Inténtalo de nuevo.")
+            return Response(
+                {"error": "Hubo un problema al procesar tu verificación. Inténtalo de nuevo."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 ######################################################
 ###################### ACTIONS #######################

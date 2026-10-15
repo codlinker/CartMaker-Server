@@ -307,7 +307,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     cedula_document = models.CharField(max_length=500, null=True, blank=True)
     cedula_verified = models.BooleanField(default=False)
     cedula_number = models.CharField(max_length=50, null=True, blank=True)
-    biometric_vector = VectorField(dimensions=192, null=True, blank=True)
+    biometric_vector = VectorField(dimensions=512, null=True, blank=True)
     gender = models.IntegerField(choices=UserGender.choices, default=UserGender.MALE)
     is_external_account = models.BooleanField(default=False)
     can_check_payments = models.BooleanField(default=False, help_text="Puede ingresar al panel de pagos")

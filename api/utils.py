@@ -161,3 +161,74 @@ def validate_venezuelan_rif_modulo11(raw_rif: str):
             f"El RIF {normalized} no supera la validación matemática Módulo 11 del SENIAT (dígito esperado: -{expected_check})."
         )
     return True, normalized, None
+
+
+# =========================================================================
+# CONSTANTES Y NORMALIZACIÓN MATEMÁTICA BIOMÉTRICA (512 DIMENSIONES)
+# =========================================================================
+BIOMETRIC_VECTOR_DIMENSIONS = 512
+
+# Umbral de Distancia Coseno (1 - cos(theta)) para detección de multicuentas en KYC (1:N).
+# En espacios ArcFace/MobileFaceNet de 512-D sobre la hiperesfera unitaria S^511:
+# - Dos selfies de la misma persona en distintas sesiones/iluminaciones caen en [0.06, 0.28].
+# - Dos personas distintas tienen distancia esperada ~1.00 (sigma = 1/sqrt(512) = 0.0442).
+# Al fijar 0.30 (>= BIOMETRIC_LOGIN_THRESHOLD_ACCEPTABLE), garantizamos que ninguna identidad
+# que pueda hacer login pase desapercibida al intentar registrar una segunda cuenta.
+BIOMETRIC_KYC_DUPLICATE_THRESHOLD = 0.30
+
+# Umbrales de Distancia Coseno para Login Biométrico:
+# - PERFECT (<= 0.18): Coincidencia de altísima confianza (cos(theta) >= 0.82). Único rango donde se permite
+#   adaptación suave de plantilla (rolling template).
+# - ACCEPTABLE (<= 0.26): Límite estricto para búsqueda global 1:N (cos(theta) >= 0.74).
+# - 1TO1 (<= 0.30): Límite cuando el cliente especifica email o user_id (verificación 1:1).
+# - MIN_MARGIN (0.08): Margen mínimo (Lowe's Ratio / Margin gap) requerido entre el 1.er y 2.do vecino
+#   más cercano en búsquedas 1:N para rechazar colisiones ambiguas.
+BIOMETRIC_LOGIN_THRESHOLD_PERFECT = 0.18
+BIOMETRIC_LOGIN_THRESHOLD_ACCEPTABLE = 0.26
+BIOMETRIC_LOGIN_THRESHOLD_1TO1 = 0.30
+BIOMETRIC_LOGIN_MIN_MARGIN = 0.08
+
+
+def normalize_biometric_vector(
+    raw_vector,
+    expected_dim: int = BIOMETRIC_VECTOR_DIMENSIONS,
+) -> tuple[bool, list[float], str | None]:
+    """
+    Valida dimensionalidad, finitud, varianza no degenerada y proyecta el vector biométrico
+    sobre la hiperesfera unitaria S^(d-1) mediante normalización L2 estricta (||v||_2 = 1.0).
+    """
+    if isinstance(raw_vector, str):
+        try:
+            import json
+            raw_vector = json.loads(raw_vector)
+        except Exception:
+            return False, [], "Formato de vector biométrico inválido."
+
+    if not isinstance(raw_vector, (list, tuple)) or len(raw_vector) != expected_dim:
+        actual_len = len(raw_vector) if isinstance(raw_vector, (list, tuple)) else 0
+        return (
+            False,
+            [],
+            f"El vector biométrico debe tener exactamente {expected_dim} dimensiones (recibido: {actual_len}).",
+        )
+
+    try:
+        floats = [float(x) for x in raw_vector]
+    except (ValueError, TypeError):
+        return False, [], "El vector biométrico contiene valores no numéricos."
+
+    if any(math.isnan(x) or math.isinf(x) for x in floats):
+        return False, [], "El vector biométrico contiene valores NaN o infinitos."
+
+    norm_sq = sum(x * x for x in floats)
+    norm = math.sqrt(norm_sq)
+    if norm < 1e-6:
+        return False, [], "Vector biométrico nulo o degenerado (norma cercana a cero)."
+
+    mean_val = sum(floats) / expected_dim
+    variance = sum((x - mean_val) ** 2 for x in floats) / expected_dim
+    if variance < 1e-8:
+        return False, [], "Vector biométrico inválido (varianza uniforme/sintética)."
+
+    normalized = [x / norm for x in floats]
+    return True, normalized, None
