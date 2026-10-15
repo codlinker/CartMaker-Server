@@ -75,13 +75,17 @@ document.addEventListener('DOMContentLoaded', () => {
         tab.addEventListener('click', () => {
             ticketTabs.forEach(t => {
                 t.classList.remove('active');
-                t.style.color = '#757575';
+                t.style.color = '#94A3B8';
+                t.style.background = 'transparent';
+                t.style.borderColor = 'transparent';
                 t.style.fontWeight = '700';
             });
             ticketPanels.forEach(p => p.style.display = 'none');
 
             tab.classList.add('active');
-            tab.style.color = '#6D49F2';
+            tab.style.color = '#FFFFFF';
+            tab.style.background = 'rgba(109, 73, 242, 0.22)';
+            tab.style.borderColor = 'rgba(109, 73, 242, 0.4)';
             tab.style.fontWeight = '800';
 
             const targetPanel = document.getElementById(tab.getAttribute('data-tab'));

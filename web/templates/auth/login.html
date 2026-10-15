@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% load static %}
 
-{% block title %}Login | CartMaker{% endblock %}
+{% block title %}Acceso Operativo | CartMaker HQ{% endblock %}
 
 {% block extra_head %}
     <link rel="stylesheet" href="{% static 'css/login.css' %}">
@@ -9,28 +9,115 @@
 
 {% block content %}
 <div class="login-wrapper">
-    <div class="login-orb orb-1"></div>
-    <div class="login-orb orb-2"></div>
+    <div class="login-orb orb-1" aria-hidden="true"></div>
+    <div class="login-orb orb-2" aria-hidden="true"></div>
 
-    <div class="login-card">
-        <div class="login-header">
-            <span class="material-symbols-rounded login-icon">admin_panel_settings</span>
-            <h2>Portal de Agentes</h2>
-            <p>Acceso restringido al personal de soporte</p>
+    <div class="login-shell">
+        <!-- Panel Informativo lateral (Visible en Desktop, compacto en Móvil) -->
+        <div class="login-brand-panel">
+            <div class="login-brand-badge">
+                <span class="pulse-dot-emerald"></span>
+                <span>CARTMAKER HQ · RED OPERATIVA</span>
+            </div>
+            <h1>Centro de Control de Soporte y Finanzas</h1>
+            <p>
+                Consola unificada en tiempo real para la atención de tickets con WebSockets y auditoría de conciliación bancaria (BCV / Atlas Plus AI).
+            </p>
+
+            <div class="login-capabilities-list">
+                <div class="cap-item">
+                    <span class="material-symbols-rounded">support_agent</span>
+                    <div>
+                        <strong>Soporte en Tiempo Real</strong>
+                        <span>Chat bidireccional con clientes, notas de voz y métricas de SLA.</span>
+                    </div>
+                </div>
+                <div class="cap-item">
+                    <span class="material-symbols-rounded">account_balance</span>
+                    <div>
+                        <strong>Conciliación Bancaria</strong>
+                        <span>Verificación instantánea de referencias Pago Móvil y suscripciones Atlas Plus.</span>
+                    </div>
+                </div>
+            </div>
         </div>
-        
-        <form method="POST" class="login-form">
-            {% csrf_token %}
-            <div class="input-group">
-                <label for="id_username">Correo Electrónico</label>
-                <input type="text" name="username" autofocus required id="id_username" placeholder="ejemplo@cartmaker.app">
+
+        <!-- Tarjeta del Formulario -->
+        <div class="login-card">
+            <div class="login-header">
+                <div class="login-icon-ring">
+                    <span class="material-symbols-rounded">shield_lock</span>
+                </div>
+                <h2>Iniciar Sesión</h2>
+                <p>Ingresa con tus credenciales autorizadas de CartMaker</p>
             </div>
-            <div class="input-group">
-                <label for="id_password">Contraseña</label>
-                <input type="password" name="password" required id="id_password" placeholder="••••••••">
+
+            <form method="POST" class="login-form" novalidate>
+                {% csrf_token %}
+                {% if request.GET.next %}
+                    <input type="hidden" name="next" value="{{ request.GET.next }}">
+                {% endif %}
+
+                <div class="input-group">
+                    <label for="id_username">Correo Corporativo</label>
+                    <div class="input-field-wrap">
+                        <span class="material-symbols-rounded field-icon">mail</span>
+                        <input
+                            type="email"
+                            name="username"
+                            id="id_username"
+                            placeholder="agente@cartmaker.app"
+                            autocomplete="username"
+                            autofocus
+                            required
+                        >
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label for="id_password">Contraseña de Acceso</label>
+                    <div class="input-field-wrap">
+                        <span class="material-symbols-rounded field-icon">lock</span>
+                        <input
+                            type="password"
+                            name="password"
+                            id="id_password"
+                            placeholder="••••••••••••"
+                            autocomplete="current-password"
+                            required
+                        >
+                        <button type="button" class="toggle-pwd-btn" id="togglePwdBtn" aria-label="Mostrar u ocultar contraseña">
+                            <span class="material-symbols-rounded" id="togglePwdIcon">visibility</span>
+                        </button>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn-submit">
+                    <span>Ingresar a la Consola</span>
+                    <span class="material-symbols-rounded">arrow_forward</span>
+                </button>
+            </form>
+
+            <div class="login-security-footnote">
+                <span class="material-symbols-rounded">verified_user</span>
+                <span>Sesión protegida mediante cifrado TLS y tokens JWT firmados.</span>
             </div>
-            <button type="submit" class="btn-submit">Ingresar al Portal</button>
-        </form>
+        </div>
     </div>
 </div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const toggleBtn = document.getElementById('togglePwdBtn');
+        const pwdInput = document.getElementById('id_password');
+        const pwdIcon = document.getElementById('togglePwdIcon');
+        if (toggleBtn && pwdInput && pwdIcon) {
+            toggleBtn.addEventListener('click', () => {
+                const isPwd = pwdInput.type === 'password';
+                pwdInput.type = isPwd ? 'text' : 'password';
+                pwdIcon.textContent = isPwd ? 'visibility_off' : 'visibility';
+            });
+        }
+    });
+</script>
 {% endblock %}

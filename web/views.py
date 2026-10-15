@@ -20,16 +20,22 @@ from django.conf import settings
 # 🔒 VISTAS DE AUTENTICACIÓN (COMPARTIDAS)
 # ==============================================================
 def login_view(request):
+    next_url = request.POST.get('next') or request.GET.get('next')
+    if next_url and not next_url.startswith('/'):
+        next_url = None
+
     # 1. Si ya está logueado, lo enviamos a su área de trabajo
     if request.user.is_authenticated:
-        if request.user.is_superuser:
-            return redirect('admin:index')
+        if next_url:
+            return redirect(next_url)
+        elif getattr(request.user, 'can_check_support', False) or request.user.is_superuser:
+            return redirect('web_dashboard')
         elif getattr(request.user, 'can_check_payments', False):
             return redirect('web_payments_dashboard')
-        elif getattr(request.user, 'can_check_support', False):
-            return redirect('web_dashboard')
         else:
-            return redirect('web_logout')
+            logout(request)
+            messages.error(request, "Tu cuenta no posee permisos operativos para acceder a la consola web.")
+            return redirect('web_login')
 
     # 2. Procesamiento del Formulario
     if request.method == 'POST':
@@ -37,7 +43,6 @@ def login_view(request):
         if form.is_valid():
             user = form.get_user()
             
-            # 💡 FILTRO CORREGIDO: Verificamos si tiene ALGUN permiso administrativo
             is_authorized = (
                 user.is_superuser or 
                 getattr(user, 'can_check_support', False) or 
@@ -46,18 +51,16 @@ def login_view(request):
             
             if is_authorized:
                 login(request, user)
-                
-                # Redirección dinámica basada en permisos
-                if user.is_superuser:
-                    return redirect('admin:index')
+                if next_url:
+                    return redirect(next_url)
+                elif getattr(user, 'can_check_support', False) or user.is_superuser:
+                    return redirect('web_dashboard')
                 elif getattr(user, 'can_check_payments', False):
                     return redirect('web_payments_dashboard')
-                elif getattr(user, 'can_check_support', False):
-                    return redirect('web_dashboard')
             else:
-                messages.error(request, "Acceso denegado. Solo personal autorizado de CartMaker.")
+                messages.error(request, "Acceso restringido. Consola exclusiva para el equipo operativo de CartMaker.")
         else:
-            messages.error(request, "Credenciales inválidas.")
+            messages.error(request, "Credenciales inválidas. Verifica tu correo corporativo y contraseña.")
     else:
         form = AuthenticationForm()
         
@@ -368,11 +371,37 @@ def support_agent_chat(request, ticket_id):
 # ==============================================================
 # 🌍 VISTA PÚBLICA
 # ==============================================================
+# Variable de comisión por cada venta completada (%).
+# Si se coloca en 0 (ej. SALES_COMMISSION_PCT = 0), el frontend reacciona automáticamente
+# y muestra únicamente que crear tu comercio y vender es 100% gratis.
+SALES_COMMISSION_PCT = 0
+
 def landing_view(request):
-    """ Exclusivo para branding y descarga de la App """
-    # Traemos los planes ordenados por precio
+    """ Ecosistema hiper-local CartMaker: Descubrimiento comercial en tu zona, Inventario IA y Atlas IA """
     plans = MerchantPlan.objects.all().order_by('price')
-    return render(request, 'home.html', {'plans': plans})
+    system_config = SystemConfig.objects.order_by('-creation').first()
+
+    raw_commission = getattr(system_config, 'sales_commission_pct', None) if system_config else None
+    commission_source = raw_commission if raw_commission is not None else SALES_COMMISSION_PCT
+    try:
+        commission_val = float(commission_source)
+    except (TypeError, ValueError):
+        commission_val = 0.0
+
+    has_sales_commission = commission_val > 0
+    commission_display = f"{commission_val:g}" if has_sales_commission else "0"
+
+    context = {
+        'plans': plans,
+        'system_config': system_config,
+        'atlas_plus_price': system_config.atlas_plus_price_usd if system_config else 3.99,
+        'atlas_free_limit': system_config.atlas_free_daily_limit if system_config else 5,
+        'atlas_plus_limit': system_config.atlas_plus_daily_limit if system_config else 75,
+        'sales_commission_pct': commission_display,
+        'sales_commission_num': commission_val,
+        'has_sales_commission': has_sales_commission,
+    }
+    return render(request, 'home.html', context)
 
 def pitch_deck_view(request):
     """ Presentación Ejecutiva interactiva para Socios Fundadores """

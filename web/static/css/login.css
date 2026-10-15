@@ -1,191 +1,307 @@
-/* =========================================
-   LOGIN WRAPPER & BACKGROUND
-   ========================================= */
-.main-content {
-    max-width: 100%;
-}
+/* ==========================================================================
+   CARTMAKER HQ — ENTERPRISE PORTAL LOGIN (MOBILE-FIRST CLICKUP STYLE)
+   ========================================================================== */
 
 .login-wrapper {
-    min-height: calc(100vh - 80px); /* 80px del navbar */
-    width: 100%;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    padding: 2rem;
     position: relative;
-    background: var(--bg-dark);
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px;
+    background: #0A0714;
     overflow: hidden;
-    z-index: 1;
 }
 
-/* Efectos de luces de fondo (Orbes) */
 .login-orb {
     position: absolute;
     border-radius: 50%;
-    filter: blur(80px);
-    z-index: -1;
+    filter: blur(90px);
     pointer-events: none;
-    animation: floatOrb 15s infinite ease-in-out alternate;
+    z-index: 0;
 }
 
-.login-orb.orb-1 {
-    width: 400px;
-    height: 400px;
-    background: rgba(109, 73, 242, 0.25); /* Primary glow */
-    top: -10%;
-    left: -5%;
+.orb-1 {
+    width: 360px;
+    height: 360px;
+    background: rgba(109, 73, 242, 0.35);
+    top: -100px;
+    left: -100px;
 }
 
-.login-orb.orb-2 {
-    width: 300px;
-    height: 300px;
-    background: rgba(49, 27, 146, 0.3); /* Dark purple glow */
-    bottom: -5%;
-    right: 5%;
-    animation-delay: -5s;
+.orb-2 {
+    width: 320px;
+    height: 320px;
+    background: rgba(236, 72, 153, 0.22);
+    bottom: -80px;
+    right: -80px;
 }
 
-@keyframes floatOrb {
-    0% { transform: translate(0, 0) scale(1); }
-    50% { transform: translate(30px, -30px) scale(1.1); }
-    100% { transform: translate(-20px, 20px) scale(0.9); }
-}
-
-/* =========================================
-   LOGIN CARD (GLASSMORPHISM)
-   ========================================= */
-.login-card {
+.login-shell {
+    position: relative;
+    z-index: 1;
     width: 100%;
-    max-width: 460px;
-    background: rgba(255, 255, 255, 0.03);
-    backdrop-filter: blur(30px);
-    -webkit-backdrop-filter: blur(30px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 35px;
-    padding: 3.5rem 3rem;
+    max-width: 980px;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 24px;
+    align-items: center;
+}
+
+.login-brand-panel {
+    color: #FFFFFF;
+    padding: 8px 4px;
     text-align: center;
-    box-shadow: 0 30px 60px rgba(0, 0, 0, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
-    animation: cardEntrance 0.6s cubic-bezier(0.25, 1, 0.5, 1) forwards;
 }
 
-@keyframes cardEntrance {
-    from { opacity: 0; transform: translateY(30px) scale(0.95); }
-    to { opacity: 1; transform: translateY(0) scale(1); }
+.login-brand-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    font-family: var(--font-display);
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    color: #C4B5FD;
+    margin-bottom: 14px;
 }
 
-/* =========================================
-   HEADER & TIPOGRAFÍA
-   ========================================= */
-.login-header {
-    margin-bottom: 2.5rem;
+.pulse-dot-emerald {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #10B981;
+    box-shadow: 0 0 8px #10B981;
 }
 
-.login-icon {
-    font-size: 64px;
-    color: var(--primary);
-    margin-bottom: 1rem;
-    filter: drop-shadow(0 0 20px rgba(109, 73, 242, 0.4));
+.login-brand-panel h1 {
+    color: #FFFFFF;
+    font-size: clamp(1.6rem, 4vw, 2.35rem);
+    font-weight: 800;
+    margin-bottom: 12px;
 }
 
-.login-header h2 {
-    font-size: 1.8rem;
-    font-weight: 900;
-    color: var(--white);
-    margin-bottom: 0.5rem;
-    letter-spacing: -0.5px;
-    font-family: 'Poppins', sans-serif;
+.login-brand-panel > p {
+    color: #A39EB8;
+    font-size: 0.94rem;
+    line-height: 1.6;
+    max-width: 480px;
+    margin: 0 auto 20px;
 }
 
-.login-header p {
-    color: var(--light-purple);
-    font-size: 0.95rem;
-    font-weight: 500;
-}
-
-/* =========================================
-   FORMULARIO & INPUTS
-   ========================================= */
-.login-form {
+.login-capabilities-list {
+    display: none;
+    flex-direction: column;
+    gap: 14px;
     text-align: left;
 }
 
+.cap-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.cap-item .material-symbols-rounded {
+    color: #A78BFA;
+    font-size: 22px;
+    margin-top: 2px;
+}
+
+.cap-item strong {
+    display: block;
+    font-size: 0.9rem;
+    color: #FFFFFF;
+    margin-bottom: 2px;
+}
+
+.cap-item span {
+    font-size: 0.8rem;
+    color: #94A3B8;
+}
+
+/* Tarjeta del Formulario */
+.login-card {
+    background: #FFFFFF;
+    border-radius: 26px;
+    padding: 28px 22px;
+    box-shadow: 0 28px 65px rgba(0, 0, 0, 0.45);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.login-header {
+    text-align: center;
+    margin-bottom: 24px;
+}
+
+.login-icon-ring {
+    width: 54px;
+    height: 54px;
+    border-radius: 16px;
+    background: var(--gradient-brand);
+    color: #FFFFFF;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 14px;
+    box-shadow: 0 10px 24px rgba(109, 73, 242, 0.35);
+}
+
+.login-icon-ring .material-symbols-rounded {
+    font-size: 26px;
+}
+
+.login-header h2 {
+    font-size: 1.45rem;
+    font-weight: 800;
+    color: var(--text-main);
+    margin-bottom: 4px;
+}
+
+.login-header p {
+    font-size: 0.86rem;
+    color: var(--text-secondary);
+}
+
+.login-form {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
 .input-group {
-    margin-bottom: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
 }
 
 .input-group label {
-    display: block;
-    font-size: 0.85rem;
+    font-size: 0.82rem;
     font-weight: 700;
-    color: var(--light-grey);
-    margin-bottom: 0.6rem;
-    text-transform: uppercase;
-    letter-spacing: 1px;
+    color: var(--text-main);
 }
 
-.input-group input {
+.input-field-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.field-icon {
+    position: absolute;
+    left: 14px;
+    color: var(--text-muted);
+    font-size: 19px;
+    pointer-events: none;
+}
+
+.input-field-wrap input {
     width: 100%;
-    padding: 1.2rem;
-    border-radius: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    background: rgba(0, 0, 0, 0.3);
-    font-family: 'Inter', sans-serif;
-    font-size: 1rem;
-    color: var(--white);
-    transition: all 0.3s ease;
+    padding: 13px 42px 13px 42px;
+    border-radius: 13px;
+    border: 1.5px solid rgba(15, 11, 29, 0.12);
+    background: #F9F9FC;
+    font-size: 0.94rem;
+    color: var(--text-main);
+    transition: all 0.2s ease;
+}
+
+.input-field-wrap input:focus {
     outline: none;
+    border-color: var(--cm-primary);
+    background: #FFFFFF;
+    box-shadow: 0 0 0 4px rgba(109, 73, 242, 0.12);
 }
 
-.input-group input::placeholder {
-    color: rgba(255, 255, 255, 0.3);
-}
-
-.input-group input:focus {
-    border-color: var(--primary);
-    background: rgba(0, 0, 0, 0.5);
-    box-shadow: 0 0 0 4px rgba(109, 73, 242, 0.2);
-}
-
-/* =========================================
-   BOTÓN DE SUBMIT
-   ========================================= */
-.btn-submit {
-    width: 100%;
-    padding: 1.2rem;
-    background: var(--primary);
-    color: var(--white);
+.toggle-pwd-btn {
+    position: absolute;
+    right: 10px;
+    background: none;
     border: none;
-    border-radius: 16px;
-    font-weight: 800;
-    font-size: 1.1rem;
+    color: var(--text-muted);
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
-    margin-top: 1rem;
-    box-shadow: 0 10px 20px rgba(109, 73, 242, 0.3);
-    font-family: 'Inter', sans-serif;
+    display: inline-flex;
+    padding: 4px;
+}
+
+.toggle-pwd-btn:hover {
+    color: var(--cm-primary);
+}
+
+.btn-submit {
+    margin-top: 6px;
+    width: 100%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 14px 20px;
+    border-radius: 14px;
+    border: none;
+    background: var(--gradient-brand);
+    color: #FFFFFF;
+    font-family: var(--font-display);
+    font-size: 0.95rem;
+    font-weight: 800;
+    cursor: pointer;
+    box-shadow: 0 10px 24px rgba(109, 73, 242, 0.32);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .btn-submit:hover {
-    background: var(--dark-purple);
-    transform: translateY(-3px);
-    box-shadow: 0 15px 30px rgba(109, 73, 242, 0.5);
+    transform: translateY(-2px);
+    box-shadow: 0 14px 30px rgba(109, 73, 242, 0.44);
 }
 
-.btn-submit:active {
-    transform: translateY(0);
-    box-shadow: 0 5px 10px rgba(109, 73, 242, 0.3);
+.login-security-footnote {
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-light);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    font-size: 0.76rem;
+    color: var(--text-muted);
+    text-align: center;
 }
 
-/* =========================================
-   RESPONSIVE
-   ========================================= */
-@media (max-width: 480px) {
+.login-security-footnote .material-symbols-rounded {
+    font-size: 16px;
+    color: var(--cm-emerald);
+}
+
+@media (min-width: 900px) {
     .login-wrapper {
-        padding: 1rem;
+        padding: 48px 24px;
     }
-    
+
+    .login-shell {
+        grid-template-columns: 1.05fr 0.95fr;
+        gap: 48px;
+    }
+
+    .login-brand-panel {
+        text-align: left;
+    }
+
+    .login-brand-panel > p {
+        margin-left: 0;
+    }
+
+    .login-capabilities-list {
+        display: flex;
+    }
+
     .login-card {
-        padding: 2.5rem 1.5rem;
-        border-radius: 25px;
+        padding: 38px 34px;
     }
 }
