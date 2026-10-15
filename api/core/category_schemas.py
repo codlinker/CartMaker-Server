@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 CATALOGO_ESTRUCTURA: List[Dict[str, Any]] = [
     {
-        "categoria": "Alimentos y Bebidas (Supermercado)",
+        "categoria": "Alimentos y Bebidas",
         "imagen": "static/img/categories/alimentos_y_bebidas.jpg",
         "subcategorias": [
             {"nombre": "Despensa y Víveres", "imagen": "static/img/categories/sub_categories/despensa_y_viveres.jpg"},
@@ -18,7 +18,6 @@ CATALOGO_ESTRUCTURA: List[Dict[str, Any]] = [
             {"nombre": "Bebidas", "imagen": "static/img/categories/sub_categories/bebidas.jpg"},
             {"nombre": "Licores", "imagen": "static/img/categories/sub_categories/licores.jpg"},
             {"nombre": "Snacks y Dulces", "imagen": "static/img/categories/sub_categories/snacks_y_dulces.jpg"},
-            {"nombre": "Limpieza del Hogar", "imagen": "static/img/categories/sub_categories/limpieza_del_hogar.jpg"},
         ],
     },
     {
@@ -67,6 +66,7 @@ CATALOGO_ESTRUCTURA: List[Dict[str, Any]] = [
             {"nombre": "Baño", "imagen": "static/img/categories/sub_categories/bano.jpg"},
             {"nombre": "Decoración", "imagen": "static/img/categories/sub_categories/decoracion.jpg"},
             {"nombre": "Jardín y Exteriores", "imagen": "static/img/categories/sub_categories/jardin_y_exteriores.jpg"},
+            {"nombre": "Limpieza del Hogar", "imagen": "static/img/categories/sub_categories/limpieza_del_hogar.jpg"},
         ],
     },
     {
@@ -158,7 +158,7 @@ CATALOGO_ESTRUCTURA: List[Dict[str, Any]] = [
         ],
     },
     {
-        "categoria": "Otras Categorías (Varios)",
+        "categoria": "Otras Categorías",
         "imagen": "static/img/categories/otras_categorias.jpg",
         "subcategorias": [
             {"nombre": "Otros", "imagen": "static/img/categories/sub_categories/otros.jpg"},
@@ -168,16 +168,18 @@ CATALOGO_ESTRUCTURA: List[Dict[str, Any]] = [
 
 # Mapeo de nombres antiguos/legacy a las 14 categorías oficiales
 LEGACY_CATEGORY_TO_OFFICIAL_MAP: Dict[str, str] = {
-    "Alimentos y Bebidas": "Alimentos y Bebidas (Supermercado)",
-    "Restaurantes y Comida Preparada": "Alimentos y Bebidas (Supermercado)",
+    "Alimentos y Bebidas (Supermercado)": "Alimentos y Bebidas",
+    "Alimentos y Bebidas": "Alimentos y Bebidas",
+    "Restaurantes y Comida Preparada": "Alimentos y Bebidas",
     "Hogar y Electrodomésticos": "Hogar, Muebles y Jardín",
     "Automotriz y Repuestos": "Carros, Motos y Otros",
     "Deportes y Aire Libre": "Deportes y Fitness",
     "Juguetes y Entretenimiento": "Juegos y Juguetes",
     "Ferretería y Herramientas": "Ferretería y Construcción",
     "Educación, Libros y Papelería": "Papelería, Oficina y Libros",
-    "Servicios Profesionales": "Otras Categorías (Varios)",
-    "Otros": "Otras Categorías (Varios)",
+    "Servicios Profesionales": "Otras Categorías",
+    "Otras Categorías (Varios)": "Otras Categorías",
+    "Otros": "Otras Categorías",
 }
 
 
@@ -2171,6 +2173,7 @@ SUBCATEGORY_SCHEMAS: Dict[str, Dict[str, Any]] = {
 
 # Esquemas por defecto a nivel de Categoría Principal (cuando no se especifica subcategoría)
 CATEGORY_DEFAULT_SUBCATEGORY_MAP: Dict[str, str] = {
+    "Alimentos y Bebidas": "Despensa y Víveres",
     "Alimentos y Bebidas (Supermercado)": "Despensa y Víveres",
     "Tecnología y Electrónica": "Celulares y Tablets",
     "Moda y Accesorios": "Ropa Femenina",
@@ -2184,6 +2187,7 @@ CATEGORY_DEFAULT_SUBCATEGORY_MAP: Dict[str, str] = {
     "Mascotas": "Perros",
     "Papelería, Oficina y Libros": "Útiles Escolares",
     "Instrumentos Musicales": "Guitarras y Bajos",
+    "Otras Categorías": "Otros",
     "Otras Categorías (Varios)": "Otros",
 }
 
