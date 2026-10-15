@@ -210,13 +210,26 @@ class ProductImageSerializer(serializers.Serializer):
     apply_transparency = serializers.BooleanField(default=False)
     transparency_color = serializers.CharField(max_length=7, required=False, allow_null=True)
 
+MAX_IMAGE_SIZE_MB = 10
+MAX_VIDEO_SIZE_MB = 40
+
+def validate_image_size(file):
+    if file.size > MAX_IMAGE_SIZE_MB * 1024 * 1024:
+        raise serializers.ValidationError(f"La imagen no puede pesar más de {MAX_IMAGE_SIZE_MB}MB.")
+    return file
+
+def validate_video_size(file):
+    if file.size > MAX_VIDEO_SIZE_MB * 1024 * 1024:
+        raise serializers.ValidationError(f"El video no puede pesar más de {MAX_VIDEO_SIZE_MB}MB.")
+    return file
+
 class VerifyUserSerializer(serializers.Serializer):
     first_name = serializers.CharField(max_length=150, required=True)
     last_name = serializers.CharField(max_length=150, required=True)
     cedula_number = serializers.CharField(max_length=20, required=True)
     birth_date = serializers.DateField(format="%d/%m/%Y", input_formats=['%d/%m/%Y'], required=True)
-    cedula_photo = serializers.ImageField(required=True)
-    selfie_photo = serializers.ImageField(required=True)
+    cedula_photo = serializers.ImageField(required=True, validators=[validate_image_size])
+    selfie_photo = serializers.ImageField(required=True, validators=[validate_image_size])
     nacionality = serializers.CharField(max_length=1, required=True)
     biometry = serializers.ListField(
         child=serializers.FloatField(),
@@ -290,25 +303,12 @@ class UploadSubscriptionPaymentSerializer(serializers.Serializer):
     amount_sended = serializers.FloatField(required=True)
     subscription_type = serializers.IntegerField(required=True)
     subscription_id = serializers.IntegerField(required=True)
-    payment_proof = serializers.ImageField(required=True)
+    payment_proof = serializers.ImageField(required=True, validators=[validate_image_size])
     dollar_bcv_tax = serializers.FloatField(required=True)
 
 class RegistDeviceSerializer(serializers.Serializer):
     fcm_token = serializers.CharField(required=True)
     platform = serializers.CharField(required=True)
-
-MAX_IMAGE_SIZE_MB = 10
-MAX_VIDEO_SIZE_MB = 40
-
-def validate_image_size(file):
-    if file.size > MAX_IMAGE_SIZE_MB * 1024 * 1024:
-        raise serializers.ValidationError(f"La imagen no puede pesar más de {MAX_IMAGE_SIZE_MB}MB.")
-    return file
-
-def validate_video_size(file):
-    if file.size > MAX_VIDEO_SIZE_MB * 1024 * 1024:
-        raise serializers.ValidationError(f"El video no puede pesar más de {MAX_VIDEO_SIZE_MB}MB.")
-    return file
 
 class UpdateCompanySerializer(serializers.Serializer):
     company_id = serializers.CharField(required=True)
@@ -376,8 +376,8 @@ class CreateCompanySerializer(serializers.Serializer):
     representante_cedula = serializers.CharField(max_length=25, required=False, allow_null=True, allow_blank=True)
     kyb_ocr_verified = serializers.BooleanField(required=False, default=False)
     kyb_confidence_score = serializers.IntegerField(required=False, default=0)
-    rif_document = serializers.ImageField(required=False, allow_null=True)
-    mercantil_document = serializers.ImageField(required=False, allow_null=True)
+    rif_document = serializers.ImageField(required=False, allow_null=True, validators=[validate_image_size])
+    mercantil_document = serializers.ImageField(required=False, allow_null=True, validators=[validate_image_size])
     rif_image_sha256 = serializers.CharField(max_length=64, required=False, allow_null=True, allow_blank=True)
     mercantil_image_sha256 = serializers.CharField(max_length=64, required=False, allow_null=True, allow_blank=True)
 
@@ -393,7 +393,7 @@ class CreateCompanySerializer(serializers.Serializer):
 class CreateStoreSerializer(serializers.Serializer):
     company_id = serializers.UUIDField(required=True)
     name = serializers.CharField(required=True, max_length=255)
-    store_img = serializers.ImageField(required=False)
+    store_img = serializers.ImageField(required=False, validators=[validate_image_size])
     work_hours = serializers.JSONField(required=True)
     work_days = serializers.CharField(required=False)
     
@@ -413,10 +413,46 @@ class CreateStoreSerializer(serializers.Serializer):
     instagram_handle = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     phone_number = serializers.CharField(required=False, allow_null=True, allow_blank=True)
 
+class FlexibleJSONField(serializers.Field):
+    """
+    Acepta tanto objetos nativos (dict/list) en peticiones JSON como strings codificados
+    en JSON cuando se envían mediante MultipartFormData desde Flutter.
+    """
+    def __init__(self, default_factory=dict, **kwargs):
+        self.default_factory = default_factory
+        super().__init__(**kwargs)
+
+    def to_internal_value(self, data):
+        if data is None or data == "":
+            return self.default_factory()
+        if isinstance(data, (dict, list)):
+            return data
+        if isinstance(data, str):
+            raw = data.strip()
+            if not raw:
+                return self.default_factory()
+            try:
+                return json.loads(raw)
+            except Exception as exc:
+                raise serializers.ValidationError(f"Formato JSON inválido: {exc}")
+        return self.default_factory()
+
+    def to_representation(self, value):
+        return value
+
+
 class ProductSerializer(serializers.ModelSerializer):
     category_id = serializers.IntegerField(write_only=True)
     # DRF convertirá los "true"/"false" de MultipartFormData a booleanos automáticamente
     discounts_by_tokens_active = serializers.BooleanField(default=False, required=False)
+    selling_unit = serializers.CharField(max_length=32, required=False, allow_blank=True)
+    unit_label = serializers.CharField(max_length=50, required=False, allow_blank=True)
+    allow_fractional_quantity = serializers.BooleanField(required=False)
+    min_order_quantity = serializers.DecimalField(max_digits=10, decimal_places=3, required=False)
+    unit_step = serializers.DecimalField(max_digits=10, decimal_places=3, required=False)
+    attributes = FlexibleJSONField(default_factory=dict, required=False)
+    variants = FlexibleJSONField(default_factory=list, required=False)
+    modifier_groups = FlexibleJSONField(default_factory=list, required=False)
 
     class Meta:
         model = Product
@@ -426,11 +462,19 @@ class ProductSerializer(serializers.ModelSerializer):
             'price', 
             'description', 
             'category_id', 
-            'discounts_by_tokens_active'
+            'discounts_by_tokens_active',
+            'selling_unit',
+            'unit_label',
+            'allow_fractional_quantity',
+            'min_order_quantity',
+            'unit_step',
+            'attributes',
+            'variants',
+            'modifier_groups',
         ]
 
     def to_representation(self, instance):
-        # Delegamos la serialización de salida a tu método del modelo
+        # Delegamos la serialización de salida al método del modelo
         return instance.get_json()
 
 class CompanyVideoStorySerializer(serializers.ModelSerializer):
@@ -438,8 +482,8 @@ class CompanyVideoStorySerializer(serializers.ModelSerializer):
     Serializer robusto para crear Historias de Video desde Flutter.
     """
     # 💡 Declaramos explícitamente los campos de archivo
-    video_file = serializers.FileField(required=True)
-    thumbnail = serializers.ImageField(required=True)
+    video_file = serializers.FileField(required=True, validators=[validate_video_size])
+    thumbnail = serializers.ImageField(required=True, validators=[validate_image_size])
     
     # 💡 Los campos de texto siguen siendo opcionales y tolerantes
     associated_item_id = serializers.CharField(required=False, allow_null=True, allow_blank=True)

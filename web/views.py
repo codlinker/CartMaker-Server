@@ -15,13 +15,21 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.core.paginator import Paginator
 from .decorators import *
 from django.conf import settings
+from django.utils.http import url_has_allowed_host_and_scheme
+
+ALLOWED_AVATAR_EXTENSIONS = {'jpg', 'jpeg', 'png', 'webp', 'heic'}
+MAX_AVATAR_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 # ==============================================================
 # 🔒 VISTAS DE AUTENTICACIÓN (COMPARTIDAS)
 # ==============================================================
 def login_view(request):
     next_url = request.POST.get('next') or request.GET.get('next')
-    if next_url and not next_url.startswith('/'):
+    if next_url and not url_has_allowed_host_and_scheme(
+        url=next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
         next_url = None
 
     # 1. Si ya está logueado, lo enviamos a su área de trabajo
@@ -213,9 +221,18 @@ def dashboard_view(request):
 
             if 'profile_picture' in request.FILES:
                 new_image = request.FILES['profile_picture']
-                file_name = f"agent_{request.user.id}_{new_image.name}"
+                raw_name = getattr(new_image, 'name', '') or ''
+                ext = raw_name.rsplit('.', 1)[-1].lower() if '.' in raw_name else ''
+                if ext not in ALLOWED_AVATAR_EXTENSIONS:
+                    messages.error(request, "Formato de imagen no permitido. Usa JPG, PNG o WEBP.")
+                    return redirect('web_dashboard')
+                if new_image.size > MAX_AVATAR_SIZE_BYTES:
+                    messages.error(request, "La imagen no puede superar los 10MB.")
+                    return redirect('web_dashboard')
+
+                ts_str = timezone.localtime(timezone.now()).strftime('%Y%m%d_%H%M%S')
+                file_name = f"agent_{request.user.id}_{ts_str}.{ext}"
                 
-                # Asumiendo que storage_manager está importado o instanciado globalmente
                 saved_path = storage_manager.save_file(
                     file_obj=new_image,
                     folder_path='profiles/avatars',
@@ -331,11 +348,21 @@ def dashboard_view(request):
 @support_access_required
 def close_ticket(request, ticket_id):  
     ticket = get_object_or_404(SupportTicket, id=ticket_id)
-    reason_id = request.POST.get('close_reason', 0) # Capturamos el select
+    if ticket.agent and ticket.agent != request.user and not request.user.is_superuser:
+        messages.error(request, "No tienes permisos para cerrar un ticket asignado a otro agente.")
+        return redirect('web_dashboard')
+
+    reason_raw = request.POST.get('close_reason', CloseTicketReason.SOLVED)
+    try:
+        reason_val = int(reason_raw)
+        if reason_val not in CloseTicketReason.values:
+            reason_val = CloseTicketReason.SOLVED
+    except (ValueError, TypeError):
+        reason_val = CloseTicketReason.SOLVED
     
     ticket.closed = True
     ticket.close_time = timezone.now()
-    ticket.close_reason = int(reason_id)
+    ticket.close_reason = reason_val
     ticket.save(update_fields=['closed', 'close_time', 'close_reason'])
     
     # 💡 ALERTAMOS A NODE.JS EN TIEMPO REAL
@@ -361,6 +388,9 @@ def close_ticket(request, ticket_id):
 @support_access_required
 def support_agent_chat(request, ticket_id):
     ticket = get_object_or_404(SupportTicket, id=ticket_id)
+    if ticket.agent and ticket.agent != request.user and not request.user.is_superuser:
+        messages.error(request, "No tienes permisos para acceder al chat de otro agente.")
+        return redirect('web_dashboard')
     refresh = RefreshToken.for_user(request.user)
     return render(request, 'support/support_chat.html', {
         'ticket': ticket,

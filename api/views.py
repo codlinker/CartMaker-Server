@@ -2616,12 +2616,16 @@ class SearchCacheAPI(APIView):
 
     def get(self, request):
         """
-        Caché Global: UI del Buscador.
+        Caché Global: UI del Buscador + Esquemas Dinámicos de Producto por Categoría/Subcategoría.
         """
         cache_key = "cartmaker:global:search"
         cached_data = cache.get(cache_key)
 
-        if cached_data:
+        if (
+            cached_data
+            and isinstance(cached_data.get("categories"), list)
+            and (not cached_data["categories"] or "default_product_schema" in cached_data["categories"][0])
+        ):
             return Response(cached_data, status=status.HTTP_200_OK)
 
         # Cache Miss
@@ -2643,7 +2647,7 @@ class SearchCacheAPI(APIView):
 class CategoriesListAPI(APIView):
     """
     Endpoint público (protegido por X-Api-Key en el Gatekeeper) para listar
-    las categorías principales del catálogo durante el Onboarding o en el buscador.
+    las categorías principales del catálogo durante el Onboarding, buscador o registro de productos.
     GET /api/v1/categories/?page_size=50
     """
     throttle_classes = [ScopedRateThrottle]
@@ -2654,7 +2658,11 @@ class CategoriesListAPI(APIView):
         cache_key = "cartmaker:global:categories"
         categories = cache.get(cache_key)
 
-        if categories is None:
+        if (
+            categories is None
+            or not isinstance(categories, list)
+            or (categories and "default_product_schema" not in categories[0])
+        ):
             categories = [
                 category.get_json()
                 for category in Category.objects.prefetch_related('subcategories').order_by('id')
@@ -2686,6 +2694,79 @@ class CategoriesListAPI(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class CategoryProductSchemaAPI(APIView):
+    """
+    Devuelve el esquema dinámico de creación/visualización de producto para una
+    subcategoría o categoría específica (o el catálogo completo de unidades y esquemas).
+    GET /api/v1/categories/product-schema/?subcategory_id=X
+    GET /api/v1/categories/product-schema/?category_id=Y
+    GET /api/v1/categories/product-schema/?subcategory_name=Frescos
+    """
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'navigation'
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        from api.core.category_schemas import SELLING_UNITS_CATALOG, get_subcategory_schema
+
+        subcategory_id = request.query_params.get('subcategory_id') or request.query_params.get('sub_category_id')
+        category_id = request.query_params.get('category_id')
+        subcategory_name = request.query_params.get('subcategory_name')
+        category_name = request.query_params.get('category_name')
+
+        if subcategory_id:
+            try:
+                sub = SubCategory.objects.select_related('parent_category').get(id=int(subcategory_id))
+                return Response({
+                    "subcategory_id": sub.id,
+                    "subcategory_name": sub.name,
+                    "category_id": sub.parent_category_id,
+                    "category_name": sub.parent_category.name if sub.parent_category_id else "",
+                    "product_schema": sub.get_product_schema(),
+                }, status=status.HTTP_200_OK)
+            except (SubCategory.DoesNotExist, ValueError, TypeError):
+                return Response({"error": "Subcategoría no encontrada."}, status=status.HTTP_404_NOT_FOUND)
+
+        if category_id:
+            try:
+                cat = Category.objects.prefetch_related('subcategories').get(id=int(category_id))
+                return Response({
+                    "category_id": cat.id,
+                    "category_name": cat.name,
+                    "default_product_schema": cat.get_product_schema(),
+                    "sub_categories": [
+                        {
+                            "id": s.id,
+                            "name": s.name,
+                            "product_schema": s.get_product_schema(),
+                        }
+                        for s in cat.subcategories.all()
+                    ],
+                }, status=status.HTTP_200_OK)
+            except (Category.DoesNotExist, ValueError, TypeError):
+                return Response({"error": "Categoría no encontrada."}, status=status.HTTP_404_NOT_FOUND)
+
+        if subcategory_name or category_name:
+            schema = get_subcategory_schema(
+                subcategory_name=subcategory_name,
+                parent_category_name=category_name,
+            )
+            return Response({
+                "subcategory_name": subcategory_name,
+                "category_name": category_name,
+                "product_schema": schema,
+            }, status=status.HTTP_200_OK)
+
+        categories = [
+            category.get_json()
+            for category in Category.objects.prefetch_related('subcategories').order_by('id')
+        ]
+        return Response({
+            "selling_units_catalog": list(SELLING_UNITS_CATALOG.values()),
+            "categories": categories,
+        }, status=status.HTTP_200_OK)
 
 
 def _extract_and_validate_category_ids(data: dict):
@@ -4181,12 +4262,28 @@ class OrderViewSet(viewsets.ViewSet):
                 cart_items = order.cart.get('items', [])
                 for item in cart_items:
                     inv_item_id = item.get('inventory_item_id')
-                    qty = int(item.get('quantity', 0))
-                    if inv_item_id and qty > 0:
+                    raw_qty = float(item.get('quantity', 0) or 0)
+                    stock_units = int(item.get('stock_units_deducted') or (max(1, math.ceil(raw_qty)) if raw_qty > 0 else 0))
+                    if inv_item_id and stock_units > 0:
                         try:
-                            inv_item = InventoryItem.objects.select_for_update().get(id=inv_item_id)
-                            inv_item.stock += qty
+                            inv_item = InventoryItem.objects.select_for_update().select_related('product').get(id=inv_item_id)
+                            inv_item.stock += stock_units
                             inv_item.save()
+
+                            # Si se descontó stock de una variante específica, lo reintegramos también
+                            sel_var = item.get('selected_variant')
+                            if isinstance(sel_var, dict) and sel_var.get('id') and isinstance(inv_item.product.variants, list):
+                                updated_vars = False
+                                for v in inv_item.product.variants:
+                                    if isinstance(v, dict) and str(v.get('id')) == str(sel_var.get('id')) and v.get('stock') is not None:
+                                        try:
+                                            v['stock'] = int(v['stock']) + stock_units
+                                            v['is_available'] = v['stock'] > 0
+                                            updated_vars = True
+                                        except (ValueError, TypeError):
+                                            pass
+                                if updated_vars:
+                                    inv_item.product.save(update_fields=['variants'])
                         except InventoryItem.DoesNotExist:
                             pass 
 
@@ -4276,7 +4373,8 @@ class OrderViewSet(viewsets.ViewSet):
                 cart_items = order.cart.get('items', [])
                 for item in cart_items:
                     inv_item_id = item.get('inventory_item_id')
-                    qty = int(item.get('quantity', 0))
+                    raw_qty = float(item.get('quantity', 0) or 0)
+                    qty = int(item.get('stock_units_deducted') or (max(1, math.ceil(raw_qty)) if raw_qty > 0 else 0))
                     
                     # 💡 EXTRAEMOS LA ETIQUETA DEL VIDEO DEL SNAPSHOT DE LA ORDEN
                     source_video_id = item.get('source_video_id')
@@ -4434,7 +4532,7 @@ class CartViewSet(viewsets.ViewSet):
         # RESOLUCIÓN DE CACHE MISS (Solo va a BD por los productos que no están en RAM)
         if missing_ids:
             qs = InventoryItem.objects.select_related(
-                'product', 'offer', 'store__company'
+                'product', 'product__category__parent_category', 'offer', 'store__company'
             ).filter(id__in=missing_ids)
             
             new_structs_to_cache = {}
@@ -4491,38 +4589,40 @@ class CartViewSet(viewsets.ViewSet):
     
     @action(detail=False, methods=['post'])
     def create_order(self, request):
+        from api.core.category_schemas import resolve_cart_item_dynamic_pricing
+
         if request.user.cedula_verified == False:
             return Response({
                 "error": "No puedes comprar sin antes verificar tu identidad."
             }, status=status.HTTP_406_NOT_ACCEPTABLE)
         store_id = request.data.get('store_id')
-        items_data = request.data.get('items', [])  # Ej: [{'id': 'uid', 'quantity': 2}]
+        items_data = request.data.get('items', [])  # Ej: [{'id': 'uid', 'quantity': 2, 'selected_variant': ..., 'selected_modifiers': [...]}]
         withdrawal_type = request.data.get('withdrawal_type', 0)
         location_id = request.data.get('delivery_location_id')
-
-        print("REQUEST DATA EN CREATE ORDER: ", request.data)
 
         if not store_id or not items_data or not isinstance(items_data, list):
             return Response({
                 "error": "El carrito está vacío o faltan datos para procesar tu orden."
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Validamos estructura y cantidades estrictamente positivas (> 0)
+        # Validamos estructura y cantidades estrictamente positivas (> 0), soportando enteros y decimales (ej. 0.5 kg)
         item_qty_map = {}
         item_discount_map = {}
+        items_lines_by_id = {}
         for item_entry in items_data:
             if not isinstance(item_entry, dict) or not item_entry.get('id'):
                 return Response({"error": "Formato de productos inválido."}, status=status.HTTP_400_BAD_REQUEST)
             try:
-                qty_val = int(item_entry.get('quantity', 0))
+                qty_val = float(item_entry.get('quantity', 0))
             except (ValueError, TypeError):
-                qty_val = 0
-            if qty_val <= 0:
+                qty_val = 0.0
+            if qty_val <= 0 or math.isnan(qty_val) or math.isinf(qty_val):
                 return Response({
                     "error": "La cantidad de cada producto debe ser mayor a cero."
                 }, status=status.HTTP_400_BAD_REQUEST)
             entry_id = str(item_entry['id'])
-            item_qty_map[entry_id] = item_qty_map.get(entry_id, 0) + qty_val
+            item_qty_map[entry_id] = round(item_qty_map.get(entry_id, 0.0) + qty_val, 3)
+            items_lines_by_id.setdefault(entry_id, []).append(item_entry)
             if item_entry.get('selected_discount'):
                 item_discount_map[entry_id] = item_entry.get('selected_discount')
 
@@ -4588,7 +4688,7 @@ class CartViewSet(viewsets.ViewSet):
                 # Filtramos explícitamente por store=store y usamos of=('self',) porque 'offer' es un OneToOne inverso (LEFT OUTER JOIN en PostgreSQL)
                 inventory_items = list(
                     InventoryItem.objects.select_for_update(of=('self',))
-                    .select_related('product', 'offer')
+                    .select_related('product', 'product__category', 'offer')
                     .filter(id__in=item_ids, store=store)
                 )
 
@@ -4665,93 +4765,153 @@ class CartViewSet(viewsets.ViewSet):
                 total_price = 0.0
 
                 for item in inventory_items:
-                    requested_qty = item_qty_map[str(item.id)]
+                    item_id_str = str(item.id)
+                    requested_qty_total = item_qty_map[item_id_str]
+                    stock_units_to_deduct = max(1, int(math.ceil(requested_qty_total)))
                     
                     # 💡 CASO 2: El producto fue pausado
                     if item.paused:
                         return Response({
                             "error": "PRODUCTO_PAUSADO",
-                            "product_id": str(item.id),
+                            "product_id": item_id_str,
                             "message": f"El vendedor acaba de pausar la venta de '{item.product.name}'. Por favor, retíralo de tu carrito para continuar."
                         }, status=status.HTTP_409_CONFLICT)
                     
                     # 💡 CASO 3: Stock agotado totalmente o parcialmente
-                    if item.stock < requested_qty:
+                    if item.stock < stock_units_to_deduct:
                         if item.stock == 0:
                             msg = f"¡Ups! Alguien más acaba de comprar la última unidad de '{item.product.name}'. Lo hemos retirado de tu carrito."
                         else:
-                            msg = f"Hemos ajustado tu pedido de '{item.product.name}' de {requested_qty} a {item.stock} unidades, que es el stock disponible actualmente."
+                            msg = f"Hemos ajustado tu pedido de '{item.product.name}' de {requested_qty_total:g} a {item.stock} {item.product.unit_label or 'unidades'}, que es el stock disponible actualmente."
                             
                         return Response({
-                            "error": "STOCK_INSUFICIENTES" if False else "STOCK_INSUFICIENTE",
-                            "product_id": str(item.id),
+                            "error": "STOCK_INSUFICIENTE",
+                            "product_id": item_id_str,
                             "available_stock": item.stock,
                             "message": msg
                         }, status=status.HTTP_409_CONFLICT)
                     
-                    # Todo en orden: Descontamos
-                    item.stock -= requested_qty
+                    # Todo en orden: Descontamos del inventario de la sucursal
+                    item.stock -= stock_units_to_deduct
                     if item.stock <= 0:
                         item.sold_out_time = timezone.now()
                         if item.stock < 0:
                             item.stock = 0
                     item.save()
 
-                    # Precio base de la BD
-                    base_unit_price = float(item.custom_price) if item.custom_price else float(item.product.price)
-                    
-                    # 💡 1. APLICAMOS OFERTA ESTÁNDAR (Afecta a TODAS las unidades)
+                    # Oferta estándar activa sobre el lote
                     standard_offer_pct = None
                     if hasattr(item, 'offer') and item.offer and item.offer.valid_until >= timezone.now():
                         standard_offer_pct = int(item.offer.percentage)
-                        base_unit_price = base_unit_price - (base_unit_price * (standard_offer_pct / 100.0))
 
-                    # 💡 2. REGLA DE NEGOCIO: EXCLUSIVIDAD MUTUA
-                    applied_token_discount = validated_discount_map.get(str(item.id))
-                    
-                    # Si el producto tiene oferta de tienda Y el usuario intentó usar tokens: ¡Rechazamos!
+                    applied_token_discount = validated_discount_map.get(item_id_str)
                     if standard_offer_pct and applied_token_discount:
                         return Response({
                             "error": "OFERTAS_NO_ACUMULABLES",
                             "message": f"El producto '{item.product.name}' ya tiene una oferta de la tienda, por lo que no es acumulable con descuentos por tokens."
                         }, status=status.HTTP_409_CONFLICT)
 
-                    # El subtotal arranca asumiendo que todas valen el base_unit_price (ya rebajado si había oferta estándar)
-                    subtotal = base_unit_price * requested_qty
-
-                    # 💡 3. APLICAMOS DESCUENTO POR TOKENS VALIDADO EN SERVIDOR (Afecta solo a 1 UNIDAD)
-                    if applied_token_discount:
-                        pct = float(applied_token_discount['percentage'])
-                        ahorro = base_unit_price * (pct / 100.0)
-                        subtotal = max(0.0, subtotal - ahorro)
-
                     img_url = storage_manager.get_url(item.product.images[0]) if item.product.images else ""
+                    token_discount_already_applied_for_item = False
+                    product_variants_modified = False
 
-                    original_item_req = next((req_item for req_item in items_data if str(req_item['id']) == str(item.id)), {})
-                    source_video_id = original_item_req.get('source_video_id')
-                    is_from_atlas = original_item_req.get('isFromAtlas', False)
+                    for req_line in items_lines_by_id.get(item_id_str, []):
+                        line_qty_float = float(req_line.get('quantity', 1))
+                        line_qty = int(line_qty_float) if line_qty_float.is_integer() else round(line_qty_float, 3)
+                        line_stock_units = max(1, int(math.ceil(line_qty_float)))
 
-                    cart_snapshot.append({
-                        "product_id": str(item.product.id),
-                        "inventory_item_id": str(item.id),
-                        "name": item.product.name,
-                        "quantity": requested_qty,
-                        "unit_price": base_unit_price, 
-                        "subtotal": subtotal,
-                        "product_image": img_url,
-                        "standard_offer_applied": standard_offer_pct,
-                        "token_discount_applied": applied_token_discount,
-                        "source_video_id": source_video_id,
-                        "is_from_atlas": is_from_atlas
-                    })
-                    total_price += subtotal
+                        # Cálculo dinámico de precio (variantes + modificadores/extras)
+                        dynamic_unit_price, selection_meta = resolve_cart_item_dynamic_pricing(item.product, req_line)
+
+                        # Si el InventoryItem tiene custom_price y la variante no definió precio absoluto propio,
+                        # usamos custom_price como base + deltas de variante y modificadores
+                        sel_var = selection_meta.get("selected_variant")
+                        if item.custom_price is not None:
+                            var_delta = float(sel_var.get("price_delta", 0.0)) if sel_var else 0.0
+                            mod_delta = float(selection_meta.get("modifiers_total_delta", 0.0))
+                            line_base_unit_price = max(0.0, float(item.custom_price) + var_delta + mod_delta)
+                        else:
+                            line_base_unit_price = dynamic_unit_price
+
+                        # Validar y descontar stock específico de la variante (si el comerciante definió stock por variante)
+                        if sel_var and isinstance(item.product.variants, list):
+                            for raw_v in item.product.variants:
+                                if isinstance(raw_v, dict) and str(raw_v.get('id')) == str(sel_var.get('id')):
+                                    if raw_v.get('stock') is not None:
+                                        try:
+                                            v_stock = int(raw_v['stock'])
+                                        except (ValueError, TypeError):
+                                            v_stock = None
+                                        if v_stock is not None:
+                                            if v_stock < line_stock_units:
+                                                return Response({
+                                                    "error": "STOCK_VARIANTE_INSUFICIENTE",
+                                                    "product_id": item_id_str,
+                                                    "variant_id": sel_var.get("id"),
+                                                    "available_stock": v_stock,
+                                                    "message": f"La variante '{sel_var.get('name')}' de '{item.product.name}' solo tiene {v_stock} disponible(s)."
+                                                }, status=status.HTTP_409_CONFLICT)
+                                            raw_v['stock'] = max(0, v_stock - line_stock_units)
+                                            raw_v['is_available'] = raw_v['stock'] > 0
+                                            product_variants_modified = True
+                                    break
+
+                        if standard_offer_pct:
+                            line_base_unit_price = round(
+                                line_base_unit_price - (line_base_unit_price * (standard_offer_pct / 100.0)),
+                                2,
+                            )
+
+                        subtotal = round(line_base_unit_price * line_qty_float, 2)
+
+                        line_token_discount = None
+                        if applied_token_discount and not token_discount_already_applied_for_item:
+                            pct = float(applied_token_discount['percentage'])
+                            ahorro = line_base_unit_price * (pct / 100.0)
+                            subtotal = round(max(0.0, subtotal - ahorro), 2)
+                            line_token_discount = applied_token_discount
+                            token_discount_already_applied_for_item = True
+
+                        source_video_id = req_line.get('source_video_id')
+                        is_from_atlas = req_line.get('isFromAtlas', False)
+
+                        # Construir título descriptivo si tiene variante (mantiene 'name' limpio y agrega 'display_name')
+                        display_name = item.product.name
+                        if sel_var and sel_var.get("name"):
+                            display_name = f"{item.product.name} ({sel_var['name']})"
+
+                        cart_snapshot.append({
+                            "product_id": str(item.product.id),
+                            "inventory_item_id": item_id_str,
+                            "name": item.product.name,
+                            "display_name": display_name,
+                            "quantity": line_qty,
+                            "stock_units_deducted": line_stock_units,
+                            "selling_unit": selection_meta["selling_unit"],
+                            "unit_label": selection_meta["unit_label"],
+                            "unit_price": round(line_base_unit_price, 2),
+                            "subtotal": subtotal,
+                            "product_image": img_url,
+                            "selected_variant": sel_var,
+                            "selected_modifiers": selection_meta["selected_modifiers"],
+                            "selected_options": selection_meta["selected_options"],
+                            "customer_notes": selection_meta["customer_notes"],
+                            "standard_offer_applied": standard_offer_pct,
+                            "token_discount_applied": line_token_discount,
+                            "source_video_id": source_video_id,
+                            "is_from_atlas": is_from_atlas
+                        })
+                        total_price = round(total_price + subtotal, 2)
+
+                    if product_variants_modified:
+                        item.product.save(update_fields=['variants'])
 
                 # 3. Creamos la orden oficial
                 order = Order.objects.create(
                     store=store,
                     client=request.user,
                     client_location=client_location,
-                    cart={"items": cart_snapshot, "total": total_price},
+                    cart={"items": cart_snapshot, "total": round(total_price, 2)},
                     status=OrderStatus.WAITING, 
                     withdrawal_type=withdrawal_type
                 )
@@ -4770,6 +4930,7 @@ class CartViewSet(viewsets.ViewSet):
                 
                 # Invalidamos caché volátil y notificamos tras commit exitoso
                 volatile_keys_to_del = [f"cartmaker:volatile:item:{item.id}" for item in inventory_items]
+                struct_keys_to_del = [f"cartmaker:struct:item:{item.id}" for item in inventory_items]
                 merchant_id = store.company.owner.id
                 final_order_id = order.id
                 final_store_name = store.name
@@ -4778,6 +4939,8 @@ class CartViewSet(viewsets.ViewSet):
                 def _post_order_commit():
                     for v_key in volatile_keys_to_del:
                         cache.delete(v_key)
+                    for s_key in struct_keys_to_del:
+                        cache.delete(s_key)
                     firebase_admin.NotificationManager.notify_order_created(
                         merchant_id=merchant_id,
                         order_id=final_order_id,
@@ -5077,7 +5240,8 @@ class ClientCompanyViewSet(viewsets.ViewSet):
         except CompanyStore.DoesNotExist:
             return Response({'error': 'La tienda solicitada no existe o fue eliminada.'}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
-            return Response({'error': f'Error interno: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.exception(f"Error en ClientCompanyViewSet.profile: {e}")
+            return Response({'error': 'Error interno al cargar el perfil del comercio.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class GamificationViewSet(viewsets.ViewSet):
     """
@@ -5444,7 +5608,8 @@ class UniversalConversationViewSet(viewsets.ViewSet):
         except CompanyVideoStory.DoesNotExist:
             return Response({'error': 'El video no existe o fue retirado.'}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.exception(f"Error en single_feed_post: {e}")
+            return Response({'error': 'Error interno al consultar el contenido.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
 class ProductSearchEngineViewSet(viewsets.ViewSet):
     """
@@ -5481,11 +5646,11 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
         return sort_by, price_order
 
     def _get_pagination_params(self, request):
-        """Extrae de forma segura los parámetros de paginación con fallbacks."""
+        """Extrae de forma segura los parámetros de paginación con límites defensivos contra DoS."""
         try:
-            page = int(request.query_params.get('page', 1))
-            page_size = int(request.query_params.get('page_size', 20))
-        except ValueError:
+            page = max(1, int(request.query_params.get('page', 1)))
+            page_size = max(1, min(50, int(request.query_params.get('page_size', 20))))
+        except (ValueError, TypeError):
             page, page_size = 1, 20
         return page, page_size
 
@@ -6424,13 +6589,24 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         # Aseguramos que el usuario solo pueda interactuar con los productos de su compañía
-        return Product.objects.select_related('company').filter(company__owner=self.request.user).order_by('-creation')
+        return Product.objects.select_related('company', 'category__parent_category').filter(company__owner=self.request.user).order_by('-creation')
+
+    @action(detail=False, methods=['get'], url_path='schema', permission_classes=[AllowAny])
+    def schema(self, request):
+        """
+        Devuelve el esquema dinámico de creación de producto para la subcategoría o categoría solicitada.
+        GET /api/v1/products/schema/?subcategory_id=X
+        """
+        return CategoryProductSchemaAPI().get(request)
     
     @action(detail=False, methods=['post'])
     def bulk_create(self, request):
         """
         Recibe un lote de productos y los guarda todos de golpe usando bulk_create.
+        Soporta campos dinámicos por categoría (selling_unit, attributes, variants, modifier_groups).
         """
+        from api.core.category_schemas import validate_and_normalize_product_dynamic_data
+
         company_id = request.data.get('company_id')
         try:
             company = Company.objects.get(id=company_id, owner=request.user)
@@ -6441,10 +6617,13 @@ class ProductViewSet(viewsets.ModelViewSet):
         if not raw_products:
             return Response({'error': 'Faltan los datos de los productos.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        try:
-            products_list = json.loads(raw_products)
-        except json.JSONDecodeError:
-            return Response({'error': 'El formato de products_data es inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+        if isinstance(raw_products, list):
+            products_list = raw_products
+        else:
+            try:
+                products_list = json.loads(raw_products)
+            except json.JSONDecodeError:
+                return Response({'error': 'El formato de products_data es inválido.'}, status=status.HTTP_400_BAD_REQUEST)
 
         created_products_json = []
         dtnow_str = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
@@ -6455,8 +6634,20 @@ class ProductViewSet(viewsets.ModelViewSet):
                 product_instances = []
                 
                 for prod_data in products_list:
-                    category = SubCategory.objects.get(id=prod_data['category_id'])
+                    category = SubCategory.objects.select_related('parent_category').get(id=prod_data['category_id'])
                     discounts_data = prod_data.get('discounts_data', [])
+                    if isinstance(discounts_data, str) and discounts_data.strip():
+                        try:
+                            discounts_data = json.loads(discounts_data)
+                        except Exception:
+                            discounts_data = []
+
+                    dynamic_data = validate_and_normalize_product_dynamic_data(
+                        prod_data,
+                        subcategory_name=category.name,
+                        category_name=category.parent_category.name if category.parent_category_id else None,
+                        base_price=float(prod_data.get('price', 0.0) or 0.0),
+                    )
 
                     # Instanciamos sin guardar en BD todavía
                     product = Product(
@@ -6467,18 +6658,30 @@ class ProductViewSet(viewsets.ModelViewSet):
                         category=category,
                         discounts_by_tokens_active=prod_data.get('discounts_by_tokens_active', False),
                         discounts_data=discounts_data,
-                        images=[]
+                        images=[],
+                        selling_unit=dynamic_data['selling_unit'],
+                        unit_label=dynamic_data['unit_label'],
+                        allow_fractional_quantity=dynamic_data['allow_fractional_quantity'],
+                        min_order_quantity=dynamic_data['min_order_quantity'],
+                        unit_step=dynamic_data['unit_step'],
+                        attributes=dynamic_data['attributes'],
+                        variants=dynamic_data['variants'],
+                        modifier_groups=dynamic_data['modifier_groups'],
                     )
                     product_instances.append(product)
 
                 # 2. BULK CREATE REAL (Un solo viaje a la BD)
-                # OJO: bulk_create en Postgres sí retorna los IDs generados si pasas los objetos.
                 created_products = Product.objects.bulk_create(product_instances)
 
                 # 3. Manejo de imágenes (Requiere los IDs que acabamos de generar)
                 for prod_index, product in enumerate(created_products):
                     prod_data = products_list[prod_index]
                     image_order = prod_data.get('image_order', [])
+                    if isinstance(image_order, str) and image_order.strip():
+                        try:
+                            image_order = json.loads(image_order)
+                        except Exception:
+                            image_order = []
                     final_images = []
 
                     for img_index, item in enumerate(image_order):
@@ -6496,7 +6699,7 @@ class ProductViewSet(viewsets.ModelViewSet):
                         else:
                             final_images.append(item)
 
-                    # 4. Actualizamos el array de imágenes (Bulk Update opcional, pero aquí update normal está bien)
+                    # 4. Actualizamos el array de imágenes
                     product.images = final_images
                     product.save(update_fields=['images'])
                     
@@ -6508,6 +6711,8 @@ class ProductViewSet(viewsets.ModelViewSet):
             return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def create(self, request, *args, **kwargs):
+        from api.core.category_schemas import validate_and_normalize_product_dynamic_data
+
         serializer = self.get_serializer(data=request.data)
         if not serializer.is_valid():
             return Response({'success': False, 'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
@@ -6522,9 +6727,31 @@ class ProductViewSet(viewsets.ModelViewSet):
                 except Company.DoesNotExist:
                     return Response({'error': 'Compañía no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
-                category = SubCategory.objects.get(id=d['category_id'])
+                category = SubCategory.objects.select_related('parent_category').get(id=d['category_id'])
                 raw_discounts = request.data.get('discounts_data')
-                discounts_data = json.loads(raw_discounts) if raw_discounts else []
+                if isinstance(raw_discounts, str) and raw_discounts.strip():
+                    discounts_data = json.loads(raw_discounts)
+                elif isinstance(raw_discounts, (list, dict)):
+                    discounts_data = raw_discounts
+                else:
+                    discounts_data = []
+
+                dynamic_input = {}
+                for dyn_key in (
+                    'selling_unit', 'unit_label', 'allow_fractional_quantity',
+                    'min_order_quantity', 'unit_step', 'attributes', 'variants', 'modifier_groups'
+                ):
+                    if dyn_key in d:
+                        dynamic_input[dyn_key] = d[dyn_key]
+                    elif dyn_key in request.data:
+                        dynamic_input[dyn_key] = request.data.get(dyn_key)
+
+                dynamic_data = validate_and_normalize_product_dynamic_data(
+                    dynamic_input,
+                    subcategory_name=category.name,
+                    category_name=category.parent_category.name if category.parent_category_id else None,
+                    base_price=float(d.get('price', 0.0) or 0.0),
+                )
 
                 product = Product.objects.create(
                     company=company,
@@ -6534,14 +6761,22 @@ class ProductViewSet(viewsets.ModelViewSet):
                     category=category,
                     discounts_by_tokens_active=d.get('discounts_by_tokens_active', False),
                     discounts_data=discounts_data,
-                    images=[] # Lo llenamos en el siguiente paso
+                    images=[], # Lo llenamos en el siguiente paso
+                    selling_unit=dynamic_data['selling_unit'],
+                    unit_label=dynamic_data['unit_label'],
+                    allow_fractional_quantity=dynamic_data['allow_fractional_quantity'],
+                    min_order_quantity=dynamic_data['min_order_quantity'],
+                    unit_step=dynamic_data['unit_step'],
+                    attributes=dynamic_data['attributes'],
+                    variants=dynamic_data['variants'],
+                    modifier_groups=dynamic_data['modifier_groups'],
                 )
 
                 # ===============================
                 # MANEJO DE IMÁGENES (Array de Strings)
                 # ===============================
                 raw_image_order = request.data.get('image_order', '[]')
-                image_order = json.loads(raw_image_order)
+                image_order = json.loads(raw_image_order) if isinstance(raw_image_order, str) else (raw_image_order or [])
                 
                 final_images = []
                 dtnow_str = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
@@ -6571,6 +6806,8 @@ class ProductViewSet(viewsets.ModelViewSet):
             return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def update(self, request, *args, **kwargs):
+        from api.core.category_schemas import validate_and_normalize_product_dynamic_data
+
         product = self.get_object()
         serializer = self.get_serializer(product, data=request.data, partial=True)
         if not serializer.is_valid():
@@ -6586,68 +6823,92 @@ class ProductViewSet(viewsets.ModelViewSet):
                 product.discounts_by_tokens_active = d.get('discounts_by_tokens_active', product.discounts_by_tokens_active)
                 
                 if 'category_id' in d:
-                    product.category_id = d['category_id']
+                    product.category = SubCategory.objects.select_related('parent_category').get(id=d['category_id'])
 
                 raw_discounts = request.data.get('discounts_data')
                 if raw_discounts is not None:
-                    product.discounts_data = json.loads(raw_discounts)
+                    product.discounts_data = json.loads(raw_discounts) if isinstance(raw_discounts, str) else raw_discounts
+
+                dynamic_input = {}
+                for dyn_key in (
+                    'selling_unit', 'unit_label', 'allow_fractional_quantity',
+                    'min_order_quantity', 'unit_step', 'attributes', 'variants', 'modifier_groups'
+                ):
+                    if dyn_key in request.data:
+                        dynamic_input[dyn_key] = d[dyn_key] if dyn_key in d else request.data.get(dyn_key)
+
+                cat_obj = product.category
+                dynamic_data = validate_and_normalize_product_dynamic_data(
+                    dynamic_input,
+                    subcategory_name=cat_obj.name if cat_obj else None,
+                    category_name=cat_obj.parent_category.name if (cat_obj and cat_obj.parent_category_id) else None,
+                    base_price=float(product.price or 0.0),
+                    existing_product=product,
+                )
+
+                product.selling_unit = dynamic_data['selling_unit']
+                product.unit_label = dynamic_data['unit_label']
+                product.allow_fractional_quantity = dynamic_data['allow_fractional_quantity']
+                product.min_order_quantity = dynamic_data['min_order_quantity']
+                product.unit_step = dynamic_data['unit_step']
+                product.attributes = dynamic_data['attributes']
+                product.variants = dynamic_data['variants']
+                product.modifier_groups = dynamic_data['modifier_groups']
 
                 # ===============================
                 # MANEJO DE IMÁGENES CORREGIDO
                 # ===============================
-                raw_image_order = request.data.get('image_order', '[]')
-                image_order_from_frontend = json.loads(raw_image_order)
-                
-                processed_image_order = []
+                if 'image_order' in request.data:
+                    raw_image_order = request.data.get('image_order', '[]')
+                    image_order_from_frontend = json.loads(raw_image_order) if isinstance(raw_image_order, str) else (raw_image_order or [])
+                    
+                    processed_image_order = []
 
-                # 1. TRADUCIR URLs ABSOLUTAS A RELATIVAS
-                for item in image_order_from_frontend:
-                    if item.startswith('new_image_'):
-                        processed_image_order.append(item)
-                    else:
-                        # El item es una URL con 'http://...'. Buscamos a qué ruta relativa de la BD pertenece.
-                        found = False
-                        for old_relative_url in product.images:
-                            if old_relative_url in item: # Magia aquí: buscamos "product_pictures/..." dentro de "http://..."
-                                processed_image_order.append(old_relative_url)
-                                found = True
-                                break
-                        
-                        if not found:
-                            # Fallback de seguridad por si la URL llega extraña
-                            clean_path = item.split('/media/')[-1] if '/media/' in item else item
-                            processed_image_order.append(clean_path)
-                
-                # 2. BORRAR IMÁGENES DESCARTADAS (Ahora sí comparamos manzanas con manzanas)
-                for old_url in product.images:
-                    if old_url not in processed_image_order:
-                        try:
-                            storage_manager.delete_file(old_url)
-                        except Exception as e:
-                            print(f"Error borrando img descartada: {e}")
-
-                final_images = []
-                dtnow_str = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
-
-                # 3. CONSTRUIR NUEVO ARRAY (Subiendo nuevas y manteniendo las viejas)
-                for index, item in enumerate(processed_image_order):
-                    if item.startswith('new_image_') and item in request.FILES:
-                        file = request.FILES[item]
-                        extension = file.name.split('.')[-1]
-                        file_name = f"prod_{product.id}_{index}_{dtnow_str}.{extension}"
-                        folder = f"product_pictures/{product.id}"
-                        
-                        relative_path = storage_manager.save_file(file, folder, file_name)
-                        if relative_path:
-                            final_images.append(relative_path)
+                    # 1. TRADUCIR URLs ABSOLUTAS A RELATIVAS
+                    for item in image_order_from_frontend:
+                        if item.startswith('new_image_'):
+                            processed_image_order.append(item)
                         else:
-                            raise Exception(f"Error guardando nueva imagen.")
-                    else:
-                        # Si no es nueva, ya es una ruta relativa limpia gracias al paso 1
-                        final_images.append(item)
+                            found = False
+                            for old_relative_url in product.images:
+                                if old_relative_url in item:
+                                    processed_image_order.append(old_relative_url)
+                                    found = True
+                                    break
+                            
+                            if not found:
+                                clean_path = item.split('/media/')[-1] if '/media/' in item else item
+                                processed_image_order.append(clean_path)
+                    
+                    # 2. BORRAR IMÁGENES DESCARTADAS
+                    for old_url in product.images:
+                        if old_url not in processed_image_order:
+                            try:
+                                storage_manager.delete_file(old_url)
+                            except Exception as e:
+                                print(f"Error borrando img descartada: {e}")
 
-                # Guardamos las rutas limpias en la base de datos
-                product.images = final_images
+                    final_images = []
+                    dtnow_str = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
+
+                    # 3. CONSTRUIR NUEVO ARRAY (Subiendo nuevas y manteniendo las viejas)
+                    for index, item in enumerate(processed_image_order):
+                        if item.startswith('new_image_') and item in request.FILES:
+                            file = request.FILES[item]
+                            extension = file.name.split('.')[-1]
+                            file_name = f"prod_{product.id}_{index}_{dtnow_str}.{extension}"
+                            folder = f"product_pictures/{product.id}"
+                            
+                            relative_path = storage_manager.save_file(file, folder, file_name)
+                            if relative_path:
+                                final_images.append(relative_path)
+                            else:
+                                raise Exception("Error guardando nueva imagen.")
+                        else:
+                            final_images.append(item)
+
+                    product.images = final_images
+
                 product.save()
 
             return Response({'success': True, 'data': product.get_json()}, status=status.HTTP_200_OK)
@@ -6837,8 +7098,19 @@ class UserViewSet(mixins.RetrieveModelMixin,
         file_obj = request.FILES.get('photo')
         if not file_obj:
             return Response({"error": "No se envió ninguna imagen"}, status=400)
+        raw_name = getattr(file_obj, 'name', '') or ''
+        extension = raw_name.rsplit('.', 1)[-1].lower() if '.' in raw_name else ''
+        if extension not in {'jpg', 'jpeg', 'png', 'webp', 'heic'}:
+            return Response(
+                {"error": "Formato de imagen no permitido. Usa JPG, PNG, WEBP o HEIC."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if file_obj.size > MAX_IMAGE_SIZE_MB * 1024 * 1024:
+            return Response(
+                {"error": f"La imagen no puede pesar más de {MAX_IMAGE_SIZE_MB}MB."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         user = request.user
-        extension = file_obj.name.split('.')[-1]
         file_name = f"avatar_{user.id}_{timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')}.{extension}"
         folder = "profiles/avatars"
         relative_path = storage_manager.save_file(file_obj, folder, file_name)
@@ -6846,7 +7118,8 @@ class UserViewSet(mixins.RetrieveModelMixin,
             if user.profile_picture:
                 storage_manager.delete_file(user.profile_picture)
             user.profile_picture = relative_path
-            user.save()
+            user.save(update_fields=['profile_picture'])
+            cache.delete(f"cartmaker:tenant:{user.id}:profile")
             return Response({
                 "message": "Foto actualizada",
                 "url": storage_manager.get_url(relative_path)

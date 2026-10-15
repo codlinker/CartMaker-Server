@@ -173,6 +173,7 @@ SPECTACULAR_SETTINGS = {
     'TITLE': 'CartMaker API',
     'DESCRIPTION': 'Documentación oficial del backend de CartMaker.',
     'VERSION': env_manager.API_VERSION,
+    'SERVE_PERMISSIONS': ['rest_framework.permissions.IsAdminUser'],
 }
 
 SIMPLE_JWT = {

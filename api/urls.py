@@ -30,15 +30,17 @@ router.register(r'support-tickets', SupportTicketViewSet, basename='support-tick
 
 # --- DEFINICIÓN DE RUTAS (URLS) ---
 urlpatterns = [
-    # Rutas para la documentación de la API
-    path('schema/', SpectacularAPIView.as_view(), name='schema'),
-    path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger_ui'),
+    # Rutas para la documentación de la API (restringidas exclusivamente a administradores)
+    path('schema/', SpectacularAPIView.as_view(permission_classes=[IsAdminUser]), name='schema'),
+    path('docs/', SpectacularSwaggerView.as_view(url_name='schema', permission_classes=[IsAdminUser]), name='swagger_ui'),
     # Rutas para la obtencion de datos
     path('v1/cache/user', UserCacheAPI.as_view(), name="user_cache"),
     path('v1/cache/home', HomeCacheAPI.as_view(), name="home_cache"),
     path('v1/cache/search', SearchCacheAPI.as_view(), name="search_cache"),
     path('v1/categories/', CategoriesListAPI.as_view(), name="categories_list_slash"),
     path('v1/categories', CategoriesListAPI.as_view(), name="categories_list"),
+    path('v1/categories/product-schema/', CategoryProductSchemaAPI.as_view(), name="category_product_schema_slash"),
+    path('v1/categories/product-schema', CategoryProductSchemaAPI.as_view(), name="category_product_schema"),
     path('v1/users/preferences/', UserPreferencesAPI.as_view(), name="users_preferences_slash"),
     path('v1/users/preferences', UserPreferencesAPI.as_view(), name="users_preferences"),
     path('v1/user/preferences', UserPreferencesAPI.as_view(), name="user_preferences_no_slash"),

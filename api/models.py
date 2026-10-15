@@ -969,15 +969,21 @@ class Category(models.Model):
     name = models.CharField(max_length=255)
     img_url = models.CharField(help_text="Colocar ruta a traves del endpoint static del servidor. Ej: static/img/test.png", blank=True, null=True)
 
+    def get_product_schema(self) -> dict:
+        from api.core.category_schemas import get_subcategory_schema
+        return get_subcategory_schema(parent_category_name=self.name)
+
     def get_json(self) -> dict:
         return {
             "id": self.id,
             "name": self.name,
             "img_url": self.get_img_url(),
+            "default_product_schema": self.get_product_schema(),
             "sub_categories": [{
                 "id": sub.id,
                 "name": sub.name,
-                "img_url": sub.get_img_url()
+                "img_url": sub.get_img_url(),
+                "product_schema": sub.get_product_schema(),
             } for sub in self.subcategories.all()] 
         }
     
@@ -985,8 +991,10 @@ class Category(models.Model):
         """
         Retorna la URL publica de la imagen de la categoria.
         """
+        if not self.img_url:
+            return ""
         return self.img_url if self.img_url.startswith('http')\
-              else f"{settings.DOMAIN}/{self.img_url}"
+              else f"{settings.DOMAIN}/{self.img_url.lstrip('/')}"
 
 class SubCategory(models.Model):
     """
@@ -995,37 +1003,56 @@ class SubCategory(models.Model):
     Attributes:
         name (str): Nombre de la subcategoría.
         parent_category (ForeignKey): Categoría padre.
+        schema_config (json): Configuración dinámica opcional de campos, unidades y variantes.
     """
     name = models.CharField(max_length=255)
     parent_category = models.ForeignKey(Category, on_delete=models.CASCADE, related_name='subcategories')
     img_url = models.CharField(help_text="Colocar ruta a traves del endpoint static del servidor. Ej: static/img/test.png", blank=True, null=True)
+    schema_config = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Overrides opcionales del esquema dinámico de producto para esta subcategoría."
+    )
+
+    def get_product_schema(self) -> dict:
+        from api.core.category_schemas import get_subcategory_schema
+        parent_name = self.parent_category.name if self.parent_category_id else None
+        return get_subcategory_schema(
+            subcategory_name=self.name,
+            parent_category_name=parent_name,
+            custom_override=self.schema_config if isinstance(self.schema_config, dict) else None,
+        )
 
     def get_json(self) -> dict:
         return {
-            "id":self.id,
-            "name":self.name,
-            "parent_category":self.parent_category.id,
-            "img_url":self.get_img_url()
+            "id": self.id,
+            "name": self.name,
+            "parent_category": self.parent_category_id,
+            "parent_category_name": self.parent_category.name if self.parent_category_id else "",
+            "img_url": self.get_img_url(),
+            "product_schema": self.get_product_schema(),
         }
     
     def get_img_url(self) -> str:
         """
         Retorna la URL publica de la imagen de la sub-categoria.
         """
+        if not self.img_url:
+            return ""
         return self.img_url if self.img_url.startswith('http')\
-              else f"{settings.DOMAIN}/{self.img_url}"
+              else f"{settings.DOMAIN}/{self.img_url.lstrip('/')}"
     
     def __str__(self) -> str:
         return f"{self.parent_category.name} - {self.name}"
 
 class Product(models.Model):
     """
-    Catálogo maestro de productos por compañía.
+    Catálogo maestro de productos por compañía, con soporte dinámico según su categoría/subcategoría.
 
     Attributes:
         id (uuid): ID único del producto.
         name (str): Nombre descriptivo del artículo.
-        price (Decimal): Precio base de referencia.
+        price (Decimal): Precio base de referencia (por la unidad definida en `selling_unit`).
         creation (datetime): Fecha de registro.
         category (ForeignKey): Subcategoría asignada.
         description (str): Detalles técnicos o comerciales.
@@ -1033,6 +1060,14 @@ class Product(models.Model):
         discounts_data (json): Configuración de reglas de descuento.
         company (ForeignKey): Empresa propietaria del producto.
         images (json): Lista de URLs de imágenes del producto.
+        selling_unit (str): Unidad de venta ('unit', 'kg', 'g', 'lb', 'l', 'ml', 'pack', 'box', 'portion', 'combo', 'pair', 'set', 'm', 'm2', 'gal').
+        unit_label (str): Etiqueta corta de la unidad (ej. 'und', 'kg', 'g', 'porción', 'par').
+        allow_fractional_quantity (bool): Permite pedir cantidades decimales (ej. 0.5 kg, 1.25 kg).
+        min_order_quantity (Decimal): Cantidad mínima por orden.
+        unit_step (Decimal): Incremento del selector de cantidad en el frontend.
+        attributes (json): Diccionario de atributos específicos de la categoría (marca, modelo, talla, año, etc.).
+        variants (json): Lista de variantes seleccionables (tallas/colores, presentaciones de peso, capacidades) con su precio/stock.
+        modifier_groups (json): Grupos de extras/contornos/preparación estilo PedidosYa.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255)
@@ -1044,9 +1079,48 @@ class Product(models.Model):
     discounts_data = models.JSONField(default=dict, blank=True)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='products')
     images = models.JSONField(default=list)
-    # Ejemplo de 'images':
-    # ["https://...", "https://...",
-    # ]
+    selling_unit = models.CharField(
+        max_length=32,
+        default="unit",
+        help_text="Unidad de venta: unit, kg, g, lb, l, ml, pack, box, portion, combo, pair, set, m, m2, gal."
+    )
+    unit_label = models.CharField(
+        max_length=50,
+        default="und",
+        blank=True,
+        help_text="Etiqueta corta visible de la unidad (ej. 'und', 'kg', 'g', 'porción', 'par')."
+    )
+    allow_fractional_quantity = models.BooleanField(
+        default=False,
+        help_text="Si es True, el comprador puede pedir fracciones (ej. 0.5 kg, 1.5 kg)."
+    )
+    min_order_quantity = models.DecimalField(
+        max_digits=10,
+        decimal_places=3,
+        default=1.000,
+        help_text="Cantidad mínima por pedido en la unidad de venta."
+    )
+    unit_step = models.DecimalField(
+        max_digits=10,
+        decimal_places=3,
+        default=1.000,
+        help_text="Incremento/paso del selector de cantidad en el frontend (ej. 0.25 para kg, 1 para unidad)."
+    )
+    attributes = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Atributos dinámicos según la categoría (ej. marca, modelo, almacenamiento, tela, año, kilometraje)."
+    )
+    variants = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Variantes seleccionables (ej. tallas/colores, presentaciones de peso 250g/500g/1kg, tamaños)."
+    )
+    modifier_groups = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Grupos de modificadores/extras estilo PedidosYa (ej. contornos, salsas, tipo de corte, maduración)."
+    )
 
     class Meta:
         indexes = [
@@ -1065,30 +1139,69 @@ class Product(models.Model):
     def __str__(self):
         return f"{self.name} - {self.company.name}"
 
-
     def get_json(self)->dict:
+        from api.core.category_schemas import (
+            SELLING_UNITS_CATALOG,
+            get_subcategory_schema,
+            normalize_modifier_groups,
+            normalize_variants,
+        )
         images = []
-        for img_url in self.images:
+        for img_url in (self.images or []):
             images.append(storage_manager.get_url(img_url))
         category = self.category
         if category is None:
-            category_data = {"id": None, "name": "General"}
+            category_data = {
+                "id": None,
+                "name": "General",
+                "parent_category_id": None,
+                "parent_category_name": "General",
+            }
+            schema = get_subcategory_schema()
         else:
+            parent_cat = category.parent_category if category.parent_category_id else None
             category_data = {
                 'id': self.category_id,
-                'name': category.name
+                'name': category.name,
+                'parent_category_id': category.parent_category_id,
+                'parent_category_name': parent_cat.name if parent_cat else "",
             }
+            schema = category.get_product_schema()
+
+        base_price = float(self.price)
+        selling_unit_code = (self.selling_unit or schema.get("default_selling_unit") or "unit").strip().lower()
+        unit_meta = SELLING_UNITS_CATALOG.get(selling_unit_code, SELLING_UNITS_CATALOG["unit"])
+        unit_label_val = (self.unit_label or unit_meta["short_label"]).strip()
+
+        normalized_variants = normalize_variants(self.variants, base_price=base_price)
+        normalized_modifiers = normalize_modifier_groups(self.modifier_groups)
+        attrs = self.attributes if isinstance(self.attributes, dict) else {}
+
         data = {
-            "id":str(self.id),
-            "name":self.name,
-            "price":float(self.price),
-            "creation":timezone.localtime(self.creation),
-            "category":category_data,
-            "description":self.description,
-            "discounts_by_tokens_active":self.discounts_by_tokens_active if self.company.gamification_enabled else False,
-            "discounts_data":self.discounts_data,
-            "company_id":self.company_id,
-            "images":images
+            "id": str(self.id),
+            "name": self.name,
+            "price": base_price,
+            "creation": timezone.localtime(self.creation),
+            "category": category_data,
+            "category_archetype": schema.get("archetype", "general"),
+            "description": self.description,
+            "discounts_by_tokens_active": self.discounts_by_tokens_active if self.company.gamification_enabled else False,
+            "discounts_data": self.discounts_data,
+            "company_id": self.company_id,
+            "images": images,
+            "selling_unit": selling_unit_code,
+            "unit_label": unit_label_val,
+            "price_label": unit_meta.get("price_label", "Precio por unidad"),
+            "allow_fractional_quantity": bool(self.allow_fractional_quantity),
+            "min_order_quantity": float(self.min_order_quantity or 1.0),
+            "unit_step": float(self.unit_step or 1.0),
+            "attributes": attrs,
+            "variants": normalized_variants,
+            "modifier_groups": normalized_modifiers,
+            "has_variants": len(normalized_variants) > 0,
+            "has_modifier_groups": len(normalized_modifiers) > 0,
+            "order_notes_enabled": bool(schema.get("order_notes_enabled", True)),
+            "order_notes_placeholder": schema.get("order_notes_placeholder", ""),
         }
         return data
 

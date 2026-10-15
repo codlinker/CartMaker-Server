@@ -248,6 +248,9 @@ def delete_item_volatile_cache(sender, instance: InventoryItem, **kwargs):
 @receiver(post_save, sender=Product)
 def invalidate_structural_cache_on_product_change(sender, instance: Product, **kwargs):
     def clear_structure_cache():
+        item_ids = list(instance.inventory_items.values_list('id', flat=True))
+        if item_ids:
+            cache.delete_many([f"cartmaker:struct:item:{uid}" for uid in item_ids])
         stores_ids = instance.inventory_items.values_list('store_id', flat=True).distinct()
         for store_id in stores_ids:
             try:
