@@ -1,4 +1,4 @@
-from django.db.models.signals import post_save, pre_save, post_delete
+from django.db.models.signals import post_save, pre_save, post_delete, m2m_changed
 from django.dispatch import receiver
 from .core.firebase_admin import NotificationManager
 from .models import *
@@ -272,9 +272,14 @@ def invalidate_home_cache(sender, instance, **kwargs):
     transaction.on_commit(lambda: cache.delete("cartmaker:global:home"))
 
 @receiver(post_save, sender=Category)
+@receiver(post_delete, sender=Category)
 @receiver(post_save, sender=SubCategory)
+@receiver(post_delete, sender=SubCategory)
 def invalidate_search_cache(sender, instance, **kwargs):
-    transaction.on_commit(lambda: cache.delete("cartmaker:global:search"))
+    def _clear_categories_caches():
+        cache.delete("cartmaker:global:search")
+        cache.delete("cartmaker:global:categories")
+    transaction.on_commit(_clear_categories_caches)
 
 # ON CREATED
 @receiver(post_save, sender=User)
@@ -287,6 +292,12 @@ def on_user_created(sender, created, instance: User, **kwargs):
 @receiver(post_save, sender=User)
 def invalidate_user_profile_cache(sender, instance: User, **kwargs):
     transaction.on_commit(lambda: cache.delete(f"cartmaker:tenant:{instance.id}:profile"))
+
+@receiver(m2m_changed, sender=User.preferred_categories.through)
+def invalidate_user_preferences_cache(sender, instance, action, **kwargs):
+    if action in ("post_add", "post_remove", "post_clear") and getattr(instance, "id", None):
+        user_id = instance.id
+        transaction.on_commit(lambda: cache.delete(f"cartmaker:tenant:{user_id}:profile"))
 
 @receiver(post_save, sender=ClientLocation)
 @receiver(post_delete, sender=ClientLocation)

@@ -15,12 +15,19 @@ User = get_user_model()
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
     tokens = serializers.SerializerMethodField()
+    category_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        write_only=True,
+        required=False,
+        allow_empty=True,
+    )
 
     class Meta:
         model = User
-        fields = ('email', 'first_name', 'last_name', 'password', 'tokens', 'gender', "id")
+        fields = ('email', 'first_name', 'last_name', 'password', 'tokens', 'gender', "id", 'category_ids')
 
     def create(self, validated_data):
+        raw_category_ids = validated_data.pop('category_ids', None)
         with transaction.atomic():
             user = User.objects.create_user(
                 email=validated_data['email'],
@@ -29,6 +36,9 @@ class RegisterSerializer(serializers.ModelSerializer):
                 last_name=validated_data.get('last_name', ''),
                 gender=validated_data['gender']
             )
+            if raw_category_ids is not None:
+                valid_cats = Category.objects.filter(id__in=raw_category_ids)
+                user.preferred_categories.set(valid_cats)
             send_email_otp(validated_data['email'])
         return user
 
@@ -45,6 +55,7 @@ class RegisterSerializer(serializers.ModelSerializer):
         representation['user_type'] = instance.user_type 
         representation['gender'] = instance.gender
         representation['email_verified'] = instance.email_verified
+        representation['preferred_category_ids'] = instance.get_preferred_category_ids()
         return representation
 
 class CartMakerTokenSerializer(TokenObtainPairSerializer):
@@ -65,6 +76,7 @@ class CartMakerTokenSerializer(TokenObtainPairSerializer):
         data['last_name'] = f"{self.user.last_name}".strip()
         data['email_verified'] = self.user.email_verified
         data['gender'] = self.user.gender
+        data['preferred_category_ids'] = self.user.get_preferred_category_ids()
         return data
     
 class ClientLocationSerializer(serializers.ModelSerializer):

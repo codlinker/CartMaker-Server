@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
 from pathlib import Path
+from urllib.parse import urlparse
 from .enviroment_manager import EnviromentManager
 from datetime import timedelta
 from django.utils.translation import gettext_lazy as _
@@ -26,7 +27,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 # Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
+# See https://docs.djangoproject.com/en/6.0/topics/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = env_manager.DJANGO_SECRET_KEY
@@ -43,7 +44,59 @@ if DEBUG:
 else:
     STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
-ALLOWED_HOSTS = ['*']
+# =========================================================================
+# 🛡️ BLINDAJE DE DOMINIO, ALLOWED_HOSTS Y ORÍGENES DE CONFIANZA
+# =========================================================================
+_parsed_domain = urlparse(DOMAIN if "://" in DOMAIN else f"https://{DOMAIN}")
+_domain_host = (_parsed_domain.hostname or "www.cartmaker.app").lower()
+CARTMAKER_ROOT_DOMAIN = _domain_host[4:] if _domain_host.startswith("www.") else _domain_host
+
+_base_allowed_hosts = [
+    _domain_host,                   # ej. www.cartmaker.app
+    CARTMAKER_ROOT_DOMAIN,          # ej. cartmaker.app
+    f".{CARTMAKER_ROOT_DOMAIN}",    # Subdominios oficiales (*.cartmaker.app)
+    "127.0.0.1",                    # Loopback interno (Nginx / Node.js WebSockets / Healthchecks)
+    "localhost",
+]
+
+if DEBUG:
+    # Hosts adicionales para emuladores Android (10.0.2.2) y pruebas en entorno local
+    _base_allowed_hosts.extend(["10.0.2.2", "0.0.0.0"])
+
+_extra_allowed_hosts = os.environ.get("EXTRA_ALLOWED_HOSTS", "")
+if _extra_allowed_hosts:
+    _base_allowed_hosts.extend([h.strip().lower() for h in _extra_allowed_hosts.split(",") if h.strip()])
+
+ALLOWED_HOSTS = list(dict.fromkeys(_base_allowed_hosts))
+
+# Conjunto de hosts confiables para el Gatekeeper de Origen (Web + App)
+CARTMAKER_TRUSTED_HOSTS = {
+    h.lstrip(".") for h in ALLOWED_HOSTS if h not in ("*", "0.0.0.0")
+}
+
+# Orígenes verificados para peticiones POST/CSRF desde la Web Oficial de CartMaker
+CSRF_TRUSTED_ORIGINS = list(dict.fromkeys([
+    f"https://{_domain_host}",
+    f"https://{CARTMAKER_ROOT_DOMAIN}",
+    f"https://*.{CARTMAKER_ROOT_DOMAIN}",
+] + ([
+    f"http://{_domain_host}",
+    f"http://{CARTMAKER_ROOT_DOMAIN}",
+    "http://127.0.0.1:8000",
+    "http://localhost:8000",
+] if DEBUG else [])))
+
+# Firma opcional de cliente móvil (si se define export APP_CLIENT_SECRET en variables.sh)
+APP_CLIENT_SECRET = os.environ.get("APP_CLIENT_SECRET", "").strip()
+
+# Cabeceras de seguridad detrás de Reverse Proxy (Nginx / Cloudflare / ALB)
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_SAMESITE = 'Lax'
+if not DEBUG:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
 
 # Application definition
 
@@ -74,6 +127,7 @@ MIDDLEWARE = [
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'cartmaker_admin.security_middleware.CartMakerClientGatekeeperMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -342,6 +396,7 @@ UNFOLD = {
                     {"title": "Cuentas Receptoras", "link": "/admin/api/cartmakerbankaccount/", "icon": "account_balance"},
                     {"title": "Anuncios Globales", "link": "/admin/api/announcement/", "icon": "campaign"},
                     {"title": "Parámetros del Sistema", "link": "/admin/api/systemconfig/", "icon": "settings_suggest"},
+                    {"title": "API Keys (App y Chat)", "link": "/admin/api/cartmakerapikey/", "icon": "vpn_key"},
                 ]
             },
         ],

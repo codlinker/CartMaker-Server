@@ -410,6 +410,143 @@ class VideoEngagementLogAdmin(ModelAdmin):
 class UnmetDemandLogAdmin(ModelAdmin):
     list_display = ('client', 'search_term', 'coordinates', 'creation')
 
+
+# =========================================================================
+# 🔐 MÓDULO 11: API KEYS ENCRIPTADAS (APP MÓVIL FLUTTER & SERVIDOR DE CHAT)
+# =========================================================================
+from django.contrib import messages as django_messages
+from django.utils.html import mark_safe
+
+
+@admin.register(CartMakerApiKey)
+class CartMakerApiKeyAdmin(ModelAdmin):
+    list_display = (
+        "name",
+        "masked_key_display",
+        "scope_badge",
+        "is_active",
+        "last_used_at",
+        "expires_at",
+        "created_by",
+        "created_at",
+    )
+    list_filter = ("scope", "is_active", "created_at")
+    search_fields = ("name", "prefix")
+    list_editable = ("is_active",)
+
+    @display(description="Prefijo (Enmascarado)")
+    def masked_key_display(self, obj):
+        if not obj.prefix:
+            return "Se generará al guardar"
+        return f"{obj.prefix}_••••••••••••••••••••••••"
+
+    @display(description="Alcance", label={
+        CartMakerApiKey.Scope.ALL: "success",
+        CartMakerApiKey.Scope.API_ONLY: "info",
+        CartMakerApiKey.Scope.CHAT_ONLY: "warning",
+    })
+    def scope_badge(self, obj):
+        return obj.get_scope_display()
+
+    def get_readonly_fields(self, request, obj=None):
+        if obj:  # Modo edición: el prefijo y el hash son inmutables y de solo lectura
+            return (
+                "id",
+                "prefix",
+                "hashed_key",
+                "security_notice_display",
+                "created_by",
+                "created_at",
+                "last_used_at",
+            )
+        return ("creation_instructions_display",)
+
+    def get_fieldsets(self, request, obj=None):
+        if obj:
+            return (
+                ("Configuración de la Credencial", {
+                    "fields": ("name", "scope", "is_active", "expires_at")
+                }),
+                ("Blindaje Criptográfico (Solo Lectura)", {
+                    "fields": (
+                        "security_notice_display",
+                        "prefix",
+                        "hashed_key",
+                        "created_by",
+                        "created_at",
+                        "last_used_at",
+                    )
+                }),
+            )
+        return (
+            ("Generar Nueva CartMaker API Key", {
+                "fields": (
+                    "creation_instructions_display",
+                    "name",
+                    "scope",
+                    "is_active",
+                    "expires_at",
+                )
+            }),
+        )
+
+    @display(description="Seguridad de Generación Única")
+    def creation_instructions_display(self, obj):
+        return mark_safe(
+            '<div style="padding:12px 16px; border-radius:10px; background:rgba(109,73,242,0.12); '
+            'border:1px solid rgba(109,73,242,0.35); font-size:13px; line-height:1.5;">'
+            '🔐 <strong>Generación de Única Vez:</strong> Al presionar <strong>Guardar</strong>, el sistema '
+            'generará automáticamente una API Key de alta entropía (<code>cmk_live_...</code>) y te la mostrará '
+            '<strong>una sola vez</strong> en la parte superior de la pantalla para que la copies a tu proyecto '
+            'Flutter o servidor de Chat. En la base de datos solo se almacenará su hash irreversible '
+            '<code>PBKDF2-HMAC-SHA256</code>.'
+            '</div>'
+        )
+
+    @display(description="Estado de Encriptación")
+    def security_notice_display(self, obj):
+        return mark_safe(
+            '<div style="padding:12px 16px; border-radius:10px; background:rgba(16,185,129,0.10); '
+            'border:1px solid rgba(16,185,129,0.35); font-size:13px; line-height:1.5;">'
+            '🛡️ <strong>Llave Encriptada Irreversiblemente:</strong> Por seguridad, la API Key original en texto '
+            'plano no se almacena en el servidor y no puede volver a consultarse. Si extraviaste la clave, '
+            'desactiva o elimina este registro y genera una nueva API Key.'
+            '</div>'
+        )
+
+    def save_model(self, request, obj, form, change):
+        raw_key = None
+        if not change or not obj.hashed_key:
+            raw_key = obj.generate_and_set_key()
+            if request.user and request.user.is_authenticated:
+                obj.created_by = request.user
+
+        super().save_model(request, obj, form, change)
+
+        if raw_key:
+            banner_html = mark_safe(
+                f'<div style="display:flex; flex-direction:column; gap:8px; padding:6px 0;">'
+                f'<div style="font-weight:800; font-size:14px;">'
+                f'⚠️ GUARDA TU API KEY AHORA — Solo se muestra esta única vez (ya quedó encriptada):'
+                f'</div>'
+                f'<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">'
+                f'<code id="cmkRawKeyText" style="background:#0f0b1d; color:#34d399; padding:8px 14px; '
+                f'border-radius:8px; font-family:monospace; font-size:13px; font-weight:700; '
+                f'border:1px solid rgba(52,211,153,0.4); user-select:all;">{raw_key}</code>'
+                f'<button type="button" onclick="navigator.clipboard.writeText(\'{raw_key}\'); '
+                f'this.textContent=\'¡Copiada al portapapeles!\'; this.style.background=\'#10b981\';" '
+                f'style="background:#6d49f2; color:#ffffff; border:none; padding:8px 14px; '
+                f'border-radius:8px; font-weight:700; cursor:pointer; font-size:12px;">'
+                f'📋 Copiar API Key'
+                f'</button>'
+                f'</div>'
+                f'<small style="opacity:0.85;">Colócala en las variables de entorno de tu App Flutter / Servidor de Chat '
+                f'y envíala en el header <code>X-Api-Key</code> o <code>Authorization: Api-Key ...</code>.</small>'
+                f'</div>'
+            )
+            django_messages.warning(request, banner_html)
+
+
 others = [
     InventoryItemOffer, 
     InventoryItemTransaction, OrderCancellationTopic, 

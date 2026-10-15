@@ -183,6 +183,7 @@ class BiometricLoginView(APIView):
             'last_name': closest_user.last_name.strip(),
             'email_verified': closest_user.email_verified,
             'gender': closest_user.gender,
+            'preferred_category_ids': closest_user.get_preferred_category_ids(),
         }, status=status.HTTP_200_OK)
 
 class CartMakerTokenView(TokenObtainPairView):
@@ -233,6 +234,10 @@ class GoogleRegistView(APIView):
                 email_verified=True,
                 is_external_account=True
             )
+            raw_cat_ids = request.data.get('category_ids') or request.data.get('preferred_category_ids')
+            if isinstance(raw_cat_ids, list) and raw_cat_ids:
+                valid_cats = Category.objects.filter(id__in=[int(cid) for cid in raw_cat_ids if str(cid).isdigit()])
+                user.preferred_categories.set(valid_cats)
             tokens = get_tokens_for_user(user) 
             return Response({
                 "user_id": user.id,
@@ -244,7 +249,8 @@ class GoogleRegistView(APIView):
                 "gender":user.gender,
                 "user_type":user.user_type,
                 "email_verified":True,
-                "is_external_account":user.is_external_account
+                "is_external_account":user.is_external_account,
+                "preferred_category_ids": user.get_preferred_category_ids(),
             }, status=201)
         except ValueError as e:
             print(e)
@@ -280,7 +286,8 @@ class GoogleLoginView(APIView):
                 "last_name":user.last_name,
                 "gender":user.gender,
                 "user_type":user.user_type,
-                "email_verified":True
+                "email_verified":True,
+                "preferred_category_ids": user.get_preferred_category_ids(),
             }, status=200)
         except ValueError as e:
             print(e)
@@ -2530,13 +2537,16 @@ class UserCacheAPI(APIView):
         cache_key = f"cartmaker:tenant:{request.user.id}:profile"
         cached_data = cache.get(cache_key)
 
-        if cached_data:
+        if cached_data and "preferred_category_ids" in cached_data:
             return Response(cached_data, status=status.HTTP_200_OK)
 
         # Cache Miss
-        user = User.objects.prefetch_related('locations', 'contact_methods').get(id=request.user.id)
+        user = User.objects.prefetch_related(
+            'locations', 'contact_methods', 'preferred_categories'
+        ).get(id=request.user.id)
         locations = [location.get_json() for location in user.locations.all()]
         contact_methods = [contact_method.get_json() for contact_method in user.contact_methods.all().order_by('method_type')]
+        preferred_category_ids = sorted(cat.id for cat in user.preferred_categories.all())
 
         data = {
             "user_id": user.id,
@@ -2555,6 +2565,7 @@ class UserCacheAPI(APIView):
             "locations": locations,
             "is_external_account": user.is_external_account,
             'contact_methods': contact_methods,
+            "preferred_category_ids": preferred_category_ids,
         }
         
         cache.set(cache_key, data, timeout=86400) # 24 horas (Cambia rara vez)
@@ -2597,6 +2608,7 @@ class HomeCacheAPI(APIView):
         
         cache.set(cache_key, data, timeout=86400) # 24h
         return Response(data, status=status.HTTP_200_OK)
+
 class SearchCacheAPI(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'navigation'
@@ -2613,7 +2625,7 @@ class SearchCacheAPI(APIView):
             return Response(cached_data, status=status.HTTP_200_OK)
 
         # Cache Miss
-        categories = [category.get_json() for category in Category.objects.prefetch_related('subcategories').all()]
+        categories = [category.get_json() for category in Category.objects.prefetch_related('subcategories').order_by('id')]
         search_stores_at_zone = {
             "atlas_message": "Detecto varias ofertas de hortalizas en el Kiosco de DonAmigo.",
             "image_background": storage_manager.get_url('static/img/tiendas_en_la_zona_background.jpg', True)
@@ -2626,6 +2638,128 @@ class SearchCacheAPI(APIView):
         
         cache.set(cache_key, data, timeout=86400) # 24h
         return Response(data, status=status.HTTP_200_OK)
+
+
+class CategoriesListAPI(APIView):
+    """
+    Endpoint público (protegido por X-Api-Key en el Gatekeeper) para listar
+    las categorías principales del catálogo durante el Onboarding o en el buscador.
+    GET /api/v1/categories/?page_size=50
+    """
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'navigation'
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        cache_key = "cartmaker:global:categories"
+        categories = cache.get(cache_key)
+
+        if categories is None:
+            categories = [
+                category.get_json()
+                for category in Category.objects.prefetch_related('subcategories').order_by('id')
+            ]
+            cache.set(cache_key, categories, timeout=86400)
+
+        try:
+            page = max(1, int(request.query_params.get('page', 1)))
+        except (TypeError, ValueError):
+            page = 1
+
+        try:
+            page_size = max(1, min(100, int(request.query_params.get('page_size', 50))))
+        except (TypeError, ValueError):
+            page_size = 50
+
+        start = (page - 1) * page_size
+        end = start + page_size
+        sliced = categories[start:end]
+
+        return Response(
+            {
+                "count": len(categories),
+                "next": None,
+                "previous": None,
+                "results": sliced,
+                "categories": sliced,
+                "data": sliced,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+def _extract_and_validate_category_ids(data: dict):
+    """
+    Extrae y sanea la lista de IDs de categorías enviadas en el body
+    ('category_ids' o 'preferred_category_ids' o 'categories').
+    Retorna (is_valid: bool, clean_ids: list[int], error_msg: str | None).
+    """
+    raw_ids = None
+    if isinstance(data, dict):
+        for key in ('category_ids', 'preferred_category_ids', 'categories'):
+            if key in data:
+                raw_ids = data.get(key)
+                break
+
+    if raw_ids is None or not isinstance(raw_ids, (list, tuple)):
+        return False, [], "Se requiere el campo 'category_ids' como una lista de IDs enteros."
+
+    clean_ids = []
+    seen = set()
+    for item in raw_ids:
+        try:
+            cid = int(item)
+            if cid > 0 and cid not in seen:
+                seen.add(cid)
+                clean_ids.append(cid)
+        except (TypeError, ValueError):
+            return False, [], f"ID de categoría inválido: {item!r}."
+
+    return True, clean_ids, None
+
+
+class UserPreferencesAPI(APIView):
+    """
+    Endpoint para consultar y guardar las preferencias de categorías del usuario
+    seleccionadas durante el Onboarding o desde Ajustes.
+    Rutas: GET / POST /api/v1/users/preferences/ (y /api/v1/user/preferences/)
+    """
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'actions'
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        preferred_ids = request.user.get_preferred_category_ids()
+        return Response(
+            {"preferred_category_ids": preferred_ids},
+            status=status.HTTP_200_OK,
+        )
+
+    def post(self, request):
+        is_valid, clean_ids, error_msg = _extract_and_validate_category_ids(request.data)
+        if not is_valid:
+            return Response({"error": error_msg}, status=status.HTTP_400_BAD_REQUEST)
+
+        valid_categories = list(Category.objects.filter(id__in=clean_ids).order_by('id'))
+        valid_ids = [cat.id for cat in valid_categories]
+
+        with transaction.atomic():
+            request.user.preferred_categories.set(valid_categories)
+            user_id = request.user.id
+            transaction.on_commit(
+                lambda: cache.delete(f"cartmaker:tenant:{user_id}:profile")
+            )
+
+        return Response(
+            {"preferred_category_ids": valid_ids},
+            status=status.HTTP_200_OK,
+        )
+
+    def put(self, request):
+        return self.post(request)
+
+    def patch(self, request):
+        return self.post(request)
 
 ####################################################
 #################### VIEW SETS #####################
@@ -6718,3 +6852,29 @@ class UserViewSet(mixins.RetrieveModelMixin,
                 "url": storage_manager.get_url(relative_path)
             })
         return Response({"error": "Error al guardar el archivo"}, status=500)
+
+    @action(detail=False, methods=['get', 'post', 'put', 'patch'], url_path='preferences')
+    def preferences(self, request):
+        if request.method == 'GET':
+            return Response(
+                {"preferred_category_ids": request.user.get_preferred_category_ids()},
+                status=status.HTTP_200_OK,
+            )
+        is_valid, clean_ids, error_msg = _extract_and_validate_category_ids(request.data)
+        if not is_valid:
+            return Response({"error": error_msg}, status=status.HTTP_400_BAD_REQUEST)
+
+        valid_categories = list(Category.objects.filter(id__in=clean_ids).order_by('id'))
+        valid_ids = [cat.id for cat in valid_categories]
+
+        with transaction.atomic():
+            request.user.preferred_categories.set(valid_categories)
+            user_id = request.user.id
+            transaction.on_commit(
+                lambda: cache.delete(f"cartmaker:tenant:{user_id}:profile")
+            )
+
+        return Response(
+            {"preferred_category_ids": valid_ids},
+            status=status.HTTP_200_OK,
+        )

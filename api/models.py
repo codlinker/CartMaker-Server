@@ -312,6 +312,12 @@ class User(AbstractBaseUser, PermissionsMixin):
     is_external_account = models.BooleanField(default=False)
     can_check_payments = models.BooleanField(default=False, help_text="Puede ingresar al panel de pagos")
     can_check_support = models.BooleanField(default=False, help_text="Puede ingresar al panel de soporte")
+    preferred_categories = models.ManyToManyField(
+        'Category',
+        blank=True,
+        related_name='interested_users',
+        help_text="Categorías principales seleccionadas por el usuario en el onboarding."
+    )
 
     objects = UserManager()
 
@@ -338,6 +344,14 @@ class User(AbstractBaseUser, PermissionsMixin):
         """
         return self.profile_picture if self.profile_picture.startswith('http')\
               else storage_manager.get_url(self.profile_picture)
+
+    def get_preferred_category_ids(self) -> list:
+        """
+        Retorna la lista ordenada de IDs de categorías principales preferidas por el usuario.
+        """
+        return list(
+            self.preferred_categories.order_by('id').values_list('id', flat=True)
+        )
 
 class UserWallet(models.Model):
     """
@@ -2187,3 +2201,204 @@ class VideoEngagementLog(models.Model):
     class Meta:
         verbose_name = _("Log de Engagement de Video")
         verbose_name_plural = _("Logs de Engagement de Video")
+
+
+# =========================================================================
+# 🔐 MÓDULO DE SEGURIDAD PERIMETRAL: API KEYS ENCRIPTADAS (APP & CHAT)
+# =========================================================================
+import hashlib
+import secrets
+from django.core.cache import cache
+
+
+class CartMakerApiKey(models.Model):
+    """
+    Credencial criptográfica para autorizar peticiones HTTP provenientes de la
+    Aplicación Móvil (Flutter) y del Servidor de Chat hacia el backend de CartMaker.
+
+    La llave en texto plano (formato `cmk_live_<prefijo>_<secreto>`) se genera una única
+    vez al crearse en el panel administrativo y jamás se almacena en la base de datos;
+    únicamente se guarda su prefijo identificador y su hash derivado con PBKDF2-HMAC-SHA256.
+    """
+
+    class Scope(models.TextChoices):
+        ALL = 'all', _('API Principal + Servidor de Chat (Acceso Completo)')
+        API_ONLY = 'api', _('Solo Servidor de la Aplicación (/api/)')
+        CHAT_ONLY = 'chat', _('Solo Servidor de Chat (/chat/)')
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(
+        max_length=120,
+        verbose_name=_("Nombre / Dispositivo o Servicio"),
+        help_text=_("Ej: App Móvil Flutter (Producción), Servidor de Chat Node.js, etc.")
+    )
+    scope = models.CharField(
+        max_length=16,
+        choices=Scope.choices,
+        default=Scope.ALL,
+        db_index=True,
+        verbose_name=_("Alcance de Autorización"),
+        help_text=_("Define si esta API Key autoriza peticiones hacia /api/, hacia /chat/ o ambos.")
+    )
+    prefix = models.CharField(
+        max_length=32,
+        unique=True,
+        editable=False,
+        db_index=True,
+        verbose_name=_("Prefijo Identificador")
+    )
+    hashed_key = models.CharField(
+        max_length=256,
+        editable=False,
+        verbose_name=_("Hash Criptográfico (PBKDF2-HMAC-SHA256)")
+    )
+    is_active = models.BooleanField(
+        default=True,
+        db_index=True,
+        verbose_name=_("Key Activa"),
+        help_text=_("Si se desmarca, cualquier petición con esta API Key será rechazada de inmediato.")
+    )
+    expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("Fecha de Expiración (Opcional)"),
+        help_text=_("Déjalo en blanco para que la API Key no caduque automáticamente.")
+    )
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        editable=False,
+        related_name='created_api_keys',
+        verbose_name=_("Creada por")
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("Fecha de Creación"))
+    last_used_at = models.DateTimeField(null=True, blank=True, editable=False, verbose_name=_("Último Uso"))
+
+    class Meta:
+        verbose_name = _("CartMaker API Key")
+        verbose_name_plural = _("CartMaker API Keys")
+        ordering = ['-created_at']
+
+    def __str__(self):
+        status_str = "Activa" if self.is_active else "Revocada"
+        return f"{self.name} ({self.prefix}••••) [{status_str}]"
+
+    @classmethod
+    def hash_raw_key(cls, raw_key: str) -> str:
+        """
+        Deriva un hash irreversible de 256 bits usando PBKDF2-HMAC-SHA256 (60,000 iteraciones)
+        combinado con el SECRET_KEY del servidor como sal criptográfica.
+        """
+        salt = (getattr(settings, 'SECRET_KEY', '') or 'cartmaker-default-salt').encode('utf-8')
+        derived = hashlib.pbkdf2_hmac(
+            'sha256',
+            raw_key.encode('utf-8'),
+            salt,
+            60000
+        )
+        return derived.hex()
+
+    def generate_and_set_key(self) -> str:
+        """
+        Genera una API Key de alta entropía (>288 bits), asigna `prefix` y `hashed_key`
+        al modelo, y retorna la llave en texto plano por única vez.
+        """
+        while True:
+            prefix_hex = secrets.token_hex(6)  # 12 caracteres hexadecimales
+            candidate_prefix = f"cmk_live_{prefix_hex}"
+            if not CartMakerApiKey.objects.filter(prefix=candidate_prefix).exists():
+                break
+
+        secret_token = secrets.token_urlsafe(36)
+        raw_key = f"{candidate_prefix}_{secret_token}"
+        self.prefix = candidate_prefix
+        self.hashed_key = self.hash_raw_key(raw_key)
+        return raw_key
+
+    def invalidate_cache(self):
+        if self.prefix:
+            try:
+                cache.delete(f"cmk_record:{self.prefix}")
+            except Exception:
+                pass
+
+    def save(self, *args, **kwargs):
+        self.invalidate_cache()
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        self.invalidate_cache()
+        return super().delete(*args, **kwargs)
+
+    @classmethod
+    def verify_key(cls, raw_key: str, required_scope: str = 'api') -> bool:
+        """
+        Verifica en tiempo constante (`secrets.compare_digest`) si una API Key recibida
+        en los headers HTTP es auténtica, está activa, no ha expirado y tiene permiso
+        para el alcance solicitado ('api' o 'chat').
+        """
+        if not raw_key or not isinstance(raw_key, str):
+            return False
+
+        raw_key = raw_key.strip()
+        if not raw_key.startswith("cmk_live_"):
+            return False
+
+        parts = raw_key.split("_", 3)
+        if len(parts) != 4:
+            return False
+
+        prefix = f"cmk_live_{parts[2]}"
+        cache_key = f"cmk_record:{prefix}"
+
+        record = None
+        try:
+            record = cache.get(cache_key)
+        except Exception:
+            record = None
+
+        if record is None:
+            key_obj = cls.objects.filter(prefix=prefix).only(
+                'id', 'prefix', 'hashed_key', 'scope', 'is_active', 'expires_at'
+            ).first()
+            if not key_obj:
+                return False
+            record = {
+                'id': str(key_obj.id),
+                'hashed_key': key_obj.hashed_key,
+                'scope': key_obj.scope,
+                'is_active': key_obj.is_active,
+                'expires_at_ts': key_obj.expires_at.timestamp() if key_obj.expires_at else None,
+            }
+            try:
+                cache.set(cache_key, record, timeout=300)
+            except Exception:
+                pass
+
+        if not record.get('is_active'):
+            return False
+
+        expires_at_ts = record.get('expires_at_ts')
+        if expires_at_ts and timezone.now().timestamp() > expires_at_ts:
+            return False
+
+        allowed_scopes = ('all', required_scope)
+        if record.get('scope') not in allowed_scopes:
+            return False
+
+        computed_hash = cls.hash_raw_key(raw_key)
+        if not secrets.compare_digest(computed_hash, record.get('hashed_key', '')):
+            return False
+
+        # Actualización ligera (throttled cada 5 min) de last_used_at
+        usage_throttle_key = f"cmk_used:{prefix}"
+        try:
+            if not cache.get(usage_throttle_key):
+                cls.objects.filter(prefix=prefix).update(last_used_at=timezone.now())
+                cache.set(usage_throttle_key, 1, timeout=300)
+        except Exception:
+            pass
+
+        return True

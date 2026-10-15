@@ -41,9 +41,24 @@ class ProductSearchEngine:
         self.purchase_places = {}
         self.user = user
         self.seed = str(seed)
-        
-        # Al instanciar, construimos su huella digital de intereses
+
+        # Perfil híbrido: preferencias iniciales de Onboarding (Cold Start) + afinidad conductual real
+        self.user_onboarding_category_ids = []
+        self.onboarding_weight = 1.0
         self.user_top_categories = self._build_user_affinity_profile()
+
+    def _get_affinity_hash(self) -> str:
+        """
+        Genera una firma determinista del perfil de intereses actual del usuario
+        (combinando afinidad conductual + preferencias de onboarding ponderadas)
+        para aislar el caché estructural según sus gustos.
+        """
+        signature = (
+            f"beh:{sorted(self.user_top_categories)}|"
+            f"onb:{sorted(self.user_onboarding_category_ids)}|"
+            f"w:{round(self.onboarding_weight, 1)}"
+        )
+        return hashlib.md5(signature.encode()).hexdigest()
 
     # =========================================================================
     # CAPA DE CACHÉ DIVIDIDO (STRUCTURAL VS VOLATILE)
@@ -193,7 +208,10 @@ class ProductSearchEngine:
     def _get_stories_feed(self, max_distance_meters: float) -> list:
         now = timezone.now()
         # 1. Obtenemos los videos vigentes de tiendas cercanas
-        qs_videos = CompanyVideoStory.objects.select_related('company').filter(
+        qs_videos = CompanyVideoStory.objects.select_related(
+            'company',
+            'associated_item__product__category',
+        ).filter(
             expires_at__gt=now,
             video_file__isnull=False,
             company__stores__is_main_store=True,
@@ -213,7 +231,10 @@ class ProductSearchEngine:
 
         videos = list(qs_videos.order_by('-creation'))
         
-        # 3. Agrupamos por compañía
+        behavioral_set = set(self.user_top_categories or [])
+        onboarding_set = set(self.user_onboarding_category_ids or [])
+
+        # 3. Agrupamos por compañía y calculamos afinidad de sus historias
         companies_map = {}
         for v in videos:
             cid = str(v.company_id)
@@ -223,9 +244,23 @@ class ProductSearchEngine:
                     "store_name": v.company.name,
                     "profile_picture_img_url": storage_manager.get_url(v.company.image) if v.company.image else "",
                     "new_stories": [],
-                    "watched_stories": []
+                    "watched_stories": [],
+                    "_affinity_score": 0.0,
                 }
             
+            # Evaluamos si el producto vinculado al video coincide con los gustos del usuario
+            assoc = getattr(v, 'associated_item', None)
+            prod = getattr(assoc, 'product', None) if assoc else None
+            subcat = getattr(prod, 'category', None) if prod else None
+            if subcat:
+                story_affinity = 0.0
+                if subcat.id in behavioral_set:
+                    story_affinity += 1.5
+                if subcat.parent_category_id in onboarding_set:
+                    story_affinity += 1.2 * self.onboarding_weight
+                if story_affinity > companies_map[cid]["_affinity_score"]:
+                    companies_map[cid]["_affinity_score"] = story_affinity
+
             vid_data = v.get_json()
             vid_data["feed_type"] = "video"
             
@@ -234,13 +269,21 @@ class ProductSearchEngine:
             else:
                 companies_map[cid]["new_stories"].append(vid_data)
 
-        # 4. Convertimos a lista y ordenamos: 
-        # PRIMERO: las que tienen historias nuevas. SEGUNDO: la cantidad total de historias.
+        # 4. Convertimos a lista y ordenamos:
+        # PRIMERO: las que tienen historias nuevas.
+        # SEGUNDO: mayor afinidad con el usuario (conductual + onboarding).
+        # TERCERO: la cantidad total de historias.
         companies_list = list(companies_map.values())
         companies_list.sort(
-            key=lambda x: (len(x["new_stories"]) > 0, len(x["new_stories"]) + len(x["watched_stories"])), 
+            key=lambda x: (
+                len(x["new_stories"]) > 0,
+                round(x.get("_affinity_score", 0.0), 3),
+                len(x["new_stories"]) + len(x["watched_stories"]),
+            ), 
             reverse=True
         )
+        for comp in companies_list:
+            comp.pop("_affinity_score", None)
         
         return companies_list
     
@@ -280,15 +323,44 @@ class ProductSearchEngine:
 
     def _annotate_video_ranking(self, queryset):
         """
-        Calcula la relevancia del video basándose en Gravedad (Estilo Facebook/TikTok).
+        Calcula la relevancia del video basándose en Gravedad (Estilo Facebook/TikTok),
+        combinando preferencias del Onboarding (Cold Start) con afinidad conductual real.
         """
-        now = timezone.now()
-        
-        if self.user_top_categories:
+        video_onboarding_boost = round(1.0 + (0.50 * self.onboarding_weight), 3)
+        video_synergy_boost = round(1.55 + (0.12 * self.onboarding_weight), 3)
+
+        if self.user_top_categories and self.user_onboarding_category_ids:
             affinity_multiplier = Case(
-                When(associated_item__product__category_id__in=self.user_top_categories, then=Value(1.50)),
+                When(
+                    Q(associated_item__product__category_id__in=self.user_top_categories)
+                    & Q(associated_item__product__category__parent_category_id__in=self.user_onboarding_category_ids),
+                    then=Value(video_synergy_boost),
+                ),
+                When(
+                    associated_item__product__category_id__in=self.user_top_categories,
+                    then=Value(1.55),
+                ),
+                When(
+                    associated_item__product__category__parent_category_id__in=self.user_onboarding_category_ids,
+                    then=Value(video_onboarding_boost),
+                ),
+                default=Value(1.0),
+                output_field=FloatField(),
+            )
+        elif self.user_top_categories:
+            affinity_multiplier = Case(
+                When(associated_item__product__category_id__in=self.user_top_categories, then=Value(1.55)),
                 default=Value(1.0),
                 output_field=FloatField()
+            )
+        elif self.user_onboarding_category_ids:
+            affinity_multiplier = Case(
+                When(
+                    associated_item__product__category__parent_category_id__in=self.user_onboarding_category_ids,
+                    then=Value(video_onboarding_boost),
+                ),
+                default=Value(1.0),
+                output_field=FloatField(),
             )
         else:
             affinity_multiplier = Value(1.0, output_field=FloatField())
@@ -351,75 +423,153 @@ class ProductSearchEngine:
         return feed
     
     def _build_user_affinity_profile(self):
+        """
+        Construye el perfil híbrido de intereses del usuario:
+        1. Carga las categorías principales seleccionadas en el Onboarding (`user.preferred_categories`).
+        2. Analiza las señales reales de comportamiento de los últimos 30 días
+           (vistas, carrito, compras, likes de productos/videos, engagement de videos y preguntas).
+        3. Calcula `self.onboarding_weight` mediante decaimiento exponencial suave:
+           - Al principio (Cold Start, 0 interacciones): `onboarding_weight = 1.0` (100% protagonismo).
+           - Conforme el usuario interactúa con la app: decae progresivamente hasta `0.15`,
+             cediendo el protagonismo a las subcategorías reales (`top_5_category_ids`).
+        """
         if not self.user or not self.user.is_authenticated:
+            self.user_onboarding_category_ids = []
+            self.onboarding_weight = 0.0
             return []
+
+        # 0. PREFERENCIAS DE ONBOARDING (Categorías Padre)
+        try:
+            self.user_onboarding_category_ids = list(
+                self.user.preferred_categories.order_by('id').values_list('id', flat=True)
+            )
+        except Exception:
+            self.user_onboarding_category_ids = []
 
         date_threshold = timezone.now() - timedelta(days=30)
         
         product_ct = ContentType.objects.get_for_model(InventoryItem)
         video_ct = ContentType.objects.get_for_model(CompanyVideoStory)
 
-        # 1. AFINIDAD POR LIKES (Productos)
+        # 1. AFINIDAD POR LIKES (Productos y Videos)
         liked_product_ids = UniversalLike.objects.filter(
             user=self.user,
             content_type=product_ct,
             creation__gte=date_threshold
         ).values_list('object_id', flat=True)
 
-        liked_categories = InventoryItem.objects.filter(
+        liked_categories = list(InventoryItem.objects.filter(
             id__in=list(liked_product_ids)
-        ).values_list('product__category_id', flat=True)
+        ).values_list('product__category_id', flat=True))
 
-        # 2. AFINIDAD POR VISUALIZACIONES / CARRITO / COMPRAS
-        viewed_categories = ProductViewLog.objects.filter(
+        liked_video_ids = UniversalLike.objects.filter(
+            user=self.user,
+            content_type=video_ct,
+            creation__gte=date_threshold
+        ).values_list('object_id', flat=True)
+
+        liked_video_categories = list(CompanyVideoStory.objects.filter(
+            id__in=list(liked_video_ids),
+            associated_item__isnull=False
+        ).values_list('associated_item__product__category_id', flat=True))
+
+        # 2. AFINIDAD POR VISUALIZACIONES / CARRITO / COMPRAS EN PRODUCTOS
+        view_logs = ProductViewLog.objects.filter(
             client=self.user,
             start_time__gte=date_threshold
         ).filter(
             Q(added_to_cart=True) | Q(bought=True) | Q(end_time__isnull=False)
-        ).values_list('inventory_item__product__category_id', flat=True)
+        ).values_list(
+            'inventory_item__product__category_id',
+            'added_to_cart',
+            'bought',
+        )
 
-        # =========================================================================
-        # 💡 NUEVA CAPA: AFINIDAD POR COMENTARIOS / PREGUNTAS (Alta Señal)
-        # =========================================================================
-        # Caso A: Categorías de productos donde el usuario dejó una duda
+        # 3. AFINIDAD POR ENGAGEMENT EN VIDEOS
+        video_logs = VideoEngagementLog.objects.filter(
+            client=self.user,
+            timestamp__gte=date_threshold,
+            video__associated_item__isnull=False,
+        ).filter(
+            Q(video_completed=True)
+            | Q(interacted_with_product=True)
+            | Q(added_to_cart_from_video=True)
+            | Q(bought_from_video=True)
+        ).values_list(
+            'video__associated_item__product__category_id',
+            'video_completed',
+            'interacted_with_product',
+            'added_to_cart_from_video',
+            'bought_from_video',
+        )
+
+        # 4. AFINIDAD POR COMENTARIOS / PREGUNTAS (Alta Señal)
         commented_product_ids = UniversalComment.objects.filter(
             client=self.user,
             content_type=product_ct,
             question_creation__gte=date_threshold
         ).values_list('object_id', flat=True)
         
-        commented_prod_categories = InventoryItem.objects.filter(
+        commented_prod_categories = list(InventoryItem.objects.filter(
             id__in=list(commented_product_ids)
-        ).values_list('product__category_id', flat=True)
+        ).values_list('product__category_id', flat=True))
 
-        # Caso B: Categorías de los productos vinculados a los VIDEOS que el usuario comentó
         commented_video_ids = UniversalComment.objects.filter(
             client=self.user,
             content_type=video_ct,
             question_creation__gte=date_threshold
         ).values_list('object_id', flat=True)
         
-        commented_video_categories = CompanyVideoStory.objects.filter(
+        commented_video_categories = list(CompanyVideoStory.objects.filter(
             id__in=list(commented_video_ids),
             associated_item__isnull=False
-        ).values_list('associated_item__product__category_id', flat=True)
+        ).values_list('associated_item__product__category_id', flat=True))
 
         # =========================================================================
-        # 3. PONDERACIÓN ASIMÉTRICA DE INTERACCIONES
+        # 5. PONDERACIÓN ASIMÉTRICA DE INTERACCIONES Y DECAIMIENTO DEL ONBOARDING
         # =========================================================================
         frequency = {}
-        
-        # Likes y Views suman 1 punto de interés
-        for cat_id in list(liked_categories) + list(viewed_categories):
+
+        # Likes en productos o videos suman 2 puntos
+        for cat_id in liked_categories + liked_video_categories:
             if cat_id:
-                frequency[cat_id] = frequency.get(cat_id, 0) + 1
-                
-        # 💡 Los comentarios demuestran alta intención: Suman 3 puntos directo al score
-        for cat_id in list(commented_prod_categories) + list(commented_video_categories):
+                frequency[cat_id] = frequency.get(cat_id, 0) + 2
+
+        # Vistas (+1), Carrito (+4), Compras (+6)
+        for cat_id, added_to_cart, bought in view_logs:
+            if not cat_id:
+                continue
+            pts = 6 if bought else (4 if added_to_cart else 1)
+            frequency[cat_id] = frequency.get(cat_id, 0) + pts
+
+        # Video Engagement: Completado (+1), Click producto (+2), Carrito (+4), Compra (+6)
+        for cat_id, completed, clicked, carted, bought_vid in video_logs:
+            if not cat_id:
+                continue
+            pts = 6 if bought_vid else (4 if carted else (2 if clicked else (1 if completed else 0)))
+            if pts > 0:
+                frequency[cat_id] = frequency.get(cat_id, 0) + pts
+
+        # Comentarios / Preguntas demuestran alta intención: Suman 3 puntos
+        for cat_id in commented_prod_categories + commented_video_categories:
             if cat_id:
                 frequency[cat_id] = frequency.get(cat_id, 0) + 3
 
-        # Ordenamos de mayor a menor y extraemos el Top 5
+        total_behavioral_points = sum(frequency.values())
+
+        # Decaimiento progresivo del peso del Onboarding conforme crecen las señales reales:
+        # - Con 0 puntos conductuales -> onboarding_weight = 1.00 (Cold Start puro)
+        # - Con ~12 puntos conductuales -> onboarding_weight ≈ 0.51 (Transición híbrida)
+        # - Con >=35 puntos conductuales -> onboarding_weight = 0.15 (Dominan los gustos reales)
+        if self.user_onboarding_category_ids:
+            self.onboarding_weight = round(
+                max(0.15, math.exp(-float(total_behavioral_points) / 18.0)),
+                3,
+            )
+        else:
+            self.onboarding_weight = 0.0
+
+        # Ordenamos de mayor a menor y extraemos el Top 5 de subcategorías conductuales
         sorted_categories = sorted(frequency.items(), key=lambda x: x[1], reverse=True)
         top_5_category_ids = [cat[0] for cat in sorted_categories[:5]]
 
@@ -497,21 +647,50 @@ class ProductSearchEngine:
     def _annotate_ranking_score(self, queryset):
         """
         Calcula la relevancia del producto estático aplicando Gravedad,
-        Fatiga de Impresión y Jitter por Semilla.
+        Fatiga de Impresión, Jitter por Semilla y Afinidad Híbrida Progresiva
+        (Preferencias de Onboarding en Cold Start -> Gustos Reales por Interacción).
         """
-        now = timezone.now()
-
         platinum_multiplier = Case(
             When(store__company__is_platinum=True, then=Value(1.20)),
             default=Value(1.0),
             output_field=FloatField()
         )
 
-        if self.user_top_categories:
+        product_onboarding_boost = round(1.0 + (0.35 * self.onboarding_weight), 3)
+        product_synergy_boost = round(1.35 + (0.10 * self.onboarding_weight), 3)
+
+        if self.user_top_categories and self.user_onboarding_category_ids:
             affinity_multiplier = Case(
-                When(product__category_id__in=self.user_top_categories, then=Value(1.30)),
+                When(
+                    Q(product__category_id__in=self.user_top_categories)
+                    & Q(product__category__parent_category_id__in=self.user_onboarding_category_ids),
+                    then=Value(product_synergy_boost),
+                ),
+                When(
+                    product__category_id__in=self.user_top_categories,
+                    then=Value(1.35),
+                ),
+                When(
+                    product__category__parent_category_id__in=self.user_onboarding_category_ids,
+                    then=Value(product_onboarding_boost),
+                ),
+                default=Value(1.0),
+                output_field=FloatField(),
+            )
+        elif self.user_top_categories:
+            affinity_multiplier = Case(
+                When(product__category_id__in=self.user_top_categories, then=Value(1.35)),
                 default=Value(1.0),
                 output_field=FloatField()
+            )
+        elif self.user_onboarding_category_ids:
+            affinity_multiplier = Case(
+                When(
+                    product__category__parent_category_id__in=self.user_onboarding_category_ids,
+                    then=Value(product_onboarding_boost),
+                ),
+                default=Value(1.0),
+                output_field=FloatField(),
             )
         else:
             affinity_multiplier = Value(1.0, output_field=FloatField())
@@ -1238,8 +1417,9 @@ class ProductSearchEngine:
         now = timezone.now()
         approx_lat = round(self.user_location.y, 3)
         approx_lng = round(self.user_location.x, 3)
+        affinity_hash = self._get_affinity_hash() if (sort_by == 'relevance' and not price_order) else "global"
         
-        base_cache_key = f"cartmaker:struct:offers:{approx_lat}:{approx_lng}:{sort_by}:{price_order}"
+        base_cache_key = f"cartmaker:struct:offers:{approx_lat}:{approx_lng}:{affinity_hash}:{sort_by}:{price_order}"
         
         qs = self._get_base_active_queryset()
         qs = self._annotate_proximity_flag(qs)
@@ -1325,7 +1505,7 @@ class ProductSearchEngine:
         """
         approx_lat = round(self.user_location.y, 3)
         approx_lng = round(self.user_location.x, 3)
-        affinity_hash = hashlib.md5(str(self.user_top_categories).encode()).hexdigest()
+        affinity_hash = self._get_affinity_hash()
         
         # Llave de Redis aislada por página
         cache_key = f"cartmaker:struct:home:{approx_lat}:{approx_lng}:{affinity_hash}:seed_{self.seed}:p_{page}:sz_{page_size}"
@@ -1370,20 +1550,44 @@ class ProductSearchEngine:
             products_needed = page_size - len(videos_list)
             p_end = p_start + products_needed
 
-            qs_products = self._get_base_active_queryset()
-                
-            qs_products = self._annotate_proximity_flag(qs_products)
-            qs_products = qs_products.filter(store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters)))
-            qs_products = self._annotate_ranking_score(qs_products)
-            qs_products = self._apply_monopoly_prevention(qs_products)
+            qs_products_base = self._get_base_active_queryset()
+            qs_products_base = self._annotate_proximity_flag(qs_products_base)
+
+            qs_products_local = qs_products_base.filter(
+                store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters))
+            )
+            qs_products_local = self._annotate_ranking_score(qs_products_local)
+            qs_products_local = self._apply_monopoly_prevention(qs_products_local)
+
             home_horizon = timezone.now() - timedelta(days=45)
             # 💡 FILTRO INTELIGENTE: Pasan los nuevos OR los que tienen actividad viva (> 0)
-            qs_products = qs_products.filter(
+            qs_products_recent = qs_products_local.filter(
                 Q(creation__gte=home_horizon) | Q(cached_popularity_score__gt=0.0)
             )
             
             # Slicing dinámico de productos en SQL con el punto de partida real
-            products_list = list(qs_products[p_start:p_end])
+            products_list = list(qs_products_recent[p_start:p_end])
+
+            # Fallback 1: Si el horizonte de 45 días deja la página vacía o incompleta en esta zona,
+            # usamos todo el inventario activo de la zona sin restricción de antigüedad.
+            if len(products_list) < products_needed:
+                products_list = list(qs_products_local[p_start:p_end])
+
+            # Fallback 2: Si en el radio local (15km) no hay absolutamente ningún video ni producto
+            # en la página 1, abrimos el radio para no dejar jamás el feed en blanco.
+            if page == 1 and not videos_list and not products_list:
+                qs_fallback_videos = self._get_base_video_queryset().filter(
+                    company__stores__is_main_store=True,
+                    company__stores__is_active=True,
+                ).distinct()
+                qs_fallback_videos = self._annotate_video_ranking(qs_fallback_videos)
+                qs_fallback_videos = self._apply_video_monopoly_prevention(qs_fallback_videos)
+                videos_list = list(qs_fallback_videos[:ideal_videos_count])
+
+                fallback_products_needed = page_size - len(videos_list)
+                qs_fallback_products = self._annotate_ranking_score(qs_products_base)
+                qs_fallback_products = self._apply_monopoly_prevention(qs_fallback_products)
+                products_list = list(qs_fallback_products[:fallback_products_needed])
             
             # ==========================================
             # 💡 DEBUG: AUDITORÍA DE RANKING DE PRODUCTOS
