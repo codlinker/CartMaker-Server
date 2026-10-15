@@ -1,6 +1,7 @@
 from datetime import datetime
 import os
-
+import re
+import hashlib
 from django.core.cache import cache
 import random
 from django.core.mail import EmailMultiAlternatives
@@ -131,3 +132,24 @@ def recalculate_item_popularity(inventory_item_id: str):
     InventoryItem.objects.filter(id=inventory_item_id).update(
         cached_popularity_score=total_popularity
     )
+
+def validate_venezuelan_rif_modulo11(raw_rif: str) -> tuple[bool, str]:
+    cleaned = re.sub(r'[^A-Z0-9]', '', (raw_rif or '').upper().strip())
+    if len(cleaned) < 9 or len(cleaned) > 10:
+        return False, ''
+    prefix = cleaned[0]
+    weights = {'V': 4, 'E': 8, 'J': 12, 'P': 16, 'G': 20, 'C': 12}
+    if prefix not in weights:
+        return False, ''
+    digits = cleaned[1:]
+    if not digits.isdigit():
+        return False, ''
+    body_and_check = digits.zfill(9)
+    body8 = body_and_check[:8]
+    provided_check = int(body_and_check[8])
+    multipliers = [3, 2, 7, 6, 5, 4, 3, 2]
+    total = weights[prefix] + sum(int(body8[i]) * multipliers[i] for i in range(8))
+    remainder = 11 - (total % 11)
+    expected_check = 0 if remainder >= 10 else remainder
+    normalized = f"{prefix}-{body8}-{provided_check}"
+    return (provided_check == expected_check), normalized

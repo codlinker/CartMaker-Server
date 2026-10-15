@@ -50,6 +50,7 @@ urlpatterns = [
     path('v1/create-company', CreateCompanyAPI.as_view(), name='create_company'),
     path('v1/update-company', UpdateCompanyAPI.as_view(), name="update_company"),
     path('v1/create-store', CreateStoreAPI.as_view(), name="create_store"),
+    path('v1/check-company-kyb-available', CheckCompanyKybAvailableAPI.as_view(), name='check-company-kyb-available'),
     path('v1/update-store', UpdateStoreAPI.as_view(), name="update_store"),
     path('v1/delete-store/<uuid:store_id>/', UpdateStoreAPI.as_view(), name="delete_store"),
     path('v1/delete-store-contact-method/<int:method_id>/', DeleteStoreContactMethodAPI.as_view(), name='delete_contact_method'),

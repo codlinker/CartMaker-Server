@@ -585,18 +585,18 @@ class Company(models.Model):
         default=MerchantType.ENTREPRENEUR,
         help_text="Emprendedor o empresa. Lo define el dueño al configurar la compañía."
     )
-    rif_number = models.CharField(max_length=20, null=True, blank=True, db_index=True)
-    razon_social = models.CharField(max_length=180, null=True, blank=True)
-    mercantil_oficina = models.CharField(max_length=150, null=True, blank=True)
-    mercantil_numero = models.CharField(max_length=50, null=True, blank=True)
-    mercantil_tomo = models.CharField(max_length=50, null=True, blank=True)
+    rif_number = models.CharField(max_length=20, unique=True, null=True, blank=True, db_index=True)
+    razon_social = models.CharField(max_length=180, null=True, blank=True, db_index=True)
+    mercantil_oficina = models.CharField(max_length=140, null=True, blank=True)
+    mercantil_numero = models.CharField(max_length=40, null=True, blank=True)
+    mercantil_tomo = models.CharField(max_length=40, null=True, blank=True)
     representante_cedula = models.CharField(max_length=25, null=True, blank=True)
     rif_document_url = models.URLField(max_length=500, null=True, blank=True)
     mercantil_document_url = models.URLField(max_length=500, null=True, blank=True)
+    rif_document_sha256 = models.CharField(max_length=64, null=True, blank=True, db_index=True)
+    mercantil_document_sha256 = models.CharField(max_length=64, null=True, blank=True, db_index=True)
     kyb_ocr_verified = models.BooleanField(default=False)
-    kyb_confidence_score = models.IntegerField(default=0)
-    # 0 = No aplica (Emprendedor), 1 = Pendiente/En revisión, 2 = Verificada, 3 = Rechazada
-    kyb_status = models.IntegerField(default=0)
+    kyb_confidence_score = models.PositiveSmallIntegerField(default=0)
 
     def get_json(self)->dict:
         url = ""

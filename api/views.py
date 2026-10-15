@@ -39,7 +39,7 @@ from django.utils import timezone
 from .tasks import *
 from django.contrib.gis.geos import Polygon, Point
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
-from .utils import parse_flexible_date
+from .utils import parse_flexible_date, validate_venezuelan_rif_modulo11
 from asgiref.sync import sync_to_async, async_to_sync
 from rest_framework.pagination import PageNumberPagination
 from django.db.models.functions import Coalesce, Round
@@ -1417,6 +1417,66 @@ class CompanyStoreViewSet(viewsets.ModelViewSet):
                 {'error': f'Error interno al actualizar: {str(e)}'}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+class CheckCompanyKybAvailableAPI(APIView):
+    """
+    Verifica en tiempo real al pulsar 'Confirmar Expediente Mercantil' que:
+    1. El RIF sea matemáticamente válido (SENIAT Módulo 11) y no esté registrado en BD.
+    2. La Razón Social no esté registrada por otra empresa.
+    3. El asiento de Registro Mercantil (Oficina + Número + Tomo) no esté registrado.
+    4. La Cédula del Representante Legal coincida con la Cédula verificada (KYC) del usuario.
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        raw_rif = (request.data.get('rif_number') or '').strip()
+        razon_social = (request.data.get('razon_social') or '').strip().upper()
+        mercantil_oficina = (request.data.get('mercantil_oficina') or '').strip()
+        mercantil_numero = (request.data.get('mercantil_numero') or '').strip()
+        mercantil_tomo = (request.data.get('mercantil_tomo') or '').strip().upper()
+        rep_cedula = (request.data.get('representante_cedula') or '').strip().upper()
+        is_valid_rif, normalized_rif = validate_venezuelan_rif_modulo11(raw_rif)
+        if not is_valid_rif:
+            return Response({
+                "available": False,
+                "error": "El RIF ingresado no supera la validación matemática Módulo 11 del SENIAT."
+            }, status=status.HTTP_200_OK)
+        # 1. Unicidad de RIF en BD
+        if Company.objects.filter(rif_number__iexact=normalized_rif).exists():
+            return Response({
+                "available": False,
+                "error": f"El RIF {normalized_rif} ya se encuentra registrado por otra empresa en CartMaker."
+            }, status=status.HTTP_200_OK)
+        # 2. Unicidad de Razón Social en BD
+        if razon_social and Company.objects.filter(razon_social__iexact=razon_social).exists():
+            return Response({
+                "available": False,
+                "error": f"La Razón Social '{razon_social}' ya está registrada en CartMaker."
+            }, status=status.HTTP_200_OK)
+        # 3. Unicidad de Asiento Mercantil (Oficina + Número + Tomo)
+        if mercantil_oficina and mercantil_numero and mercantil_tomo:
+            if Company.objects.filter(
+                mercantil_oficina__iexact=mercantil_oficina,
+                mercantil_numero__iexact=mercantil_numero,
+                mercantil_tomo__iexact=mercantil_tomo,
+            ).exists():
+                return Response({
+                    "available": False,
+                    "error": f"El Registro Mercantil (N° {mercantil_numero}, Tomo {mercantil_tomo}) ya fue registrado anteriormente."
+                }, status=status.HTTP_200_OK)
+        # 4. Blindaje Antifraude: Cruce con la Cédula biométrica del usuario logueado
+        user_cedula_digits = re.sub(r'[^0-9]', '', getattr(request.user, 'cedula_number', '') or '')
+        rep_cedula_digits = re.sub(r'[^0-9]', '', rep_cedula)
+        if getattr(request.user, 'cedula_verified', False) and user_cedula_digits:
+            if user_cedula_digits != rep_cedula_digits:
+                return Response({
+                    "available": False,
+                    "error": "La Cédula del Representante Legal no coincide con la Cédula verificada biométricamente de tu cuenta."
+                }, status=status.HTTP_200_OK)
+        return Response({
+            "available": True,
+            "normalized_rif": normalized_rif
+        }, status=status.HTTP_200_OK)
     
 class CreateStoreAPI(APIView):
     throttle_classes = [ScopedRateThrottle]
