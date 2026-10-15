@@ -923,15 +923,27 @@ class AtlasManager:
 
     @sync_to_async
     def _get_available_subcategories(self) -> List[Dict[str, Any]]:
-        return [
-            {
+        from api.core.category_schemas import get_subcategory_schema
+
+        items = []
+        for s in SubCategory.objects.select_related('parent_category').all():
+            schema = get_subcategory_schema(
+                subcategory_name=s.name,
+                parent_category_name=s.parent_category.name,
+            )
+            items.append({
                 "id": s.id,
                 "name": f"{s.parent_category.name} - {s.name}",
                 "subcategory_name": s.name,
+                "parent_category_id": s.parent_category_id,
                 "parent_category_name": s.parent_category.name,
-            }
-            for s in SubCategory.objects.select_related('parent_category').all()
-        ]
+                "default_unit": schema.get("default_selling_unit", "unit"),
+                "allowed_units": schema.get("allowed_selling_unit_codes", ["unit"]),
+                "attribute_keys": [f["key"] for f in schema.get("fields", []) if isinstance(f, dict) and f.get("key")],
+                "supports_variants": bool(schema.get("supports_variants", True)),
+                "supports_modifier_groups": bool(schema.get("supports_modifier_groups", False)),
+            })
+        return items
 
     def _parse_gemini_json_response(
         self,
@@ -955,29 +967,45 @@ class AtlasManager:
                 clean = clean[:-3]
             res = json.loads(clean.strip(), strict=False)
             if "products" in res and isinstance(res["products"], list):
+                fallback_sub = next(iter(subcats_map.values()), None) if subcats_map else None
                 for prod in res["products"]:
                     if not isinstance(prod, dict):
                         continue
                     if "description" in prod and isinstance(prod["description"], str):
                         prod["description"] = re.sub(r'(?<!\n)\n(?!\n)', '\n\n', prod["description"]).strip()
 
-                    sub_id = prod.get("subcategory_id") or prod.get("category_id")
+                    sub_id = prod.get("subcategory_id") or prod.get("category_id") or prod.get("category")
                     sub_info = None
                     if subcats_map and sub_id is not None:
                         try:
                             sub_info = subcats_map.get(int(sub_id))
                         except (ValueError, TypeError):
                             sub_info = None
+                    if sub_info is None and fallback_sub is not None:
+                        sub_info = fallback_sub
 
+                    resolved_sub_id = sub_info["id"] if sub_info else sub_id
                     sub_name = sub_info["subcategory_name"] if sub_info else None
+                    cat_id = sub_info["parent_category_id"] if sub_info else None
                     cat_name = sub_info["parent_category_name"] if sub_info else None
+
+                    try:
+                        base_price_val = max(0.0, float(prod.get("price", 0.0) or 0.0))
+                    except (ValueError, TypeError):
+                        base_price_val = 0.0
+                    prod["price"] = round(base_price_val, 2)
 
                     dyn = validate_and_normalize_product_dynamic_data(
                         prod,
                         subcategory_name=sub_name,
                         category_name=cat_name,
-                        base_price=float(prod.get("price", 0.0) or 0.0),
+                        base_price=base_price_val,
                     )
+                    prod["subcategory_id"] = resolved_sub_id
+                    prod["category_id"] = resolved_sub_id
+                    prod["subcategory_name"] = sub_name or ""
+                    prod["parent_category_id"] = cat_id
+                    prod["parent_category_name"] = cat_name or ""
                     prod["selling_unit"] = dyn["selling_unit"]
                     prod["unit_label"] = dyn["unit_label"]
                     prod["allow_fractional_quantity"] = dyn["allow_fractional_quantity"]
@@ -994,50 +1022,115 @@ class AtlasManager:
         except json.JSONDecodeError:
             return {"products": [], "error": "Atlas no pudo interpretar el formato de los datos."}
 
+    @staticmethod
+    def _build_vision_catalog_prompt(subcats_for_llm: List[Dict[str, Any]], multi_mode: bool = False) -> str:
+        mode_instruction = (
+            "Analiza la imagen comercial (estante, vitrina, menú, factura o foto con varios artículos) "
+            "y detecta TODOS los productos distintos visibles."
+            if multi_mode
+            else "Analiza la imagen comercial y extrae el producto o los productos visibles con el máximo nivel de detalle."
+        )
+        return (
+            f"{mode_instruction}\n"
+            "Para cada producto detectado:\n"
+            "1. Elige el `subcategory_id` exacto del catálogo oficial.\n"
+            "2. Elige `selling_unit` dentro de las `allowed_units` de esa subcategoría "
+            "(ej. 'kg' o 'g' para frutas/verduras/carnes/charcutería por peso; 'pair' para calzado; "
+            "'portion' o 'combo' para comida preparada; 'unit' o 'pack' para empaquetados).\n"
+            "3. Completa `attributes` usando las claves de `attribute_keys` de esa subcategoría que puedas "
+            "deducir visualmente del empaque, etiqueta o producto (ej. marca, contenido_neto, modelo, condicion, "
+            "genero, tipo_prenda, tela_material, tipo_fresco, estado_conservacion, etc.).\n"
+            "4. Si en la foto se aprecian tallas, colores, capacidades o presentaciones con precios distintos, "
+            "inclúyelas en `variants` como `[{\"name\": \"...\", \"options\": {...}, \"price\": 0.0, \"stock\": null}]`.\n"
+            "5. Si es comida preparada, snacks, charcutería o frescos donde aplican opciones de preparación/corte/maduración "
+            "o contornos/extras visibles, puedes sugerirlos en `modifier_groups`.\n"
+            "6. Si el precio es visible en la imagen, colócalo en `price` (número); de lo contrario usa `0.0`.\n\n"
+            "Responde ÚNICAMENTE con JSON válido bajo este formato exacto:\n"
+            "{\n"
+            "  \"products\": [\n"
+            "    {\n"
+            "      \"name\": \"Nombre claro y comercial del producto\",\n"
+            "      \"description\": \"Descripción comercial atractiva y detallada\",\n"
+            "      \"price\": 0.0,\n"
+            "      \"subcategory_id\": 1,\n"
+            "      \"selling_unit\": \"unit\",\n"
+            "      \"attributes\": {},\n"
+            "      \"variants\": [],\n"
+            "      \"modifier_groups\": []\n"
+            "    }\n"
+            "  ]\n"
+            "}\n\n"
+            f"Catálogo oficial de subcategorías y sus campos: {json.dumps(subcats_for_llm, ensure_ascii=False)}"
+        )
+
     async def analyze_image_for_products_async(self, image_data: bytes, mime_type: str) -> Dict[str, Any]:
         subcats = await self._get_available_subcategories()
-        subcats_for_llm = [{"id": s["id"], "name": s["name"]} for s in subcats]
+        subcats_for_llm = [
+            {
+                "id": s["id"],
+                "name": s["name"],
+                "default_unit": s["default_unit"],
+                "allowed_units": s["allowed_units"],
+                "attribute_keys": s["attribute_keys"],
+            }
+            for s in subcats
+        ]
         subcats_map = {s["id"]: s for s in subcats}
-        prompt = (
-            "Analiza la imagen comercial y extrae los productos visibles. "
-            "Responde ÚNICAMENTE con JSON válido bajo este formato exacto:\n"
-            "{\"products\": [{\n"
-            "  \"name\": \"Nombre claro del producto\",\n"
-            "  \"description\": \"Descripción comercial atractiva y detallada\",\n"
-            "  \"price\": 0.0,\n"
-            "  \"subcategory_id\": 1,\n"
-            "  \"selling_unit\": \"unit|kg|g|l|ml|pack|box|portion|pair|set\",\n"
-            "  \"attributes\": {\"marca\": \"...\", \"contenido_neto\": \"...\"},\n"
-            "  \"variants\": []\n"
-            "}]}\n"
-            "Reglas para selling_unit y attributes según la categoría:\n"
-            "- Frutas, verduras, carnes, charcutería por peso: usa selling_unit='kg' o 'g'.\n"
-            "- Calzado: usa selling_unit='pair' y en attributes incluye 'marca', 'genero'.\n"
-            "- Ropa: incluye 'marca', 'tipo_prenda', 'tela_material' en attributes.\n"
-            "- Tecnología/Electrónica: incluye 'marca', 'modelo', 'condicion' en attributes.\n"
-            "- Víveres/Bebidas/Cuidado Personal: incluye 'marca', 'contenido_neto' en attributes.\n"
-            f"Catálogo oficial de subcategorías: {json.dumps(subcats_for_llm, ensure_ascii=False)}"
-        )
+        prompt = self._build_vision_catalog_prompt(subcats_for_llm, multi_mode=False)
         b64 = base64.b64encode(image_data).decode('utf-8')
         res = await self.client.chat.completions.create(
             model=self.model_name,
             messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64}"}}]}],
-            temperature=0.3
+            temperature=0.25
         )
         return self._parse_gemini_json_response(res.choices[0].message.content, subcats_map=subcats_map)
 
     async def analyze_image_for_multiple_products_async(self, image_data: bytes, mime_type: str) -> Dict[str, Any]:
-        return await self.analyze_image_for_products_async(image_data, mime_type)
+        subcats = await self._get_available_subcategories()
+        subcats_for_llm = [
+            {
+                "id": s["id"],
+                "name": s["name"],
+                "default_unit": s["default_unit"],
+                "allowed_units": s["allowed_units"],
+                "attribute_keys": s["attribute_keys"],
+            }
+            for s in subcats
+        ]
+        subcats_map = {s["id"]: s for s in subcats}
+        prompt = self._build_vision_catalog_prompt(subcats_for_llm, multi_mode=True)
+        b64 = base64.b64encode(image_data).decode('utf-8')
+        res = await self.client.chat.completions.create(
+            model=self.model_name,
+            messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64}"}}]}],
+            temperature=0.25
+        )
+        return self._parse_gemini_json_response(res.choices[0].message.content, subcats_map=subcats_map)
 
     async def analyze_processed_json_products_async(self, raw_products_json: List[Dict[str, Any]]) -> Dict[str, Any]:
         subcats = await self._get_available_subcategories()
-        subcats_for_llm = [{"id": s["id"], "name": s["name"]} for s in subcats]
+        subcats_for_llm = [
+            {
+                "id": s["id"],
+                "name": s["name"],
+                "default_unit": s["default_unit"],
+                "allowed_units": s["allowed_units"],
+                "attribute_keys": s["attribute_keys"],
+            }
+            for s in subcats
+        ]
         subcats_map = {s["id"]: s for s in subcats}
         prompt = (
-            "Mapea estos productos rústicos de inventario al catálogo oficial de CartMaker. "
-            "Responde ÚNICAMENTE con JSON: "
+            "Mapea estas filas de inventario (Excel/CSV) al catálogo oficial de CartMaker.\n"
+            "Para cada producto:\n"
+            "1. Asígnale su `subcategory_id` exacto del catálogo oficial.\n"
+            "2. Elige `selling_unit` dentro de las `allowed_units` de esa subcategoría.\n"
+            "3. Extrae en `attributes` cualquier dato técnico o comercial usando las claves de `attribute_keys` "
+            "de esa subcategoría (ej. marca, contenido_neto, modelo, condicion, talla, color, etc.).\n"
+            "4. Si la fila describe variantes (tallas/colores/pesos), inclúyelas en `variants`.\n"
+            "Responde ÚNICAMENTE con JSON válido:\n"
             "{\"products\": [{\"name\": \"...\", \"description\": \"...\", \"price\": 0.0, \"subcategory_id\": 1, "
-            "\"selling_unit\": \"unit|kg|g|l|pack|pair\", \"attributes\": {}}]} "
+            "\"selling_unit\": \"unit\", \"attributes\": {}, \"variants\": [], \"modifier_groups\": []}]}\n"
             f"Catálogo oficial: {json.dumps(subcats_for_llm, ensure_ascii=False)}"
         )
         res = await self.client.chat.completions.create(

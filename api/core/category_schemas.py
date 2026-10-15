@@ -373,8 +373,34 @@ def _build_schema(
     }
 
 
+def _warranty_field(placeholder: str = "Ej: 30 días, 6 meses o 1 año") -> Dict[str, Any]:
+    return {
+        "key": "garantia",
+        "label": "Garantía",
+        "type": "warranty",
+        "required": False,
+        "unit_options": ["días", "meses", "años", "sin garantía"],
+        "default_unit": "meses",
+        "options": [
+            "Sin garantía",
+            "7 días",
+            "15 días",
+            "30 días",
+            "3 meses",
+            "6 meses",
+            "1 año",
+            "2 años",
+            "3 años",
+            "5 años",
+        ],
+        "placeholder": placeholder,
+        "helper_text": "Puedes indicar cantidad y unidad (días, meses o años) o seleccionar una opción rápida.",
+        "section": "condition",
+    }
+
+
 # ==============================================================================
-# 4. DEFINICIÓN ESPECÍFICA POR SUBCATEGORÍA (68 SUBCATEGORÍAS)
+# 4. DEFINICIÓN ESPECÍFICA POR SUBCATEGORÍA (72 SUBCATEGORÍAS)
 # ==============================================================================
 
 SUBCATEGORY_SCHEMAS: Dict[str, Dict[str, Any]] = {
@@ -817,7 +843,7 @@ SUBCATEGORY_SCHEMAS: Dict[str, Dict[str, Any]] = {
             {"key": "ram", "label": "Memoria RAM", "type": "select", "required": False, "options": ["2 GB", "3 GB", "4 GB", "6 GB", "8 GB", "12 GB", "16 GB"], "section": "specs"},
             {"key": "condicion", "label": "Condición del Equipo", "type": "select", "required": True, "options": ["Nuevo (Sellado)", "Open Box", "Reacondicionado / Refurbished", "Usado - Como Nuevo", "Usado - Buen Estado"], "section": "condition"},
             {"key": "dual_sim", "label": "SIM / Conectividad", "type": "select", "required": False, "options": ["Dual SIM Física", "SIM Física + eSIM", "Solo eSIM", "Single SIM", "Solo Wi-Fi"], "section": "specs"},
-            {"key": "garantia_meses", "label": "Garantía", "type": "number", "required": False, "unit_suffix": "meses", "placeholder": "Ej: 3, 6 o 12", "section": "condition"},
+            _warranty_field("Ej: 3 meses, 6 meses o 1 año"),
         ],
     ),
     "Computación": _build_schema(
@@ -844,7 +870,7 @@ SUBCATEGORY_SCHEMAS: Dict[str, Dict[str, Any]] = {
             {"key": "pantalla", "label": "Tamaño de Pantalla", "type": "text", "required": False, "placeholder": "Ej: 15.6 pulgadas FHD 144Hz", "section": "specs"},
             {"key": "tarjeta_grafica", "label": "Tarjeta Gráfica (GPU)", "type": "text", "required": False, "placeholder": "Ej: NVIDIA RTX 4060 8GB / Integrada", "section": "specs"},
             {"key": "condicion", "label": "Condición", "type": "select", "required": True, "options": ["Nuevo (Sellado)", "Open Box", "Reacondicionado", "Usado"], "section": "condition"},
-            {"key": "garantia_meses", "label": "Garantía", "type": "number", "required": False, "unit_suffix": "meses", "placeholder": "Ej: 6 o 12", "section": "condition"},
+            _warranty_field("Ej: 6 meses o 1 año"),
         ],
     ),
     "Periféricos y Accesorios": _build_schema(
@@ -867,6 +893,7 @@ SUBCATEGORY_SCHEMAS: Dict[str, Dict[str, Any]] = {
             {"key": "conectividad", "label": "Tipo de Conexión", "type": "select", "required": False, "options": ["Bluetooth / Inalámbrico", "USB-C", "Lightning", "USB-A", "Jack 3.5mm", "HDMI", "No aplica"], "section": "specs"},
             {"key": "compatibilidad", "label": "Dispositivos Compatibles", "type": "text", "required": False, "placeholder": "Ej: iPhone 15 / Android / PC / Mac", "section": "specs"},
             {"key": "condicion", "label": "Condición", "type": "select", "required": False, "options": ["Nuevo", "Usado"], "section": "condition"},
+            _warranty_field("Ej: 30 días, 3 meses o 1 año"),
         ],
     ),
     "TV, Audio y Video": _build_schema(
@@ -889,7 +916,7 @@ SUBCATEGORY_SCHEMAS: Dict[str, Dict[str, Any]] = {
             {"key": "tamano_pulgadas", "label": "Tamaño de Pantalla (si es TV)", "type": "select", "required": False, "options": ["No aplica", "32 pulgadas", "40-43 pulgadas", "50 pulgadas", "55 pulgadas", "65 pulgadas", "70+ pulgadas"], "section": "specs"},
             {"key": "resolucion", "label": "Resolución", "type": "select", "required": False, "options": ["No aplica", "HD", "Full HD (1080p)", "4K UHD", "8K", "QLED / OLED"], "section": "specs"},
             {"key": "condicion", "label": "Condición", "type": "select", "required": True, "options": ["Nuevo (Sellado)", "Open Box", "Usado"], "section": "condition"},
-            {"key": "garantia_meses", "label": "Garantía", "type": "number", "required": False, "unit_suffix": "meses", "section": "condition"},
+            _warranty_field("Ej: 6 meses o 1 año"),
         ],
     ),
     "Videojuegos y Consolas": _build_schema(
@@ -912,6 +939,7 @@ SUBCATEGORY_SCHEMAS: Dict[str, Dict[str, Any]] = {
             {"key": "tipo_producto", "label": "Tipo de Producto", "type": "select", "required": False, "options": ["Consola", "Videojuego Físico", "Control / Mando", "Accesorios", "Tarjeta de Regalo"], "section": "details"},
             {"key": "almacenamiento", "label": "Capacidad (si es consola)", "type": "text", "required": False, "placeholder": "Ej: 1 TB SSD / 64 GB OLED", "section": "specs"},
             {"key": "condicion", "label": "Condición", "type": "select", "required": True, "options": ["Nuevo (Sellado)", "Usado - Como Nuevo", "Usado"], "section": "condition"},
+            _warranty_field("Ej: 3 meses, 6 meses o 1 año"),
         ],
     ),
     "Wearables": _build_schema(
@@ -934,6 +962,7 @@ SUBCATEGORY_SCHEMAS: Dict[str, Dict[str, Any]] = {
             {"key": "modelo", "label": "Modelo", "type": "text", "required": True, "placeholder": "Ej: Apple Watch Series 9 / Redmi Watch 4", "section": "details"},
             {"key": "compatibilidad", "label": "Compatibilidad", "type": "select", "required": False, "options": ["iOS y Android", "Solo iOS (iPhone)", "Solo Android"], "section": "specs"},
             {"key": "condicion", "label": "Condición", "type": "select", "required": True, "options": ["Nuevo", "Open Box", "Usado"], "section": "condition"},
+            _warranty_field("Ej: 3 meses, 6 meses o 1 año"),
         ],
     ),
     "Cámaras y Fotografía": _build_schema(
@@ -955,6 +984,7 @@ SUBCATEGORY_SCHEMAS: Dict[str, Dict[str, Any]] = {
             {"key": "modelo", "label": "Modelo", "type": "text", "required": True, "placeholder": "Ej: Sony ZV-E10 / DJI Mini 4 Pro", "section": "details"},
             {"key": "resolucion", "label": "Resolución / Sensor", "type": "text", "required": False, "placeholder": "Ej: 24.2 MP / Video 4K 60fps", "section": "specs"},
             {"key": "condicion", "label": "Condición", "type": "select", "required": True, "options": ["Nuevo", "Open Box", "Usado"], "section": "condition"},
+            _warranty_field("Ej: 6 meses o 1 año"),
         ],
     ),
 
@@ -1224,7 +1254,7 @@ SUBCATEGORY_SCHEMAS: Dict[str, Dict[str, Any]] = {
             {"key": "voltaje", "label": "Voltaje", "type": "select", "required": False, "options": ["110V", "220V", "Bivoltaje (110V/220V)", "Recargable / Batería", "A Gas"], "section": "specs"},
             {"key": "capacidad", "label": "Capacidad / Potencia", "type": "text", "required": False, "placeholder": "Ej: 12.000 BTU / 14 Kg / 4 Litros / 600W", "section": "specs"},
             {"key": "condicion", "label": "Condición", "type": "select", "required": True, "options": ["Nuevo", "Open Box", "Usado"], "section": "condition"},
-            {"key": "garantia_meses", "label": "Garantía", "type": "number", "required": False, "unit_suffix": "meses", "placeholder": "Ej: 6 o 12", "section": "condition"},
+            _warranty_field("Ej: 6 meses, 1 año o 2 años"),
         ],
     ),
     "Muebles": _build_schema(
@@ -1245,6 +1275,7 @@ SUBCATEGORY_SCHEMAS: Dict[str, Dict[str, Any]] = {
             {"key": "material_principal", "label": "Material Principal", "type": "text", "required": False, "placeholder": "Ej: Madera Pino, MDF Melamina, Tela Antifluidos, Metal", "section": "specs"},
             {"key": "dimensiones", "label": "Dimensiones (Ancho x Alto x Profundidad)", "type": "text", "required": False, "placeholder": "Ej: 180 x 85 x 90 cm", "section": "specs"},
             {"key": "requiere_armado", "label": "Entrega", "type": "select", "required": False, "options": ["Se entrega armado", "En caja (Requiere armado)", "Fabricación bajo pedido"], "section": "condition"},
+            _warranty_field(),
         ],
     ),
     "Dormitorio": _build_schema(
@@ -1266,6 +1297,7 @@ SUBCATEGORY_SCHEMAS: Dict[str, Dict[str, Any]] = {
             {"key": "tamano_cama", "label": "Tamaño", "type": "select", "required": False, "options": ["Individual (1.00m)", "Matrimonial (1.40m)", "Queen (1.60m)", "King (2.00m)", "Estándar"], "section": "specs"},
             {"key": "material", "label": "Material / Hilos", "type": "text", "required": False, "placeholder": "Ej: Algodón Egipcio 400 hilos, Microfibra, Ortopédico", "section": "specs"},
             {"key": "marca", "label": "Marca", "type": "text", "required": False, "placeholder": "Ej: Paraíso, Simmons, Cannon, Ama de Casa", "section": "details"},
+            _warranty_field("Ej: 1 año o 5 años (colchones)"),
         ],
     ),
     "Baño": _build_schema(
@@ -1347,7 +1379,7 @@ SUBCATEGORY_SCHEMAS: Dict[str, Dict[str, Any]] = {
             {"key": "marca", "label": "Marca", "type": "text", "required": False, "placeholder": "Ej: DeWalt, Makita, Bosch, Truper, Total, Stanley, Ingco", "section": "details"},
             {"key": "tipo_alimentacion", "label": "Alimentación", "type": "select", "required": False, "options": ["Manual", "Eléctrica con Cable (110V)", "Eléctrica (220V)", "Inalámbrica (Batería)", "Gasolina / Diésel", "Neumática"], "section": "specs"},
             {"key": "potencia", "label": "Potencia / Capacidad", "type": "text", "required": False, "placeholder": "Ej: 800W / 20V Max / 3500W", "section": "specs"},
-            {"key": "garantia_meses", "label": "Garantía", "type": "number", "required": False, "unit_suffix": "meses", "section": "condition"},
+            _warranty_field(),
         ],
     ),
     "Electricidad e Iluminación": _build_schema(
@@ -1369,6 +1401,7 @@ SUBCATEGORY_SCHEMAS: Dict[str, Dict[str, Any]] = {
             {"key": "marca", "label": "Marca", "type": "text", "required": False, "placeholder": "Ej: Exceline, Sylvania, Hammer, Bticino, Elecon", "section": "details"},
             {"key": "voltaje", "label": "Voltaje", "type": "select", "required": False, "options": ["110V", "220V", "Multivoltaje (85V-265V)", "12V / 24V"], "section": "specs"},
             {"key": "potencia_calibre", "label": "Potencia (W) / Calibre / Amperaje", "type": "text", "required": False, "placeholder": "Ej: 15W / 20A / Calibre 12 AWG", "section": "specs"},
+            _warranty_field("Ej: 1 año o 3 años (protectores Exceline)"),
         ],
     ),
     "Plomería": _build_schema(
@@ -1389,6 +1422,7 @@ SUBCATEGORY_SCHEMAS: Dict[str, Dict[str, Any]] = {
             {"key": "marca", "label": "Marca", "type": "text", "required": False, "placeholder": "Ej: Griven, Pedrollo, Tubrica, Pavco, Fundición Pacífico", "section": "details"},
             {"key": "medida_pulgadas", "label": "Medida / Diámetro", "type": "text", "required": False, "placeholder": "Ej: 1/2 pulgada, 1/2 HP, 500 Litros", "section": "specs"},
             {"key": "material", "label": "Material", "type": "select", "required": False, "options": ["Acero Inoxidable", "Bronce / Latón", "PVC Aguas Blancas", "PVC Aguas Negras", "PPR Termofusión", "Hierro Galvanizado", "Polietileno"], "section": "specs"},
+            _warranty_field(),
         ],
     ),
     "Materiales de Construcción": _build_schema(
@@ -1429,6 +1463,7 @@ SUBCATEGORY_SCHEMAS: Dict[str, Dict[str, Any]] = {
             {"key": "marca", "label": "Marca", "type": "text", "required": False, "placeholder": "Ej: Hikvision, Ezviz, Dahua, Imou, Yale, Sonoff", "section": "details"},
             {"key": "conectividad", "label": "Conectividad / App", "type": "text", "required": False, "placeholder": "Ej: Wi-Fi 2.4GHz, Tuya Smart, Alexa / Google Home", "section": "specs"},
             {"key": "uso", "label": "Ubicación de Uso", "type": "select", "required": False, "options": ["Interior", "Exterior (Resistente al agua IP65/IP66)", "Interior y Exterior"], "section": "specs"},
+            _warranty_field(),
         ],
     ),
 
@@ -1474,6 +1509,7 @@ SUBCATEGORY_SCHEMAS: Dict[str, Dict[str, Any]] = {
             {"key": "ano", "label": "Año", "type": "number", "required": True, "placeholder": "Ej: 2024", "section": "specs"},
             {"key": "kilometraje", "label": "Kilometraje", "type": "number", "required": False, "unit_suffix": "km", "placeholder": "Ej: 0", "section": "specs"},
             {"key": "condicion", "label": "Condición", "type": "select", "required": True, "options": ["Nueva (0 km)", "Usada - Papeles al día"], "section": "condition"},
+            _warranty_field(),
         ],
     ),
     "Repuestos para Autos": _build_schema(
@@ -1495,6 +1531,7 @@ SUBCATEGORY_SCHEMAS: Dict[str, Dict[str, Any]] = {
             {"key": "compatibilidad", "label": "Vehículos y Años Compatibles", "type": "text", "required": True, "placeholder": "Ej: Toyota Corolla 2009-2014 / Aveo todos los años", "section": "specs"},
             {"key": "numero_parte_oem", "label": "Número de Parte / Código OEM", "type": "text", "required": False, "placeholder": "Ej: 04465-02220 / PH3614", "section": "specs"},
             {"key": "condicion", "label": "Condición", "type": "select", "required": True, "options": ["Nuevo Original", "Nuevo Reemplazo (Aftermarket)", "Importado (Chivera / Usado)"], "section": "condition"},
+            _warranty_field(),
         ],
     ),
     "Lubricantes y Fluidos": _build_schema(
@@ -1537,6 +1574,7 @@ SUBCATEGORY_SCHEMAS: Dict[str, Dict[str, Any]] = {
             {"key": "medida_caucho_rin", "label": "Medida (Ancho/Perfil/Rin)", "type": "text", "required": True, "placeholder": "Ej: 195/65 R15", "section": "specs"},
             {"key": "tipo_terreno", "label": "Tipo de Terreno", "type": "select", "required": False, "options": ["Pista / Ciudad (H/T)", "Todo Terreno (A/T)", "Pantano (M/T)", "Carga"], "section": "specs"},
             {"key": "condicion", "label": "Condición", "type": "select", "required": False, "options": ["Nuevo", "Usado (Media vida)"], "section": "condition"},
+            _warranty_field(),
         ],
     ),
     "Accesorios para Vehículos": _build_schema(
@@ -1556,6 +1594,7 @@ SUBCATEGORY_SCHEMAS: Dict[str, Dict[str, Any]] = {
         fields=[
             {"key": "marca", "label": "Marca", "type": "text", "required": False, "placeholder": "Ej: Pioneer, Meguiar's, 3M, Sparco, Genérico", "section": "details"},
             {"key": "compatibilidad", "label": "Compatibilidad", "type": "text", "required": False, "placeholder": "Ej: Universal / Específico por modelo", "section": "specs"},
+            _warranty_field(),
         ],
     ),
     "Motos": _build_schema(
@@ -2007,6 +2046,7 @@ SUBCATEGORY_SCHEMAS: Dict[str, Dict[str, Any]] = {
             {"key": "marca", "label": "Marca", "type": "text", "required": True, "placeholder": "Ej: Fender, Squier, Yamaha, Ibanez, Epiphone, Cort", "section": "details"},
             {"key": "tipo_instrumento", "label": "Tipo", "type": "select", "required": False, "options": ["Guitarra Clásica (Nylon)", "Guitarra Acústica / Electroacústica", "Guitarra Eléctrica", "Bajo Eléctrico (4 cuerdas)", "Bajo Eléctrico (5 cuerdas)"], "section": "specs"},
             {"key": "condicion", "label": "Condición", "type": "select", "required": True, "options": ["Nuevo", "Usado"], "section": "condition"},
+            _warranty_field(),
         ],
     ),
     "Teclados y Pianos": _build_schema(
@@ -2020,6 +2060,7 @@ SUBCATEGORY_SCHEMAS: Dict[str, Dict[str, Any]] = {
             {"key": "marca", "label": "Marca", "type": "text", "required": True, "placeholder": "Ej: Yamaha, Casio, Roland, Korg, Arturia, M-Audio", "section": "details"},
             {"key": "cantidad_teclas", "label": "Cantidad de Teclas", "type": "select", "required": False, "options": ["25 teclas", "49 teclas", "61 teclas (5 octavas)", "76 teclas", "88 teclas ( Acción Martillo)"], "section": "specs"},
             {"key": "condicion", "label": "Condición", "type": "select", "required": True, "options": ["Nuevo", "Usado"], "section": "condition"},
+            _warranty_field(),
         ],
     ),
     "Baterías y Percusión": _build_schema(
@@ -2078,6 +2119,7 @@ SUBCATEGORY_SCHEMAS: Dict[str, Dict[str, Any]] = {
             {"key": "marca", "label": "Marca", "type": "text", "required": True, "placeholder": "Ej: Shure, Focusrite, Behringer, Pioneer DJ, JBL, Electro-Voice", "section": "details"},
             {"key": "modelo", "label": "Modelo", "type": "text", "required": False, "placeholder": "Ej: Shure SM58 / Scarlett 2i2 / DDJ-FLX4", "section": "details"},
             {"key": "condicion", "label": "Condición", "type": "select", "required": False, "options": ["Nuevo", "Usado"], "section": "condition"},
+            _warranty_field(),
         ],
     ),
     "Accesorios Musicales": _build_schema(
@@ -2121,6 +2163,7 @@ SUBCATEGORY_SCHEMAS: Dict[str, Dict[str, Any]] = {
         fields=[
             {"key": "marca", "label": "Marca / Proveedor", "type": "text", "required": False, "placeholder": "Opcional", "section": "details"},
             {"key": "condicion", "label": "Condición", "type": "select", "required": False, "options": ["Nuevo", "Usado", "Servicio / Bajo Pedido"], "section": "condition"},
+            _warranty_field(),
         ],
     ),
 }
@@ -2177,7 +2220,9 @@ def get_subcategory_schema(
 
     result = json.loads(json.dumps(base_schema))
     if custom_override and isinstance(custom_override, dict):
-        result.update(custom_override)
+        # Solo sobreescribir el esquema oficial en código si el admin marcó explícitamente `is_custom_override: True`
+        if custom_override.get("is_custom_override"):
+            result.update(custom_override)
 
     result["subcategory_name"] = subcategory_name or ""
     result["parent_category_name"] = parent_category_name or ""
@@ -2377,9 +2422,35 @@ def normalize_modifier_groups(raw_groups: Any) -> List[Dict[str, Any]]:
     return normalized_groups
 
 
+def _format_warranty_label(value: Any, unit: str) -> str:
+    """Formatea un valor numérico + unidad de garantía en español limpio (ej. '1 año', '6 meses', '30 días')."""
+    u = str(unit or "meses").strip().lower()
+    if u in ("sin garantía", "sin garantia", "ninguna", "no", "none", "0"):
+        return "Sin garantía"
+    try:
+        num = float(value)
+        num_int = int(num) if num.is_integer() else num
+    except (ValueError, TypeError):
+        return str(value).strip()
+
+    if num <= 0:
+        return "Sin garantía"
+
+    if u in ("año", "años", "ano", "anos", "year", "years", "yr"):
+        return f"{num_int} {'año' if num_int == 1 else 'años'}"
+    if u in ("día", "días", "dia", "dias", "day", "days"):
+        return f"{num_int} {'día' if num_int == 1 else 'días'}"
+    return f"{num_int} {'mes' if num_int == 1 else 'meses'}"
+
+
 def normalize_attributes(raw_attributes: Any) -> Dict[str, Any]:
     """
-    Normaliza el diccionario de atributos dinámicos del producto (ej. marca, modelo, talla, etc.).
+    Normaliza el diccionario de atributos dinámicos del producto (ej. marca, modelo, talla, garantía, etc.).
+    Soporta garantías flexibles en días, meses o años:
+      - Preset o texto: {"garantia": "1 año"} o {"garantia": "6 meses"}
+      - Número + unidad separados: {"garantia_valor": 1, "garantia_unidad": "años"} o {"garantia": 6, "garantia_unidad": "meses"}
+      - Objeto estructurado: {"garantia": {"value": 1, "unit": "años"}}
+      - Legacy en meses: {"garantia_meses": 6}
     """
     parsed = _parse_json_or_value(raw_attributes, {})
     if not isinstance(parsed, dict):
@@ -2391,6 +2462,55 @@ def normalize_attributes(raw_attributes: Any) -> Dict[str, Any]:
         if not key_str or v is None or v == "":
             continue
         cleaned[key_str] = v
+
+    # Normalización inteligente de Garantía (días / meses / años / sin garantía)
+    raw_garantia = cleaned.get("garantia")
+    raw_garantia_valor = cleaned.get("garantia_valor")
+    raw_garantia_unidad = cleaned.get("garantia_unidad")
+    raw_garantia_meses = cleaned.get("garantia_meses")
+
+    if isinstance(raw_garantia, dict):
+        w_val = raw_garantia.get("value", raw_garantia.get("valor"))
+        w_unit = str(raw_garantia.get("unit", raw_garantia.get("unidad", "meses"))).strip().lower()
+        if w_unit in ("sin garantía", "sin garantia", "ninguna") or w_val in (0, "0", None, ""):
+            cleaned["garantia"] = "Sin garantía"
+            cleaned["garantia_valor"] = 0
+            cleaned["garantia_unidad"] = "sin garantía"
+        else:
+            cleaned["garantia"] = _format_warranty_label(w_val, w_unit)
+            try:
+                cleaned["garantia_valor"] = int(float(w_val)) if float(w_val).is_integer() else float(w_val)
+            except (ValueError, TypeError):
+                pass
+            cleaned["garantia_unidad"] = w_unit
+    elif raw_garantia_valor is not None or raw_garantia_unidad is not None:
+        w_unit = str(raw_garantia_unidad or "meses").strip().lower()
+        w_val = raw_garantia_valor if raw_garantia_valor is not None else raw_garantia
+        if w_unit in ("sin garantía", "sin garantia", "ninguna") or w_val in (0, "0"):
+            cleaned["garantia"] = "Sin garantía"
+            cleaned["garantia_valor"] = 0
+            cleaned["garantia_unidad"] = "sin garantía"
+        elif w_val is not None:
+            cleaned["garantia"] = _format_warranty_label(w_val, w_unit)
+    elif isinstance(raw_garantia, (int, float)):
+        cleaned["garantia"] = _format_warranty_label(raw_garantia, "meses")
+        cleaned["garantia_valor"] = int(raw_garantia) if float(raw_garantia).is_integer() else float(raw_garantia)
+        cleaned["garantia_unidad"] = "meses"
+    elif isinstance(raw_garantia, str):
+        g_str = raw_garantia.strip()
+        if g_str.isdigit():
+            num_val = int(g_str)
+            cleaned["garantia"] = _format_warranty_label(num_val, "meses")
+            cleaned["garantia_valor"] = num_val
+            cleaned["garantia_unidad"] = "meses"
+    elif raw_garantia is None and raw_garantia_meses is not None:
+        cleaned["garantia"] = _format_warranty_label(raw_garantia_meses, "meses")
+        try:
+            cleaned["garantia_valor"] = int(float(raw_garantia_meses))
+            cleaned["garantia_unidad"] = "meses"
+        except (ValueError, TypeError):
+            pass
+
     return cleaned
 
 
