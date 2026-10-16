@@ -2910,6 +2910,7 @@
         function renderHandoffReadyBox(handoffData) {
             const zone = document.getElementById('handoffDynamicZone');
             if (!zone) return;
+            state.handoffResult = handoffData;
             zone.innerHTML = `
                 <div style="text-align:center;background:var(--sf-bg-primary);border:1px solid var(--sf-accent-primary);border-radius:18px;padding:18px;">
                     <div style="font-weight:800;font-size:1.05rem;margin-bottom:6px;display:flex;align-items:center;justify-content:center;gap:6px;color:#059669;">
@@ -2923,13 +2924,31 @@
                         <span class="material-symbols-rounded">smartphone</span>
                         <span>Abrir Mi Pedido en CartMaker App Ahora</span>
                     </a>
-                    <div class="sf-qr-box" id="handoffQrContainer"></div>
+                    <div style="display:inline-flex;gap:4px;background:#FFFFFF;border:1px solid rgba(15,11,29,0.09);border-radius:10px;padding:3px;margin-bottom:6px;">
+                        <button type="button" class="sf-curr-btn active" id="qrModeWebBtn" onclick="switchHandoffQrMode('web')">QR Cámara (Auto-App)</button>
+                        <button type="button" class="sf-curr-btn" id="qrModeDeepBtn" onclick="switchHandoffQrMode('deeplink')">QR Directo App</button>
+                    </div>
+                    <div>
+                        <div class="sf-qr-box" id="handoffQrContainer"></div>
+                    </div>
                     <div style="margin-top:10px;font-size:0.78rem;color:var(--sf-text-secondary);">
                         Código de Carrito: <strong style="color:var(--sf-text-primary);font-family:var(--font-mono);">${handoffData.token}</strong>
                     </div>
                 </div>
             `;
             drawQrCode('handoffQrContainer', handoffData.web_resume_url || handoffData.app_deep_link);
+        }
+
+        function switchHandoffQrMode(mode) {
+            if (!state.handoffResult) return;
+            const webBtn = document.getElementById('qrModeWebBtn');
+            const deepBtn = document.getElementById('qrModeDeepBtn');
+            if (webBtn) webBtn.classList.toggle('active', mode === 'web');
+            if (deepBtn) deepBtn.classList.toggle('active', mode === 'deeplink');
+            const targetPayload = mode === 'deeplink'
+                ? state.handoffResult.app_deep_link
+                : (state.handoffResult.web_resume_url || state.handoffResult.app_deep_link);
+            drawQrCode('handoffQrContainer', targetPayload);
         }
 
         function openAppHandoffModal() {
@@ -3049,11 +3068,23 @@
                 }));
                 updateFloatingCartBar();
                 openCartDrawer();
+                const draftToken = STOREFRONT_DATA.express_order_draft.token;
+                const isWebCart = String(draftToken || '').startsWith('cmw_');
+                const draftDeepLink = isWebCart
+                    ? `cartmaker://web-cart?token=${draftToken}`
+                    : `cartmaker://express-order?token=${draftToken}`;
                 renderHandoffReadyBox({
-                    token: STOREFRONT_DATA.express_order_draft.token,
-                    app_deep_link: `cartmaker://express-order?token=${STOREFRONT_DATA.express_order_draft.token}`,
+                    token: draftToken,
+                    app_deep_link: draftDeepLink,
                     web_resume_url: window.location.href,
                 });
+                // Si el usuario acaba de escanear el QR desde su teléfono y abrió /orden-express/<token>/,
+                // lanzamos automáticamente el deep link de CartMaker App sin requerir un toque extra.
+                if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '')) {
+                    setTimeout(() => {
+                        window.location.href = draftDeepLink;
+                    }, 180);
+                }
             }
         });
     </script>

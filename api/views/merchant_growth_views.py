@@ -526,6 +526,24 @@ class MerchantGrowthViewSet(viewsets.ViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        target_company_id = str(draft.get("company_id") or "")
+        company_obj = Company.objects.filter(id=target_company_id).only("id", "owner_id").first() if target_company_id else None
+
+        if request.user and request.user.is_authenticated:
+            user_company = _get_merchant_company_for_user(request.user)
+            if (user_company and str(user_company.id) == target_company_id) or (
+                company_obj and company_obj.owner_id == request.user.id
+            ):
+                return Response(
+                    {
+                        "error": "No puedes agregar al carrito ni comprar productos de tu propio comercio.",
+                        "code": "OWN_COMPANY_CART_FORBIDDEN",
+                        "is_own_company": True,
+                        "company_id": target_company_id,
+                    },
+                    status=status.HTTP_406_NOT_ACCEPTABLE,
+                )
+
         item_ids = [x.get("item_id") for x in (draft.get("items") or []) if x.get("item_id")]
         fresh_items = {
             str(it.id): it.get_json()
@@ -548,6 +566,7 @@ class MerchantGrowthViewSet(viewsets.ViewSet):
             "token": token,
             "type": draft.get("type"),
             "company_id": draft.get("company_id"),
+            "company_owner_id": str(company_obj.owner_id) if company_obj else None,
             "company_name": draft.get("company_name"),
             "store_id": draft.get("store_id"),
             "merchant_note": draft.get("merchant_note"),
