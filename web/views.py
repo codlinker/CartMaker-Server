@@ -542,14 +542,10 @@ def _build_storefront_context(
         else ''
     )
 
-    theme_override = (request.GET.get('theme') or '').strip().lower()
-    if theme_override and theme_override in STOREFRONT_THEMES:
-        theme = dict(STOREFRONT_THEMES[theme_override])
-    else:
-        theme = resolve_company_storefront_theme(
-            company_category_name=company.category.name if company.category else '',
-            dominant_parent_category=dominant_parent,
-        )
+    theme = resolve_company_storefront_theme(
+        company_category_name=company.category.name if company.category else '',
+        dominant_parent_category=dominant_parent,
+    )
 
     # Sucursales enriquecidas con zona geográfica y coordenadas para el mapa interactivo
     branches_data = []
@@ -632,13 +628,12 @@ def _build_storefront_context(
     company_data['total_sales_units'] = total_sales_units
     company_data['merchant_type_label'] = company.get_merchant_type_display()
 
+    mapbox_api_key = getattr(settings, 'MAPBOX_APIKEY', '')
+    mapbox_style_url = getattr(settings, 'MAPBOX_STYLE_URL', '')
+
     storefront_payload = {
         'company': company_data,
         'theme': theme,
-        'available_themes': [
-            {'key': k, 'label': v['category_label'], 'icon': v['hero_badge_icon']}
-            for k, v in STOREFRONT_THEMES.items()
-        ],
         'branches': branches_data,
         'initial_store_id': str(initial_store_id) if initial_store_id else main_branch['id'],
         'subcategories': list(subcategories_map.values()),
@@ -656,6 +651,8 @@ def _build_storefront_context(
         'highlight_item_id': str(highlight_item_id) if highlight_item_id else None,
         'express_order_draft': express_order_draft,
         'handoff_endpoint': f"/tienda/{company.id}/handoff-cart/",
+        'mapbox_api_key': mapbox_api_key,
+        'mapbox_style_url': mapbox_style_url,
     }
 
     from django.core.serializers.json import DjangoJSONEncoder
@@ -667,6 +664,8 @@ def _build_storefront_context(
         'items_count': len(serialized_items),
         'bcv_rate': bcv_rate,
         'app_deep_link': app_deep_link,
+        'mapbox_api_key': mapbox_api_key,
+        'mapbox_style_url': mapbox_style_url,
         'storefront_json': json.dumps(storefront_payload, cls=DjangoJSONEncoder, ensure_ascii=False),
     }
 

@@ -1,646 +1,1188 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="es" data-theme-mode="{{ theme.mode }}">
+<html lang="es" class="scroll-smooth">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
-    <title>{{ company.name }} — Catálogo Oficial en CartMaker</title>
-    <meta name="description" content="{{ theme.hero_tagline }} Explora el inventario en tiempo real de {{ company.name }} en CartMaker.">
+    <title>{{ company.name }} — Catálogo Oficial en Tiempo Real | CartMaker</title>
+    <meta name="description" content="{{ theme.hero_tagline }}. Explora el catálogo en vivo de {{ company.name }} en CartMaker.">
+    <meta name="theme-color" content="{{ theme.accent_primary|default:'#6D49F2' }}">
     <meta property="og:title" content="{{ company.name }} | Vitrina Oficial CartMaker">
     <meta property="og:description" content="{{ theme.hero_tagline }}">
     {% if company.image %}
     <meta property="og:image" content="{{ company.image }}">
     {% endif %}
-    <link rel="icon" href="{% static 'img/favicon.ico' %}">
+    <link rel="icon" type="image/x-icon" href="{% static 'img/favicon.ico' %}">
 
-    <!-- Tipografías Adaptativas para las 14 Personalidades de Categoría -->
+    <!-- Tipografía Oficial CartMaker / Atlas: Plus Jakarta Sans + Inter + JetBrains Mono + Material Symbols Rounded -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:ital,wght@0,600;0,700;0,800;1,600&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800;900&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&family=Playfair+Display:ital,wght@0,600;0,700;1,600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,500,0,0" />
 
-    <!-- Leaflet Maps CSS & JS para el Mapa Interactivo y Cálculo de Ruta en Vivo -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    <!-- Hojas de Estilo Base de CartMaker -->
+    <link rel="stylesheet" href="{% static 'css/base.css' %}">
 
-    <!-- Generador ligero de QR en Canvas para Handoff hacia la App y Kit Imprimible -->
+    <!-- Mapbox GL JS Oficial -->
+    <link href="https://api.mapbox.com/mapbox-gl-js/v3.4.0/mapbox-gl.css" rel="stylesheet">
+    <script src="https://api.mapbox.com/mapbox-gl-js/v3.4.0/mapbox-gl.js"></script>
+
+    <!-- Generador QR Vectorial para Handoff hacia la App y Hablador Imprimible -->
     <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 
     <style>
         :root {
-            --sf-bg-primary: {{ theme.bg_primary }};
-            --sf-bg-secondary: {{ theme.bg_secondary }};
-            --sf-bg-card: {{ theme.bg_card }};
-            --sf-text-primary: {{ theme.text_primary }};
-            --sf-text-secondary: {{ theme.text_secondary }};
-            --sf-accent-primary: {{ theme.accent_primary }};
-            --sf-accent-secondary: {{ theme.accent_secondary }};
-            --sf-accent-gradient: {{ theme.accent_gradient }};
-            --sf-border-glow: {{ theme.border_glow }};
+            --sf-bg-primary: {{ theme.bg_primary|default:"#FAFAFC" }};
+            --sf-bg-secondary: {{ theme.bg_secondary|default:"#F3F2F8" }};
+            --sf-bg-card: {{ theme.bg_card|default:"#FFFFFF" }};
+            --sf-text-primary: {{ theme.text_primary|default:"#0F0B1D" }};
+            --sf-text-secondary: {{ theme.text_secondary|default:"#4B4660" }};
+            --sf-accent-primary: {{ theme.accent_primary|default:"#6D49F2" }};
+            --sf-accent-secondary: {{ theme.accent_secondary|default:"#06B6D4" }};
+            --sf-accent-gradient: {{ theme.accent_gradient|safe }};
+            --sf-border-glow: {{ theme.border_glow|default:"rgba(109, 73, 242, 0.16)" }};
+            --sf-orb-1: {{ theme.orb_1|default:"#6D49F2" }};
+            --sf-orb-2: {{ theme.orb_2|default:"#FF3366" }};
+            --sf-orb-3: {{ theme.orb_3|default:"#06B6D4" }};
             --sf-font-heading: {{ theme.font_heading|safe }};
             --sf-font-body: {{ theme.font_body|safe }};
-            --sf-card-aspect: {{ theme.card_aspect }};
+            --sf-card-aspect: {{ theme.card_aspect|default:"1 / 1" }};
             --sf-ambient: {{ theme.ambient_pattern|safe }};
-            --sf-radius-lg: 22px;
-            --sf-radius-md: 16px;
-            --sf-radius-sm: 11px;
         }
 
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
-
-        body {
+        body.storefront-light-page {
             background-color: var(--sf-bg-primary);
             background-image: var(--sf-ambient);
             background-attachment: fixed;
             color: var(--sf-text-primary);
             font-family: var(--sf-font-body);
-            line-height: 1.5;
             min-height: 100vh;
             overflow-x: hidden;
-            transition: background-color 0.35s ease, color 0.35s ease;
         }
 
         h1, h2, h3, h4, .sf-heading {
             font-family: var(--sf-font-heading);
-            letter-spacing: -0.02em;
+            color: var(--sf-text-primary);
+            letter-spacing: -0.025em;
+        }
+
+        .material-symbols-rounded {
+            font-variation-settings: 'FILL' 0, 'wght' 500, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+            line-height: 1;
+            user-select: none;
+        }
+
+        .icon-filled {
+            font-variation-settings: 'FILL' 1, 'wght' 600, 'GRAD' 0, 'opsz' 24;
+        }
+
+        .text-gradient-category {
+            background: var(--sf-accent-gradient);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
         }
 
         /* =========================================================
-           BARRA SUPERIOR CARTMAKER ECOSYSTEM + TASA BCV EN VIVO
+           HERO SECTION CON MESH ORBS + PATRÓN ATLAS + CANVAS INTERACTIVO
            ========================================================= */
-        .cm-topbar {
-            position: sticky;
-            top: 0;
-            z-index: 90;
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            background: rgba(10, 12, 22, 0.82);
-            border-bottom: 1px solid var(--sf-border-glow);
-            padding: 10px 20px;
-            color: #F8FAFC;
+        .sf-stage-wrapper {
+            position: relative;
+            padding: 14px 0 60px;
+            overflow: hidden;
         }
-        [data-theme-mode="light"] .cm-topbar {
-            background: rgba(255, 255, 255, 0.88);
+
+        .sf-bg-mesh {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            z-index: 0;
+            overflow: hidden;
+        }
+
+        .sf-mesh-orb {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(85px);
+            opacity: 0.24;
+        }
+
+        .sf-orb-1 {
+            width: 380px;
+            height: 380px;
+            background: var(--sf-orb-1);
+            top: -90px;
+            left: -110px;
+            animation: floatOrbStore 14s ease-in-out infinite alternate;
+        }
+
+        .sf-orb-2 {
+            width: 320px;
+            height: 320px;
+            background: var(--sf-orb-2);
+            top: 100px;
+            right: -120px;
+            opacity: 0.18;
+            animation: floatOrbStore 17s ease-in-out infinite alternate-reverse;
+        }
+
+        .sf-orb-3 {
+            width: 300px;
+            height: 300px;
+            background: var(--sf-orb-3);
+            bottom: 40px;
+            left: 25%;
+            opacity: 0.15;
+            animation: floatOrbStore 20s ease-in-out infinite alternate;
+        }
+
+        @keyframes floatOrbStore {
+            0% { transform: translate(0, 0) scale(1); }
+            100% { transform: translate(26px, -20px) scale(1.08); }
+        }
+
+        .sf-grid-dots {
+            position: absolute;
+            inset: 0;
+            background-image: radial-gradient(rgba(109, 73, 242, 0.11) 1px, transparent 1px);
+            background-size: 24px 24px;
+            mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.65) 0%, transparent 88%);
+            -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.65) 0%, transparent 88%);
+        }
+
+        .sf-container {
+            position: relative;
+            z-index: 1;
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 0 18px;
+        }
+
+        /* Píldoras superiores estilo Atlas / ClickUp */
+        .sf-top-pill-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+
+        .sf-live-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            border-radius: 999px;
+            background: #FFFFFF;
+            border: 1px solid rgba(15, 11, 29, 0.09);
+            box-shadow: 0 2px 8px rgba(15, 11, 29, 0.04);
+            font-size: 0.78rem;
+            font-weight: 700;
             color: var(--sf-text-primary);
         }
-        .cm-topbar-inner {
-            max-width: 1340px;
-            margin: 0 auto;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            flex-wrap: wrap;
+
+        .sf-pulse-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #10B981;
+            box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+            animation: sfPulseEmerald 2s infinite;
         }
-        .cm-brand-pill {
+
+        .sf-pulse-dot.closed {
+            background: #EF4444;
+            animation: none;
+        }
+
+        @keyframes sfPulseEmerald {
+            0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.6); }
+            70% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+
+        .sf-atlas-verified-pill {
             display: inline-flex;
             align-items: center;
-            gap: 10px;
-            text-decoration: none;
-            color: inherit;
-            font-weight: 800;
-            font-size: 0.95rem;
-        }
-        .cm-brand-logo-dot {
-            width: 32px;
-            height: 32px;
-            border-radius: 10px;
-            background: var(--sf-accent-gradient);
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            color: #fff;
-            font-size: 1.05rem;
-            box-shadow: 0 4px 14px var(--sf-border-glow);
-        }
-        .cm-topbar-controls {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            flex-wrap: wrap;
-        }
-        .cm-bcv-pill {
-            font-size: 0.8rem;
-            font-weight: 700;
-            padding: 6px 12px;
+            gap: 7px;
+            padding: 6px 14px;
             border-radius: 999px;
-            background: rgba(16, 185, 129, 0.14);
-            color: #10B981;
-            border: 1px solid rgba(16, 185, 129, 0.32);
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-        }
-        .cm-currency-toggle {
-            display: inline-flex;
-            background: rgba(148, 163, 184, 0.15);
-            border-radius: 999px;
-            padding: 3px;
-            border: 1px solid var(--sf-border-glow);
-        }
-        .cm-currency-btn {
-            border: none;
-            background: transparent;
-            color: inherit;
-            font-size: 0.76rem;
-            font-weight: 700;
-            padding: 5px 11px;
-            border-radius: 999px;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-        .cm-currency-btn.active {
-            background: var(--sf-accent-gradient);
-            color: #fff;
-        }
-        .cm-theme-switcher {
-            background: rgba(148, 163, 184, 0.14);
-            color: inherit;
-            border: 1px solid var(--sf-border-glow);
-            border-radius: 999px;
-            padding: 6px 12px;
+            background: linear-gradient(90deg, rgba(109, 73, 242, 0.10) 0%, rgba(236, 72, 153, 0.10) 100%);
+            border: 1px solid rgba(109, 73, 242, 0.22);
             font-size: 0.78rem;
-            font-weight: 600;
-            cursor: pointer;
-        }
-        .cm-app-cta-top {
-            background: var(--sf-accent-gradient);
-            color: #fff;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 999px;
             font-weight: 700;
-            font-size: 0.82rem;
-            cursor: pointer;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            box-shadow: 0 6px 18px var(--sf-border-glow);
-            transition: transform 0.2s ease;
+            color: var(--cm-primary);
         }
-        .cm-app-cta-top:hover {
-            transform: translateY(-1px);
+
+        .sf-atlas-verified-pill img {
+            width: 16px;
+            height: 16px;
         }
 
         /* =========================================================
-           HERO INTERACTIVO DEL COMERCIANTE
+           TARJETA HERO DEL COMERCIO + CANVAS DE CATEGORÍA + MAPBOX 3D
            ========================================================= */
-        .sf-container {
-            max-width: 1340px;
-            margin: 0 auto;
-            padding: 24px 20px 120px;
-        }
         .sf-hero-card {
             position: relative;
+            background: #FFFFFF;
+            border: 1px solid rgba(15, 11, 29, 0.08);
             border-radius: 28px;
-            background: var(--sf-bg-secondary);
-            border: 1px solid var(--sf-border-glow);
             padding: 28px;
-            margin-bottom: 24px;
+            box-shadow: 0 18px 50px rgba(15, 11, 29, 0.07), 0 0 0 1px var(--sf-border-glow);
             overflow: hidden;
-            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.18);
+            margin-bottom: 22px;
         }
+
+        /* Barra superior cromática según la categoría */
+        .sf-hero-card::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 5px;
+            background: var(--sf-accent-gradient);
+            z-index: 3;
+        }
+
+        /* Lienzo HTML5 Canvas interactivo de la categoría */
+        #categoryHeroCanvas {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+            opacity: 0.85;
+        }
+
+        .sf-hero-watermark {
+            position: absolute;
+            right: 43%;
+            bottom: -28px;
+            font-size: 190px;
+            color: var(--sf-accent-primary);
+            opacity: 0.035;
+            pointer-events: none;
+            z-index: 0;
+            transform: rotate(-10deg);
+        }
+
         .sf-hero-grid {
+            position: relative;
+            z-index: 2;
             display: grid;
-            grid-template-columns: 1.35fr 1fr;
-            gap: 24px;
-            align-items: center;
+            grid-template-columns: 1.28fr 0.92fr;
+            gap: 28px;
+            align-items: stretch;
         }
-        @media (max-width: 960px) {
+
+        @media (max-width: 980px) {
             .sf-hero-grid {
                 grid-template-columns: 1fr;
             }
+            .sf-hero-card {
+                padding: 20px;
+            }
         }
-        .sf-merchant-header {
+
+        .sf-merchant-identity {
             display: flex;
-            align-items: flex-start;
-            gap: 20px;
+            flex-direction: column;
+            justify-content: space-between;
+            gap: 18px;
         }
+
+        .sf-merchant-top-row {
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
+        }
+
         @media (max-width: 600px) {
-            .sf-merchant-header {
+            .sf-merchant-top-row {
                 flex-direction: column;
             }
         }
-        .sf-merchant-avatar-wrap {
+
+        .sf-avatar-stage {
             position: relative;
             flex-shrink: 0;
         }
+
         .sf-merchant-avatar {
             width: 96px;
             height: 96px;
             border-radius: 24px;
             object-fit: cover;
-            border: 3px solid var(--sf-accent-primary);
-            box-shadow: 0 10px 25px var(--sf-border-glow);
-            background: var(--sf-bg-card);
+            background: #F8FAFC;
+            border: 3px solid #FFFFFF;
+            box-shadow: 0 12px 28px rgba(15, 11, 29, 0.12), 0 0 0 2px var(--sf-accent-primary);
         }
-        .sf-platinum-crown {
+
+        .sf-platinum-badge {
             position: absolute;
             bottom: -8px;
-            right: -8px;
-            background: linear-gradient(135deg, #F59E0B, #FEF08A, #D97706);
-            color: #1E1B4B;
-            font-size: 0.68rem;
-            font-weight: 900;
-            padding: 3px 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%);
+            color: #FFFFFF;
+            font-size: 0.64rem;
+            font-weight: 800;
+            padding: 3px 9px;
             border-radius: 999px;
-            box-shadow: 0 4px 12px rgba(245, 158, 11, 0.5);
-            letter-spacing: 0.04em;
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            white-space: nowrap;
+            box-shadow: 0 4px 12px rgba(245, 158, 11, 0.35);
         }
-        .sf-badges-row {
+
+        .sf-platinum-badge .material-symbols-rounded {
+            font-size: 13px;
+        }
+
+        .sf-badges-wrap {
             display: flex;
             flex-wrap: wrap;
             gap: 8px;
             margin-bottom: 10px;
         }
-        .sf-badge {
+
+        .sf-chip {
             display: inline-flex;
             align-items: center;
-            gap: 5px;
-            font-size: 0.74rem;
-            font-weight: 700;
-            padding: 4px 11px;
+            gap: 6px;
+            padding: 5px 12px;
             border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            background: var(--sf-bg-secondary);
+            color: var(--sf-accent-primary);
             border: 1px solid var(--sf-border-glow);
-            background: var(--sf-bg-card);
         }
-        .sf-badge.open {
-            background: rgba(16, 185, 129, 0.15);
-            color: #10B981;
-            border-color: rgba(16, 185, 129, 0.35);
+
+        .sf-chip .material-symbols-rounded {
+            font-size: 16px;
         }
-        .sf-badge.closed {
-            background: rgba(239, 68, 68, 0.15);
-            color: #EF4444;
-            border-color: rgba(239, 68, 68, 0.35);
+
+        .sf-chip.chip-open {
+            background: rgba(16, 185, 129, 0.10);
+            color: #059669;
+            border-color: rgba(16, 185, 129, 0.25);
         }
-        .sf-badge.verified {
-            background: rgba(59, 130, 246, 0.15);
-            color: #3B82F6;
-            border-color: rgba(59, 130, 246, 0.35);
+
+        .sf-chip.chip-closed {
+            background: rgba(239, 68, 68, 0.10);
+            color: #DC2626;
+            border-color: rgba(239, 68, 68, 0.25);
         }
-        .sf-badge.tokens {
-            background: rgba(245, 158, 11, 0.16);
-            color: #F59E0B;
-            border-color: rgba(245, 158, 11, 0.4);
+
+        .sf-chip.chip-kyb {
+            background: rgba(109, 73, 242, 0.10);
+            color: #6D49F2;
+            border-color: rgba(109, 73, 242, 0.24);
         }
-        .sf-merchant-title {
-            font-size: clamp(1.65rem, 3vw, 2.35rem);
+
+        .sf-chip.chip-tokens {
+            background: rgba(245, 158, 11, 0.12);
+            color: #B45309;
+            border-color: rgba(245, 158, 11, 0.30);
+        }
+
+        .sf-merchant-name {
+            font-size: clamp(1.75rem, 3.2vw, 2.5rem);
             font-weight: 800;
-            line-height: 1.15;
-            margin-bottom: 6px;
+            line-height: 1.1;
+            margin-bottom: 8px;
+            color: var(--sf-text-primary);
         }
+
         .sf-merchant-tagline {
             color: var(--sf-text-secondary);
-            font-size: 0.92rem;
-            margin-bottom: 14px;
+            font-size: 0.96rem;
+            line-height: 1.5;
+            max-width: 640px;
         }
-        .sf-stats-bar {
+
+        /* Micro-beneficios dinámicos de la categoría (Estilo Atlas / ClickUp) */
+        .sf-category-perks {
+            list-style: none;
             display: flex;
-            flex-wrap: wrap;
-            gap: 14px;
-            margin-top: 12px;
+            flex-direction: column;
+            gap: 8px;
+            margin: 4px 0;
         }
-        .sf-stat-chip {
-            background: var(--sf-bg-card);
-            border: 1px solid var(--sf-border-glow);
-            padding: 8px 14px;
-            border-radius: 14px;
+
+        .sf-category-perks li {
+            display: inline-flex;
+            align-items: center;
+            gap: 9px;
+            font-size: 0.86rem;
+            font-weight: 600;
+            color: var(--sf-text-secondary);
+        }
+
+        .sf-category-perks li .material-symbols-rounded {
+            font-size: 18px;
+            color: var(--sf-accent-primary);
+            background: var(--sf-bg-secondary);
+            width: 28px;
+            height: 28px;
+            border-radius: 8px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        /* Tarjetas de Métricas del Comercio */
+        .sf-metrics-row {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+        }
+
+        @media (max-width: 640px) {
+            .sf-metrics-row {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .sf-metric-card {
+            background: var(--sf-bg-primary);
+            border: 1px solid rgba(15, 11, 29, 0.08);
+            border-radius: 18px;
+            padding: 12px 14px;
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 12px;
             cursor: pointer;
-            transition: transform 0.2s ease, border-color 0.2s ease;
+            transition: all 0.22s ease;
         }
-        .sf-stat-chip:hover {
-            transform: translateY(-2px);
+
+        .sf-metric-card:hover {
             border-color: var(--sf-accent-primary);
+            background: #FFFFFF;
+            transform: translateY(-2px);
+            box-shadow: 0 10px 24px rgba(15, 11, 29, 0.06);
         }
-        .sf-stat-val {
+
+        .sf-metric-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .sf-metric-icon.amber {
+            background: rgba(245, 158, 11, 0.14);
+            color: #D97706;
+        }
+
+        .sf-metric-icon.purple {
+            background: rgba(109, 73, 242, 0.12);
+            color: #6D49F2;
+        }
+
+        .sf-metric-icon.emerald {
+            background: rgba(16, 185, 129, 0.12);
+            color: #059669;
+        }
+
+        .sf-metric-val {
+            font-family: var(--sf-font-heading);
             font-weight: 800;
-            font-size: 0.98rem;
+            font-size: 1.05rem;
+            color: var(--sf-text-primary);
+            line-height: 1.2;
         }
-        .sf-stat-lbl {
-            font-size: 0.76rem;
+
+        .sf-metric-lbl {
+            font-size: 0.73rem;
+            font-weight: 600;
             color: var(--sf-text-secondary);
         }
 
         /* =========================================================
-           PANEL DE MAPA INTERACTIVO Y CÁLCULO DE TIEMPO DE LLEGADA
+           TARJETA DE MAPA 3D MAPBOX + LOGÍSTICA GPS EN TIEMPO REAL
            ========================================================= */
-        .sf-map-box {
-            background: var(--sf-bg-card);
-            border: 1px solid var(--sf-border-glow);
-            border-radius: 20px;
+        .sf-mapbox-card {
+            background: var(--sf-bg-primary);
+            border: 1px solid rgba(15, 11, 29, 0.09);
+            border-radius: 22px;
             overflow: hidden;
             display: flex;
             flex-direction: column;
+            box-shadow: 0 8px 26px rgba(15, 11, 29, 0.05);
         }
-        #sfLeafletMap {
+
+        .sf-mapbox-viewport-wrap {
+            position: relative;
             width: 100%;
-            height: 210px;
-            z-index: 1;
+            height: 225px;
+            background: #E2E8F0;
         }
-        .sf-map-footer {
-            padding: 12px 16px;
+
+        #sfMapboxContainer {
+            width: 100%;
+            height: 100%;
+        }
+
+        .sf-map-floating-pill {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            z-index: 5;
+            background: rgba(255, 255, 255, 0.92);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(15, 11, 29, 0.10);
+            border-radius: 999px;
+            padding: 5px 12px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.74rem;
+            font-weight: 700;
+            color: var(--sf-text-primary);
+            box-shadow: 0 4px 14px rgba(15, 11, 29, 0.08);
+        }
+
+        .sf-map-floating-pill .material-symbols-rounded {
+            font-size: 16px;
+            color: var(--sf-accent-primary);
+        }
+
+        /* Pin 3D Personalizado de CartMaker en Mapbox */
+        .cm-mapbox-pin {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            cursor: pointer;
+        }
+
+        .cm-mapbox-pin-bubble {
+            width: 44px;
+            height: 44px;
+            border-radius: 14px;
+            background: #FFFFFF;
+            border: 3px solid var(--sf-accent-primary);
+            box-shadow: 0 8px 20px rgba(109, 73, 242, 0.35);
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.2s ease;
+        }
+
+        .cm-mapbox-pin:hover .cm-mapbox-pin-bubble {
+            transform: scale(1.1) translateY(-2px);
+        }
+
+        .cm-mapbox-pin-bubble img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .cm-mapbox-pin-tip {
+            width: 0;
+            height: 0;
+            border-left: 7px solid transparent;
+            border-right: 7px solid transparent;
+            border-top: 9px solid var(--sf-accent-primary);
+            margin-top: -1px;
+        }
+
+        .sf-map-logistics-panel {
+            padding: 14px 16px;
+            background: #FFFFFF;
+            border-top: 1px solid rgba(15, 11, 29, 0.07);
             display: flex;
             flex-direction: column;
             gap: 10px;
+            flex: 1;
+            justify-content: space-between;
         }
-        .sf-eta-pills {
+
+        .sf-map-address-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            font-size: 0.82rem;
+        }
+
+        .sf-address-text {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-weight: 700;
+            color: var(--sf-text-primary);
+        }
+
+        .sf-address-text .material-symbols-rounded {
+            font-size: 18px;
+            color: var(--sf-accent-primary);
+        }
+
+        .sf-distance-chip {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: var(--sf-accent-primary);
+            background: var(--sf-bg-secondary);
+            padding: 3px 9px;
+            border-radius: 999px;
+        }
+
+        .sf-eta-grid {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
             gap: 8px;
         }
-        .sf-eta-pill {
-            background: rgba(148, 163, 184, 0.1);
-            border: 1px solid var(--sf-border-glow);
-            border-radius: 10px;
-            padding: 6px 8px;
+
+        .sf-eta-box {
+            background: var(--sf-bg-primary);
+            border: 1px solid rgba(15, 11, 29, 0.08);
+            border-radius: 12px;
+            padding: 7px 8px;
             text-align: center;
-            font-size: 0.76rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
         }
-        .sf-eta-pill strong {
-            display: block;
-            font-size: 0.88rem;
+
+        .sf-eta-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            color: var(--sf-text-secondary);
+        }
+
+        .sf-eta-label .material-symbols-rounded {
+            font-size: 15px;
             color: var(--sf-accent-primary);
         }
-        .sf-route-btn {
+
+        .sf-eta-box strong {
+            font-family: var(--sf-font-heading);
+            font-size: 0.9rem;
+            font-weight: 800;
+            color: var(--sf-text-primary);
+        }
+
+        .sf-btn-route {
             width: 100%;
-            background: var(--sf-accent-gradient);
-            color: #fff;
             border: none;
-            border-radius: 12px;
-            padding: 9px 14px;
+            background: var(--sf-accent-gradient);
+            color: #FFFFFF;
+            font-family: var(--sf-font-heading);
             font-weight: 700;
             font-size: 0.82rem;
+            padding: 10px 14px;
+            border-radius: 12px;
             cursor: pointer;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            gap: 8px;
-            transition: opacity 0.2s ease;
+            gap: 7px;
+            box-shadow: 0 6px 18px rgba(109, 73, 242, 0.24);
+            transition: transform 0.18s ease, box-shadow 0.18s ease;
         }
-        .sf-route-btn:hover {
-            opacity: 0.94;
+
+        .sf-btn-route:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 10px 24px rgba(109, 73, 242, 0.34);
+        }
+
+        .sf-btn-route .material-symbols-rounded {
+            font-size: 18px;
         }
 
         /* =========================================================
-           SELECTOR DE SUCURSALES (MULTI-TIENDA)
+           SELECTOR DE SUCURSALES (TABS DE SEDES)
            ========================================================= */
         .sf-branches-strip {
             display: flex;
-            align-items: center;
             gap: 10px;
             overflow-x: auto;
-            padding-bottom: 8px;
+            padding-bottom: 6px;
             margin-bottom: 20px;
             scrollbar-width: thin;
         }
+
         .sf-branch-tab {
-            flex-shrink: 0;
-            background: var(--sf-bg-card);
-            color: var(--sf-text-primary);
-            border: 1px solid var(--sf-border-glow);
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
             padding: 10px 16px;
             border-radius: 14px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            font-size: 0.84rem;
+            background: #FFFFFF;
+            border: 1px solid rgba(15, 11, 29, 0.09);
+            color: var(--sf-text-secondary);
+            font-family: var(--sf-font-heading);
+            font-size: 0.83rem;
             font-weight: 700;
+            cursor: pointer;
+            white-space: nowrap;
+            box-shadow: 0 2px 6px rgba(15, 11, 29, 0.03);
             transition: all 0.2s ease;
         }
+
+        .sf-branch-tab .material-symbols-rounded {
+            font-size: 17px;
+        }
+
+        .sf-branch-tab:hover {
+            border-color: var(--sf-accent-primary);
+            color: var(--sf-text-primary);
+        }
+
         .sf-branch-tab.active {
             background: var(--sf-accent-gradient);
-            color: #fff;
+            color: #FFFFFF;
             border-color: transparent;
-            box-shadow: 0 8px 20px var(--sf-border-glow);
+            box-shadow: 0 8px 20px rgba(109, 73, 242, 0.25);
         }
+
         .sf-branch-dot {
             width: 8px;
             height: 8px;
             border-radius: 50%;
             background: #10B981;
         }
+
         .sf-branch-dot.closed {
             background: #EF4444;
         }
 
         /* =========================================================
-           REEL DE VIDEO STORIES DEL COMERCIANTE
+           REEL INTERACTIVO DE VIDEO STORIES (CARTMAKER TV 30S)
            ========================================================= */
         .sf-stories-section {
-            margin-bottom: 26px;
+            background: #FFFFFF;
+            border: 1px solid rgba(15, 11, 29, 0.08);
+            border-radius: 22px;
+            padding: 18px 22px;
+            margin-bottom: 22px;
+            box-shadow: 0 6px 20px rgba(15, 11, 29, 0.04);
         }
-        .sf-section-subtitle {
-            font-size: 0.85rem;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            color: var(--sf-text-secondary);
-            font-weight: 800;
-            margin-bottom: 12px;
+
+        .sf-stories-header {
             display: flex;
             align-items: center;
-            gap: 8px;
+            justify-content: space-between;
+            margin-bottom: 12px;
         }
+
+        .sf-stories-title {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.95rem;
+            font-weight: 800;
+            color: var(--sf-text-primary);
+        }
+
+        .sf-stories-title .material-symbols-rounded {
+            color: var(--cm-pink);
+            font-size: 20px;
+        }
+
         .sf-stories-reel {
             display: flex;
             gap: 16px;
             overflow-x: auto;
-            padding: 4px 2px 12px;
+            padding: 4px 2px 8px;
         }
+
         .sf-story-item {
-            flex-shrink: 0;
-            width: 110px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
             cursor: pointer;
-            text-align: center;
-            transition: transform 0.2s ease;
+            width: 88px;
+            flex-shrink: 0;
         }
-        .sf-story-item:hover {
-            transform: translateY(-3px);
-        }
+
         .sf-story-ring {
-            width: 86px;
-            height: 86px;
-            margin: 0 auto 6px;
+            width: 78px;
+            height: 78px;
+            border-radius: 50%;
             padding: 3px;
-            border-radius: 26px;
             background: var(--sf-accent-gradient);
             position: relative;
+            transition: transform 0.2s ease;
         }
+
+        .sf-story-item:hover .sf-story-ring {
+            transform: scale(1.06);
+        }
+
         .sf-story-thumb {
             width: 100%;
             height: 100%;
-            border-radius: 22px;
+            border-radius: 50%;
             object-fit: cover;
-            background: #111;
+            border: 2px solid #FFFFFF;
+            background: #F1F5F9;
         }
+
         .sf-story-play-badge {
             position: absolute;
-            bottom: -4px;
-            right: -4px;
+            bottom: 0;
+            right: 0;
             background: var(--sf-accent-primary);
-            color: #fff;
-            width: 26px;
-            height: 26px;
+            color: #FFFFFF;
+            width: 24px;
+            height: 24px;
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 0.72rem;
-            border: 2px solid var(--sf-bg-primary);
+            border: 2px solid #FFFFFF;
         }
+
+        .sf-story-play-badge .material-symbols-rounded {
+            font-size: 14px;
+        }
+
         .sf-story-caption {
-            font-size: 0.75rem;
+            font-size: 0.72rem;
             font-weight: 600;
+            text-align: center;
+            color: var(--sf-text-secondary);
+            width: 100%;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
         }
 
         /* =========================================================
-           BARRA DE BÚSQUEDA Y FILTROS INTELIGENTES EN VIVO
+           CABECERA DEL CATÁLOGO CON ANIMACIÓN DEL CARRITO + SELECTOR DE MONEDA
            ========================================================= */
-        .sf-filters-bar {
-            position: sticky;
-            top: 57px;
-            z-index: 80;
-            backdrop-filter: blur(18px);
-            -webkit-backdrop-filter: blur(18px);
-            background: var(--sf-bg-secondary);
-            border: 1px solid var(--sf-border-glow);
-            border-radius: 20px;
-            padding: 16px;
-            margin-bottom: 24px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
-        }
-        .sf-filters-top {
-            display: grid;
-            grid-template-columns: 1fr auto auto;
-            gap: 12px;
-            align-items: center;
-            margin-bottom: 12px;
-        }
-        @media (max-width: 780px) {
-            .sf-filters-top {
-                grid-template-columns: 1fr;
-            }
-        }
-        .sf-search-input-wrap {
-            position: relative;
+        .sf-catalog-stage-header {
             display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 14px;
+            margin-bottom: 14px;
+        }
+
+        .sf-catalog-title-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .sf-catalog-eyebrow {
+            display: inline-flex;
             align-items: center;
+            gap: 6px;
+            font-size: 0.72rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--sf-accent-primary);
         }
-        .sf-search-input {
-            width: 100%;
-            background: var(--sf-bg-primary);
+
+        .sf-catalog-eyebrow img {
+            width: 18px;
+            height: 18px;
+            object-fit: contain;
+        }
+
+        .sf-catalog-main-heading {
+            font-size: clamp(1.35rem, 2.5vw, 1.75rem);
+            font-weight: 800;
             color: var(--sf-text-primary);
-            border: 1px solid var(--sf-border-glow);
-            border-radius: 14px;
-            padding: 12px 16px 12px 42px;
-            font-size: 0.94rem;
-            font-family: inherit;
-            outline: none;
-            transition: border-color 0.2s ease;
-        }
-        .sf-search-input:focus {
-            border-color: var(--sf-accent-primary);
-        }
-        .sf-search-icon {
-            position: absolute;
-            left: 14px;
-            font-size: 1rem;
-            opacity: 0.65;
-        }
-        .sf-select {
-            background: var(--sf-bg-primary);
-            color: var(--sf-text-primary);
-            border: 1px solid var(--sf-border-glow);
-            border-radius: 14px;
-            padding: 11px 14px;
-            font-size: 0.86rem;
-            font-weight: 600;
-            cursor: pointer;
-        }
-        .sf-pills-row {
             display: flex;
             align-items: center;
             gap: 8px;
-            overflow-x: auto;
-            padding-bottom: 4px;
         }
-        .sf-filter-pill {
-            flex-shrink: 0;
-            border: 1px solid var(--sf-border-glow);
-            background: var(--sf-bg-primary);
-            color: var(--sf-text-primary);
-            padding: 7px 14px;
-            border-radius: 999px;
-            font-size: 0.8rem;
+
+        /* Barra de Moneda (USD + Bs / Solo USD / Solo Bs) + Tasa BCV justo arriba del catálogo */
+        .sf-currency-toolbar {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .sf-bcv-live-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(16, 185, 129, 0.10);
+            border: 1px solid rgba(16, 185, 129, 0.26);
+            color: #059669;
+            padding: 7px 13px;
+            border-radius: 12px;
+            font-size: 0.78rem;
             font-weight: 700;
-            cursor: pointer;
-            transition: all 0.2s ease;
         }
-        .sf-filter-pill.active {
+
+        .sf-bcv-live-badge .material-symbols-rounded {
+            font-size: 16px;
+        }
+
+        .sf-currency-segmented {
+            display: inline-flex;
+            align-items: center;
+            background: #FFFFFF;
+            border: 1px solid rgba(15, 11, 29, 0.10);
+            border-radius: 14px;
+            padding: 4px;
+            box-shadow: 0 4px 12px rgba(15, 11, 29, 0.04);
+        }
+
+        .sf-curr-btn {
+            border: none;
+            background: transparent;
+            color: var(--sf-text-secondary);
+            font-family: var(--sf-font-heading);
+            font-size: 0.78rem;
+            font-weight: 700;
+            padding: 7px 13px;
+            border-radius: 10px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            transition: all 0.18s ease;
+        }
+
+        .sf-curr-btn:hover {
+            color: var(--sf-text-primary);
+        }
+
+        .sf-curr-btn.active {
             background: var(--sf-accent-gradient);
-            color: #fff;
-            border-color: transparent;
+            color: #FFFFFF;
+            box-shadow: 0 4px 12px rgba(109, 73, 242, 0.25);
         }
 
         /* =========================================================
-           GRILLA DE PRODUCTOS ADAPTATIVA POR CATEGORÍA
+           BARRA DE BÚSQUEDA, ORDENAMIENTO Y PÍLDORAS DE SUBCATEGORÍA
+           ========================================================= */
+        .sf-filters-bar {
+            background: #FFFFFF;
+            border: 1px solid rgba(15, 11, 29, 0.08);
+            border-radius: 22px;
+            padding: 16px 18px;
+            margin-bottom: 22px;
+            box-shadow: 0 8px 26px rgba(15, 11, 29, 0.04);
+        }
+
+        .sf-filters-top {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-bottom: 14px;
+        }
+
+        .sf-search-input-wrap {
+            flex: 1;
+            min-width: 240px;
+            position: relative;
+        }
+
+        .sf-search-icon {
+            position: absolute;
+            left: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--sf-text-secondary);
+            font-size: 20px;
+            pointer-events: none;
+        }
+
+        .sf-search-input {
+            width: 100%;
+            background: var(--sf-bg-primary);
+            border: 1px solid rgba(15, 11, 29, 0.10);
+            color: var(--sf-text-primary);
+            padding: 11px 14px 11px 42px;
+            border-radius: 14px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            outline: none;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+        }
+
+        .sf-search-input:focus {
+            background: #FFFFFF;
+            border-color: var(--sf-accent-primary);
+            box-shadow: 0 0 0 3px var(--sf-border-glow);
+        }
+
+        .sf-select-wrap {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+        }
+
+        .sf-select-wrap .material-symbols-rounded {
+            position: absolute;
+            left: 12px;
+            font-size: 18px;
+            color: var(--sf-accent-primary);
+            pointer-events: none;
+        }
+
+        .sf-select {
+            background: var(--sf-bg-primary);
+            border: 1px solid rgba(15, 11, 29, 0.10);
+            color: var(--sf-text-primary);
+            padding: 11px 16px 11px 38px;
+            border-radius: 14px;
+            font-family: var(--sf-font-heading);
+            font-size: 0.84rem;
+            font-weight: 700;
+            outline: none;
+            cursor: pointer;
+        }
+
+        .sf-cart-trigger-btn {
+            border: none;
+            background: var(--sf-accent-gradient);
+            color: #FFFFFF;
+            padding: 11px 18px;
+            border-radius: 14px;
+            font-family: var(--sf-font-heading);
+            font-size: 0.85rem;
+            font-weight: 800;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 6px 18px rgba(109, 73, 242, 0.24);
+            transition: transform 0.18s ease, box-shadow 0.18s ease;
+        }
+
+        .sf-cart-trigger-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 10px 24px rgba(109, 73, 242, 0.34);
+        }
+
+        .sf-cart-trigger-btn .material-symbols-rounded {
+            font-size: 19px;
+        }
+
+        .sf-pills-row {
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            padding-bottom: 4px;
+            scrollbar-width: none;
+        }
+
+        .sf-pills-row::-webkit-scrollbar {
+            display: none;
+        }
+
+        .sf-filter-pill {
+            border: 1px solid rgba(15, 11, 29, 0.09);
+            background: var(--sf-bg-primary);
+            color: var(--sf-text-secondary);
+            padding: 7px 14px;
+            border-radius: 999px;
+            font-family: var(--sf-font-heading);
+            font-size: 0.78rem;
+            font-weight: 700;
+            cursor: pointer;
+            white-space: nowrap;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            transition: all 0.18s ease;
+        }
+
+        .sf-filter-pill .material-symbols-rounded {
+            font-size: 15px;
+        }
+
+        .sf-filter-pill:hover {
+            border-color: var(--sf-accent-primary);
+            color: var(--sf-text-primary);
+        }
+
+        .sf-filter-pill.active {
+            background: var(--sf-accent-gradient);
+            color: #FFFFFF;
+            border-color: transparent;
+            box-shadow: 0 4px 12px rgba(109, 73, 242, 0.22);
+        }
+
+        /* =========================================================
+           GRILLA DE PRODUCTOS (ESTILO CLICKUP / ATLAS HIGH-CONTRAST LIGHT)
            ========================================================= */
         .sf-products-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(265px, 1fr));
             gap: 20px;
         }
-        /* Variaciones específicas según el arquetipo visual de las 14 categorías */
-        [data-card-style="gourmet-menu"] .sf-products-grid {
-            grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
-        }
-        [data-card-style="runway-lookbook"] .sf-products-grid {
-            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+
+        @media (max-width: 600px) {
+            .sf-products-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 12px;
+            }
         }
 
         .sf-product-card {
-            background: var(--sf-bg-card);
-            border: 1px solid var(--sf-border-glow);
-            border-radius: var(--sf-radius-lg);
+            background: #FFFFFF;
+            border: 1px solid rgba(15, 11, 29, 0.08);
+            border-radius: 22px;
             overflow: hidden;
             display: flex;
             flex-direction: column;
+            justify-content: space-between;
             transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s ease, border-color 0.25s ease;
-            cursor: pointer;
             position: relative;
+            cursor: pointer;
+            box-shadow: 0 6px 18px rgba(15, 11, 29, 0.04);
         }
+
         .sf-product-card:hover {
             transform: translateY(-5px);
             border-color: var(--sf-accent-primary);
-            box-shadow: 0 18px 38px var(--sf-border-glow);
+            box-shadow: 0 18px 38px rgba(15, 11, 29, 0.10);
         }
+
         .sf-product-media {
             position: relative;
             width: 100%;
             aspect-ratio: var(--sf-card-aspect);
-            background: rgba(148, 163, 184, 0.08);
+            background: #F8FAFC;
             overflow: hidden;
+            border-bottom: 1px solid rgba(15, 11, 29, 0.05);
         }
+
         .sf-product-img {
             width: 100%;
             height: 100%;
             object-fit: cover;
-            transition: transform 0.4s ease;
+            transition: transform 0.45s ease;
         }
+
         .sf-product-card:hover .sf-product-img {
             transform: scale(1.05);
         }
+
         .sf-card-top-badges {
             position: absolute;
             top: 10px;
@@ -649,442 +1191,667 @@
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
-            gap: 6px;
             pointer-events: none;
+            gap: 6px;
         }
+
         .sf-offer-tag {
-            background: linear-gradient(135deg, #EF4444, #F97316);
-            color: #fff;
-            font-size: 0.74rem;
+            background: linear-gradient(135deg, #EF4444 0%, #F97316 100%);
+            color: #FFFFFF;
+            font-family: var(--sf-font-heading);
             font-weight: 800;
+            font-size: 0.72rem;
             padding: 4px 10px;
             border-radius: 999px;
-            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.32);
         }
+
+        .sf-offer-tag .material-symbols-rounded {
+            font-size: 14px;
+        }
+
         .sf-token-tag {
-            background: rgba(15, 23, 42, 0.86);
-            color: #FBBF24;
-            border: 1px solid rgba(251, 191, 36, 0.45);
-            font-size: 0.72rem;
-            font-weight: 700;
+            background: rgba(255, 255, 255, 0.94);
+            backdrop-filter: blur(8px);
+            color: #B45309;
+            border: 1px solid rgba(245, 158, 11, 0.4);
+            font-family: var(--sf-font-heading);
+            font-weight: 800;
+            font-size: 0.68rem;
             padding: 4px 9px;
             border-radius: 999px;
-            backdrop-filter: blur(8px);
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            box-shadow: 0 4px 10px rgba(15, 11, 29, 0.08);
         }
+
+        .sf-token-tag .material-symbols-rounded {
+            font-size: 14px;
+            color: #F59E0B;
+        }
+
         .sf-product-body {
-            padding: 16px;
+            padding: 15px 16px;
             display: flex;
             flex-direction: column;
+            gap: 6px;
             flex: 1;
-            gap: 8px;
         }
+
         .sf-product-cat {
-            font-size: 0.72rem;
-            font-weight: 700;
+            font-size: 0.7rem;
             text-transform: uppercase;
-            letter-spacing: 0.06em;
+            letter-spacing: 0.05em;
             color: var(--sf-accent-primary);
+            font-weight: 800;
+            display: flex;
+            align-items: center;
+            gap: 4px;
         }
+
         .sf-product-title {
-            font-size: 1.02rem;
-            font-weight: 700;
-            line-height: 1.3;
+            font-size: 0.96rem;
+            font-weight: 800;
+            line-height: 1.32;
+            color: var(--sf-text-primary);
             display: -webkit-box;
             -webkit-line-clamp: 2;
             -webkit-box-orient: vertical;
             overflow: hidden;
         }
+
         .sf-specs-preview {
             display: flex;
             flex-wrap: wrap;
-            gap: 5px;
+            gap: 4px;
+            margin-top: 2px;
         }
+
         .sf-spec-chip {
-            font-size: 0.7rem;
+            font-size: 0.68rem;
+            font-weight: 600;
             padding: 2px 8px;
             border-radius: 6px;
-            background: rgba(148, 163, 184, 0.13);
+            background: var(--sf-bg-secondary);
             color: var(--sf-text-secondary);
-            font-weight: 600;
         }
+
         .sf-price-row {
             margin-top: auto;
             padding-top: 10px;
-            border-top: 1px solid rgba(148, 163, 184, 0.14);
+            border-top: 1px solid rgba(15, 11, 29, 0.06);
             display: flex;
             align-items: flex-end;
             justify-content: space-between;
             gap: 8px;
         }
+
         .sf-price-main {
-            font-size: 1.28rem;
+            font-family: var(--sf-font-heading);
+            font-size: 1.24rem;
             font-weight: 800;
+            color: var(--sf-text-primary);
             line-height: 1.1;
         }
+
         .sf-price-old {
-            font-size: 0.78rem;
+            font-size: 0.74rem;
+            color: #94A3B8;
             text-decoration: line-through;
-            color: var(--sf-text-secondary);
-            margin-left: 6px;
         }
+
         .sf-price-bs {
-            font-size: 0.76rem;
-            color: var(--sf-text-secondary);
-            font-weight: 600;
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: #059669;
             margin-top: 2px;
         }
+
         .sf-add-btn {
-            background: var(--sf-accent-gradient);
-            color: #fff;
             border: none;
-            border-radius: 12px;
+            background: var(--sf-accent-gradient);
+            color: #FFFFFF;
             padding: 9px 14px;
-            font-weight: 700;
-            font-size: 0.82rem;
+            border-radius: 12px;
+            font-family: var(--sf-font-heading);
+            font-weight: 800;
+            font-size: 0.78rem;
             cursor: pointer;
             display: inline-flex;
             align-items: center;
             gap: 5px;
-            box-shadow: 0 4px 14px var(--sf-border-glow);
+            box-shadow: 0 4px 12px rgba(109, 73, 242, 0.22);
+            transition: transform 0.16s ease, box-shadow 0.16s ease;
+        }
+
+        .sf-add-btn:hover {
+            transform: scale(1.04);
+            box-shadow: 0 6px 16px rgba(109, 73, 242, 0.32);
+        }
+
+        .sf-add-btn .material-symbols-rounded {
+            font-size: 16px;
         }
 
         /* =========================================================
-           BARRA FLOTANTE INFERIOR DE CARRITO -> APP CARTMAKER
+           BARRA FLOTANTE INFERIOR DE CHECKOUT EXCLUSIVO EN CARTMAKER APP
            ========================================================= */
         .sf-floating-cart-bar {
             position: fixed;
             bottom: 20px;
             left: 50%;
-            transform: translateX(-50%) translateY(130%);
+            transform: translateX(-50%) translateY(150%);
+            width: min(94vw, 900px);
             z-index: 95;
-            width: min(94vw, 760px);
-            background: rgba(10, 12, 24, 0.94);
-            color: #fff;
-            border: 1px solid var(--sf-accent-primary);
+            background: rgba(255, 255, 255, 0.96);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 2px solid var(--sf-accent-primary);
             border-radius: 22px;
             padding: 14px 20px;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 16px;
-            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.55), 0 0 25px var(--sf-border-glow);
-            backdrop-filter: blur(20px);
+            gap: 14px;
+            box-shadow: 0 24px 60px rgba(15, 11, 29, 0.18);
             transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+            color: var(--sf-text-primary);
         }
+
         .sf-floating-cart-bar.visible {
             transform: translateX(-50%) translateY(0);
         }
+
+        @media (max-width: 640px) {
+            .sf-floating-cart-bar {
+                flex-direction: column;
+                align-items: stretch;
+                bottom: 12px;
+                padding: 14px;
+            }
+        }
+
         .sf-checkout-app-btn {
-            background: var(--sf-accent-gradient);
-            color: #fff;
             border: none;
-            border-radius: 14px;
+            background: var(--sf-accent-gradient);
+            color: #FFFFFF;
             padding: 12px 22px;
+            border-radius: 14px;
+            font-family: var(--sf-font-heading);
             font-weight: 800;
-            font-size: 0.92rem;
+            font-size: 0.9rem;
             cursor: pointer;
             display: inline-flex;
             align-items: center;
             gap: 8px;
-            box-shadow: 0 6px 20px var(--sf-border-glow);
+            box-shadow: 0 8px 24px rgba(109, 73, 242, 0.30);
+            transition: transform 0.18s ease, box-shadow 0.18s ease;
+        }
+
+        .sf-checkout-app-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 12px 28px rgba(109, 73, 242, 0.40);
         }
 
         /* =========================================================
-           MODALES INTERACTIVOS (DETALLE SDUI, STORIES, HANDOFF APP, QR)
+           MODALES CLAROS ESTILO CARTMAKER / ATLAS
            ========================================================= */
         .sf-modal-backdrop {
             position: fixed;
             inset: 0;
-            z-index: 120;
-            background: rgba(5, 7, 15, 0.78);
-            backdrop-filter: blur(12px);
+            z-index: 1100;
+            background: rgba(15, 11, 29, 0.55);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
             display: none;
             align-items: center;
             justify-content: center;
             padding: 18px;
         }
+
         .sf-modal-backdrop.open {
             display: flex;
         }
+
         .sf-modal-card {
-            background: var(--sf-bg-secondary);
+            background: #FFFFFF;
             color: var(--sf-text-primary);
-            border: 1px solid var(--sf-border-glow);
+            border: 1px solid rgba(15, 11, 29, 0.10);
             border-radius: 26px;
             width: min(100%, 820px);
             max-height: 90vh;
             overflow-y: auto;
-            padding: 26px;
+            padding: 28px;
             position: relative;
-            box-shadow: 0 25px 70px rgba(0, 0, 0, 0.55);
+            box-shadow: 0 28px 70px rgba(15, 11, 29, 0.22);
         }
+
         .sf-modal-close {
             position: absolute;
             top: 16px;
             right: 16px;
-            width: 36px;
-            height: 36px;
+            width: 38px;
+            height: 38px;
             border-radius: 50%;
-            border: 1px solid var(--sf-border-glow);
-            background: var(--sf-bg-card);
+            border: 1px solid rgba(15, 11, 29, 0.10);
+            background: var(--sf-bg-primary);
             color: var(--sf-text-primary);
-            font-size: 1.1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             cursor: pointer;
+            transition: background 0.18s ease;
         }
+
+        .sf-modal-close:hover {
+            background: #F1F5F9;
+        }
+
         .sf-detail-grid {
             display: grid;
             grid-template-columns: 1fr 1.1fr;
             gap: 24px;
         }
+
         @media (max-width: 720px) {
             .sf-detail-grid {
                 grid-template-columns: 1fr;
             }
         }
+
         .sf-variant-btn {
-            border: 1px solid var(--sf-border-glow);
+            border: 1px solid rgba(15, 11, 29, 0.12);
             background: var(--sf-bg-primary);
             color: var(--sf-text-primary);
             padding: 8px 14px;
             border-radius: 12px;
+            font-family: var(--sf-font-heading);
             font-size: 0.82rem;
             font-weight: 700;
             cursor: pointer;
             margin: 4px 6px 4px 0;
+            transition: all 0.18s ease;
         }
+
         .sf-variant-btn.selected {
             background: var(--sf-accent-gradient);
-            color: #fff;
+            color: #FFFFFF;
             border-color: transparent;
+            box-shadow: 0 4px 12px rgba(109, 73, 242, 0.24);
         }
+
         .sf-qr-box {
-            background: #fff;
+            background: #FFFFFF;
             padding: 16px;
             border-radius: 20px;
+            border: 2px solid var(--sf-border-glow);
             display: inline-flex;
             align-items: center;
             justify-content: center;
             margin: 12px auto;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            box-shadow: 0 10px 28px rgba(15, 11, 29, 0.08);
         }
+
         .sf-protection-banner {
-            background: rgba(16, 185, 129, 0.12);
-            border: 1px solid rgba(16, 185, 129, 0.35);
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px solid rgba(16, 185, 129, 0.28);
+            color: var(--sf-text-primary);
             border-radius: 16px;
             padding: 14px 16px;
             margin-top: 16px;
             font-size: 0.84rem;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            text-align: left;
+        }
+
+        .sf-protection-banner .material-symbols-rounded {
+            color: #059669;
+            font-size: 22px;
+            flex-shrink: 0;
+            margin-top: 1px;
         }
     </style>
 </head>
-<body data-card-style="{{ theme.card_style }}">
+<body class="landing-page storefront-light-page" data-card-style="{{ theme.card_style }}">
 
     <!-- =========================================================
-         BARRA SUPERIOR DEL ECOSISTEMA CARTMAKER
+         BARRA DE ANUNCIO SUPERIOR (ESTILO CLICKUP / CARTMAKER)
          ========================================================= -->
-    <header class="cm-topbar">
-        <div class="cm-topbar-inner">
-            <a href="/" class="cm-brand-pill">
-                <span class="cm-brand-logo-dot">🛒</span>
-                <span>CartMaker <small style="opacity:0.72;font-weight:600;">Vitrina Oficial</small></span>
+    <div class="top-announcement-bar">
+        <div class="announcement-inner">
+            <span class="announcement-pill">VITRINA OFICIAL</span>
+            <p class="announcement-text">
+                Estás explorando el inventario en tiempo real de <strong>{{ company.name }}</strong> sincronizado con <strong>CartMaker &amp; Atlas IA</strong>.
+            </p>
+            <a href="{{ app_deep_link }}" onclick="openAppHandoffModal(); return false;" class="announcement-cta">
+                Abrir en la App <span class="material-symbols-rounded">arrow_forward</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- =========================================================
+         FLOATING GLASS NAVBAR OFICIAL CARTMAKER (CON LOGO OFICIAL SVG)
+         ========================================================= -->
+    <header class="public-header-wrapper" id="publicHeader">
+        <nav class="public-navbar" aria-label="Navegación Vitrina Oficial CartMaker">
+            <a href="{% url 'web_home' %}" class="nav-brand">
+                <div class="brand-logo-box">
+                    <img src="{% static 'img/logo_sin_letras.svg' %}" alt="CartMaker Logo" class="nav-logo-svg">
+                </div>
+                <div class="brand-text-group">
+                    <span class="nav-brand-text">CartMaker</span>
+                    <span class="nav-brand-tag">Vitrina Oficial en Vivo</span>
+                </div>
             </a>
 
-            <div class="cm-topbar-controls">
-                {% if bcv_rate > 0 %}
-                <span class="cm-bcv-pill" title="Tasa Oficial BCV sincronizada automáticamente">
-                    🏦 BCV: Bs. {{ bcv_rate|floatformat:2 }} / $1
-                </span>
-                {% endif %}
-
-                <div class="cm-currency-toggle" role="group" aria-label="Selector de moneda">
-                    <button type="button" class="cm-currency-btn active" data-curr="BOTH" onclick="setCurrencyMode('BOTH')">USD + Bs</button>
-                    <button type="button" class="cm-currency-btn" data-curr="USD" onclick="setCurrencyMode('USD')">Solo USD</button>
-                    <button type="button" class="cm-currency-btn" data-curr="BS" onclick="setCurrencyMode('BS')">Solo Bs</button>
-                </div>
-
-                <select id="themePreviewSelect" class="cm-theme-switcher" onchange="switchCategoryTheme(this.value)" title="Personalidad visual adaptada a la categoría del comercio">
-                </select>
-
-                <button type="button" class="cm-app-cta-top" onclick="openQrStandeeModal()">
-                    🖨️ QR de Tienda
+            <div class="nav-right-actions" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <button type="button" class="btn-nav-secondary" onclick="openQrStandeeModal()" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+                    <span class="material-symbols-rounded" style="font-size:18px;">qr_code_2</span>
+                    <span>QR de Tienda</span>
                 </button>
-                <a href="{{ app_deep_link }}" onclick="openAppHandoffModal(); return false;" class="cm-app-cta-top">
-                    📱 Abrir en CartMaker App
+                <a href="{{ app_deep_link }}" onclick="openAppHandoffModal(); return false;" class="btn-nav-primary">
+                    <span class="material-symbols-rounded">smartphone</span>
+                    <span>Abrir en CartMaker App</span>
                 </a>
             </div>
-        </div>
+        </nav>
     </header>
 
-    <main class="sf-container">
-        <!-- =========================================================
-             HERO DEL COMERCIANTE + MAPA INTERACTIVO CON RUTA EN VIVO
-             ========================================================= -->
-        <section class="sf-hero-card">
-            <div class="sf-hero-grid">
-                <div>
-                    <div class="sf-merchant-header">
-                        <div class="sf-merchant-avatar-wrap">
-                            <img src="{{ company.image|default:'/static/img/no_image.jpg' }}" alt="{{ company.name }}" class="sf-merchant-avatar" onerror="this.src='/static/img/no_image.jpg'">
-                            {% if company.is_platinum %}
-                            <span class="sf-platinum-crown">👑 PLATINUM</span>
-                            {% endif %}
-                        </div>
+    <div class="sf-stage-wrapper">
+        <!-- Orbes de Luz + Patrón de Puntos de CartMaker / Atlas -->
+        <div class="sf-bg-mesh" aria-hidden="true">
+            <div class="sf-mesh-orb sf-orb-1"></div>
+            <div class="sf-mesh-orb sf-orb-2"></div>
+            <div class="sf-mesh-orb sf-orb-3"></div>
+            <div class="sf-grid-dots"></div>
+        </div>
 
-                        <div style="flex:1;">
-                            <div class="sf-badges-row">
-                                <span class="sf-badge" id="heroCategoryBadge">
-                                    {{ theme.hero_badge_icon }} <span id="heroCategoryLabel">{{ theme.category_label }}</span>
-                                </span>
-                                <span class="sf-badge open" id="branchOpenStatusBadge">
-                                    🟢 Verificando horario...
-                                </span>
-                                {% if company.kyb_status == 2 %}
-                                <span class="sf-badge verified" title="Empresa verificada legalmente en SENIAT/SAREN">
-                                    🛡️ Empresa Verificada KYB
-                                </span>
-                                {% endif %}
-                                {% if company.gamification_enabled %}
-                                <span class="sf-badge tokens">
-                                    🪙 Gana {{ company.gamification_tokens_per_dollar }} Tokens por cada $1
+        <main class="sf-container">
+            <!-- Píldoras Superiores de Ecosistema -->
+            <div class="sf-top-pill-row">
+                <div class="sf-live-pill">
+                    <span class="sf-pulse-dot" id="topLivePulseDot"></span>
+                    <span id="topLiveStatusText">Inventario y Precios Sincronizados en Tiempo Real</span>
+                </div>
+                <div class="sf-atlas-verified-pill">
+                    <img src="{% static 'img/atlas.svg' %}" alt="Atlas IA">
+                    <span>Indexado en el Radar Hiper-Local de Atlas IA</span>
+                </div>
+            </div>
+
+            <!-- =========================================================
+                 HERO DEL COMERCIANTE + CANVAS DE CATEGORÍA + MAPBOX 3D
+                 ========================================================= -->
+            <section class="sf-hero-card">
+                <!-- Lienzo HTML5 Canvas interactivo exclusivo para la categoría de la tienda -->
+                <canvas id="categoryHeroCanvas"></canvas>
+                <span class="material-symbols-rounded sf-hero-watermark" aria-hidden="true">{{ theme.watermark_icon|default:"storefront" }}</span>
+
+                <div class="sf-hero-grid">
+                    <div class="sf-merchant-identity">
+                        <div class="sf-merchant-top-row">
+                            <div class="sf-avatar-stage">
+                                <img src="{{ company.image|default:'/static/img/no_image.jpg' }}" alt="{{ company.name }}" class="sf-merchant-avatar" onerror="this.src='/static/img/no_image.jpg'">
+                                {% if company.is_platinum %}
+                                <span class="sf-platinum-badge">
+                                    <span class="material-symbols-rounded icon-filled">workspace_premium</span> PLATINUM
                                 </span>
                                 {% endif %}
                             </div>
 
-                            <h1 class="sf-merchant-title">{{ company.name }}</h1>
-                            <p class="sf-merchant-tagline" id="heroTaglineText">{{ theme.hero_tagline }}</p>
+                            <div style="flex:1;">
+                                <div class="sf-badges-wrap">
+                                    <span class="sf-chip">
+                                        <span class="material-symbols-rounded">{{ theme.hero_badge_icon }}</span>
+                                        <span>{{ theme.category_label }}</span>
+                                    </span>
 
-                            <div class="sf-stats-bar">
-                                <div class="sf-stat-chip" onclick="openReputationModal()" title="Ver desglose de calificaciones">
-                                    <span>⭐</span>
-                                    <div>
-                                        <div class="sf-stat-val">{{ company.avg_rating|default:"5.0" }} <small style="font-weight:500;opacity:0.75;">({{ company.rating_count }})</small></div>
-                                        <div class="sf-stat-lbl">Calificación Verificada</div>
-                                    </div>
+                                    <span class="sf-chip chip-open" id="branchOpenStatusBadge">
+                                        <span class="material-symbols-rounded">schedule</span>
+                                        <span>Verificando horario...</span>
+                                    </span>
+
+                                    {% if company.kyb_status == 2 %}
+                                    <span class="sf-chip chip-kyb" title="Empresa verificada legalmente en SENIAT/SAREN">
+                                        <span class="material-symbols-rounded icon-filled">verified</span>
+                                        <span>Empresa Verificada KYB</span>
+                                    </span>
+                                    {% endif %}
+
+                                    {% if company.gamification_enabled %}
+                                    <span class="sf-chip chip-tokens">
+                                        <span class="material-symbols-rounded icon-filled">toll</span>
+                                        <span>Gana {{ company.gamification_tokens_per_dollar }} Tokens por cada $1</span>
+                                    </span>
+                                    {% endif %}
                                 </div>
 
-                                <div class="sf-stat-chip" onclick="openReputationModal()">
-                                    <span>📦</span>
-                                    <div>
-                                        <div class="sf-stat-val">{{ items_count }}</div>
-                                        <div class="sf-stat-lbl">Productos en Stock</div>
-                                    </div>
-                                </div>
+                                <h1 class="sf-merchant-name">{{ company.name }}</h1>
+                                <p class="sf-merchant-tagline">{{ theme.hero_tagline }}</p>
+                            </div>
+                        </div>
 
-                                <div class="sf-stat-chip" onclick="openQrStandeeModal()">
-                                    <span>🔒</span>
-                                    <div>
-                                        <div class="sf-stat-val">100% App</div>
-                                        <div class="sf-stat-lbl">Compra Protegida CartMaker</div>
-                                    </div>
+                        {% if theme.feature_pills %}
+                        <ul class="sf-category-perks">
+                            {% for pill in theme.feature_pills %}
+                            <li>
+                                <span class="material-symbols-rounded">{{ pill.icon }}</span>
+                                <span>{{ pill.text }}</span>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                        {% endif %}
+
+                        <div class="sf-metrics-row">
+                            <div class="sf-metric-card" onclick="openReputationModal()" title="Ver desglose de calificaciones verificadas">
+                                <div class="sf-metric-icon amber">
+                                    <span class="material-symbols-rounded icon-filled">star</span>
+                                </div>
+                                <div>
+                                    <div class="sf-metric-val">{{ company.avg_rating|default:"5.0" }} <small style="font-weight:600;color:var(--sf-text-secondary);font-size:0.8rem;">({{ company.rating_count }})</small></div>
+                                    <div class="sf-metric-lbl">Calificación Verificada</div>
+                                </div>
+                            </div>
+
+                            <div class="sf-metric-card" onclick="document.getElementById('catalogoSection').scrollIntoView({behavior:'smooth'})">
+                                <div class="sf-metric-icon purple">
+                                    <span class="material-symbols-rounded">inventory_2</span>
+                                </div>
+                                <div>
+                                    <div class="sf-metric-val">{{ items_count }}</div>
+                                    <div class="sf-metric-lbl">Productos en Stock</div>
+                                </div>
+                            </div>
+
+                            <div class="sf-metric-card" onclick="openQrStandeeModal()">
+                                <div class="sf-metric-icon emerald">
+                                    <span class="material-symbols-rounded">verified_user</span>
+                                </div>
+                                <div>
+                                    <div class="sf-metric-val">100% App</div>
+                                    <div class="sf-metric-lbl">Compra Protegida CartMaker</div>
                                 </div>
                             </div>
                         </div>
                     </div>
+
+                    <!-- Mapa 3D Oficial con Mapbox GL JS + Cálculo de Ruta en Vivo -->
+                    <div class="sf-mapbox-card">
+                        <div class="sf-mapbox-viewport-wrap">
+                            <div class="sf-map-floating-pill">
+                                <span class="material-symbols-rounded">3d_rotation</span>
+                                <span>Mapa 3D CartMaker</span>
+                            </div>
+                            <div id="sfMapboxContainer"></div>
+                        </div>
+
+                        <div class="sf-map-logistics-panel">
+                            <div class="sf-map-address-bar">
+                                <span class="sf-address-text" id="activeBranchAddressLabel">
+                                    <span class="material-symbols-rounded">location_on</span>
+                                    <span>Cargando ubicación...</span>
+                                </span>
+                                <span class="sf-distance-chip" id="routeDistanceBadge" style="display:none;"></span>
+                            </div>
+
+                            <div class="sf-eta-grid">
+                                <div class="sf-eta-box">
+                                    <span class="sf-eta-label">
+                                        <span class="material-symbols-rounded">directions_car</span> Carro
+                                    </span>
+                                    <strong id="etaCarVal">-- min</strong>
+                                </div>
+                                <div class="sf-eta-box">
+                                    <span class="sf-eta-label">
+                                        <span class="material-symbols-rounded">two_wheeler</span> Moto
+                                    </span>
+                                    <strong id="etaMotoVal">-- min</strong>
+                                </div>
+                                <div class="sf-eta-box">
+                                    <span class="sf-eta-label">
+                                        <span class="material-symbols-rounded">directions_walk</span> A pie
+                                    </span>
+                                    <strong id="etaWalkVal">-- min</strong>
+                                </div>
+                            </div>
+
+                            <button type="button" class="sf-btn-route" id="calcRouteBtn" onclick="calculateLiveRouteToStore()">
+                                <span class="material-symbols-rounded">near_me</span>
+                                <span id="calcRouteBtnText">Calcular cuánto tardo en llegar desde mi ubicación</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- =========================================================
+                 SELECTOR DE SUCURSALES (SI TIENE 1 O MÁS SEDES)
+                 ========================================================= -->
+            <div class="sf-branches-strip" id="branchesTabsContainer"></div>
+
+            <!-- =========================================================
+                 REEL INTERACTIVO DE VIDEO STORIES (CARTMAKER TV 30S)
+                 ========================================================= -->
+            <section class="sf-stories-section" id="storiesSectionWrap" style="display:none;">
+                <div class="sf-stories-header">
+                    <div class="sf-stories-title">
+                        <span class="material-symbols-rounded icon-filled">play_circle</span>
+                        <span>CartMaker TV · Video Historias de {{ company.name }}</span>
+                    </div>
+                    <small style="color:var(--sf-text-secondary);font-weight:600;font-size:0.78rem;">Toca una historia para ver el producto en acción</small>
+                </div>
+                <div class="sf-stories-reel" id="storiesReelContainer"></div>
+            </section>
+
+            <!-- =========================================================
+                 CABECERA DEL CATÁLOGO + SELECTOR DE MONEDA (USD + Bs / Solo USD / Solo Bs)
+                 UBICADO JUSTO ARRIBA DEL CATÁLOGO PARA MÁXIMA ERGONOMÍA
+                 ========================================================= -->
+            <section id="catalogoSection">
+                <div class="sf-catalog-stage-header">
+                    <div class="sf-catalog-title-group">
+                        <span class="sf-catalog-eyebrow">
+                            <img src="{% static 'img/logo_sin_letras.png' %}" alt="CartMaker">
+                            <span>INVENTARIO OFICIAL EN TIEMPO REAL</span>
+                        </span>
+                        <h2 class="sf-catalog-main-heading">
+                            <span>Catálogo Disponible</span>
+                            <span class="text-gradient-category">(<span id="visibleProductsCount">0</span>)</span>
+                        </h2>
+                    </div>
+
+                    <!-- Controles de Moneda y Tasa BCV justo arriba del catálogo -->
+                    <div class="sf-currency-toolbar">
+                        {% if bcv_rate > 0 %}
+                        <div class="sf-bcv-live-badge" title="Tasa Oficial BCV sincronizada automáticamente">
+                            <span class="material-symbols-rounded">account_balance</span>
+                            <span>BCV: Bs. {{ bcv_rate|floatformat:2 }} / $1</span>
+                        </div>
+                        {% endif %}
+
+                        <div class="sf-currency-segmented" role="group" aria-label="Visualización de precios">
+                            <button type="button" class="sf-curr-btn active" data-curr="BOTH" onclick="setCurrencyMode('BOTH')">
+                                <span class="material-symbols-rounded" style="font-size:16px;">currency_exchange</span>
+                                <span>USD + Bs</span>
+                            </button>
+                            <button type="button" class="sf-curr-btn" data-curr="USD" onclick="setCurrencyMode('USD')">
+                                <span>Solo USD</span>
+                            </button>
+                            <button type="button" class="sf-curr-btn" data-curr="BS" onclick="setCurrencyMode('BS')">
+                                <span>Solo Bs</span>
+                            </button>
+                        </div>
+                    </div>
                 </div>
 
-                <!-- Mapa Interactivo de Sucursales + Calculadora de Tiempo de Llegada -->
-                <div class="sf-map-box">
-                    <div id="sfLeafletMap"></div>
-                    <div class="sf-map-footer">
-                        <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.8rem;">
-                            <strong id="activeBranchAddressLabel">📍 Cargando ubicación...</strong>
-                            <span id="routeDistanceBadge" style="color:var(--sf-accent-primary);font-weight:800;"></span>
+                <!-- =========================================================
+                     BUSCADOR INSTANTÁNEO, ORDENAMIENTO Y FILTROS DE SUBCATEGORÍA
+                     ========================================================= -->
+                <div class="sf-filters-bar">
+                    <div class="sf-filters-top">
+                        <div class="sf-search-input-wrap">
+                            <span class="material-symbols-rounded sf-search-icon">search</span>
+                            <input type="search" id="catalogSearchInput" class="sf-search-input" placeholder="Buscar producto, marca, talla, modelo o especificación en {{ company.name }}..." oninput="applyFilters()">
                         </div>
-                        <div class="sf-eta-pills">
-                            <div class="sf-eta-pill">
-                                🚗 Carro
-                                <strong id="etaCarVal">-- min</strong>
-                            </div>
-                            <div class="sf-eta-pill">
-                                🏍️ Moto
-                                <strong id="etaMotoVal">-- min</strong>
-                            </div>
-                            <div class="sf-eta-pill">
-                                🚶 A pie
-                                <strong id="etaWalkVal">-- min</strong>
-                            </div>
+
+                        <div class="sf-select-wrap">
+                            <span class="material-symbols-rounded">tune</span>
+                            <select id="sortSelect" class="sf-select" onchange="applyFilters()" aria-label="Ordenar productos">
+                                <option value="featured">Más Destacados</option>
+                                <option value="price_asc">Precio: Menor a Mayor</option>
+                                <option value="price_desc">Precio: Mayor a Menor</option>
+                                <option value="discount">Mayor Descuento</option>
+                                <option value="rating">Mejor Calificados</option>
+                            </select>
                         </div>
-                        <button type="button" class="sf-route-btn" id="calcRouteBtn" onclick="calculateLiveRouteToStore()">
-                            🧭 Calcular cuánto tardo en llegar desde mi ubicación
+
+                        <button type="button" class="sf-cart-trigger-btn" onclick="openCartDrawer()">
+                            <span class="material-symbols-rounded">shopping_bag</span>
+                            <span>Mi Carrito (<span id="topCartCounter">0</span>)</span>
                         </button>
                     </div>
-                </div>
-            </div>
-        </section>
 
-        <!-- =========================================================
-             SELECTOR DE SUCURSALES (SI TIENE 1 O MÁS SEDES)
-             ========================================================= -->
-        <div class="sf-branches-strip" id="branchesTabsContainer"></div>
-
-        <!-- =========================================================
-             REEL INTERACTIVO DE VIDEO STORIES (SI LA TIENDA TIENE STORIES)
-             ========================================================= -->
-        <section class="sf-stories-section" id="storiesSectionWrap" style="display:none;">
-            <div class="sf-section-subtitle">
-                <span>🎬 Video Historias en Vivo</span>
-                <small style="opacity:0.7;font-weight:600;">(Toca para ver el producto en acción)</small>
-            </div>
-            <div class="sf-stories-reel" id="storiesReelContainer"></div>
-        </section>
-
-        <!-- =========================================================
-             BUSCADOR INSTANTÁNEO Y FILTROS DE CATÁLOGO
-             ========================================================= -->
-        <section class="sf-filters-bar">
-            <div class="sf-filters-top">
-                <div class="sf-search-input-wrap">
-                    <span class="sf-search-icon">🔍</span>
-                    <input type="search" id="catalogSearchInput" class="sf-search-input" placeholder="Buscar producto, marca, talla, modelo o especificación en {{ company.name }}..." oninput="applyFilters()">
+                    <div class="sf-pills-row" id="subcategoryPillsContainer"></div>
                 </div>
 
-                <select id="sortSelect" class="sf-select" onchange="applyFilters()">
-                    <option value="featured">✨ Más Destacados</option>
-                    <option value="price_asc">💲 Precio: Menor a Mayor</option>
-                    <option value="price_desc">💎 Precio: Mayor a Menor</option>
-                    <option value="discount">⚡ Mayor Descuento</option>
-                    <option value="rating">⭐ Mejor Calificados</option>
-                </select>
-
-                <button type="button" class="sf-add-btn" style="padding:11px 16px;" onclick="openCartDrawer()">
-                    🛒 Mi Carrito (<span id="topCartCounter">0</span>)
-                </button>
-            </div>
-
-            <div class="sf-pills-row" id="subcategoryPillsContainer"></div>
-        </section>
-
-        <!-- =========================================================
-             GRILLA DE PRODUCTOS INTERACTIVOS
-             ========================================================= -->
-        <section>
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-                <h2 class="sf-heading" style="font-size:1.25rem;">Catálogo en Tiempo Real (<span id="visibleProductsCount">0</span>)</h2>
-                <span style="font-size:0.8rem;color:var(--sf-text-secondary);">Precios sincronizados con inventario oficial CartMaker</span>
-            </div>
-            <div class="sf-products-grid" id="productsGridContainer"></div>
-        </section>
-    </main>
+                <!-- Grilla de Productos -->
+                <div class="sf-products-grid" id="productsGridContainer"></div>
+            </section>
+        </main>
+    </div>
 
     <!-- =========================================================
          BARRA FLOTANTE INFERIOR DE CHECKOUT EXCLUSIVO EN CARTMAKER APP
          ========================================================= -->
     <div class="sf-floating-cart-bar" id="floatingCartBar">
-        <div>
-            <div style="font-size:0.78rem;color:#94A3B8;font-weight:600;">
-                <span id="floatingCartItemsCount">0</span> productos listos para pedir en <strong>{{ company.name }}</strong>
+        <div style="display:flex;align-items:center;gap:12px;">
+            <div class="brand-logo-box" style="width:42px;height:42px;flex-shrink:0;">
+                <img src="{% static 'img/logo_sin_letras.svg' %}" alt="CartMaker" class="nav-logo-svg">
             </div>
-            <div style="font-size:1.22rem;font-weight:800;">
-                Total: <span id="floatingCartTotalUsd">$0.00</span>
-                <small id="floatingCartTotalBs" style="font-size:0.82rem;color:#10B981;margin-left:8px;"></small>
+            <div>
+                <div style="font-size:0.78rem;color:var(--sf-text-secondary);font-weight:600;">
+                    <span id="floatingCartItemsCount">0</span> productos listos para pedir en <strong>{{ company.name }}</strong>
+                </div>
+                <div style="font-size:1.22rem;font-weight:800;color:var(--sf-text-primary);">
+                    Total: <span id="floatingCartTotalUsd">$0.00</span>
+                    <small id="floatingCartTotalBs" style="font-size:0.84rem;color:#059669;margin-left:8px;font-weight:700;"></small>
+                </div>
             </div>
         </div>
         <div style="display:flex;gap:10px;align-items:center;">
-            <button type="button" class="cm-currency-btn" style="border:1px solid rgba(255,255,255,0.25);padding:10px 14px;color:#fff;" onclick="openCartDrawer()">
-                Ver Carrito
+            <button type="button" class="sf-curr-btn" style="border:1px solid rgba(15,11,29,0.14);padding:10px 16px;" onclick="openCartDrawer()">
+                <span class="material-symbols-rounded" style="font-size:18px;">visibility</span>
+                <span>Ver Carrito</span>
             </button>
             <button type="button" class="sf-checkout-app-btn" onclick="proceedToCartMakerAppCheckout()">
-                🚀 Completar Compra en CartMaker App
+                <span class="material-symbols-rounded">rocket_launch</span>
+                <span>Completar Compra en CartMaker App</span>
             </button>
         </div>
     </div>
@@ -1094,7 +1861,9 @@
          ========================================================= -->
     <div class="sf-modal-backdrop" id="productDetailModal" onclick="if(event.target===this)closeProductModal()">
         <div class="sf-modal-card">
-            <button type="button" class="sf-modal-close" onclick="closeProductModal()">✕</button>
+            <button type="button" class="sf-modal-close" onclick="closeProductModal()" aria-label="Cerrar">
+                <span class="material-symbols-rounded">close</span>
+            </button>
             <div id="productModalContent"></div>
         </div>
     </div>
@@ -1103,8 +1872,10 @@
          MODAL 2: REPRODUCTOR DE VIDEO STORY VERTICAL (9:16)
          ========================================================= -->
     <div class="sf-modal-backdrop" id="storyPlayerModal" onclick="if(event.target===this)closeStoryModal()">
-        <div class="sf-modal-card" style="max-width:430px;padding:18px;text-align:center;">
-            <button type="button" class="sf-modal-close" onclick="closeStoryModal()">✕</button>
+        <div class="sf-modal-card" style="max-width:430px;padding:20px;text-align:center;">
+            <button type="button" class="sf-modal-close" onclick="closeStoryModal()" aria-label="Cerrar">
+                <span class="material-symbols-rounded">close</span>
+            </button>
             <div id="storyModalContent"></div>
         </div>
     </div>
@@ -1114,7 +1885,9 @@
          ========================================================= -->
     <div class="sf-modal-backdrop" id="cartHandoffModal" onclick="if(event.target===this)closeCartDrawer()">
         <div class="sf-modal-card" style="max-width:650px;">
-            <button type="button" class="sf-modal-close" onclick="closeCartDrawer()">✕</button>
+            <button type="button" class="sf-modal-close" onclick="closeCartDrawer()" aria-label="Cerrar">
+                <span class="material-symbols-rounded">close</span>
+            </button>
             <div id="cartDrawerContent"></div>
         </div>
     </div>
@@ -1124,7 +1897,9 @@
          ========================================================= -->
     <div class="sf-modal-backdrop" id="reputationModal" onclick="if(event.target===this)closeReputationModal()">
         <div class="sf-modal-card" style="max-width:560px;">
-            <button type="button" class="sf-modal-close" onclick="closeReputationModal()">✕</button>
+            <button type="button" class="sf-modal-close" onclick="closeReputationModal()" aria-label="Cerrar">
+                <span class="material-symbols-rounded">close</span>
+            </button>
             <div id="reputationModalContent"></div>
         </div>
     </div>
@@ -1134,25 +1909,46 @@
          ========================================================= -->
     <div class="sf-modal-backdrop" id="qrStandeeModal" onclick="if(event.target===this)closeQrStandeeModal()">
         <div class="sf-modal-card" style="max-width:520px;text-align:center;">
-            <button type="button" class="sf-modal-close" onclick="closeQrStandeeModal()">✕</button>
-            <span class="sf-badge tokens" style="margin-bottom:10px;">🖨️ Kit QR Oficial CartMaker</span>
+            <button type="button" class="sf-modal-close" onclick="closeQrStandeeModal()" aria-label="Cerrar">
+                <span class="material-symbols-rounded">close</span>
+            </button>
+
+            <div style="display:inline-flex;align-items:center;gap:8px;margin-bottom:10px;">
+                <div class="brand-logo-box" style="width:34px;height:34px;">
+                    <img src="{% static 'img/logo_sin_letras.svg' %}" alt="CartMaker" class="nav-logo-svg">
+                </div>
+                <span class="sf-chip chip-kyb">
+                    <span class="material-symbols-rounded">qr_code_2</span>
+                    <span>Kit QR Oficial CartMaker</span>
+                </span>
+            </div>
+
             <h2 class="sf-heading" style="font-size:1.5rem;margin-bottom:6px;">{{ company.name }}</h2>
             <p style="font-size:0.88rem;color:var(--sf-text-secondary);margin-bottom:14px;">
-                Escanea con la cámara de tu teléfono para explorar el catálogo en tiempo real y pedir desde la App de CartMaker.
+                Escanea con la cámara de tu teléfono para explorar el catálogo en tiempo real y pedir de forma segura desde la App de CartMaker.
             </p>
             <div class="sf-qr-box" id="storefrontQrCanvas"></div>
-            <div style="margin:14px 0;display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
-                <button type="button" class="sf-add-btn" onclick="copyStorefrontUrl()">📋 Copiar Link de Vitrina</button>
-                <button type="button" class="sf-add-btn" onclick="window.print()">🖨️ Imprimir Hablador QR</button>
+            <div style="margin:14px 0;display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
+                <button type="button" class="sf-add-btn" onclick="copyStorefrontUrl()">
+                    <span class="material-symbols-rounded">content_copy</span>
+                    <span>Copiar Link de Vitrina</span>
+                </button>
+                <button type="button" class="sf-add-btn" onclick="window.print()">
+                    <span class="material-symbols-rounded">print</span>
+                    <span>Imprimir Hablador QR</span>
+                </button>
             </div>
             <div class="sf-protection-banner">
-                🔒 <strong>Compra 100% Protegida:</strong> Todos los pagos y entregas de {{ company.name }} se procesan de forma segura dentro de la aplicación móvil de CartMaker.
+                <span class="material-symbols-rounded">verified_user</span>
+                <div>
+                    <strong>Compra 100% Protegida:</strong> Todos los pagos y entregas de {{ company.name }} se procesan de forma segura dentro de la aplicación móvil de CartMaker.
+                </div>
             </div>
         </div>
     </div>
 
     <!-- =========================================================
-         MOTOR INTERACTIVO DE LA VITRINA PÚBLICA
+         MOTOR INTERACTIVO DE LA VITRINA PÚBLICA (CANVAS + MAPBOX 3D + SDUI)
          ========================================================= -->
     <script>
         const STOREFRONT_DATA = {{ storefront_json|safe }};
@@ -1172,28 +1968,185 @@
             handoffResult: null,
             map: null,
             branchMarkers: [],
-            routeLayer: null,
+            userMarker: null,
             userLat: null,
             userLng: null,
         };
 
-        const ALL_THEMES_MAP = {
-            tech_cyber: { mode:'dark', bg1:'#070B14', bg2:'#0F172A', card:'rgba(15,23,42,0.84)', txt1:'#F8FAFC', txt2:'#94A3B8', acc1:'#06B6D4', grad:'linear-gradient(135deg,#06B6D4 0%,#6366F1 55%,#A855F7 100%)', glow:'rgba(6,182,212,0.28)', aspect:'1 / 1', style:'cyber-spec-grid', icon:'⚡', label:'Tecnología y Electrónica' },
-            beauty_editorial: { mode:'light', bg1:'#FFFBF9', bg2:'#FDF2F0', card:'rgba(255,255,255,0.94)', txt1:'#291820', txt2:'#7A5C68', acc1:'#D9468F', grad:'linear-gradient(135deg,#D9468F 0%,#EC4899 50%,#F59E0B 100%)', glow:'rgba(217,70,143,0.22)', aspect:'4 / 5', style:'editorial-luxury', icon:'✨', label:'Salud y Belleza' },
-            gourmet_bistro: { mode:'light', bg1:'#FFFDF9', bg2:'#FEF5EB', card:'#FFFFFF', txt1:'#1F140E', txt2:'#6E503F', acc1:'#EA580C', grad:'linear-gradient(135deg,#EA580C 0%,#F59E0B 60%,#DC2626 100%)', glow:'rgba(234,88,12,0.22)', aspect:'4 / 3', style:'gourmet-menu', icon:'🍽️', label:'Alimentos y Bebidas' },
-            fashion_runway: { mode:'dark', bg1:'#0C0A09', bg2:'#1C1917', card:'rgba(28,25,23,0.88)', txt1:'#FAFAF9', txt2:'#A8A29E', acc1:'#D4AF37', grad:'linear-gradient(135deg,#D4AF37 0%,#F59E0B 50%,#F43F5E 100%)', glow:'rgba(212,175,55,0.28)', aspect:'3 / 4', style:'runway-lookbook', icon:'👗', label:'Moda y Accesorios' },
-            auto_telemetry: { mode:'dark', bg1:'#090A0F', bg2:'#12151F', card:'rgba(18,21,31,0.90)', txt1:'#F1F5F9', txt2:'#94A3B8', acc1:'#EF4444', grad:'linear-gradient(135deg,#EF4444 0%,#F97316 60%,#EAB308 100%)', glow:'rgba(239,68,68,0.30)', aspect:'16 / 11', style:'telemetry-garage', icon:'🏎️', label:'Carros, Motos y Otros' },
-            industrial_pro: { mode:'dark', bg1:'#0F1419', bg2:'#1A222C', card:'rgba(26,34,44,0.90)', txt1:'#F8FAFC', txt2:'#94A3B8', acc1:'#F59E0B', grad:'linear-gradient(135deg,#F59E0B 0%,#EA580C 100%)', glow:'rgba(245,158,11,0.30)', aspect:'1 / 1', style:'industrial-catalog', icon:'🛠️', label:'Ferretería y Construcción' },
-            nordic_architect: { mode:'light', bg1:'#F8FAF7', bg2:'#EEF3EC', card:'#FFFFFF', txt1:'#14241B', txt2:'#4E6758', acc1:'#059669', grad:'linear-gradient(135deg,#059669 0%,#10B981 55%,#D97706 100%)', glow:'rgba(5,150,105,0.20)', aspect:'4 / 3', style:'interior-gallery', icon:'🏡', label:'Hogar, Muebles y Jardín' },
-            kinetic_sport: { mode:'dark', bg1:'#060D0B', bg2:'#0E1F1A', card:'rgba(14,31,26,0.88)', txt1:'#F8FAFC', txt2:'#94A3B8', acc1:'#10B981', grad:'linear-gradient(135deg,#10B981 0%,#06B6D4 55%,#3B82F6 100%)', glow:'rgba(16,185,129,0.30)', aspect:'1 / 1', style:'kinetic-performance', icon:'🏆', label:'Deportes y Fitness' },
-            pastel_cloud: { mode:'light', bg1:'#F8FAFF', bg2:'#F0F4FF', card:'#FFFFFF', txt1:'#1E293B', txt2:'#64748B', acc1:'#6366F1', grad:'linear-gradient(135deg,#6366F1 0%,#A855F7 50%,#EC4899 100%)', glow:'rgba(99,102,241,0.18)', aspect:'1 / 1', style:'soft-rounded', icon:'🍼', label:'Bebés y Maternidad' },
-            pet_nature: { mode:'light', bg1:'#FFFDF9', bg2:'#FFF4E6', card:'#FFFFFF', txt1:'#1C1917', txt2:'#57534E', acc1:'#F97316', grad:'linear-gradient(135deg,#F97316 0%,#FB923C 50%,#0D9488 100%)', glow:'rgba(249,115,22,0.22)', aspect:'1 / 1', style:'pet-friendly', icon:'🐾', label:'Mascotas' },
-            arcade_pop: { mode:'dark', bg1:'#0F0720', bg2:'#1B0E36', card:'rgba(27,14,54,0.88)', txt1:'#FFFFFF', txt2:'#C4B5FD', acc1:'#EC4899', grad:'linear-gradient(135deg,#EC4899 0%,#8B5CF6 50%,#06B6D4 100%)', glow:'rgba(236,72,153,0.30)', aspect:'1 / 1', style:'arcade-pop', icon:'🎮', label:'Juegos y Juguetes' },
-            acoustic_stage: { mode:'dark', bg1:'#0A0908', bg2:'#171412', card:'rgba(23,20,18,0.90)', txt1:'#FAF8F5', txt2:'#A89F91', acc1:'#F59E0B', grad:'linear-gradient(135deg,#F59E0B 0%,#D97706 50%,#92400E 100%)', glow:'rgba(245,158,11,0.28)', aspect:'1 / 1', style:'studio-stage', icon:'🎸', label:'Instrumentos Musicales' },
-            atelier_press: { mode:'light', bg1:'#FBF9F5', bg2:'#F3EFE6', card:'#FFFFFF', txt1:'#1E293B', txt2:'#475569', acc1:'#1D4ED8', grad:'linear-gradient(135deg,#1D4ED8 0%,#4F46E5 55%,#B91C1C 100%)', glow:'rgba(29,78,216,0.20)', aspect:'3 / 4', style:'atelier-editorial', icon:'📚', label:'Papelería, Oficina y Libros' },
-            cartmaker_signature: { mode:'dark', bg1:'#090812', bg2:'#131124', card:'rgba(19,17,36,0.88)', txt1:'#F8FAFC', txt2:'#94A3B8', acc1:'#7C3AED', grad:'linear-gradient(135deg,#7C3AED 0%,#EC4899 50%,#F97316 100%)', glow:'rgba(124,58,237,0.30)', aspect:'1 / 1', style:'signature-glass', icon:'🛒', label:'Comercio Oficial CartMaker' },
-        };
+        /* =========================================================
+           1. MOTOR DE DIBUJO EN CANVAS HTML5 POR CATEGORÍA DE TIENDA
+           ========================================================= */
+        function initCategoryCanvasStage() {
+            const canvas = document.getElementById('categoryHeroCanvas');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const mode = (STOREFRONT_DATA.theme && STOREFRONT_DATA.theme.canvas_mode) || 'atlas_radar';
+            const primaryHex = (STOREFRONT_DATA.theme && STOREFRONT_DATA.theme.accent_primary) || '#6D49F2';
+            const secondaryHex = (STOREFRONT_DATA.theme && STOREFRONT_DATA.theme.accent_secondary) || '#06B6D4';
 
+            let width = 0;
+            let height = 0;
+            let mouseX = -1000;
+            let mouseY = -1000;
+
+            const resize = () => {
+                const rect = canvas.parentElement.getBoundingClientRect();
+                width = rect.width;
+                height = rect.height;
+                const dpr = Math.min(window.devicePixelRatio || 1, 2);
+                canvas.width = width * dpr;
+                canvas.height = height * dpr;
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            };
+            resize();
+            window.addEventListener('resize', resize, { passive: true });
+
+            canvas.parentElement.addEventListener('mousemove', (e) => {
+                const rect = canvas.parentElement.getBoundingClientRect();
+                mouseX = e.clientX - rect.left;
+                mouseY = e.clientY - rect.top;
+            }, { passive: true });
+
+            canvas.parentElement.addEventListener('mouseleave', () => {
+                mouseX = -1000;
+                mouseY = -1000;
+            }, { passive: true });
+
+            const particles = Array.from({ length: 28 }, (_, i) => ({
+                x: Math.random() * (width || 900),
+                y: Math.random() * (height || 380),
+                vx: (Math.random() - 0.5) * 0.55,
+                vy: (Math.random() - 0.5) * 0.55,
+                r: 2 + Math.random() * 3.5,
+                phase: Math.random() * Math.PI * 2,
+                shapeIdx: i % 4,
+            }));
+
+            let tick = 0;
+            function renderFrame() {
+                tick += 0.018;
+                ctx.clearRect(0, 0, width, height);
+
+                // Actualización física de partículas
+                particles.forEach(p => {
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    if (p.x < 0) p.x = width;
+                    if (p.x > width) p.x = 0;
+                    if (p.y < 0) p.y = height;
+                    if (p.y > height) p.y = 0;
+
+                    const dx = p.x - mouseX;
+                    const dy = p.y - mouseY;
+                    const dist = Math.hypot(dx, dy);
+                    if (dist < 110 && dist > 0) {
+                        p.x += (dx / dist) * 0.8;
+                        p.y += (dy / dist) * 0.8;
+                    }
+                });
+
+                ctx.save();
+                if (mode === 'circuit_nodes') {
+                    // Trazos de circuito PCB y pulsos de datos para Tecnología y Electrónica
+                    ctx.strokeStyle = primaryHex + '18';
+                    ctx.lineWidth = 1.2;
+                    for (let i = 0; i < particles.length; i++) {
+                        const a = particles[i];
+                        for (let j = i + 1; j < particles.length; j++) {
+                            const b = particles[j];
+                            const d = Math.hypot(a.x - b.x, a.y - b.y);
+                            if (d < 135) {
+                                ctx.beginPath();
+                                ctx.moveTo(a.x, a.y);
+                                ctx.lineTo(b.x, a.y);
+                                ctx.lineTo(b.x, b.y);
+                                ctx.stroke();
+                            }
+                        }
+                        ctx.fillStyle = (i % 2 === 0 ? primaryHex : secondaryHex) + '30';
+                        ctx.beginPath();
+                        ctx.arc(a.x, a.y, a.r, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                } else if (mode === 'harmonic_waves' || mode === 'kinetic_pulse' || mode === 'telemetry_stream') {
+                    // Ondas sinusoidales armónicas / telemetría aerodinámica
+                    for (let w = 0; w < 3; w++) {
+                        ctx.beginPath();
+                        ctx.strokeStyle = (w % 2 === 0 ? primaryHex : secondaryHex) + '20';
+                        ctx.lineWidth = 2;
+                        for (let x = 0; x <= width; x += 18) {
+                            const y = (height * (0.3 + w * 0.22)) + Math.sin(x * 0.012 + tick + w) * 22;
+                            if (x === 0) ctx.moveTo(x, y);
+                            else ctx.lineTo(x, y);
+                        }
+                        ctx.stroke();
+                    }
+                } else if (mode === 'blueprint_cad') {
+                    // Retícula arquitectónica CAD para Ferretería y Construcción
+                    ctx.strokeStyle = primaryHex + '14';
+                    ctx.lineWidth = 1;
+                    const step = 48;
+                    for (let x = 0; x < width; x += step) {
+                        ctx.beginPath();
+                        ctx.moveTo(x, 0);
+                        ctx.lineTo(x, height);
+                        ctx.stroke();
+                    }
+                    for (let y = 0; y < height; y += step) {
+                        ctx.beginPath();
+                        ctx.moveTo(0, y);
+                        ctx.lineTo(width, y);
+                        ctx.stroke();
+                    }
+                    particles.slice(0, 12).forEach(p => {
+                        ctx.strokeStyle = primaryHex + '28';
+                        ctx.strokeRect(p.x - 6, p.y - 6, 12, 12);
+                    });
+                } else if (mode === 'arcade_shapes') {
+                    // Figuras geométricas dinámicas para Juegos y Juguetes
+                    particles.forEach(p => {
+                        ctx.strokeStyle = (p.shapeIdx % 2 === 0 ? primaryHex : secondaryHex) + '28';
+                        ctx.lineWidth = 1.8;
+                        ctx.beginPath();
+                        if (p.shapeIdx === 0) {
+                            ctx.arc(p.x, p.y, p.r * 2.2, 0, Math.PI * 2);
+                        } else if (p.shapeIdx === 1) {
+                            ctx.rect(p.x - p.r * 2, p.y - p.r * 2, p.r * 4, p.r * 4);
+                        } else {
+                            ctx.moveTo(p.x, p.y - p.r * 2.4);
+                            ctx.lineTo(p.x + p.r * 2.2, p.y + p.r * 1.8);
+                            ctx.lineTo(p.x - p.r * 2.2, p.y + p.r * 1.8);
+                            ctx.closePath();
+                        }
+                        ctx.stroke();
+                    });
+                } else {
+                    // Constelación suave y anillos de radar hiper-local CartMaker / Atlas
+                    particles.forEach((p, idx) => {
+                        const pulse = Math.sin(tick * 1.5 + p.phase) * 1.5;
+                        ctx.fillStyle = (idx % 2 === 0 ? primaryHex : secondaryHex) + '24';
+                        ctx.beginPath();
+                        ctx.arc(p.x, p.y, Math.max(1.5, p.r + pulse), 0, Math.PI * 2);
+                        ctx.fill();
+                    });
+                    // Anillos concéntricos de radar en la esquina izquierda
+                    for (let r = 1; r <= 3; r++) {
+                        ctx.strokeStyle = primaryHex + '14';
+                        ctx.lineWidth = 1.2;
+                        ctx.beginPath();
+                        ctx.arc(90, 90, r * 55 + (tick * 12) % 55, 0, Math.PI * 2);
+                        ctx.stroke();
+                    }
+                }
+                ctx.restore();
+                requestAnimationFrame(renderFrame);
+            }
+            requestAnimationFrame(renderFrame);
+        }
+
+        /* =========================================================
+           2. FORMATO DE MONEDA (USD + Bs / Solo USD / Solo Bs)
+           ========================================================= */
         function formatPriceHtml(usdVal) {
             const usd = Number(usdVal || 0);
             const bcv = Number(STOREFRONT_DATA.bcv_rate || 0);
@@ -1204,7 +2157,7 @@
             }
             if (state.currencyMode === 'BS') {
                 return `<div class="sf-price-main">Bs. ${bs.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</div>
-                        <div class="sf-price-bs">Ref. $${usd.toFixed(2)}</div>`;
+                        <div class="sf-price-bs">Ref. $${usd.toFixed(2)} USD</div>`;
             }
             return `<div class="sf-price-main">$${usd.toFixed(2)}</div>
                     <div class="sf-price-bs">Bs. ${bs.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</div>`;
@@ -1212,43 +2165,15 @@
 
         function setCurrencyMode(mode) {
             state.currencyMode = mode;
-            document.querySelectorAll('.cm-currency-btn[data-curr]').forEach(btn => {
+            document.querySelectorAll('.sf-curr-btn[data-curr]').forEach(btn => {
                 btn.classList.toggle('active', btn.getAttribute('data-curr') === mode);
             });
             applyFilters();
             updateFloatingCartBar();
         }
 
-        function initThemeSelector() {
-            const sel = document.getElementById('themePreviewSelect');
-            if (!sel) return;
-            const currentKey = STOREFRONT_DATA.theme.theme_key;
-            sel.innerHTML = (STOREFRONT_DATA.available_themes || []).map(t =>
-                `<option value="${t.key}" ${t.key === currentKey ? 'selected' : ''}>${t.icon} Tema: ${t.label}</option>`
-            ).join('');
-        }
-
-        function switchCategoryTheme(themeKey) {
-            const t = ALL_THEMES_MAP[themeKey];
-            if (!t) return;
-            const root = document.documentElement;
-            root.setAttribute('data-theme-mode', t.mode);
-            document.body.setAttribute('data-card-style', t.style);
-            root.style.setProperty('--sf-bg-primary', t.bg1);
-            root.style.setProperty('--sf-bg-secondary', t.bg2);
-            root.style.setProperty('--sf-bg-card', t.card);
-            root.style.setProperty('--sf-text-primary', t.txt1);
-            root.style.setProperty('--sf-text-secondary', t.txt2);
-            root.style.setProperty('--sf-accent-primary', t.acc1);
-            root.style.setProperty('--sf-accent-gradient', t.grad);
-            root.style.setProperty('--sf-border-glow', t.glow);
-            root.style.setProperty('--sf-card-aspect', t.aspect);
-            const badgeEl = document.getElementById('heroCategoryBadge');
-            if (badgeEl) badgeEl.innerHTML = `${t.icon} <span>${t.label}</span>`;
-        }
-
         /* =========================================================
-           SUCURSALES Y MAPA INTERACTIVO CON RUTA EN VIVO
+           3. SUCURSALES Y MAPA 3D OFICIAL MAPBOX GL JS + RUTAS EN VIVO
            ========================================================= */
         function renderBranchesTabs() {
             const container = document.getElementById('branchesTabsContainer');
@@ -1259,14 +2184,15 @@
                 return;
             }
             let html = `<button type="button" class="sf-branch-tab ${state.selectedBranchId === 'ALL' ? 'active' : ''}" onclick="selectBranch('ALL')">
-                🌐 Todas las Sedes (${branches.length})
+                <span class="material-symbols-rounded">store</span>
+                <span>Todas las Sedes (${branches.length})</span>
             </button>`;
             branches.forEach(b => {
                 const isOpen = Boolean(b.is_currently_open);
                 const zone = (b.location && b.location.zone_name) ? b.location.zone_name : b.name;
                 html += `<button type="button" class="sf-branch-tab ${state.selectedBranchId === b.id ? 'active' : ''}" onclick="selectBranch('${b.id}')">
                     <span class="sf-branch-dot ${isOpen ? '' : 'closed'}"></span>
-                    <span>${b.name} <small style="opacity:0.75;">(${zone})</small></span>
+                    <span>${b.name} <small style="opacity:0.78;">(${zone})</small></span>
                 </button>`;
             });
             container.innerHTML = html;
@@ -1278,20 +2204,24 @@
         function updateBranchHeaderInfo(branch) {
             if (!branch) return;
             const statusEl = document.getElementById('branchOpenStatusBadge');
+            const topDot = document.getElementById('topLivePulseDot');
             const hours = branch.work_hours || {};
             const scheduleStr = (hours.start && hours.end) ? `${hours.start} - ${hours.end}` : '';
+
             if (branch.is_currently_open) {
-                statusEl.className = 'sf-badge open';
-                statusEl.innerHTML = `🟢 Abierto Ahora ${scheduleStr ? '· ' + scheduleStr : ''}`;
+                statusEl.className = 'sf-chip chip-open';
+                statusEl.innerHTML = `<span class="material-symbols-rounded icon-filled">check_circle</span><span>Abierto Ahora${scheduleStr ? ' · ' + scheduleStr : ''}</span>`;
+                if (topDot) topDot.classList.remove('closed');
             } else {
-                statusEl.className = 'sf-badge closed';
-                statusEl.innerHTML = `🔴 Cerrado en este momento ${scheduleStr ? '· Horario: ' + scheduleStr : ''}`;
+                statusEl.className = 'sf-chip chip-closed';
+                statusEl.innerHTML = `<span class="material-symbols-rounded">schedule</span><span>Cerrado ahora${scheduleStr ? ' · Horario: ' + scheduleStr : ''}</span>`;
+                if (topDot) topDot.classList.add('closed');
             }
 
             const loc = branch.location || {};
             const addrEl = document.getElementById('activeBranchAddressLabel');
-            const mallBadge = loc.mall_name ? ` (CC ${loc.mall_name}${loc.mall_floor ? ', Piso ' + loc.mall_floor : ''})` : '';
-            addrEl.textContent = `📍 ${loc.zone_name || branch.name}${mallBadge}`;
+            const mallBadge = loc.mall_name ? ` · CC ${loc.mall_name}${loc.mall_floor ? ' (Piso ' + loc.mall_floor + ')' : ''}` : '';
+            addrEl.innerHTML = `<span class="material-symbols-rounded">location_on</span><span>${loc.zone_name || branch.name}${mallBadge}</span>`;
         }
 
         function selectBranch(branchId) {
@@ -1300,7 +2230,12 @@
             applyFilters();
             const branch = (STOREFRONT_DATA.branches || []).find(b => b.id === branchId) || (STOREFRONT_DATA.branches || [])[0];
             if (branch && branch.location && state.map) {
-                state.map.flyTo([branch.location.lat, branch.location.lng], 15, { duration: 0.8 });
+                state.map.flyTo({
+                    center: [branch.location.lng, branch.location.lat],
+                    zoom: 15.2,
+                    pitch: 45,
+                    duration: 900,
+                });
                 if (state.userLat && state.userLng) {
                     computeEtaToCoords(state.userLat, state.userLng, branch.location.lat, branch.location.lng);
                 }
@@ -1309,19 +2244,50 @@
 
         function initInteractiveMap() {
             const branches = (STOREFRONT_DATA.branches || []).filter(b => b.location && b.location.lat && b.location.lng);
-            if (!branches.length) return;
+            if (!branches.length || typeof mapboxgl === 'undefined' || !STOREFRONT_DATA.mapbox_api_key) return;
+
+            mapboxgl.accessToken = STOREFRONT_DATA.mapbox_api_key;
+            const mapStyle = STOREFRONT_DATA.mapbox_style_url || 'mapbox://styles/mapbox/light-v11';
             const first = branches.find(b => b.id === state.selectedBranchId) || branches[0];
-            const map = L.map('sfLeafletMap', { zoomControl: true }).setView([first.location.lat, first.location.lng], 14);
+
+            const map = new mapboxgl.Map({
+                container: 'sfMapboxContainer',
+                style: mapStyle,
+                center: [first.location.lng, first.location.lat],
+                zoom: 14.8,
+                pitch: 42,
+                bearing: -8,
+                antialias: true,
+                attributionControl: false,
+            });
+
+            map.addControl(new mapboxgl.NavigationControl({ showCompass: true }), 'top-right');
             state.map = map;
 
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-                attribution: '&copy; OpenStreetMap & CartMaker GeoEngine',
-                maxZoom: 19,
-            }).addTo(map);
+            const avatarUrl = STOREFRONT_DATA.company.image || '/static/img/no_image.jpg';
 
             branches.forEach(b => {
-                const marker = L.marker([b.location.lat, b.location.lng]).addTo(map);
-                marker.bindPopup(`<strong>${STOREFRONT_DATA.company.name} — ${b.name}</strong><br>${b.location.name || ''}`);
+                const pinEl = document.createElement('div');
+                pinEl.className = 'cm-mapbox-pin';
+                pinEl.innerHTML = `
+                    <div class="cm-mapbox-pin-bubble">
+                        <img src="${avatarUrl}" alt="${b.name}" onerror="this.src='/static/img/no_image.jpg'">
+                    </div>
+                    <div class="cm-mapbox-pin-tip"></div>
+                `;
+
+                const popup = new mapboxgl.Popup({ offset: 28, closeButton: false }).setHTML(`
+                    <div style="font-family:'Plus Jakarta Sans',sans-serif;padding:4px 2px;">
+                        <strong style="color:#0F0B1D;font-size:0.86rem;display:block;">${STOREFRONT_DATA.company.name} — ${b.name}</strong>
+                        <span style="color:#4B4660;font-size:0.76rem;">${b.location.zone_name || b.location.name || ''}</span>
+                    </div>
+                `);
+
+                const marker = new mapboxgl.Marker({ element: pinEl, anchor: 'bottom' })
+                    .setLngLat([b.location.lng, b.location.lat])
+                    .setPopup(popup)
+                    .addTo(map);
+
                 state.branchMarkers.push(marker);
             });
         }
@@ -1336,69 +2302,127 @@
             return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
         }
 
+        function drawRouteGeoJsonOnMapbox(geometry, uLng, uLat, sLng, sLat) {
+            if (!state.map) return;
+            const sourceId = 'cm-store-route';
+            const feature = {
+                type: 'Feature',
+                properties: {},
+                geometry: geometry,
+            };
+
+            if (state.map.getSource(sourceId)) {
+                state.map.getSource(sourceId).setData(feature);
+            } else {
+                state.map.addSource(sourceId, {
+                    type: 'geojson',
+                    data: feature,
+                });
+                state.map.addLayer({
+                    id: 'cm-store-route-casing',
+                    type: 'line',
+                    source: sourceId,
+                    layout: { 'line-join': 'round', 'line-cap': 'round' },
+                    paint: {
+                        'line-color': '#FFFFFF',
+                        'line-width': 8,
+                        'line-opacity': 0.85,
+                    },
+                });
+                state.map.addLayer({
+                    id: 'cm-store-route-line',
+                    type: 'line',
+                    source: sourceId,
+                    layout: { 'line-join': 'round', 'line-cap': 'round' },
+                    paint: {
+                        'line-color': '#6D49F2',
+                        'line-width': 4.5,
+                        'line-opacity': 0.95,
+                    },
+                });
+            }
+
+            const bounds = new mapboxgl.LngLatBounds();
+            bounds.extend([uLng, uLat]);
+            bounds.extend([sLng, sLat]);
+            if (geometry && Array.isArray(geometry.coordinates)) {
+                geometry.coordinates.forEach(c => bounds.extend(c));
+            }
+            state.map.fitBounds(bounds, { padding: 38, duration: 900 });
+        }
+
         async function computeEtaToCoords(uLat, uLng, sLat, sLng) {
             const straightKm = haversineKm(uLat, uLng, sLat, sLng);
             let roadKm = straightKm * 1.28;
             let carMinutes = Math.max(2, Math.round((roadKm / 28) * 60));
+            const mbToken = STOREFRONT_DATA.mapbox_api_key || '';
 
             try {
-                const url = `https://router.project-osrm.org/route/v1/driving/${uLng},${uLat};${sLng},${sLat}?overview=full&geometries=geojson`;
-                const resp = await fetch(url);
+                // 1. Intentamos primero con Mapbox Directions API oficial
+                const mbUrl = `https://api.mapbox.com/directions/v5/mapbox/driving/${uLng},${uLat};${sLng},${sLat}?geometries=geojson&overview=full&access_token=${mbToken}`;
+                const resp = await fetch(mbUrl);
                 if (resp.ok) {
                     const data = await resp.json();
                     if (data.routes && data.routes[0]) {
                         roadKm = data.routes[0].distance / 1000;
                         carMinutes = Math.max(2, Math.round(data.routes[0].duration / 60));
-                        if (state.routeLayer) state.map.removeLayer(state.routeLayer);
-                        state.routeLayer = L.geoJSON(data.routes[0].geometry, {
-                            style: { color: '#7C3AED', weight: 5, opacity: 0.85 }
-                        }).addTo(state.map);
-                        state.map.fitBounds(state.routeLayer.getBounds(), { padding: [24, 24] });
+                        drawRouteGeoJsonOnMapbox(data.routes[0].geometry, uLng, uLat, sLng, sLat);
                     }
                 }
             } catch (e) {
-                // Fallback geométrico inmediato si OSRM no responde
+                // Fallback si no hay respuesta de red
             }
 
             const motoMinutes = Math.max(1, Math.round(carMinutes * 0.68));
             const walkMinutes = Math.max(3, Math.round((roadKm / 4.8) * 60));
 
-            document.getElementById('routeDistanceBadge').textContent = `${roadKm.toFixed(1)} km`;
+            const distEl = document.getElementById('routeDistanceBadge');
+            if (distEl) {
+                distEl.style.display = 'inline-flex';
+                distEl.textContent = `${roadKm.toFixed(1)} km`;
+            }
             document.getElementById('etaCarVal').textContent = `${carMinutes} min`;
             document.getElementById('etaMotoVal').textContent = `${motoMinutes} min`;
             document.getElementById('etaWalkVal').textContent = `${walkMinutes} min`;
         }
 
         function calculateLiveRouteToStore() {
-            const btn = document.getElementById('calcRouteBtn');
+            const btnText = document.getElementById('calcRouteBtnText');
             const branches = (STOREFRONT_DATA.branches || []).filter(b => b.location && b.location.lat && b.location.lng);
             if (!branches.length) return;
             const target = branches.find(b => b.id === state.selectedBranchId) || branches[0];
 
             if (!navigator.geolocation) {
-                btn.textContent = '⚠️ Tu navegador no soporta GPS';
+                if (btnText) btnText.textContent = 'Tu navegador no soporta geolocalización GPS';
                 return;
             }
-            btn.textContent = '📡 Obteniendo tu ubicación GPS...';
+            if (btnText) btnText.textContent = 'Obteniendo tu ubicación GPS en tiempo real...';
             navigator.geolocation.getCurrentPosition(
                 pos => {
                     state.userLat = pos.coords.latitude;
                     state.userLng = pos.coords.longitude;
-                    L.circleMarker([state.userLat, state.userLng], {
-                        radius: 8, color: '#10B981', fillColor: '#10B981', fillOpacity: 0.9
-                    }).addTo(state.map).bindPopup('📍 Tu ubicación actual');
+
+                    if (state.map) {
+                        if (state.userMarker) state.userMarker.remove();
+                        const userDot = document.createElement('div');
+                        userDot.style.cssText = 'width:18px;height:18px;border-radius:50%;background:#10B981;border:3px solid #FFFFFF;box-shadow:0 0 0 6px rgba(16,185,129,0.28);';
+                        state.userMarker = new mapboxgl.Marker({ element: userDot })
+                            .setLngLat([state.userLng, state.userLat])
+                            .addTo(state.map);
+                    }
+
                     computeEtaToCoords(state.userLat, state.userLng, target.location.lat, target.location.lng);
-                    btn.textContent = '✅ Ruta y tiempos de llegada actualizados en vivo';
+                    if (btnText) btnText.textContent = 'Ruta 3D y tiempos de llegada actualizados';
                 },
                 () => {
-                    btn.textContent = '📍 Activa el permiso de ubicación para calcular tu ruta';
+                    if (btnText) btnText.textContent = 'Activa el permiso de ubicación para calcular tu ruta';
                 },
                 { enableHighAccuracy: true, timeout: 8000 }
             );
         }
 
         /* =========================================================
-           VIDEO STORIES REEL
+           4. REEL DE VIDEO STORIES (CARTMAKER TV)
            ========================================================= */
         function renderStoriesReel() {
             const stories = STOREFRONT_DATA.stories || [];
@@ -1413,7 +2437,9 @@
                 <div class="sf-story-item" onclick="openStoryModal(${idx})">
                     <div class="sf-story-ring">
                         <img src="${st.thumbnail_url || STOREFRONT_DATA.company.image || '/static/img/no_image.jpg'}" class="sf-story-thumb" alt="Story">
-                        <span class="sf-story-play-badge">▶</span>
+                        <span class="sf-story-play-badge">
+                            <span class="material-symbols-rounded icon-filled">play_arrow</span>
+                        </span>
                     </div>
                     <div class="sf-story-caption">${st.associated_item_name || st.description || 'Ver Historia'}</div>
                 </div>
@@ -1427,12 +2453,13 @@
             const content = document.getElementById('storyModalContent');
             const ctaBtn = st.associated_item_id ? `
                 <button type="button" class="sf-checkout-app-btn" style="width:100%;justify-content:center;margin-top:12px;" onclick="closeStoryModal();openProductModal('${st.associated_item_id}')">
-                    🛒 Ver '${st.associated_item_name}' ($${Number(st.associated_item_price_usd || 0).toFixed(2)})
+                    <span class="material-symbols-rounded">shopping_bag</span>
+                    <span>Ver '${st.associated_item_name}' ($${Number(st.associated_item_price_usd || 0).toFixed(2)})</span>
                 </button>
             ` : '';
             content.innerHTML = `
-                <video src="${st.video_url}" controls autoplay playsinline style="width:100%;max-height:68vh;border-radius:18px;background:#000;"></video>
-                <p style="margin-top:10px;font-size:0.88rem;">${st.description || ''}</p>
+                <video src="${st.video_url}" controls autoplay playsinline style="width:100%;max-height:68vh;border-radius:18px;background:#0F0B1D;"></video>
+                <p style="margin-top:10px;font-size:0.88rem;color:var(--sf-text-secondary);">${st.description || ''}</p>
                 ${ctaBtn}
             `;
             modal.classList.add('open');
@@ -1446,25 +2473,29 @@
         }
 
         /* =========================================================
-           FILTROS Y GRILLA DE PRODUCTOS
+           5. FILTROS Y GRILLA DE PRODUCTOS CON ICONOS VECTORIALES
            ========================================================= */
         function renderSubcategoryPills() {
             const subs = STOREFRONT_DATA.subcategories || [];
             const container = document.getElementById('subcategoryPillsContainer');
             let html = `<button type="button" class="sf-filter-pill ${state.selectedSubcatId === 'ALL' ? 'active' : ''}" onclick="selectSubcategory('ALL')">
-                ✨ Todos (${(STOREFRONT_DATA.items || []).length})
+                <span class="material-symbols-rounded">apps</span>
+                <span>Todos (${(STOREFRONT_DATA.items || []).length})</span>
             </button>`;
             html += `<button type="button" class="sf-filter-pill ${state.onlyOffers ? 'active' : ''}" onclick="toggleOffersFilter()">
-                ⚡ En Oferta Flash
+                <span class="material-symbols-rounded">bolt</span>
+                <span>En Oferta Flash</span>
             </button>`;
             if (STOREFRONT_DATA.company.gamification_enabled) {
                 html += `<button type="button" class="sf-filter-pill ${state.onlyTokens ? 'active' : ''}" onclick="toggleTokensFilter()">
-                    🪙 Acepta Tokens
+                    <span class="material-symbols-rounded">toll</span>
+                    <span>Acepta Tokens</span>
                 </button>`;
             }
             subs.forEach(sc => {
                 html += `<button type="button" class="sf-filter-pill ${String(state.selectedSubcatId) === String(sc.id) ? 'active' : ''}" onclick="selectSubcategory('${sc.id}')">
-                    ${sc.name}
+                    <span class="material-symbols-rounded">category</span>
+                    <span>${sc.name}</span>
                 </button>`;
             });
             container.innerHTML = html;
@@ -1530,8 +2561,9 @@
             document.getElementById('visibleProductsCount').textContent = items.length;
             const grid = document.getElementById('productsGridContainer');
             if (!items.length) {
-                grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:48px 20px;background:var(--sf-bg-card);border-radius:22px;border:1px solid var(--sf-border-glow);">
-                    <h3 style="margin-bottom:8px;">No encontramos productos con esos filtros</h3>
+                grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:52px 20px;background:#FFFFFF;border-radius:24px;border:1px solid rgba(15,11,29,0.08);">
+                    <span class="material-symbols-rounded" style="font-size:44px;color:var(--sf-accent-primary);margin-bottom:8px;">search_off</span>
+                    <h3 style="margin-bottom:6px;">No encontramos productos con esos filtros</h3>
                     <p style="color:var(--sf-text-secondary);font-size:0.9rem;">Prueba limpiando tu búsqueda o seleccionando Todas las Sedes.</p>
                 </div>`;
                 return;
@@ -1551,15 +2583,18 @@
                         <img src="${img}" alt="${p.name}" class="sf-product-img" loading="lazy" onerror="this.src='/static/img/no_image.jpg'">
                         <div class="sf-card-top-badges">
                             <div>
-                                ${hasOffer ? `<span class="sf-offer-tag">⚡ -${it.offer_percentage}%</span>` : ''}
+                                ${hasOffer ? `<span class="sf-offer-tag"><span class="material-symbols-rounded">bolt</span> -${it.offer_percentage}%</span>` : ''}
                             </div>
                             <div>
-                                ${acceptsTokens ? `<span class="sf-token-tag">🪙 Canje Tokens</span>` : ''}
+                                ${acceptsTokens ? `<span class="sf-token-tag"><span class="material-symbols-rounded icon-filled">toll</span> Canje Tokens</span>` : ''}
                             </div>
                         </div>
                     </div>
                     <div class="sf-product-body">
-                        <div class="sf-product-cat">${p.category?.name || 'Catálogo'} · ${it.store_name}</div>
+                        <div class="sf-product-cat">
+                            <span class="material-symbols-rounded" style="font-size:13px;">sell</span>
+                            <span>${p.category?.name || 'Catálogo'} · ${it.store_name}</span>
+                        </div>
                         <h3 class="sf-product-title">${p.name}</h3>
                         ${specsHtml ? `<div class="sf-specs-preview">${specsHtml}</div>` : ''}
                         <div class="sf-price-row">
@@ -1568,7 +2603,8 @@
                                 ${hasOffer ? `<div class="sf-price-old">Antes: $${Number(it.list_price).toFixed(2)}</div>` : ''}
                             </div>
                             <button type="button" class="sf-add-btn" onclick="event.stopPropagation();quickAddToCart('${it.id}')">
-                                + Agregar
+                                <span class="material-symbols-rounded">add_shopping_cart</span>
+                                <span>Agregar</span>
                             </button>
                         </div>
                     </div>
@@ -1577,7 +2613,7 @@
         }
 
         /* =========================================================
-           MODAL INTERACTIVO DE PRODUCTO (SDUI VARIANTES & EXTRAS)
+           6. MODAL INTERACTIVO DE PRODUCTO (SDUI VARIANTES & EXTRAS)
            ========================================================= */
         function openProductModal(itemId) {
             const item = (STOREFRONT_DATA.items || []).find(x => String(x.id) === String(itemId));
@@ -1595,7 +2631,6 @@
             const p = item.product || {};
             const images = (p.images && p.images.length) ? p.images : ['/static/img/no_image.jpg'];
             const variants = p.variants || [];
-            const modifiers = p.modifier_groups || [];
             const attrs = Object.entries(p.attributes || {});
 
             let unitPrice = Number(item.effective_price);
@@ -1623,7 +2658,7 @@
             const attrsHtml = attrs.length ? `
                 <div style="margin-top:14px;display:grid;grid-template-columns:repeat(2,1fr);gap:8px;">
                     ${attrs.map(([k, v]) => `
-                        <div style="background:var(--sf-bg-primary);padding:8px 12px;border-radius:10px;border:1px solid var(--sf-border-glow);font-size:0.8rem;">
+                        <div style="background:var(--sf-bg-primary);padding:9px 12px;border-radius:12px;border:1px solid rgba(15,11,29,0.08);font-size:0.8rem;">
                             <span style="color:var(--sf-text-secondary);display:block;font-size:0.72rem;">${k}</span>
                             <strong>${v}</strong>
                         </div>
@@ -1634,38 +2669,46 @@
             document.getElementById('productModalContent').innerHTML = `
                 <div class="sf-detail-grid">
                     <div>
-                        <img src="${images[0]}" id="modalMainImg" alt="${p.name}" style="width:100%;border-radius:18px;aspect-ratio:1/1;object-fit:cover;border:1px solid var(--sf-border-glow);">
+                        <img src="${images[0]}" id="modalMainImg" alt="${p.name}" style="width:100%;border-radius:18px;aspect-ratio:1/1;object-fit:cover;border:1px solid rgba(15,11,29,0.08);">
                         ${images.length > 1 ? `
                             <div style="display:flex;gap:8px;margin-top:10px;overflow-x:auto;">
-                                ${images.map(u => `<img src="${u}" onclick="document.getElementById('modalMainImg').src='${u}'" style="width:60px;height:60px;border-radius:10px;object-fit:cover;cursor:pointer;border:1px solid var(--sf-border-glow);">`).join('')}
+                                ${images.map(u => `<img src="${u}" onclick="document.getElementById('modalMainImg').src='${u}'" style="width:60px;height:60px;border-radius:10px;object-fit:cover;cursor:pointer;border:1px solid rgba(15,11,29,0.12);">`).join('')}
                             </div>
                         ` : ''}
                     </div>
                     <div>
-                        <span class="sf-badge">${p.category?.name || 'Catálogo'} · Sede ${item.store_name}</span>
-                        <h2 class="sf-heading" style="font-size:1.55rem;margin:8px 0;">${p.name}</h2>
+                        <span class="sf-chip">
+                            <span class="material-symbols-rounded">storefront</span>
+                            <span>${p.category?.name || 'Catálogo'} · Sede ${item.store_name}</span>
+                        </span>
+                        <h2 class="sf-heading" style="font-size:1.55rem;margin:10px 0 6px;">${p.name}</h2>
                         <div style="margin-bottom:10px;">
                             ${formatPriceHtml(unitPrice)}
-                            <small style="color:var(--sf-text-secondary);">Stock disponible: ${item.stock} ${p.unit_label || 'und'}</small>
+                            <small style="color:var(--sf-text-secondary);font-weight:600;display:inline-flex;align-items:center;gap:4px;margin-top:4px;">
+                                <span class="material-symbols-rounded" style="font-size:15px;color:#059669;">inventory_2</span>
+                                Stock disponible: ${item.stock} ${p.unit_label || 'und'}
+                            </small>
                         </div>
                         <p style="font-size:0.9rem;color:var(--sf-text-secondary);margin-bottom:12px;">${p.description || ''}</p>
                         ${variantsHtml}
                         ${attrsHtml}
 
                         <div style="margin-top:18px;display:flex;align-items:center;gap:12px;">
-                            <div style="display:inline-flex;align-items:center;background:var(--sf-bg-primary);border:1px solid var(--sf-border-glow);border-radius:12px;">
+                            <div style="display:inline-flex;align-items:center;background:var(--sf-bg-primary);border:1px solid rgba(15,11,29,0.12);border-radius:12px;">
                                 <button type="button" style="border:none;background:transparent;color:inherit;padding:10px 14px;font-weight:800;cursor:pointer;" onclick="adjustModalQty(-1)">−</button>
                                 <span style="padding:0 12px;font-weight:800;">${state.activeQty} ${p.unit_label || ''}</span>
                                 <button type="button" style="border:none;background:transparent;color:inherit;padding:10px 14px;font-weight:800;cursor:pointer;" onclick="adjustModalQty(1)">+</button>
                             </div>
                             <button type="button" class="sf-checkout-app-btn" style="flex:1;justify-content:center;" onclick="addModalItemToCart()">
-                                🛒 Agregar al Carrito ($${lineTotal.toFixed(2)})
+                                <span class="material-symbols-rounded">add_shopping_cart</span>
+                                <span>Agregar al Carrito ($${lineTotal.toFixed(2)})</span>
                             </button>
                         </div>
 
                         ${tokensEarned > 0 ? `
-                            <div style="margin-top:12px;font-size:0.8rem;color:#F59E0B;font-weight:700;">
-                                🪙 Al completar esta compra en la App de CartMaker ganas +${tokensEarned} Tokens en ${STOREFRONT_DATA.company.name}.
+                            <div style="margin-top:12px;font-size:0.8rem;color:#B45309;font-weight:700;display:flex;align-items:center;gap:6px;">
+                                <span class="material-symbols-rounded icon-filled" style="color:#F59E0B;font-size:18px;">toll</span>
+                                <span>Al completar esta compra en la App de CartMaker ganas +${tokensEarned} Tokens en ${STOREFRONT_DATA.company.name}.</span>
                             </div>
                         ` : ''}
                     </div>
@@ -1688,7 +2731,7 @@
         }
 
         /* =========================================================
-           GESTIÓN DEL CARRITO & HANDOFF EXCLUSIVO A CARTMAKER APP
+           7. GESTIÓN DEL CARRITO & HANDOFF EXCLUSIVO A CARTMAKER APP
            ========================================================= */
         function quickAddToCart(itemId) {
             const item = (STOREFRONT_DATA.items || []).find(x => String(x.id) === String(itemId));
@@ -1763,6 +2806,7 @@
             if (!state.cart.length) {
                 container.innerHTML = `
                     <div style="text-align:center;padding:30px 10px;">
+                        <span class="material-symbols-rounded" style="font-size:48px;color:var(--sf-accent-primary);margin-bottom:8px;">shopping_bag</span>
                         <h3 class="sf-heading" style="font-size:1.4rem;margin-bottom:8px;">Tu carrito está vacío</h3>
                         <p style="color:var(--sf-text-secondary);font-size:0.9rem;">Agrega productos del catálogo de ${STOREFRONT_DATA.company.name} para sincronizarlos con tu App de CartMaker.</p>
                     </div>`;
@@ -1774,9 +2818,9 @@
             const totalBs = bcv > 0 ? (totalUsd * bcv) : 0;
 
             const rowsHtml = state.cart.map((c, idx) => `
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid rgba(148,163,184,0.15);">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid rgba(15,11,29,0.08);">
                     <div style="display:flex;align-items:center;gap:12px;">
-                        <img src="${c.image_url}" style="width:52px;height:52px;border-radius:12px;object-fit:cover;">
+                        <img src="${c.image_url}" style="width:52px;height:52px;border-radius:12px;object-fit:cover;border:1px solid rgba(15,11,29,0.08);">
                         <div>
                             <div style="font-weight:700;font-size:0.92rem;">${c.name}</div>
                             <div style="font-size:0.78rem;color:var(--sf-text-secondary);">
@@ -1787,33 +2831,42 @@
                     </div>
                     <div style="display:flex;align-items:center;gap:10px;">
                         <strong>$${(c.unit_price_usd * c.quantity).toFixed(2)}</strong>
-                        <button type="button" onclick="removeCartItem(${idx})" style="border:none;background:rgba(239,68,68,0.15);color:#EF4444;border-radius:8px;padding:4px 8px;cursor:pointer;">✕</button>
+                        <button type="button" onclick="removeCartItem(${idx})" style="border:none;background:rgba(239,68,68,0.12);color:#DC2626;border-radius:8px;padding:5px 8px;cursor:pointer;display:inline-flex;align-items:center;">
+                            <span class="material-symbols-rounded" style="font-size:16px;">delete</span>
+                        </button>
                     </div>
                 </div>
             `).join('');
 
             container.innerHTML = `
-                <span class="sf-badge verified" style="margin-bottom:8px;">🔒 Checkout Protegido Exclusivo en CartMaker App</span>
+                <span class="sf-chip chip-kyb" style="margin-bottom:8px;">
+                    <span class="material-symbols-rounded">verified_user</span>
+                    <span>Checkout Protegido Exclusivo en CartMaker App</span>
+                </span>
                 <h2 class="sf-heading" style="font-size:1.5rem;margin-bottom:12px;">Tu Pedido en ${STOREFRONT_DATA.company.name}</h2>
                 <div style="max-height:260px;overflow-y:auto;margin-bottom:16px;">${rowsHtml}</div>
 
-                <div style="background:var(--sf-bg-primary);padding:14px 16px;border-radius:16px;border:1px solid var(--sf-border-glow);display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <div style="background:var(--sf-bg-primary);padding:14px 16px;border-radius:16px;border:1px solid rgba(15,11,29,0.08);display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
                     <div>
-                        <div style="font-size:0.78rem;color:var(--sf-text-secondary);">Monto Total Estimado</div>
+                        <div style="font-size:0.78rem;color:var(--sf-text-secondary);font-weight:600;">Monto Total Estimado</div>
                         <div style="font-size:1.35rem;font-weight:800;">$${totalUsd.toFixed(2)} USD</div>
                     </div>
-                    ${totalBs > 0 ? `<div style="text-align:right;font-weight:700;color:#10B981;">Bs. ${totalBs.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</div>` : ''}
+                    ${totalBs > 0 ? `<div style="text-align:right;font-weight:800;color:#059669;">Bs. ${totalBs.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</div>` : ''}
                 </div>
 
                 <div id="handoffDynamicZone">
                     <button type="button" class="sf-checkout-app-btn" style="width:100%;justify-content:center;padding:15px;" onclick="proceedToCartMakerAppCheckout()">
-                        🚀 Continuar y Pagar en la App de CartMaker
+                        <span class="material-symbols-rounded">rocket_launch</span>
+                        <span>Continuar y Pagar en la App de CartMaker</span>
                     </button>
                 </div>
 
                 <div class="sf-protection-banner">
-                    🛡️ <strong>¿Por qué el pago se completa únicamente en la App de CartMaker?</strong><br>
-                    En CartMaker protegemos tu dinero, reservamos el stock en tiempo real en la sucursal y te acreditamos tus <strong>Tokens de Fidelidad</strong> automáticamente.
+                    <span class="material-symbols-rounded">shield_lock</span>
+                    <div>
+                        <strong>¿Por qué el pago se completa únicamente en la App de CartMaker?</strong><br>
+                        En CartMaker protegemos tu dinero, reservamos el stock en tiempo real en la sucursal y te acreditamos tus <strong>Tokens de Fidelidad</strong> automáticamente.
+                    </div>
                 </div>
             `;
         }
@@ -1822,7 +2875,10 @@
             openCartDrawer();
             const zone = document.getElementById('handoffDynamicZone');
             if (!zone) return;
-            zone.innerHTML = `<div style="text-align:center;padding:16px;font-weight:700;">⏳ Sincronizando tu carrito con CartMaker App...</div>`;
+            zone.innerHTML = `<div style="text-align:center;padding:16px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:8px;">
+                <span class="material-symbols-rounded">sync</span>
+                <span>Sincronizando tu carrito con CartMaker App...</span>
+            </div>`;
 
             try {
                 const resp = await fetch(STOREFRONT_DATA.handoff_endpoint, {
@@ -1838,7 +2894,7 @@
                 });
                 const data = await resp.json();
                 if (!resp.ok || !data.success) {
-                    zone.innerHTML = `<div style="color:#EF4444;padding:10px;">${data.error || 'No se pudo generar el enlace.'}</div>`;
+                    zone.innerHTML = `<div style="color:#DC2626;padding:10px;">${data.error || 'No se pudo generar el enlace.'}</div>`;
                     return;
                 }
                 renderHandoffReadyBox(data);
@@ -1856,16 +2912,20 @@
             if (!zone) return;
             zone.innerHTML = `
                 <div style="text-align:center;background:var(--sf-bg-primary);border:1px solid var(--sf-accent-primary);border-radius:18px;padding:18px;">
-                    <div style="font-weight:800;font-size:1.05rem;margin-bottom:6px;">✅ ¡Tu carrito está listo para abrirse en CartMaker!</div>
+                    <div style="font-weight:800;font-size:1.05rem;margin-bottom:6px;display:flex;align-items:center;justify-content:center;gap:6px;color:#059669;">
+                        <span class="material-symbols-rounded icon-filled">check_circle</span>
+                        <span>¡Tu carrito está listo para abrirse en CartMaker!</span>
+                    </div>
                     <p style="font-size:0.84rem;color:var(--sf-text-secondary);margin-bottom:14px;">
                         Si estás en tu teléfono, toca el botón de abajo. Si estás en computadora, escanea el QR con tu celular para abrir tu pedido en la App.
                     </p>
                     <a href="${handoffData.app_deep_link}" class="sf-checkout-app-btn" style="width:100%;justify-content:center;text-decoration:none;margin-bottom:12px;">
-                        📱 Abrir Mi Pedido en CartMaker App Ahora
+                        <span class="material-symbols-rounded">smartphone</span>
+                        <span>Abrir Mi Pedido en CartMaker App Ahora</span>
                     </a>
                     <div class="sf-qr-box" id="handoffQrContainer"></div>
                     <div style="margin-top:10px;font-size:0.78rem;color:var(--sf-text-secondary);">
-                        Código de Carrito: <strong style="color:var(--sf-text-primary);">${handoffData.token}</strong>
+                        Código de Carrito: <strong style="color:var(--sf-text-primary);font-family:var(--font-mono);">${handoffData.token}</strong>
                     </div>
                 </div>
             `;
@@ -1881,7 +2941,7 @@
         }
 
         /* =========================================================
-           REPUTACIÓN Y KIT QR IMPRIMIBLE
+           8. REPUTACIÓN Y KIT QR IMPRIMIBLE
            ========================================================= */
         function openReputationModal() {
             const rep = STOREFRONT_DATA.reputation || {};
@@ -1892,25 +2952,30 @@
                 const pct = Math.round((c / total) * 100);
                 return `
                     <div style="display:flex;align-items:center;gap:10px;font-size:0.82rem;margin-bottom:6px;">
-                        <span style="width:42px;font-weight:700;">${star} ⭐</span>
-                        <div style="flex:1;height:8px;background:rgba(148,163,184,0.2);border-radius:999px;overflow:hidden;">
+                        <span style="width:46px;font-weight:700;display:inline-flex;align-items:center;gap:3px;">
+                            ${star} <span class="material-symbols-rounded icon-filled" style="font-size:15px;color:#F59E0B;">star</span>
+                        </span>
+                        <div style="flex:1;height:8px;background:#E2E8F0;border-radius:999px;overflow:hidden;">
                             <div style="width:${pct}%;height:100%;background:var(--sf-accent-gradient);"></div>
                         </div>
-                        <span style="width:36px;text-align:right;color:var(--sf-text-secondary);">${c}</span>
+                        <span style="width:36px;text-align:right;color:var(--sf-text-secondary);font-weight:600;">${c}</span>
                     </div>`;
             }).join('');
 
             document.getElementById('reputationModalContent').innerHTML = `
-                <span class="sf-badge verified">🛡️ Reputación Verificada en CartMaker</span>
+                <span class="sf-chip chip-kyb">
+                    <span class="material-symbols-rounded icon-filled">verified</span>
+                    <span>Reputación Verificada en CartMaker</span>
+                </span>
                 <h2 class="sf-heading" style="font-size:1.5rem;margin:10px 0 4px;">${STOREFRONT_DATA.company.name}</h2>
                 <p style="font-size:0.86rem;color:var(--sf-text-secondary);margin-bottom:16px;">
                     ${STOREFRONT_DATA.company.razon_social ? `Razón Social: ${STOREFRONT_DATA.company.razon_social} · ` : ''}
                     ${STOREFRONT_DATA.company.rif_number ? `RIF: ${STOREFRONT_DATA.company.rif_number}` : 'Comercio Verificado'}
                 </p>
                 <div style="display:flex;align-items:center;gap:20px;margin-bottom:18px;">
-                    <div style="text-align:center;background:var(--sf-bg-primary);padding:16px 22px;border-radius:18px;border:1px solid var(--sf-border-glow);">
+                    <div style="text-align:center;background:var(--sf-bg-primary);padding:16px 22px;border-radius:18px;border:1px solid rgba(15,11,29,0.08);">
                         <div style="font-size:2.2rem;font-weight:800;">${rep.avg_rating || '5.0'}</div>
-                        <div style="font-size:0.76rem;color:var(--sf-text-secondary);">${rep.rating_count || 0} calificaciones</div>
+                        <div style="font-size:0.76rem;color:var(--sf-text-secondary);font-weight:600;">${rep.rating_count || 0} calificaciones</div>
                     </div>
                     <div style="flex:1;">${barsHtml}</div>
                 </div>
@@ -1946,7 +3011,6 @@
 
         function copyStorefrontUrl() {
             navigator.clipboard.writeText(window.location.origin + window.location.pathname);
-            alert('¡Enlace de la vitrina copiado al portapapeles!');
         }
 
         function getCookie(name) {
@@ -1957,22 +3021,20 @@
         }
 
         /* =========================================================
-           INICIALIZACIÓN AL CARGAR LA VITRINA
+           9. INICIALIZACIÓN AL CARGAR LA VITRINA
            ========================================================= */
         document.addEventListener('DOMContentLoaded', () => {
-            initThemeSelector();
+            initCategoryCanvasStage();
             renderBranchesTabs();
             renderStoriesReel();
             renderSubcategoryPills();
             applyFilters();
             initInteractiveMap();
 
-            // Si viene desde un Link de Producto (/p/<item_id>/), abrimos su modal automáticamente
             if (STOREFRONT_DATA.highlight_item_id) {
                 openProductModal(STOREFRONT_DATA.highlight_item_id);
             }
 
-            // Si viene desde un Link de Orden Express (/orden-express/<token>/), pre-cargamos el carrito y abrimos el modal de la App
             if (STOREFRONT_DATA.express_order_draft && Array.isArray(STOREFRONT_DATA.express_order_draft.items)) {
                 state.cart = STOREFRONT_DATA.express_order_draft.items.map((it, idx) => ({
                     key: `${it.item_id}_${idx}`,

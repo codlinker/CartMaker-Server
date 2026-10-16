@@ -35,7 +35,9 @@ class EnviromentManager:
         "EMAIL_PORT": "Puerto del servidor SMTP.",
         "EMAIL_HOST_USER": "Usuario/Dirección de correo remitente.",
         "EMAIL_HOST_PASSWORD": "Password del correo remitente.",
-        "EMAIL_USE_TLS": "Indica si se usa TLS para la conexión SMTP (0 o 1)."
+        "EMAIL_USE_TLS": "Indica si se usa TLS para la conexión SMTP (0 o 1).",
+        "MAPBOX_APIKEY": "API Key de Mapbox para renderizado de mapas.",
+        "MAPBOX_STYLE_URL": "URL del estilo personalizado de Mapbox."
     }
 
     def __init__(self):
@@ -68,6 +70,8 @@ class EnviromentManager:
         self._email_host_user = None
         self._email_host_password = None
         self._email_use_tls = None
+        self._mapbox_apikey = None
+        self._mapbox_style_url = None
         self.__execute_sh_file()
         self.__load_enviroment_variables()
 
@@ -245,6 +249,16 @@ class EnviromentManager:
     def EMAIL_USE_TLS(self) -> bool:
         """ Indica si se usa TLS. """
         return bool(self._email_use_tls) if self._email_use_tls else False
+
+    @property
+    def MAPBOX_APIKEY(self) -> str:
+        """ API Key de Mapbox para renderizado de mapas. """
+        return self._mapbox_apikey
+
+    @property
+    def MAPBOX_STYLE_URL(self) -> str:
+        """ URL del estilo personalizado de Mapbox. """
+        return self._mapbox_style_url
     
     def __get_env_variable_description(self, env_variable_name:str)->str:
         """
@@ -315,6 +329,8 @@ class EnviromentManager:
             "EMAIL_HOST_USER": os.environ.get("EMAIL_HOST_USER"),
             "EMAIL_HOST_PASSWORD": os.environ.get("EMAIL_HOST_PASSWORD"),
             "EMAIL_USE_TLS": self.__process_boolean_env_variable(os.environ.get("EMAIL_USE_TLS")),
+            "MAPBOX_APIKEY": os.environ.get("MAPBOX_APIKEY"),
+            "MAPBOX_STYLE_URL": os.environ.get("MAPBOX_STYLE_URL"),
         }
         self.__check_variables(env_variables)
         self._db_name = env_variables['DB_NAME']
@@ -346,6 +362,8 @@ class EnviromentManager:
         self._email_host_user = env_variables['EMAIL_HOST_USER']
         self._email_host_password = env_variables['EMAIL_HOST_PASSWORD']
         self._email_use_tls = env_variables['EMAIL_USE_TLS']
+        self._mapbox_apikey = env_variables['MAPBOX_APIKEY']
+        self._mapbox_style_url = env_variables['MAPBOX_STYLE_URL']
 
     def __process_boolean_env_variable(self, variable:str)->bool:
         """Procesa la variable indicada en el parametro. Se espera
