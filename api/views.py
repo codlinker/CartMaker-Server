@@ -44,7 +44,10 @@ from .utils import parse_flexible_date, validate_venezuelan_rif_modulo11
 from asgiref.sync import sync_to_async, async_to_sync
 from rest_framework.pagination import PageNumberPagination
 from django.db.models.functions import Coalesce, Round
-from django.db.models import Avg, Count, Sum, Q, Subquery, OuterRef, Prefetch, UUIDField
+from django.db.models import (
+    Avg, Count, Sum, Q, F, Case, When, Value, Exists, ExpressionWrapper,
+    Subquery, OuterRef, Prefetch, UUIDField, IntegerField, FloatField, BooleanField, CharField,
+)
 from django.contrib.gis.measure import D
 import operator
 from functools import reduce
