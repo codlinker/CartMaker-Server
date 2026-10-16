@@ -27,6 +27,8 @@ router.register(r'story-video', CompanyVideoStoryViewSet, basename='story-video'
 router.register(r'gamification', GamificationViewSet, basename="gamification")
 router.register(r'analytics', AnalyticsViewSet, basename='analytics')
 router.register(r'support-tickets', SupportTicketViewSet, basename='support-tickets')
+router.register(r'merchant-growth', MerchantGrowthViewSet, basename='merchant-growth')
+
 
 # --- DEFINICIÓN DE RUTAS (URLS) ---
 urlpatterns = [

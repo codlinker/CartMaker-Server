@@ -2,11 +2,14 @@ const { io } = require("socket.io-client");
 const jwt = require("jsonwebtoken");
 
 // 💡 1. SIMULAMOS EL TOKEN DE FLUTTER
-// Usamos tu llave secreta exacta para firmar un token válido
-const JWT_SECRET = "A2odyYBjKJuaJv+aw9QIhYabmNXdTPo43Bm58o3onYs=";
+// Leemos la llave secreta desde las variables de entorno (nunca hardcodeada en el repositorio)
+const JWT_SECRET = process.env.JWT_SECRET_KEY || "";
+const TEST_USER_ID = process.env.TEST_USER_ID || "00000000-0000-0000-0000-000000000000";
 
-// ⚠️ IMPORTANTE: Pon aquí el ID real de Yusbelin Torrealba o el tuyo (dueño de la tienda)
-const TEST_USER_ID = "a2f751aa-15ba-4fce-9ddf-5b09f024d0d1"; 
+if (!JWT_SECRET) {
+  console.error("❌ Define la variable de entorno JWT_SECRET_KEY antes de ejecutar test_client.js");
+  process.exit(1);
+}
 
 const tokenFalsoPeroValido = jwt.sign({ user_id: TEST_USER_ID }, JWT_SECRET);
 

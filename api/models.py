@@ -376,25 +376,30 @@ class UserWallet(models.Model):
         """
         Agrega un registro al historial de la billetera y actualiza el saldo.
         
-        :param amount: El monto a agregar (positivo) o descontar (negativo).
+        :param amount: El monto a agregar (positivo) o descontar (positivo).
         :param sub_type: Tipo de suscripción ('merchant' o 'atlas').
         :param description: Texto opcional para mostrarle al usuario (ej: "Abono por pago incompleto").
         """
         amount_decimal = Decimal(str(amount)).quantize(Decimal('0.00'))
-        
+        if amount_decimal < Decimal('0.00'):
+            raise ValidationError("El monto de la transacción no puede ser negativo.")
+
         if transaction == 'add':
             self.balance += amount_decimal
-        elif transaction == 'substract':
+            action_label = 'credit'
+        elif transaction in ('substract', 'subtract'):
             if self.balance < amount_decimal:
-                print("Error: Intento de dejar la cuenta en negativo")
-                return self.balance
+                raise ValidationError("Saldo insuficiente en la billetera para realizar esta operación.")
             self.balance -= amount_decimal
+            action_label = 'debit'
+        else:
+            raise ValidationError(f"Tipo de transacción '{transaction}' no válido.")
 
         transaction_record = {
             'timestamp': timezone.now().isoformat(),
             'subscription_type': sub_type,
             'amount': float(amount_decimal),
-            'action': 'credit' if amount_decimal > 0 else 'debit',
+            'action': action_label,
             'description': description,
             'resulting_balance': float(self.balance)
         }
@@ -402,6 +407,7 @@ class UserWallet(models.Model):
             self.history = []
         self.history.append(transaction_record)
         self.save()
+        return self.balance
 
 class DeviceToken(models.Model):
     """
@@ -2538,6 +2544,15 @@ class CartMakerApiKey(models.Model):
         return super().delete(*args, **kwargs)
 
     @classmethod
+    def _fast_cache_digest(cls, raw_key: str) -> str:
+        """
+        Digest rápido en una sola pasada SHA-256 con SECRET_KEY para validar en microsegundos
+        llaves que ya superaron las 60,000 rondas PBKDF2 durante la ventana activa de caché (300s).
+        """
+        salt = (getattr(settings, 'SECRET_KEY', '') or 'cartmaker-default-salt')
+        return hashlib.sha256(f"{salt}:fast:{raw_key}".encode('utf-8')).hexdigest()
+
+    @classmethod
     def verify_key(cls, raw_key: str, required_scope: str = 'api') -> bool:
         """
         Verifica en tiempo constante (`secrets.compare_digest`) si una API Key recibida
@@ -2597,9 +2612,20 @@ class CartMakerApiKey(models.Model):
         if record.get('scope') not in allowed_scopes:
             return False
 
-        computed_hash = cls.hash_raw_key(raw_key)
-        if not secrets.compare_digest(computed_hash, record.get('hashed_key', '')):
-            return False
+        fast_digest = cls._fast_cache_digest(raw_key)
+        cached_fast_digest = record.get('fast_digest')
+        if cached_fast_digest:
+            if not secrets.compare_digest(fast_digest, cached_fast_digest):
+                return False
+        else:
+            computed_hash = cls.hash_raw_key(raw_key)
+            if not secrets.compare_digest(computed_hash, record.get('hashed_key', '')):
+                return False
+            record['fast_digest'] = fast_digest
+            try:
+                cache.set(cache_key, record, timeout=300)
+            except Exception:
+                pass
 
         # Actualización ligera (throttled cada 5 min) de last_used_at
         usage_throttle_key = f"cmk_used:{prefix}"

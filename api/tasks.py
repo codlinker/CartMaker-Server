@@ -251,13 +251,13 @@ def optimize_and_transcode_video_story(story_id):
                         '-vf', vf_string, 
                         '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-profile:v', 'main', '-level:v', '4.0',
                         '-c:a', 'copy', local_output
-                    ], capture_output=True, text=True)
+                    ], capture_output=True, text=True, timeout=180)
                     
                     # 💡 2. Filtrar Thumbnail en S3
                     result_t = subprocess.run([
                         'ffmpeg', '-y', '-i', local_thumb_in, 
                         '-vf', vf_string, local_thumb_out
-                    ], capture_output=True, text=True)
+                    ], capture_output=True, text=True, timeout=180)
 
                     if result_v.returncode != 0 or result_t.returncode != 0:
                         raise Exception(f"FFmpeg S3 Error. Video: {result_v.stderr} | Thumb: {result_t.stderr}")
@@ -286,13 +286,13 @@ def optimize_and_transcode_video_story(story_id):
                     '-vf', vf_string, 
                     '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-profile:v', 'main', '-level:v', '4.0',
                     '-c:a', 'copy', local_output_path
-                ], capture_output=True, text=True)
+                ], capture_output=True, text=True, timeout=180)
 
                 # 💡 2. Filtrar Thumbnail Local
                 result_t = subprocess.run([
                     'ffmpeg', '-y', '-i', absolute_thumb_path, 
                     '-vf', vf_string, local_thumb_out_path
-                ], capture_output=True, text=True)
+                ], capture_output=True, text=True, timeout=180)
 
                 if result_v.returncode != 0 or result_t.returncode != 0:
                     if os.path.exists(local_output_path): os.remove(local_output_path)
@@ -400,7 +400,14 @@ def optimize_and_transcode_video_story(story_id):
 
         try:
             from django.core.cache import cache
-            cache.delete_pattern("cartmaker:struct:*")
+            if story.associated_item_id:
+                cache.delete(f"cartmaker:struct:item:{story.associated_item_id}")
+            if story.company_id:
+                for store in story.company.stores.select_related('location').all():
+                    if store.location and store.location.coordinates:
+                        lat_r = round(store.location.coordinates.y, 2)
+                        lng_r = round(store.location.coordinates.x, 2)
+                        cache.delete_pattern(f"cartmaker:struct:home:{lat_r}:{lng_r}:*")
         except Exception:
             pass
 
@@ -412,6 +419,8 @@ def process_analytics_batch():
     """
     Barre todas las colas de telemetría de CartMaker en Redis y 
     procesa las inserciones y actualizaciones masivas hacia PostgreSQL.
+    Usa LTRIM post-commit por cola para evitar pérdida de datos si falla la BD
+    y preservar nuevos eventos insertados por RPUSH durante el procesamiento.
     """
     try:
         redis_conn = cache.client.get_client()
@@ -419,10 +428,9 @@ def process_analytics_batch():
         logger.error(f"❌ Error al conectar con Redis para analíticas: {e}")
         return
 
-    # Extraemos todo usando un Pipeline para máxima velocidad
+    # Leemos lotes actuales sin borrar antes de persistir en PostgreSQL
     pipeline = redis_conn.pipeline()
     
-    # 💡 Agregamos la nueva cola al final de la lista
     queues = [
         "telemetry:product_views", 
         "telemetry:store_views", 
@@ -433,16 +441,14 @@ def process_analytics_batch():
     
     for q in queues:
         pipeline.lrange(q, 0, -1)
-        pipeline.delete(q)
         
     results = pipeline.execute()
     
-    # results agrupa en pares [lista_data, bool_delete, lista_data, bool_delete...]
     raw_products = results[0]
-    raw_stores = results[2]
-    raw_navigation = results[4]
-    raw_video = results[6]
-    raw_unmet_demand = results[8] # 💡 Extraemos la data de las búsquedas fallidas
+    raw_stores = results[1]
+    raw_navigation = results[2]
+    raw_video = results[3]
+    raw_unmet_demand = results[4]
 
     def parse_aware_datetime(dt_str):
         if not dt_str: return None
@@ -483,17 +489,17 @@ def process_analytics_batch():
             except Exception as e:
                 logger.warning(f"⚠️ Error parseando log de ProductViewLog (se omitirá): {e}")
 
-        if product_logs:
-            try:
+        try:
+            if product_logs:
                 ProductViewLog.objects.bulk_create(product_logs, batch_size=500)
-                # bulk_create no dispara señales post_save; recalculamos popularidad por ítem afectado
-                for item_id_str in affected_item_ids:
-                    try:
-                        recalculate_item_popularity(item_id_str)
-                    except Exception:
-                        pass
-            except Exception as e:
-                logger.error(f"❌ Error en bulk_create de product_views: {e}")
+            redis_conn.ltrim("telemetry:product_views", len(raw_products), -1)
+            for item_id_str in affected_item_ids:
+                try:
+                    recalculate_item_popularity(item_id_str)
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.error(f"❌ Error en bulk_create de product_views: {e}")
 
     # ==========================================
     # 1. STORE VIEWS (Bulk Create)
@@ -515,8 +521,12 @@ def process_analytics_batch():
                     tryed_to_contact=data['tryed_to_contact']
                 ))
             except Exception: pass
-        if store_logs:
-            StoreViewLog.objects.bulk_create(store_logs, batch_size=500)
+        try:
+            if store_logs:
+                StoreViewLog.objects.bulk_create(store_logs, batch_size=500)
+            redis_conn.ltrim("telemetry:store_views", len(raw_stores), -1)
+        except Exception as e:
+            logger.error(f"❌ Error en bulk_create de store_views: {e}")
 
     # ==========================================
     # 2. NAVIGATION LOGS (Bulk Create)
@@ -533,8 +543,12 @@ def process_analytics_batch():
                     logout_time=parse_aware_datetime(data.get('logout_time'))
                 ))
             except Exception: pass
-        if nav_logs:
-            UserNavigationLog.objects.bulk_create(nav_logs, batch_size=500)
+        try:
+            if nav_logs:
+                UserNavigationLog.objects.bulk_create(nav_logs, batch_size=500)
+            redis_conn.ltrim("telemetry:navigation_logs", len(raw_navigation), -1)
+        except Exception as e:
+            logger.error(f"❌ Error en bulk_create de navigation_logs: {e}")
 
     # ==========================================
     # 3. VIDEO ENGAGEMENT (Agrupación en RAM + Bulk Upsert)
@@ -563,41 +577,45 @@ def process_analytics_batch():
                 metrics['bought_from_video'] |= data['bought_from_video']
             except Exception: pass
 
-        if aggregated_metrics:
-            client_ids = [k[0] for k in aggregated_metrics.keys()]
-            video_ids = [k[1] for k in aggregated_metrics.keys()]
-            
-            existing_logs = VideoEngagementLog.objects.filter(
-                client_id__in=client_ids, 
-                video_id__in=video_ids
-            )
-            existing_map = {(str(log.client_id), str(log.video_id)): log for log in existing_logs}
+        try:
+            if aggregated_metrics:
+                client_ids = [k[0] for k in aggregated_metrics.keys()]
+                video_ids = [k[1] for k in aggregated_metrics.keys()]
+                
+                existing_logs = VideoEngagementLog.objects.filter(
+                    client_id__in=client_ids, 
+                    video_id__in=video_ids
+                )
+                existing_map = {(str(log.client_id), str(log.video_id)): log for log in existing_logs}
 
-            to_update = []
-            to_create = []
+                to_update = []
+                to_create = []
 
-            for (cid, vid), m in aggregated_metrics.items():
-                if (cid, vid) in existing_map:
-                    log = existing_map[(cid, vid)]
-                    log.watch_time_seconds += m['watch_time_seconds']
-                    log.video_completed = log.video_completed or m['video_completed']
-                    log.interacted_with_product = log.interacted_with_product or m['interacted_with_product']
-                    log.added_to_cart_from_video = log.added_to_cart_from_video or m['added_to_cart_from_video']
-                    log.bought_from_video = log.bought_from_video or m['bought_from_video']
-                    to_update.append(log)
-                else:
-                    to_create.append(VideoEngagementLog(
-                        client_id=cid, video_id=vid, **m
-                    ))
+                for (cid, vid), m in aggregated_metrics.items():
+                    if (cid, vid) in existing_map:
+                        log = existing_map[(cid, vid)]
+                        log.watch_time_seconds += m['watch_time_seconds']
+                        log.video_completed = log.video_completed or m['video_completed']
+                        log.interacted_with_product = log.interacted_with_product or m['interacted_with_product']
+                        log.added_to_cart_from_video = log.added_to_cart_from_video or m['added_to_cart_from_video']
+                        log.bought_from_video = log.bought_from_video or m['bought_from_video']
+                        to_update.append(log)
+                    else:
+                        to_create.append(VideoEngagementLog(
+                            client_id=cid, video_id=vid, **m
+                        ))
 
-            if to_update:
-                VideoEngagementLog.objects.bulk_update(to_update, [
-                    'watch_time_seconds', 'video_completed', 'interacted_with_product', 
-                    'added_to_cart_from_video', 'bought_from_video'
-                ], batch_size=500)
-            
-            if to_create:
-                VideoEngagementLog.objects.bulk_create(to_create, batch_size=500)
+                if to_update:
+                    VideoEngagementLog.objects.bulk_update(to_update, [
+                        'watch_time_seconds', 'video_completed', 'interacted_with_product', 
+                        'added_to_cart_from_video', 'bought_from_video'
+                    ], batch_size=500)
+                
+                if to_create:
+                    VideoEngagementLog.objects.bulk_create(to_create, batch_size=500)
+            redis_conn.ltrim("telemetry:video_engagement", len(raw_video), -1)
+        except Exception as e:
+            logger.error(f"❌ Error en persistencia de video_engagement: {e}")
 
     # ==========================================
     # 4. UNMET DEMAND (Bulk Create)
@@ -620,15 +638,24 @@ def process_analytics_batch():
             except Exception as e:
                 logger.warning(f"⚠️ Error parseando log de UnmetDemandLog (se omitirá): {e}")
                 
-        if unmet_logs:
-            try:
+        try:
+            if unmet_logs:
                 UnmetDemandLog.objects.bulk_create(unmet_logs, batch_size=500)
-            except Exception as e:
-                logger.error(f"❌ Error en bulk_create de unmet_demand: {e}")
+            redis_conn.ltrim("telemetry:unmet_demand", len(raw_unmet_demand), -1)
+        except Exception as e:
+            logger.error(f"❌ Error en bulk_create de unmet_demand: {e}")
 
 @shared_task(ignore_result=True)
 def refresh_admin_dashboard_metrics():
     try:
+        try:
+            res = requests.get('https://ve.dolarapi.com/v1/dolares/oficial', timeout=5)
+            bcv_rate = float(res.json().get('promedio', 0.0) or 0.0)
+            if bcv_rate > 0:
+                cache.set('cm:bcv_official_rate', bcv_rate, timeout=86400)
+        except Exception as bcv_err:
+            logger.warning(f"⚠️ No se pudo refrescar cm:bcv_official_rate desde dolarapi: {bcv_err}")
+
         from api.dashboard import build_metrics_for_range
         logger.info("📊 Calculando métricas del Dashboard Admin...")
         now = timezone.now()
@@ -650,7 +677,32 @@ def refresh_admin_dashboard_metrics():
     except Exception as e:
         logger.error(f"❌ Error al calcular métricas: {e}")
 
+
+@shared_task(bind=True, ignore_result=True, max_retries=2, default_retry_delay=5)
+def send_otp_email_task(self, user_email: str, otp_code: str, timestamp_str: str):
+    """Despacha el correo OTP de forma asíncrona en Celery para no bloquear workers HTTP."""
+    try:
+        from api.utils import _deliver_otp_email_sync
+        _deliver_otp_email_sync(user_email, otp_code, timestamp_str)
+    except Exception as exc:
+        logger.error(f"❌ Error en send_otp_email_task hacia {user_email}: {exc}")
+        raise self.retry(exc=exc)
+
+
 @shared_task(name="cartmaker.subscriptions.notify_expiring")
 def notify_expiring_subscriptions():
     """Vender ya no depende de una suscripción. El nombre de la tarea se conserva por si queda un mensaje en cola."""
     return
+
+
+@shared_task(ignore_result=True)
+def send_push_notification_task(user_id: str, title: str, body: str, data: dict = None):
+    """Despacha notificaciones Push FCM de forma asíncrona en Celery usando NotificationManager."""
+    try:
+        user = User.objects.filter(id=user_id).first()
+        if not user:
+            return
+        safe_data = {str(k): str(v) for k, v in (data or {}).items()}
+        NotificationManager._send_multicast(user=user, title=title, body=body, data_payload=safe_data)
+    except Exception as exc:
+        logger.warning(f"⚠️ No se pudo enviar push FCM asíncrono al usuario {user_id}: {exc}")

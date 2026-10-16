@@ -198,6 +198,16 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log("Conectado al monitoreo en tiempo real");
         });
 
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
         socket.on('global_new_support_message', (msg) => {
             const badge = document.getElementById('badge-' + msg.ticket_id);
             if (badge) {
@@ -218,7 +228,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (msgPreview) {
                 let previewContent = "";
                 if (msg.message_type === 'text') {
-                    previewContent = msg.text.length > 65 ? msg.text.substring(0, 65) + "..." : msg.text;
+                    const rawText = msg.text || '';
+                    const clipped = rawText.length > 65 ? rawText.substring(0, 65) + "..." : rawText;
+                    previewContent = escapeHtml(clipped);
                 } else if (msg.message_type === 'image') {
                     previewContent = '<span class="material-symbols-rounded preview-icon" style="font-size: 14px; vertical-align: middle;">image</span> Imagen enviada';
                 } else if (msg.message_type === 'audio') {
@@ -255,23 +267,30 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
+            const safeTicketId = parseInt(ticket.id, 10) || 0;
+            const safeTopicId = parseInt(ticket.topic_id, 10) || 0;
+            const safeTopic = escapeHtml(ticket.topic || '');
+            const safeTitle = escapeHtml(ticket.title || '');
+            const rawDesc = ticket.description || '';
+            const safeDesc = escapeHtml(rawDesc.substring(0, 65));
+
             const grid = document.getElementById('dashboard-tickets-grid');
             const card = document.createElement('a');
-            card.href = '/support/ticket/' + ticket.id + '/';
+            card.href = '/support/ticket/' + safeTicketId + '/';
             card.className = "ticket-card-link";
-            card.id = 'ticket-card-' + ticket.id;
+            card.id = 'ticket-card-' + safeTicketId;
             
             card.innerHTML = `
                 <div class="ticket-card" style="animation: slideIn 0.5s ease; border-color: var(--success-green);">
                     <div class="ticket-header" style="display: flex; align-items: center;">
-                        <span class="ticket-id">#${String(ticket.id).padStart(5, '0')}</span>
-                        <span class="ticket-topic topic-${ticket.topic_id}">${ticket.topic}</span>
-                        <span class="badge-unread" id="badge-${ticket.id}" style="margin-left: auto; background-color: var(--error-red); color: white; border-radius: 50%; padding: 2px 8px; font-size: 12px; font-weight: bold; display: none;">0</span>
+                        <span class="ticket-id">#${String(safeTicketId).padStart(5, '0')}</span>
+                        <span class="ticket-topic topic-${safeTopicId}">${safeTopic}</span>
+                        <span class="badge-unread" id="badge-${safeTicketId}" style="margin-left: auto; background-color: var(--error-red); color: white; border-radius: 50%; padding: 2px 8px; font-size: 12px; font-weight: bold; display: none;">0</span>
                     </div>
-                    <h4 class="ticket-title">${ticket.title}</h4>
+                    <h4 class="ticket-title">${safeTitle}</h4>
                     <div class="ticket-message-preview">
-                        <span class="preview-label" id="label-preview-${ticket.id}">Motivo de contacto:</span>
-                        <p class="ticket-desc" id="msg-preview-${ticket.id}">${ticket.description.substring(0, 65)}...</p>
+                        <span class="preview-label" id="label-preview-${safeTicketId}">Motivo de contacto:</span>
+                        <p class="ticket-desc" id="msg-preview-${safeTicketId}">${safeDesc}...</p>
                     </div>
                     <div class="ticket-footer">
                         <div class="ticket-client">

@@ -1,0 +1,1999 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="es" data-theme-mode="{{ theme.mode }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+    <title>{{ company.name }} — Catálogo Oficial en CartMaker</title>
+    <meta name="description" content="{{ theme.hero_tagline }} Explora el inventario en tiempo real de {{ company.name }} en CartMaker.">
+    <meta property="og:title" content="{{ company.name }} | Vitrina Oficial CartMaker">
+    <meta property="og:description" content="{{ theme.hero_tagline }}">
+    {% if company.image %}
+    <meta property="og:image" content="{{ company.image }}">
+    {% endif %}
+    <link rel="icon" href="{% static 'img/favicon.ico' %}">
+
+    <!-- Tipografías Adaptativas para las 14 Personalidades de Categoría -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:ital,wght@0,600;0,700;0,800;1,600&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Leaflet Maps CSS & JS para el Mapa Interactivo y Cálculo de Ruta en Vivo -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+    <!-- Generador ligero de QR en Canvas para Handoff hacia la App y Kit Imprimible -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+
+    <style>
+        :root {
+            --sf-bg-primary: {{ theme.bg_primary }};
+            --sf-bg-secondary: {{ theme.bg_secondary }};
+            --sf-bg-card: {{ theme.bg_card }};
+            --sf-text-primary: {{ theme.text_primary }};
+            --sf-text-secondary: {{ theme.text_secondary }};
+            --sf-accent-primary: {{ theme.accent_primary }};
+            --sf-accent-secondary: {{ theme.accent_secondary }};
+            --sf-accent-gradient: {{ theme.accent_gradient }};
+            --sf-border-glow: {{ theme.border_glow }};
+            --sf-font-heading: {{ theme.font_heading|safe }};
+            --sf-font-body: {{ theme.font_body|safe }};
+            --sf-card-aspect: {{ theme.card_aspect }};
+            --sf-ambient: {{ theme.ambient_pattern|safe }};
+            --sf-radius-lg: 22px;
+            --sf-radius-md: 16px;
+            --sf-radius-sm: 11px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--sf-bg-primary);
+            background-image: var(--sf-ambient);
+            background-attachment: fixed;
+            color: var(--sf-text-primary);
+            font-family: var(--sf-font-body);
+            line-height: 1.5;
+            min-height: 100vh;
+            overflow-x: hidden;
+            transition: background-color 0.35s ease, color 0.35s ease;
+        }
+
+        h1, h2, h3, h4, .sf-heading {
+            font-family: var(--sf-font-heading);
+            letter-spacing: -0.02em;
+        }
+
+        /* =========================================================
+           BARRA SUPERIOR CARTMAKER ECOSYSTEM + TASA BCV EN VIVO
+           ========================================================= */
+        .cm-topbar {
+            position: sticky;
+            top: 0;
+            z-index: 90;
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            background: rgba(10, 12, 22, 0.82);
+            border-bottom: 1px solid var(--sf-border-glow);
+            padding: 10px 20px;
+            color: #F8FAFC;
+        }
+        [data-theme-mode="light"] .cm-topbar {
+            background: rgba(255, 255, 255, 0.88);
+            color: var(--sf-text-primary);
+        }
+        .cm-topbar-inner {
+            max-width: 1340px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .cm-brand-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            text-decoration: none;
+            color: inherit;
+            font-weight: 800;
+            font-size: 0.95rem;
+        }
+        .cm-brand-logo-dot {
+            width: 32px;
+            height: 32px;
+            border-radius: 10px;
+            background: var(--sf-accent-gradient);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-size: 1.05rem;
+            box-shadow: 0 4px 14px var(--sf-border-glow);
+        }
+        .cm-topbar-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .cm-bcv-pill {
+            font-size: 0.8rem;
+            font-weight: 700;
+            padding: 6px 12px;
+            border-radius: 999px;
+            background: rgba(16, 185, 129, 0.14);
+            color: #10B981;
+            border: 1px solid rgba(16, 185, 129, 0.32);
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .cm-currency-toggle {
+            display: inline-flex;
+            background: rgba(148, 163, 184, 0.15);
+            border-radius: 999px;
+            padding: 3px;
+            border: 1px solid var(--sf-border-glow);
+        }
+        .cm-currency-btn {
+            border: none;
+            background: transparent;
+            color: inherit;
+            font-size: 0.76rem;
+            font-weight: 700;
+            padding: 5px 11px;
+            border-radius: 999px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .cm-currency-btn.active {
+            background: var(--sf-accent-gradient);
+            color: #fff;
+        }
+        .cm-theme-switcher {
+            background: rgba(148, 163, 184, 0.14);
+            color: inherit;
+            border: 1px solid var(--sf-border-glow);
+            border-radius: 999px;
+            padding: 6px 12px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .cm-app-cta-top {
+            background: var(--sf-accent-gradient);
+            color: #fff;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 999px;
+            font-weight: 700;
+            font-size: 0.82rem;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            box-shadow: 0 6px 18px var(--sf-border-glow);
+            transition: transform 0.2s ease;
+        }
+        .cm-app-cta-top:hover {
+            transform: translateY(-1px);
+        }
+
+        /* =========================================================
+           HERO INTERACTIVO DEL COMERCIANTE
+           ========================================================= */
+        .sf-container {
+            max-width: 1340px;
+            margin: 0 auto;
+            padding: 24px 20px 120px;
+        }
+        .sf-hero-card {
+            position: relative;
+            border-radius: 28px;
+            background: var(--sf-bg-secondary);
+            border: 1px solid var(--sf-border-glow);
+            padding: 28px;
+            margin-bottom: 24px;
+            overflow: hidden;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.18);
+        }
+        .sf-hero-grid {
+            display: grid;
+            grid-template-columns: 1.35fr 1fr;
+            gap: 24px;
+            align-items: center;
+        }
+        @media (max-width: 960px) {
+            .sf-hero-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        .sf-merchant-header {
+            display: flex;
+            align-items: flex-start;
+            gap: 20px;
+        }
+        @media (max-width: 600px) {
+            .sf-merchant-header {
+                flex-direction: column;
+            }
+        }
+        .sf-merchant-avatar-wrap {
+            position: relative;
+            flex-shrink: 0;
+        }
+        .sf-merchant-avatar {
+            width: 96px;
+            height: 96px;
+            border-radius: 24px;
+            object-fit: cover;
+            border: 3px solid var(--sf-accent-primary);
+            box-shadow: 0 10px 25px var(--sf-border-glow);
+            background: var(--sf-bg-card);
+        }
+        .sf-platinum-crown {
+            position: absolute;
+            bottom: -8px;
+            right: -8px;
+            background: linear-gradient(135deg, #F59E0B, #FEF08A, #D97706);
+            color: #1E1B4B;
+            font-size: 0.68rem;
+            font-weight: 900;
+            padding: 3px 8px;
+            border-radius: 999px;
+            box-shadow: 0 4px 12px rgba(245, 158, 11, 0.5);
+            letter-spacing: 0.04em;
+        }
+        .sf-badges-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        .sf-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 0.74rem;
+            font-weight: 700;
+            padding: 4px 11px;
+            border-radius: 999px;
+            border: 1px solid var(--sf-border-glow);
+            background: var(--sf-bg-card);
+        }
+        .sf-badge.open {
+            background: rgba(16, 185, 129, 0.15);
+            color: #10B981;
+            border-color: rgba(16, 185, 129, 0.35);
+        }
+        .sf-badge.closed {
+            background: rgba(239, 68, 68, 0.15);
+            color: #EF4444;
+            border-color: rgba(239, 68, 68, 0.35);
+        }
+        .sf-badge.verified {
+            background: rgba(59, 130, 246, 0.15);
+            color: #3B82F6;
+            border-color: rgba(59, 130, 246, 0.35);
+        }
+        .sf-badge.tokens {
+            background: rgba(245, 158, 11, 0.16);
+            color: #F59E0B;
+            border-color: rgba(245, 158, 11, 0.4);
+        }
+        .sf-merchant-title {
+            font-size: clamp(1.65rem, 3vw, 2.35rem);
+            font-weight: 800;
+            line-height: 1.15;
+            margin-bottom: 6px;
+        }
+        .sf-merchant-tagline {
+            color: var(--sf-text-secondary);
+            font-size: 0.92rem;
+            margin-bottom: 14px;
+        }
+        .sf-stats-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 14px;
+            margin-top: 12px;
+        }
+        .sf-stat-chip {
+            background: var(--sf-bg-card);
+            border: 1px solid var(--sf-border-glow);
+            padding: 8px 14px;
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            transition: transform 0.2s ease, border-color 0.2s ease;
+        }
+        .sf-stat-chip:hover {
+            transform: translateY(-2px);
+            border-color: var(--sf-accent-primary);
+        }
+        .sf-stat-val {
+            font-weight: 800;
+            font-size: 0.98rem;
+        }
+        .sf-stat-lbl {
+            font-size: 0.76rem;
+            color: var(--sf-text-secondary);
+        }
+
+        /* =========================================================
+           PANEL DE MAPA INTERACTIVO Y CÁLCULO DE TIEMPO DE LLEGADA
+           ========================================================= */
+        .sf-map-box {
+            background: var(--sf-bg-card);
+            border: 1px solid var(--sf-border-glow);
+            border-radius: 20px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        #sfLeafletMap {
+            width: 100%;
+            height: 210px;
+            z-index: 1;
+        }
+        .sf-map-footer {
+            padding: 12px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .sf-eta-pills {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+        }
+        .sf-eta-pill {
+            background: rgba(148, 163, 184, 0.1);
+            border: 1px solid var(--sf-border-glow);
+            border-radius: 10px;
+            padding: 6px 8px;
+            text-align: center;
+            font-size: 0.76rem;
+        }
+        .sf-eta-pill strong {
+            display: block;
+            font-size: 0.88rem;
+            color: var(--sf-accent-primary);
+        }
+        .sf-route-btn {
+            width: 100%;
+            background: var(--sf-accent-gradient);
+            color: #fff;
+            border: none;
+            border-radius: 12px;
+            padding: 9px 14px;
+            font-weight: 700;
+            font-size: 0.82rem;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: opacity 0.2s ease;
+        }
+        .sf-route-btn:hover {
+            opacity: 0.94;
+        }
+
+        /* =========================================================
+           SELECTOR DE SUCURSALES (MULTI-TIENDA)
+           ========================================================= */
+        .sf-branches-strip {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            overflow-x: auto;
+            padding-bottom: 8px;
+            margin-bottom: 20px;
+            scrollbar-width: thin;
+        }
+        .sf-branch-tab {
+            flex-shrink: 0;
+            background: var(--sf-bg-card);
+            color: var(--sf-text-primary);
+            border: 1px solid var(--sf-border-glow);
+            padding: 10px 16px;
+            border-radius: 14px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.84rem;
+            font-weight: 700;
+            transition: all 0.2s ease;
+        }
+        .sf-branch-tab.active {
+            background: var(--sf-accent-gradient);
+            color: #fff;
+            border-color: transparent;
+            box-shadow: 0 8px 20px var(--sf-border-glow);
+        }
+        .sf-branch-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #10B981;
+        }
+        .sf-branch-dot.closed {
+            background: #EF4444;
+        }
+
+        /* =========================================================
+           REEL DE VIDEO STORIES DEL COMERCIANTE
+           ========================================================= */
+        .sf-stories-section {
+            margin-bottom: 26px;
+        }
+        .sf-section-subtitle {
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--sf-text-secondary);
+            font-weight: 800;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .sf-stories-reel {
+            display: flex;
+            gap: 16px;
+            overflow-x: auto;
+            padding: 4px 2px 12px;
+        }
+        .sf-story-item {
+            flex-shrink: 0;
+            width: 110px;
+            cursor: pointer;
+            text-align: center;
+            transition: transform 0.2s ease;
+        }
+        .sf-story-item:hover {
+            transform: translateY(-3px);
+        }
+        .sf-story-ring {
+            width: 86px;
+            height: 86px;
+            margin: 0 auto 6px;
+            padding: 3px;
+            border-radius: 26px;
+            background: var(--sf-accent-gradient);
+            position: relative;
+        }
+        .sf-story-thumb {
+            width: 100%;
+            height: 100%;
+            border-radius: 22px;
+            object-fit: cover;
+            background: #111;
+        }
+        .sf-story-play-badge {
+            position: absolute;
+            bottom: -4px;
+            right: -4px;
+            background: var(--sf-accent-primary);
+            color: #fff;
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.72rem;
+            border: 2px solid var(--sf-bg-primary);
+        }
+        .sf-story-caption {
+            font-size: 0.75rem;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* =========================================================
+           BARRA DE BÚSQUEDA Y FILTROS INTELIGENTES EN VIVO
+           ========================================================= */
+        .sf-filters-bar {
+            position: sticky;
+            top: 57px;
+            z-index: 80;
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+            background: var(--sf-bg-secondary);
+            border: 1px solid var(--sf-border-glow);
+            border-radius: 20px;
+            padding: 16px;
+            margin-bottom: 24px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+        }
+        .sf-filters-top {
+            display: grid;
+            grid-template-columns: 1fr auto auto;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        @media (max-width: 780px) {
+            .sf-filters-top {
+                grid-template-columns: 1fr;
+            }
+        }
+        .sf-search-input-wrap {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+        .sf-search-input {
+            width: 100%;
+            background: var(--sf-bg-primary);
+            color: var(--sf-text-primary);
+            border: 1px solid var(--sf-border-glow);
+            border-radius: 14px;
+            padding: 12px 16px 12px 42px;
+            font-size: 0.94rem;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.2s ease;
+        }
+        .sf-search-input:focus {
+            border-color: var(--sf-accent-primary);
+        }
+        .sf-search-icon {
+            position: absolute;
+            left: 14px;
+            font-size: 1rem;
+            opacity: 0.65;
+        }
+        .sf-select {
+            background: var(--sf-bg-primary);
+            color: var(--sf-text-primary);
+            border: 1px solid var(--sf-border-glow);
+            border-radius: 14px;
+            padding: 11px 14px;
+            font-size: 0.86rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .sf-pills-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            overflow-x: auto;
+            padding-bottom: 4px;
+        }
+        .sf-filter-pill {
+            flex-shrink: 0;
+            border: 1px solid var(--sf-border-glow);
+            background: var(--sf-bg-primary);
+            color: var(--sf-text-primary);
+            padding: 7px 14px;
+            border-radius: 999px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .sf-filter-pill.active {
+            background: var(--sf-accent-gradient);
+            color: #fff;
+            border-color: transparent;
+        }
+
+        /* =========================================================
+           GRILLA DE PRODUCTOS ADAPTATIVA POR CATEGORÍA
+           ========================================================= */
+        .sf-products-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(265px, 1fr));
+            gap: 20px;
+        }
+        /* Variaciones específicas según el arquetipo visual de las 14 categorías */
+        [data-card-style="gourmet-menu"] .sf-products-grid {
+            grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+        }
+        [data-card-style="runway-lookbook"] .sf-products-grid {
+            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+        }
+
+        .sf-product-card {
+            background: var(--sf-bg-card);
+            border: 1px solid var(--sf-border-glow);
+            border-radius: var(--sf-radius-lg);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s ease, border-color 0.25s ease;
+            cursor: pointer;
+            position: relative;
+        }
+        .sf-product-card:hover {
+            transform: translateY(-5px);
+            border-color: var(--sf-accent-primary);
+            box-shadow: 0 18px 38px var(--sf-border-glow);
+        }
+        .sf-product-media {
+            position: relative;
+            width: 100%;
+            aspect-ratio: var(--sf-card-aspect);
+            background: rgba(148, 163, 184, 0.08);
+            overflow: hidden;
+        }
+        .sf-product-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.4s ease;
+        }
+        .sf-product-card:hover .sf-product-img {
+            transform: scale(1.05);
+        }
+        .sf-card-top-badges {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 6px;
+            pointer-events: none;
+        }
+        .sf-offer-tag {
+            background: linear-gradient(135deg, #EF4444, #F97316);
+            color: #fff;
+            font-size: 0.74rem;
+            font-weight: 800;
+            padding: 4px 10px;
+            border-radius: 999px;
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+        }
+        .sf-token-tag {
+            background: rgba(15, 23, 42, 0.86);
+            color: #FBBF24;
+            border: 1px solid rgba(251, 191, 36, 0.45);
+            font-size: 0.72rem;
+            font-weight: 700;
+            padding: 4px 9px;
+            border-radius: 999px;
+            backdrop-filter: blur(8px);
+        }
+        .sf-product-body {
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            gap: 8px;
+        }
+        .sf-product-cat {
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--sf-accent-primary);
+        }
+        .sf-product-title {
+            font-size: 1.02rem;
+            font-weight: 700;
+            line-height: 1.3;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .sf-specs-preview {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+        }
+        .sf-spec-chip {
+            font-size: 0.7rem;
+            padding: 2px 8px;
+            border-radius: 6px;
+            background: rgba(148, 163, 184, 0.13);
+            color: var(--sf-text-secondary);
+            font-weight: 600;
+        }
+        .sf-price-row {
+            margin-top: auto;
+            padding-top: 10px;
+            border-top: 1px solid rgba(148, 163, 184, 0.14);
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        .sf-price-main {
+            font-size: 1.28rem;
+            font-weight: 800;
+            line-height: 1.1;
+        }
+        .sf-price-old {
+            font-size: 0.78rem;
+            text-decoration: line-through;
+            color: var(--sf-text-secondary);
+            margin-left: 6px;
+        }
+        .sf-price-bs {
+            font-size: 0.76rem;
+            color: var(--sf-text-secondary);
+            font-weight: 600;
+            margin-top: 2px;
+        }
+        .sf-add-btn {
+            background: var(--sf-accent-gradient);
+            color: #fff;
+            border: none;
+            border-radius: 12px;
+            padding: 9px 14px;
+            font-weight: 700;
+            font-size: 0.82rem;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            box-shadow: 0 4px 14px var(--sf-border-glow);
+        }
+
+        /* =========================================================
+           BARRA FLOTANTE INFERIOR DE CARRITO -> APP CARTMAKER
+           ========================================================= */
+        .sf-floating-cart-bar {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%) translateY(130%);
+            z-index: 95;
+            width: min(94vw, 760px);
+            background: rgba(10, 12, 24, 0.94);
+            color: #fff;
+            border: 1px solid var(--sf-accent-primary);
+            border-radius: 22px;
+            padding: 14px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.55), 0 0 25px var(--sf-border-glow);
+            backdrop-filter: blur(20px);
+            transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .sf-floating-cart-bar.visible {
+            transform: translateX(-50%) translateY(0);
+        }
+        .sf-checkout-app-btn {
+            background: var(--sf-accent-gradient);
+            color: #fff;
+            border: none;
+            border-radius: 14px;
+            padding: 12px 22px;
+            font-weight: 800;
+            font-size: 0.92rem;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 6px 20px var(--sf-border-glow);
+        }
+
+        /* =========================================================
+           MODALES INTERACTIVOS (DETALLE SDUI, STORIES, HANDOFF APP, QR)
+           ========================================================= */
+        .sf-modal-backdrop {
+            position: fixed;
+            inset: 0;
+            z-index: 120;
+            background: rgba(5, 7, 15, 0.78);
+            backdrop-filter: blur(12px);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 18px;
+        }
+        .sf-modal-backdrop.open {
+            display: flex;
+        }
+        .sf-modal-card {
+            background: var(--sf-bg-secondary);
+            color: var(--sf-text-primary);
+            border: 1px solid var(--sf-border-glow);
+            border-radius: 26px;
+            width: min(100%, 820px);
+            max-height: 90vh;
+            overflow-y: auto;
+            padding: 26px;
+            position: relative;
+            box-shadow: 0 25px 70px rgba(0, 0, 0, 0.55);
+        }
+        .sf-modal-close {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: 1px solid var(--sf-border-glow);
+            background: var(--sf-bg-card);
+            color: var(--sf-text-primary);
+            font-size: 1.1rem;
+            cursor: pointer;
+        }
+        .sf-detail-grid {
+            display: grid;
+            grid-template-columns: 1fr 1.1fr;
+            gap: 24px;
+        }
+        @media (max-width: 720px) {
+            .sf-detail-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        .sf-variant-btn {
+            border: 1px solid var(--sf-border-glow);
+            background: var(--sf-bg-primary);
+            color: var(--sf-text-primary);
+            padding: 8px 14px;
+            border-radius: 12px;
+            font-size: 0.82rem;
+            font-weight: 700;
+            cursor: pointer;
+            margin: 4px 6px 4px 0;
+        }
+        .sf-variant-btn.selected {
+            background: var(--sf-accent-gradient);
+            color: #fff;
+            border-color: transparent;
+        }
+        .sf-qr-box {
+            background: #fff;
+            padding: 16px;
+            border-radius: 20px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin: 12px auto;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        .sf-protection-banner {
+            background: rgba(16, 185, 129, 0.12);
+            border: 1px solid rgba(16, 185, 129, 0.35);
+            border-radius: 16px;
+            padding: 14px 16px;
+            margin-top: 16px;
+            font-size: 0.84rem;
+        }
+    </style>
+</head>
+<body data-card-style="{{ theme.card_style }}">
+
+    <!-- =========================================================
+         BARRA SUPERIOR DEL ECOSISTEMA CARTMAKER
+         ========================================================= -->
+    <header class="cm-topbar">
+        <div class="cm-topbar-inner">
+            <a href="/" class="cm-brand-pill">
+                <span class="cm-brand-logo-dot">🛒</span>
+                <span>CartMaker <small style="opacity:0.72;font-weight:600;">Vitrina Oficial</small></span>
+            </a>
+
+            <div class="cm-topbar-controls">
+                {% if bcv_rate > 0 %}
+                <span class="cm-bcv-pill" title="Tasa Oficial BCV sincronizada automáticamente">
+                    🏦 BCV: Bs. {{ bcv_rate|floatformat:2 }} / $1
+                </span>
+                {% endif %}
+
+                <div class="cm-currency-toggle" role="group" aria-label="Selector de moneda">
+                    <button type="button" class="cm-currency-btn active" data-curr="BOTH" onclick="setCurrencyMode('BOTH')">USD + Bs</button>
+                    <button type="button" class="cm-currency-btn" data-curr="USD" onclick="setCurrencyMode('USD')">Solo USD</button>
+                    <button type="button" class="cm-currency-btn" data-curr="BS" onclick="setCurrencyMode('BS')">Solo Bs</button>
+                </div>
+
+                <select id="themePreviewSelect" class="cm-theme-switcher" onchange="switchCategoryTheme(this.value)" title="Personalidad visual adaptada a la categoría del comercio">
+                </select>
+
+                <button type="button" class="cm-app-cta-top" onclick="openQrStandeeModal()">
+                    🖨️ QR de Tienda
+                </button>
+                <a href="{{ app_deep_link }}" onclick="openAppHandoffModal(); return false;" class="cm-app-cta-top">
+                    📱 Abrir en CartMaker App
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <main class="sf-container">
+        <!-- =========================================================
+             HERO DEL COMERCIANTE + MAPA INTERACTIVO CON RUTA EN VIVO
+             ========================================================= -->
+        <section class="sf-hero-card">
+            <div class="sf-hero-grid">
+                <div>
+                    <div class="sf-merchant-header">
+                        <div class="sf-merchant-avatar-wrap">
+                            <img src="{{ company.image|default:'/static/img/no_image.jpg' }}" alt="{{ company.name }}" class="sf-merchant-avatar" onerror="this.src='/static/img/no_image.jpg'">
+                            {% if company.is_platinum %}
+                            <span class="sf-platinum-crown">👑 PLATINUM</span>
+                            {% endif %}
+                        </div>
+
+                        <div style="flex:1;">
+                            <div class="sf-badges-row">
+                                <span class="sf-badge" id="heroCategoryBadge">
+                                    {{ theme.hero_badge_icon }} <span id="heroCategoryLabel">{{ theme.category_label }}</span>
+                                </span>
+                                <span class="sf-badge open" id="branchOpenStatusBadge">
+                                    🟢 Verificando horario...
+                                </span>
+                                {% if company.kyb_status == 2 %}
+                                <span class="sf-badge verified" title="Empresa verificada legalmente en SENIAT/SAREN">
+                                    🛡️ Empresa Verificada KYB
+                                </span>
+                                {% endif %}
+                                {% if company.gamification_enabled %}
+                                <span class="sf-badge tokens">
+                                    🪙 Gana {{ company.gamification_tokens_per_dollar }} Tokens por cada $1
+                                </span>
+                                {% endif %}
+                            </div>
+
+                            <h1 class="sf-merchant-title">{{ company.name }}</h1>
+                            <p class="sf-merchant-tagline" id="heroTaglineText">{{ theme.hero_tagline }}</p>
+
+                            <div class="sf-stats-bar">
+                                <div class="sf-stat-chip" onclick="openReputationModal()" title="Ver desglose de calificaciones">
+                                    <span>⭐</span>
+                                    <div>
+                                        <div class="sf-stat-val">{{ company.avg_rating|default:"5.0" }} <small style="font-weight:500;opacity:0.75;">({{ company.rating_count }})</small></div>
+                                        <div class="sf-stat-lbl">Calificación Verificada</div>
+                                    </div>
+                                </div>
+
+                                <div class="sf-stat-chip" onclick="openReputationModal()">
+                                    <span>📦</span>
+                                    <div>
+                                        <div class="sf-stat-val">{{ items_count }}</div>
+                                        <div class="sf-stat-lbl">Productos en Stock</div>
+                                    </div>
+                                </div>
+
+                                <div class="sf-stat-chip" onclick="openQrStandeeModal()">
+                                    <span>🔒</span>
+                                    <div>
+                                        <div class="sf-stat-val">100% App</div>
+                                        <div class="sf-stat-lbl">Compra Protegida CartMaker</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Mapa Interactivo de Sucursales + Calculadora de Tiempo de Llegada -->
+                <div class="sf-map-box">
+                    <div id="sfLeafletMap"></div>
+                    <div class="sf-map-footer">
+                        <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.8rem;">
+                            <strong id="activeBranchAddressLabel">📍 Cargando ubicación...</strong>
+                            <span id="routeDistanceBadge" style="color:var(--sf-accent-primary);font-weight:800;"></span>
+                        </div>
+                        <div class="sf-eta-pills">
+                            <div class="sf-eta-pill">
+                                🚗 Carro
+                                <strong id="etaCarVal">-- min</strong>
+                            </div>
+                            <div class="sf-eta-pill">
+                                🏍️ Moto
+                                <strong id="etaMotoVal">-- min</strong>
+                            </div>
+                            <div class="sf-eta-pill">
+                                🚶 A pie
+                                <strong id="etaWalkVal">-- min</strong>
+                            </div>
+                        </div>
+                        <button type="button" class="sf-route-btn" id="calcRouteBtn" onclick="calculateLiveRouteToStore()">
+                            🧭 Calcular cuánto tardo en llegar desde mi ubicación
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- =========================================================
+             SELECTOR DE SUCURSALES (SI TIENE 1 O MÁS SEDES)
+             ========================================================= -->
+        <div class="sf-branches-strip" id="branchesTabsContainer"></div>
+
+        <!-- =========================================================
+             REEL INTERACTIVO DE VIDEO STORIES (SI LA TIENDA TIENE STORIES)
+             ========================================================= -->
+        <section class="sf-stories-section" id="storiesSectionWrap" style="display:none;">
+            <div class="sf-section-subtitle">
+                <span>🎬 Video Historias en Vivo</span>
+                <small style="opacity:0.7;font-weight:600;">(Toca para ver el producto en acción)</small>
+            </div>
+            <div class="sf-stories-reel" id="storiesReelContainer"></div>
+        </section>
+
+        <!-- =========================================================
+             BUSCADOR INSTANTÁNEO Y FILTROS DE CATÁLOGO
+             ========================================================= -->
+        <section class="sf-filters-bar">
+            <div class="sf-filters-top">
+                <div class="sf-search-input-wrap">
+                    <span class="sf-search-icon">🔍</span>
+                    <input type="search" id="catalogSearchInput" class="sf-search-input" placeholder="Buscar producto, marca, talla, modelo o especificación en {{ company.name }}..." oninput="applyFilters()">
+                </div>
+
+                <select id="sortSelect" class="sf-select" onchange="applyFilters()">
+                    <option value="featured">✨ Más Destacados</option>
+                    <option value="price_asc">💲 Precio: Menor a Mayor</option>
+                    <option value="price_desc">💎 Precio: Mayor a Menor</option>
+                    <option value="discount">⚡ Mayor Descuento</option>
+                    <option value="rating">⭐ Mejor Calificados</option>
+                </select>
+
+                <button type="button" class="sf-add-btn" style="padding:11px 16px;" onclick="openCartDrawer()">
+                    🛒 Mi Carrito (<span id="topCartCounter">0</span>)
+                </button>
+            </div>
+
+            <div class="sf-pills-row" id="subcategoryPillsContainer"></div>
+        </section>
+
+        <!-- =========================================================
+             GRILLA DE PRODUCTOS INTERACTIVOS
+             ========================================================= -->
+        <section>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+                <h2 class="sf-heading" style="font-size:1.25rem;">Catálogo en Tiempo Real (<span id="visibleProductsCount">0</span>)</h2>
+                <span style="font-size:0.8rem;color:var(--sf-text-secondary);">Precios sincronizados con inventario oficial CartMaker</span>
+            </div>
+            <div class="sf-products-grid" id="productsGridContainer"></div>
+        </section>
+    </main>
+
+    <!-- =========================================================
+         BARRA FLOTANTE INFERIOR DE CHECKOUT EXCLUSIVO EN CARTMAKER APP
+         ========================================================= -->
+    <div class="sf-floating-cart-bar" id="floatingCartBar">
+        <div>
+            <div style="font-size:0.78rem;color:#94A3B8;font-weight:600;">
+                <span id="floatingCartItemsCount">0</span> productos listos para pedir en <strong>{{ company.name }}</strong>
+            </div>
+            <div style="font-size:1.22rem;font-weight:800;">
+                Total: <span id="floatingCartTotalUsd">$0.00</span>
+                <small id="floatingCartTotalBs" style="font-size:0.82rem;color:#10B981;margin-left:8px;"></small>
+            </div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;">
+            <button type="button" class="cm-currency-btn" style="border:1px solid rgba(255,255,255,0.25);padding:10px 14px;color:#fff;" onclick="openCartDrawer()">
+                Ver Carrito
+            </button>
+            <button type="button" class="sf-checkout-app-btn" onclick="proceedToCartMakerAppCheckout()">
+                🚀 Completar Compra en CartMaker App
+            </button>
+        </div>
+    </div>
+
+    <!-- =========================================================
+         MODAL 1: DETALLE DE PRODUCTO SDUI (VARIANTES, EXTRAS, ATRIBUTOS)
+         ========================================================= -->
+    <div class="sf-modal-backdrop" id="productDetailModal" onclick="if(event.target===this)closeProductModal()">
+        <div class="sf-modal-card">
+            <button type="button" class="sf-modal-close" onclick="closeProductModal()">✕</button>
+            <div id="productModalContent"></div>
+        </div>
+    </div>
+
+    <!-- =========================================================
+         MODAL 2: REPRODUCTOR DE VIDEO STORY VERTICAL (9:16)
+         ========================================================= -->
+    <div class="sf-modal-backdrop" id="storyPlayerModal" onclick="if(event.target===this)closeStoryModal()">
+        <div class="sf-modal-card" style="max-width:430px;padding:18px;text-align:center;">
+            <button type="button" class="sf-modal-close" onclick="closeStoryModal()">✕</button>
+            <div id="storyModalContent"></div>
+        </div>
+    </div>
+
+    <!-- =========================================================
+         MODAL 3: CARRITO Y PUENTE EXCLUSIVO HACIA CARTMAKER APP
+         ========================================================= -->
+    <div class="sf-modal-backdrop" id="cartHandoffModal" onclick="if(event.target===this)closeCartDrawer()">
+        <div class="sf-modal-card" style="max-width:650px;">
+            <button type="button" class="sf-modal-close" onclick="closeCartDrawer()">✕</button>
+            <div id="cartDrawerContent"></div>
+        </div>
+    </div>
+
+    <!-- =========================================================
+         MODAL 4: REPUTACIÓN, CALIFICACIONES Y VERIFICACIÓN KYB
+         ========================================================= -->
+    <div class="sf-modal-backdrop" id="reputationModal" onclick="if(event.target===this)closeReputationModal()">
+        <div class="sf-modal-card" style="max-width:560px;">
+            <button type="button" class="sf-modal-close" onclick="closeReputationModal()">✕</button>
+            <div id="reputationModalContent"></div>
+        </div>
+    </div>
+
+    <!-- =========================================================
+         MODAL 5: KIT QR IMPRIMIBLE DE MOSTRADOR Y LINK COMPARTIBLE
+         ========================================================= -->
+    <div class="sf-modal-backdrop" id="qrStandeeModal" onclick="if(event.target===this)closeQrStandeeModal()">
+        <div class="sf-modal-card" style="max-width:520px;text-align:center;">
+            <button type="button" class="sf-modal-close" onclick="closeQrStandeeModal()">✕</button>
+            <span class="sf-badge tokens" style="margin-bottom:10px;">🖨️ Kit QR Oficial CartMaker</span>
+            <h2 class="sf-heading" style="font-size:1.5rem;margin-bottom:6px;">{{ company.name }}</h2>
+            <p style="font-size:0.88rem;color:var(--sf-text-secondary);margin-bottom:14px;">
+                Escanea con la cámara de tu teléfono para explorar el catálogo en tiempo real y pedir desde la App de CartMaker.
+            </p>
+            <div class="sf-qr-box" id="storefrontQrCanvas"></div>
+            <div style="margin:14px 0;display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
+                <button type="button" class="sf-add-btn" onclick="copyStorefrontUrl()">📋 Copiar Link de Vitrina</button>
+                <button type="button" class="sf-add-btn" onclick="window.print()">🖨️ Imprimir Hablador QR</button>
+            </div>
+            <div class="sf-protection-banner">
+                🔒 <strong>Compra 100% Protegida:</strong> Todos los pagos y entregas de {{ company.name }} se procesan de forma segura dentro de la aplicación móvil de CartMaker.
+            </div>
+        </div>
+    </div>
+
+    <!-- =========================================================
+         MOTOR INTERACTIVO DE LA VITRINA PÚBLICA
+         ========================================================= -->
+    <script>
+        const STOREFRONT_DATA = {{ storefront_json|safe }};
+
+        let state = {
+            selectedBranchId: STOREFRONT_DATA.initial_store_id || 'ALL',
+            selectedSubcatId: 'ALL',
+            onlyOffers: false,
+            onlyTokens: false,
+            searchQuery: '',
+            sortBy: 'featured',
+            currencyMode: 'BOTH', // 'BOTH' | 'USD' | 'BS'
+            cart: [],
+            activeModalItem: null,
+            activeVariantIdx: 0,
+            activeQty: 1,
+            handoffResult: null,
+            map: null,
+            branchMarkers: [],
+            routeLayer: null,
+            userLat: null,
+            userLng: null,
+        };
+
+        const ALL_THEMES_MAP = {
+            tech_cyber: { mode:'dark', bg1:'#070B14', bg2:'#0F172A', card:'rgba(15,23,42,0.84)', txt1:'#F8FAFC', txt2:'#94A3B8', acc1:'#06B6D4', grad:'linear-gradient(135deg,#06B6D4 0%,#6366F1 55%,#A855F7 100%)', glow:'rgba(6,182,212,0.28)', aspect:'1 / 1', style:'cyber-spec-grid', icon:'⚡', label:'Tecnología y Electrónica' },
+            beauty_editorial: { mode:'light', bg1:'#FFFBF9', bg2:'#FDF2F0', card:'rgba(255,255,255,0.94)', txt1:'#291820', txt2:'#7A5C68', acc1:'#D9468F', grad:'linear-gradient(135deg,#D9468F 0%,#EC4899 50%,#F59E0B 100%)', glow:'rgba(217,70,143,0.22)', aspect:'4 / 5', style:'editorial-luxury', icon:'✨', label:'Salud y Belleza' },
+            gourmet_bistro: { mode:'light', bg1:'#FFFDF9', bg2:'#FEF5EB', card:'#FFFFFF', txt1:'#1F140E', txt2:'#6E503F', acc1:'#EA580C', grad:'linear-gradient(135deg,#EA580C 0%,#F59E0B 60%,#DC2626 100%)', glow:'rgba(234,88,12,0.22)', aspect:'4 / 3', style:'gourmet-menu', icon:'🍽️', label:'Alimentos y Bebidas' },
+            fashion_runway: { mode:'dark', bg1:'#0C0A09', bg2:'#1C1917', card:'rgba(28,25,23,0.88)', txt1:'#FAFAF9', txt2:'#A8A29E', acc1:'#D4AF37', grad:'linear-gradient(135deg,#D4AF37 0%,#F59E0B 50%,#F43F5E 100%)', glow:'rgba(212,175,55,0.28)', aspect:'3 / 4', style:'runway-lookbook', icon:'👗', label:'Moda y Accesorios' },
+            auto_telemetry: { mode:'dark', bg1:'#090A0F', bg2:'#12151F', card:'rgba(18,21,31,0.90)', txt1:'#F1F5F9', txt2:'#94A3B8', acc1:'#EF4444', grad:'linear-gradient(135deg,#EF4444 0%,#F97316 60%,#EAB308 100%)', glow:'rgba(239,68,68,0.30)', aspect:'16 / 11', style:'telemetry-garage', icon:'🏎️', label:'Carros, Motos y Otros' },
+            industrial_pro: { mode:'dark', bg1:'#0F1419', bg2:'#1A222C', card:'rgba(26,34,44,0.90)', txt1:'#F8FAFC', txt2:'#94A3B8', acc1:'#F59E0B', grad:'linear-gradient(135deg,#F59E0B 0%,#EA580C 100%)', glow:'rgba(245,158,11,0.30)', aspect:'1 / 1', style:'industrial-catalog', icon:'🛠️', label:'Ferretería y Construcción' },
+            nordic_architect: { mode:'light', bg1:'#F8FAF7', bg2:'#EEF3EC', card:'#FFFFFF', txt1:'#14241B', txt2:'#4E6758', acc1:'#059669', grad:'linear-gradient(135deg,#059669 0%,#10B981 55%,#D97706 100%)', glow:'rgba(5,150,105,0.20)', aspect:'4 / 3', style:'interior-gallery', icon:'🏡', label:'Hogar, Muebles y Jardín' },
+            kinetic_sport: { mode:'dark', bg1:'#060D0B', bg2:'#0E1F1A', card:'rgba(14,31,26,0.88)', txt1:'#F8FAFC', txt2:'#94A3B8', acc1:'#10B981', grad:'linear-gradient(135deg,#10B981 0%,#06B6D4 55%,#3B82F6 100%)', glow:'rgba(16,185,129,0.30)', aspect:'1 / 1', style:'kinetic-performance', icon:'🏆', label:'Deportes y Fitness' },
+            pastel_cloud: { mode:'light', bg1:'#F8FAFF', bg2:'#F0F4FF', card:'#FFFFFF', txt1:'#1E293B', txt2:'#64748B', acc1:'#6366F1', grad:'linear-gradient(135deg,#6366F1 0%,#A855F7 50%,#EC4899 100%)', glow:'rgba(99,102,241,0.18)', aspect:'1 / 1', style:'soft-rounded', icon:'🍼', label:'Bebés y Maternidad' },
+            pet_nature: { mode:'light', bg1:'#FFFDF9', bg2:'#FFF4E6', card:'#FFFFFF', txt1:'#1C1917', txt2:'#57534E', acc1:'#F97316', grad:'linear-gradient(135deg,#F97316 0%,#FB923C 50%,#0D9488 100%)', glow:'rgba(249,115,22,0.22)', aspect:'1 / 1', style:'pet-friendly', icon:'🐾', label:'Mascotas' },
+            arcade_pop: { mode:'dark', bg1:'#0F0720', bg2:'#1B0E36', card:'rgba(27,14,54,0.88)', txt1:'#FFFFFF', txt2:'#C4B5FD', acc1:'#EC4899', grad:'linear-gradient(135deg,#EC4899 0%,#8B5CF6 50%,#06B6D4 100%)', glow:'rgba(236,72,153,0.30)', aspect:'1 / 1', style:'arcade-pop', icon:'🎮', label:'Juegos y Juguetes' },
+            acoustic_stage: { mode:'dark', bg1:'#0A0908', bg2:'#171412', card:'rgba(23,20,18,0.90)', txt1:'#FAF8F5', txt2:'#A89F91', acc1:'#F59E0B', grad:'linear-gradient(135deg,#F59E0B 0%,#D97706 50%,#92400E 100%)', glow:'rgba(245,158,11,0.28)', aspect:'1 / 1', style:'studio-stage', icon:'🎸', label:'Instrumentos Musicales' },
+            atelier_press: { mode:'light', bg1:'#FBF9F5', bg2:'#F3EFE6', card:'#FFFFFF', txt1:'#1E293B', txt2:'#475569', acc1:'#1D4ED8', grad:'linear-gradient(135deg,#1D4ED8 0%,#4F46E5 55%,#B91C1C 100%)', glow:'rgba(29,78,216,0.20)', aspect:'3 / 4', style:'atelier-editorial', icon:'📚', label:'Papelería, Oficina y Libros' },
+            cartmaker_signature: { mode:'dark', bg1:'#090812', bg2:'#131124', card:'rgba(19,17,36,0.88)', txt1:'#F8FAFC', txt2:'#94A3B8', acc1:'#7C3AED', grad:'linear-gradient(135deg,#7C3AED 0%,#EC4899 50%,#F97316 100%)', glow:'rgba(124,58,237,0.30)', aspect:'1 / 1', style:'signature-glass', icon:'🛒', label:'Comercio Oficial CartMaker' },
+        };
+
+        function formatPriceHtml(usdVal) {
+            const usd = Number(usdVal || 0);
+            const bcv = Number(STOREFRONT_DATA.bcv_rate || 0);
+            const bs = bcv > 0 ? (usd * bcv) : 0;
+
+            if (state.currencyMode === 'USD' || bcv <= 0) {
+                return `<div class="sf-price-main">$${usd.toFixed(2)}</div>`;
+            }
+            if (state.currencyMode === 'BS') {
+                return `<div class="sf-price-main">Bs. ${bs.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</div>
+                        <div class="sf-price-bs">Ref. $${usd.toFixed(2)}</div>`;
+            }
+            return `<div class="sf-price-main">$${usd.toFixed(2)}</div>
+                    <div class="sf-price-bs">Bs. ${bs.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</div>`;
+        }
+
+        function setCurrencyMode(mode) {
+            state.currencyMode = mode;
+            document.querySelectorAll('.cm-currency-btn[data-curr]').forEach(btn => {
+                btn.classList.toggle('active', btn.getAttribute('data-curr') === mode);
+            });
+            applyFilters();
+            updateFloatingCartBar();
+        }
+
+        function initThemeSelector() {
+            const sel = document.getElementById('themePreviewSelect');
+            if (!sel) return;
+            const currentKey = STOREFRONT_DATA.theme.theme_key;
+            sel.innerHTML = (STOREFRONT_DATA.available_themes || []).map(t =>
+                `<option value="${t.key}" ${t.key === currentKey ? 'selected' : ''}>${t.icon} Tema: ${t.label}</option>`
+            ).join('');
+        }
+
+        function switchCategoryTheme(themeKey) {
+            const t = ALL_THEMES_MAP[themeKey];
+            if (!t) return;
+            const root = document.documentElement;
+            root.setAttribute('data-theme-mode', t.mode);
+            document.body.setAttribute('data-card-style', t.style);
+            root.style.setProperty('--sf-bg-primary', t.bg1);
+            root.style.setProperty('--sf-bg-secondary', t.bg2);
+            root.style.setProperty('--sf-bg-card', t.card);
+            root.style.setProperty('--sf-text-primary', t.txt1);
+            root.style.setProperty('--sf-text-secondary', t.txt2);
+            root.style.setProperty('--sf-accent-primary', t.acc1);
+            root.style.setProperty('--sf-accent-gradient', t.grad);
+            root.style.setProperty('--sf-border-glow', t.glow);
+            root.style.setProperty('--sf-card-aspect', t.aspect);
+            const badgeEl = document.getElementById('heroCategoryBadge');
+            if (badgeEl) badgeEl.innerHTML = `${t.icon} <span>${t.label}</span>`;
+        }
+
+        /* =========================================================
+           SUCURSALES Y MAPA INTERACTIVO CON RUTA EN VIVO
+           ========================================================= */
+        function renderBranchesTabs() {
+            const container = document.getElementById('branchesTabsContainer');
+            const branches = STOREFRONT_DATA.branches || [];
+            if (branches.length <= 1) {
+                container.style.display = 'none';
+                updateBranchHeaderInfo(branches[0]);
+                return;
+            }
+            let html = `<button type="button" class="sf-branch-tab ${state.selectedBranchId === 'ALL' ? 'active' : ''}" onclick="selectBranch('ALL')">
+                🌐 Todas las Sedes (${branches.length})
+            </button>`;
+            branches.forEach(b => {
+                const isOpen = Boolean(b.is_currently_open);
+                const zone = (b.location && b.location.zone_name) ? b.location.zone_name : b.name;
+                html += `<button type="button" class="sf-branch-tab ${state.selectedBranchId === b.id ? 'active' : ''}" onclick="selectBranch('${b.id}')">
+                    <span class="sf-branch-dot ${isOpen ? '' : 'closed'}"></span>
+                    <span>${b.name} <small style="opacity:0.75;">(${zone})</small></span>
+                </button>`;
+            });
+            container.innerHTML = html;
+
+            const activeBranch = branches.find(b => b.id === state.selectedBranchId) || branches[0];
+            updateBranchHeaderInfo(activeBranch);
+        }
+
+        function updateBranchHeaderInfo(branch) {
+            if (!branch) return;
+            const statusEl = document.getElementById('branchOpenStatusBadge');
+            const hours = branch.work_hours || {};
+            const scheduleStr = (hours.start && hours.end) ? `${hours.start} - ${hours.end}` : '';
+            if (branch.is_currently_open) {
+                statusEl.className = 'sf-badge open';
+                statusEl.innerHTML = `🟢 Abierto Ahora ${scheduleStr ? '· ' + scheduleStr : ''}`;
+            } else {
+                statusEl.className = 'sf-badge closed';
+                statusEl.innerHTML = `🔴 Cerrado en este momento ${scheduleStr ? '· Horario: ' + scheduleStr : ''}`;
+            }
+
+            const loc = branch.location || {};
+            const addrEl = document.getElementById('activeBranchAddressLabel');
+            const mallBadge = loc.mall_name ? ` (CC ${loc.mall_name}${loc.mall_floor ? ', Piso ' + loc.mall_floor : ''})` : '';
+            addrEl.textContent = `📍 ${loc.zone_name || branch.name}${mallBadge}`;
+        }
+
+        function selectBranch(branchId) {
+            state.selectedBranchId = branchId;
+            renderBranchesTabs();
+            applyFilters();
+            const branch = (STOREFRONT_DATA.branches || []).find(b => b.id === branchId) || (STOREFRONT_DATA.branches || [])[0];
+            if (branch && branch.location && state.map) {
+                state.map.flyTo([branch.location.lat, branch.location.lng], 15, { duration: 0.8 });
+                if (state.userLat && state.userLng) {
+                    computeEtaToCoords(state.userLat, state.userLng, branch.location.lat, branch.location.lng);
+                }
+            }
+        }
+
+        function initInteractiveMap() {
+            const branches = (STOREFRONT_DATA.branches || []).filter(b => b.location && b.location.lat && b.location.lng);
+            if (!branches.length) return;
+            const first = branches.find(b => b.id === state.selectedBranchId) || branches[0];
+            const map = L.map('sfLeafletMap', { zoomControl: true }).setView([first.location.lat, first.location.lng], 14);
+            state.map = map;
+
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; OpenStreetMap & CartMaker GeoEngine',
+                maxZoom: 19,
+            }).addTo(map);
+
+            branches.forEach(b => {
+                const marker = L.marker([b.location.lat, b.location.lng]).addTo(map);
+                marker.bindPopup(`<strong>${STOREFRONT_DATA.company.name} — ${b.name}</strong><br>${b.location.name || ''}`);
+                state.branchMarkers.push(marker);
+            });
+        }
+
+        function haversineKm(lat1, lon1, lat2, lon2) {
+            const R = 6371;
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat / 2) ** 2 +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                      Math.sin(dLon / 2) ** 2;
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        }
+
+        async function computeEtaToCoords(uLat, uLng, sLat, sLng) {
+            const straightKm = haversineKm(uLat, uLng, sLat, sLng);
+            let roadKm = straightKm * 1.28;
+            let carMinutes = Math.max(2, Math.round((roadKm / 28) * 60));
+
+            try {
+                const url = `https://router.project-osrm.org/route/v1/driving/${uLng},${uLat};${sLng},${sLat}?overview=full&geometries=geojson`;
+                const resp = await fetch(url);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    if (data.routes && data.routes[0]) {
+                        roadKm = data.routes[0].distance / 1000;
+                        carMinutes = Math.max(2, Math.round(data.routes[0].duration / 60));
+                        if (state.routeLayer) state.map.removeLayer(state.routeLayer);
+                        state.routeLayer = L.geoJSON(data.routes[0].geometry, {
+                            style: { color: '#7C3AED', weight: 5, opacity: 0.85 }
+                        }).addTo(state.map);
+                        state.map.fitBounds(state.routeLayer.getBounds(), { padding: [24, 24] });
+                    }
+                }
+            } catch (e) {
+                // Fallback geométrico inmediato si OSRM no responde
+            }
+
+            const motoMinutes = Math.max(1, Math.round(carMinutes * 0.68));
+            const walkMinutes = Math.max(3, Math.round((roadKm / 4.8) * 60));
+
+            document.getElementById('routeDistanceBadge').textContent = `${roadKm.toFixed(1)} km`;
+            document.getElementById('etaCarVal').textContent = `${carMinutes} min`;
+            document.getElementById('etaMotoVal').textContent = `${motoMinutes} min`;
+            document.getElementById('etaWalkVal').textContent = `${walkMinutes} min`;
+        }
+
+        function calculateLiveRouteToStore() {
+            const btn = document.getElementById('calcRouteBtn');
+            const branches = (STOREFRONT_DATA.branches || []).filter(b => b.location && b.location.lat && b.location.lng);
+            if (!branches.length) return;
+            const target = branches.find(b => b.id === state.selectedBranchId) || branches[0];
+
+            if (!navigator.geolocation) {
+                btn.textContent = '⚠️ Tu navegador no soporta GPS';
+                return;
+            }
+            btn.textContent = '📡 Obteniendo tu ubicación GPS...';
+            navigator.geolocation.getCurrentPosition(
+                pos => {
+                    state.userLat = pos.coords.latitude;
+                    state.userLng = pos.coords.longitude;
+                    L.circleMarker([state.userLat, state.userLng], {
+                        radius: 8, color: '#10B981', fillColor: '#10B981', fillOpacity: 0.9
+                    }).addTo(state.map).bindPopup('📍 Tu ubicación actual');
+                    computeEtaToCoords(state.userLat, state.userLng, target.location.lat, target.location.lng);
+                    btn.textContent = '✅ Ruta y tiempos de llegada actualizados en vivo';
+                },
+                () => {
+                    btn.textContent = '📍 Activa el permiso de ubicación para calcular tu ruta';
+                },
+                { enableHighAccuracy: true, timeout: 8000 }
+            );
+        }
+
+        /* =========================================================
+           VIDEO STORIES REEL
+           ========================================================= */
+        function renderStoriesReel() {
+            const stories = STOREFRONT_DATA.stories || [];
+            const wrap = document.getElementById('storiesSectionWrap');
+            const container = document.getElementById('storiesReelContainer');
+            if (!stories.length) {
+                wrap.style.display = 'none';
+                return;
+            }
+            wrap.style.display = 'block';
+            container.innerHTML = stories.map((st, idx) => `
+                <div class="sf-story-item" onclick="openStoryModal(${idx})">
+                    <div class="sf-story-ring">
+                        <img src="${st.thumbnail_url || STOREFRONT_DATA.company.image || '/static/img/no_image.jpg'}" class="sf-story-thumb" alt="Story">
+                        <span class="sf-story-play-badge">▶</span>
+                    </div>
+                    <div class="sf-story-caption">${st.associated_item_name || st.description || 'Ver Historia'}</div>
+                </div>
+            `).join('');
+        }
+
+        function openStoryModal(idx) {
+            const st = (STOREFRONT_DATA.stories || [])[idx];
+            if (!st) return;
+            const modal = document.getElementById('storyPlayerModal');
+            const content = document.getElementById('storyModalContent');
+            const ctaBtn = st.associated_item_id ? `
+                <button type="button" class="sf-checkout-app-btn" style="width:100%;justify-content:center;margin-top:12px;" onclick="closeStoryModal();openProductModal('${st.associated_item_id}')">
+                    🛒 Ver '${st.associated_item_name}' ($${Number(st.associated_item_price_usd || 0).toFixed(2)})
+                </button>
+            ` : '';
+            content.innerHTML = `
+                <video src="${st.video_url}" controls autoplay playsinline style="width:100%;max-height:68vh;border-radius:18px;background:#000;"></video>
+                <p style="margin-top:10px;font-size:0.88rem;">${st.description || ''}</p>
+                ${ctaBtn}
+            `;
+            modal.classList.add('open');
+        }
+
+        function closeStoryModal() {
+            const modal = document.getElementById('storyPlayerModal');
+            const content = document.getElementById('storyModalContent');
+            content.innerHTML = '';
+            modal.classList.remove('open');
+        }
+
+        /* =========================================================
+           FILTROS Y GRILLA DE PRODUCTOS
+           ========================================================= */
+        function renderSubcategoryPills() {
+            const subs = STOREFRONT_DATA.subcategories || [];
+            const container = document.getElementById('subcategoryPillsContainer');
+            let html = `<button type="button" class="sf-filter-pill ${state.selectedSubcatId === 'ALL' ? 'active' : ''}" onclick="selectSubcategory('ALL')">
+                ✨ Todos (${(STOREFRONT_DATA.items || []).length})
+            </button>`;
+            html += `<button type="button" class="sf-filter-pill ${state.onlyOffers ? 'active' : ''}" onclick="toggleOffersFilter()">
+                ⚡ En Oferta Flash
+            </button>`;
+            if (STOREFRONT_DATA.company.gamification_enabled) {
+                html += `<button type="button" class="sf-filter-pill ${state.onlyTokens ? 'active' : ''}" onclick="toggleTokensFilter()">
+                    🪙 Acepta Tokens
+                </button>`;
+            }
+            subs.forEach(sc => {
+                html += `<button type="button" class="sf-filter-pill ${String(state.selectedSubcatId) === String(sc.id) ? 'active' : ''}" onclick="selectSubcategory('${sc.id}')">
+                    ${sc.name}
+                </button>`;
+            });
+            container.innerHTML = html;
+        }
+
+        function selectSubcategory(subId) {
+            state.selectedSubcatId = subId;
+            renderSubcategoryPills();
+            applyFilters();
+        }
+
+        function toggleOffersFilter() {
+            state.onlyOffers = !state.onlyOffers;
+            renderSubcategoryPills();
+            applyFilters();
+        }
+
+        function toggleTokensFilter() {
+            state.onlyTokens = !state.onlyTokens;
+            renderSubcategoryPills();
+            applyFilters();
+        }
+
+        function applyFilters() {
+            const q = (document.getElementById('catalogSearchInput')?.value || '').trim().toLowerCase();
+            const sortBy = document.getElementById('sortSelect')?.value || 'featured';
+            let items = (STOREFRONT_DATA.items || []).slice();
+
+            if (state.selectedBranchId !== 'ALL') {
+                items = items.filter(it => String(it.store_id_str) === String(state.selectedBranchId));
+            }
+            if (state.selectedSubcatId !== 'ALL') {
+                items = items.filter(it => String(it.product?.category?.id) === String(state.selectedSubcatId));
+            }
+            if (state.onlyOffers) {
+                items = items.filter(it => Number(it.offer_percentage || 0) > 0);
+            }
+            if (state.onlyTokens) {
+                items = items.filter(it => Boolean(it.product?.discounts_by_tokens_active));
+            }
+            if (q) {
+                items = items.filter(it => {
+                    const p = it.product || {};
+                    const attrs = JSON.stringify(p.attributes || {}).toLowerCase();
+                    const vars = JSON.stringify(p.variants || []).toLowerCase();
+                    return (p.name || '').toLowerCase().includes(q) ||
+                           (p.description || '').toLowerCase().includes(q) ||
+                           (p.category?.name || '').toLowerCase().includes(q) ||
+                           attrs.includes(q) || vars.includes(q);
+                });
+            }
+
+            if (sortBy === 'price_asc') {
+                items.sort((a, b) => Number(a.effective_price) - Number(b.effective_price));
+            } else if (sortBy === 'price_desc') {
+                items.sort((a, b) => Number(b.effective_price) - Number(a.effective_price));
+            } else if (sortBy === 'discount') {
+                items.sort((a, b) => Number(b.offer_percentage || 0) - Number(a.offer_percentage || 0));
+            } else if (sortBy === 'rating') {
+                items.sort((a, b) => Number(b.avg_rating || 0) - Number(a.avg_rating || 0));
+            }
+
+            document.getElementById('visibleProductsCount').textContent = items.length;
+            const grid = document.getElementById('productsGridContainer');
+            if (!items.length) {
+                grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:48px 20px;background:var(--sf-bg-card);border-radius:22px;border:1px solid var(--sf-border-glow);">
+                    <h3 style="margin-bottom:8px;">No encontramos productos con esos filtros</h3>
+                    <p style="color:var(--sf-text-secondary);font-size:0.9rem;">Prueba limpiando tu búsqueda o seleccionando Todas las Sedes.</p>
+                </div>`;
+                return;
+            }
+
+            grid.innerHTML = items.map(it => {
+                const p = it.product || {};
+                const img = (p.images && p.images[0]) ? p.images[0] : '/static/img/no_image.jpg';
+                const hasOffer = Number(it.offer_percentage || 0) > 0;
+                const acceptsTokens = Boolean(p.discounts_by_tokens_active);
+                const attrEntries = Object.entries(p.attributes || {}).slice(0, 3);
+                const specsHtml = attrEntries.map(([k, v]) => `<span class="sf-spec-chip">${k}: ${v}</span>`).join('');
+
+                return `
+                <article class="sf-product-card" onclick="openProductModal('${it.id}')">
+                    <div class="sf-product-media">
+                        <img src="${img}" alt="${p.name}" class="sf-product-img" loading="lazy" onerror="this.src='/static/img/no_image.jpg'">
+                        <div class="sf-card-top-badges">
+                            <div>
+                                ${hasOffer ? `<span class="sf-offer-tag">⚡ -${it.offer_percentage}%</span>` : ''}
+                            </div>
+                            <div>
+                                ${acceptsTokens ? `<span class="sf-token-tag">🪙 Canje Tokens</span>` : ''}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="sf-product-body">
+                        <div class="sf-product-cat">${p.category?.name || 'Catálogo'} · ${it.store_name}</div>
+                        <h3 class="sf-product-title">${p.name}</h3>
+                        ${specsHtml ? `<div class="sf-specs-preview">${specsHtml}</div>` : ''}
+                        <div class="sf-price-row">
+                            <div>
+                                ${formatPriceHtml(it.effective_price)}
+                                ${hasOffer ? `<div class="sf-price-old">Antes: $${Number(it.list_price).toFixed(2)}</div>` : ''}
+                            </div>
+                            <button type="button" class="sf-add-btn" onclick="event.stopPropagation();quickAddToCart('${it.id}')">
+                                + Agregar
+                            </button>
+                        </div>
+                    </div>
+                </article>`;
+            }).join('');
+        }
+
+        /* =========================================================
+           MODAL INTERACTIVO DE PRODUCTO (SDUI VARIANTES & EXTRAS)
+           ========================================================= */
+        function openProductModal(itemId) {
+            const item = (STOREFRONT_DATA.items || []).find(x => String(x.id) === String(itemId));
+            if (!item) return;
+            state.activeModalItem = item;
+            state.activeVariantIdx = 0;
+            state.activeQty = Number(item.product?.min_order_quantity || 1);
+            renderProductModalContent();
+            document.getElementById('productDetailModal').classList.add('open');
+        }
+
+        function renderProductModalContent() {
+            const item = state.activeModalItem;
+            if (!item) return;
+            const p = item.product || {};
+            const images = (p.images && p.images.length) ? p.images : ['/static/img/no_image.jpg'];
+            const variants = p.variants || [];
+            const modifiers = p.modifier_groups || [];
+            const attrs = Object.entries(p.attributes || {});
+
+            let unitPrice = Number(item.effective_price);
+            if (variants.length && variants[state.activeVariantIdx]?.price) {
+                unitPrice = Number(variants[state.activeVariantIdx].price);
+            }
+            const lineTotal = unitPrice * state.activeQty;
+            const tokensEarned = STOREFRONT_DATA.company.gamification_enabled
+                ? Math.round(lineTotal * Number(STOREFRONT_DATA.company.gamification_tokens_per_dollar || 0))
+                : 0;
+
+            const variantsHtml = variants.length ? `
+                <div style="margin-top:14px;">
+                    <div style="font-size:0.8rem;font-weight:700;margin-bottom:6px;">Selecciona Variante / Presentación:</div>
+                    <div>
+                        ${variants.map((v, i) => `
+                            <button type="button" class="sf-variant-btn ${i === state.activeVariantIdx ? 'selected' : ''}" onclick="state.activeVariantIdx=${i};renderProductModalContent()">
+                                ${v.name || v.label || ('Opción ' + (i+1))} ${v.price ? '($' + Number(v.price).toFixed(2) + ')' : ''}
+                            </button>
+                        `).join('')}
+                    </div>
+                </div>
+            ` : '';
+
+            const attrsHtml = attrs.length ? `
+                <div style="margin-top:14px;display:grid;grid-template-columns:repeat(2,1fr);gap:8px;">
+                    ${attrs.map(([k, v]) => `
+                        <div style="background:var(--sf-bg-primary);padding:8px 12px;border-radius:10px;border:1px solid var(--sf-border-glow);font-size:0.8rem;">
+                            <span style="color:var(--sf-text-secondary);display:block;font-size:0.72rem;">${k}</span>
+                            <strong>${v}</strong>
+                        </div>
+                    `).join('')}
+                </div>
+            ` : '';
+
+            document.getElementById('productModalContent').innerHTML = `
+                <div class="sf-detail-grid">
+                    <div>
+                        <img src="${images[0]}" id="modalMainImg" alt="${p.name}" style="width:100%;border-radius:18px;aspect-ratio:1/1;object-fit:cover;border:1px solid var(--sf-border-glow);">
+                        ${images.length > 1 ? `
+                            <div style="display:flex;gap:8px;margin-top:10px;overflow-x:auto;">
+                                ${images.map(u => `<img src="${u}" onclick="document.getElementById('modalMainImg').src='${u}'" style="width:60px;height:60px;border-radius:10px;object-fit:cover;cursor:pointer;border:1px solid var(--sf-border-glow);">`).join('')}
+                            </div>
+                        ` : ''}
+                    </div>
+                    <div>
+                        <span class="sf-badge">${p.category?.name || 'Catálogo'} · Sede ${item.store_name}</span>
+                        <h2 class="sf-heading" style="font-size:1.55rem;margin:8px 0;">${p.name}</h2>
+                        <div style="margin-bottom:10px;">
+                            ${formatPriceHtml(unitPrice)}
+                            <small style="color:var(--sf-text-secondary);">Stock disponible: ${item.stock} ${p.unit_label || 'und'}</small>
+                        </div>
+                        <p style="font-size:0.9rem;color:var(--sf-text-secondary);margin-bottom:12px;">${p.description || ''}</p>
+                        ${variantsHtml}
+                        ${attrsHtml}
+
+                        <div style="margin-top:18px;display:flex;align-items:center;gap:12px;">
+                            <div style="display:inline-flex;align-items:center;background:var(--sf-bg-primary);border:1px solid var(--sf-border-glow);border-radius:12px;">
+                                <button type="button" style="border:none;background:transparent;color:inherit;padding:10px 14px;font-weight:800;cursor:pointer;" onclick="adjustModalQty(-1)">−</button>
+                                <span style="padding:0 12px;font-weight:800;">${state.activeQty} ${p.unit_label || ''}</span>
+                                <button type="button" style="border:none;background:transparent;color:inherit;padding:10px 14px;font-weight:800;cursor:pointer;" onclick="adjustModalQty(1)">+</button>
+                            </div>
+                            <button type="button" class="sf-checkout-app-btn" style="flex:1;justify-content:center;" onclick="addModalItemToCart()">
+                                🛒 Agregar al Carrito ($${lineTotal.toFixed(2)})
+                            </button>
+                        </div>
+
+                        ${tokensEarned > 0 ? `
+                            <div style="margin-top:12px;font-size:0.8rem;color:#F59E0B;font-weight:700;">
+                                🪙 Al completar esta compra en la App de CartMaker ganas +${tokensEarned} Tokens en ${STOREFRONT_DATA.company.name}.
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        function adjustModalQty(delta) {
+            const item = state.activeModalItem;
+            if (!item) return;
+            const step = Number(item.product?.unit_step || 1);
+            const minQ = Number(item.product?.min_order_quantity || 1);
+            const next = Math.max(minQ, Math.min(Number(item.stock), Number((state.activeQty + delta * step).toFixed(2))));
+            state.activeQty = next;
+            renderProductModalContent();
+        }
+
+        function closeProductModal() {
+            document.getElementById('productDetailModal').classList.remove('open');
+        }
+
+        /* =========================================================
+           GESTIÓN DEL CARRITO & HANDOFF EXCLUSIVO A CARTMAKER APP
+           ========================================================= */
+        function quickAddToCart(itemId) {
+            const item = (STOREFRONT_DATA.items || []).find(x => String(x.id) === String(itemId));
+            if (!item) return;
+            upsertCartEntry(item, 1, null);
+        }
+
+        function addModalItemToCart() {
+            const item = state.activeModalItem;
+            if (!item) return;
+            const variants = item.product?.variants || [];
+            const chosenVar = variants.length ? variants[state.activeVariantIdx] : null;
+            upsertCartEntry(item, state.activeQty, chosenVar);
+            closeProductModal();
+        }
+
+        function upsertCartEntry(item, qty, selectedVariant) {
+            const key = `${item.id}_${selectedVariant ? (selectedVariant.name || selectedVariant.id) : 'base'}`;
+            const existing = state.cart.find(c => c.key === key);
+            const unitPrice = (selectedVariant && selectedVariant.price) ? Number(selectedVariant.price) : Number(item.effective_price);
+            if (existing) {
+                existing.quantity = Math.min(Number(item.stock), Number((existing.quantity + qty).toFixed(2)));
+            } else {
+                state.cart.push({
+                    key,
+                    item_id: item.id,
+                    store_id: item.store_id_str,
+                    name: item.product?.name || 'Producto',
+                    image_url: (item.product?.images && item.product.images[0]) ? item.product.images[0] : '/static/img/no_image.jpg',
+                    unit_price_usd: unitPrice,
+                    quantity: qty,
+                    unit_label: item.product?.unit_label || 'und',
+                    selected_variant: selectedVariant,
+                });
+            }
+            updateFloatingCartBar();
+        }
+
+        function updateFloatingCartBar() {
+            const bar = document.getElementById('floatingCartBar');
+            const totalItems = state.cart.length;
+            const totalUsd = state.cart.reduce((acc, c) => acc + c.unit_price_usd * c.quantity, 0);
+            const bcv = Number(STOREFRONT_DATA.bcv_rate || 0);
+
+            document.getElementById('topCartCounter').textContent = totalItems;
+            document.getElementById('floatingCartItemsCount').textContent = totalItems;
+            document.getElementById('floatingCartTotalUsd').textContent = `$${totalUsd.toFixed(2)}`;
+            document.getElementById('floatingCartTotalBs').textContent = bcv > 0
+                ? `(Bs. ${(totalUsd * bcv).toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})})`
+                : '';
+
+            bar.classList.toggle('visible', totalItems > 0);
+        }
+
+        function removeCartItem(idx) {
+            state.cart.splice(idx, 1);
+            updateFloatingCartBar();
+            renderCartDrawerContent();
+        }
+
+        function openCartDrawer() {
+            renderCartDrawerContent();
+            document.getElementById('cartHandoffModal').classList.add('open');
+        }
+
+        function closeCartDrawer() {
+            document.getElementById('cartHandoffModal').classList.remove('open');
+        }
+
+        function renderCartDrawerContent() {
+            const container = document.getElementById('cartDrawerContent');
+            if (!state.cart.length) {
+                container.innerHTML = `
+                    <div style="text-align:center;padding:30px 10px;">
+                        <h3 class="sf-heading" style="font-size:1.4rem;margin-bottom:8px;">Tu carrito está vacío</h3>
+                        <p style="color:var(--sf-text-secondary);font-size:0.9rem;">Agrega productos del catálogo de ${STOREFRONT_DATA.company.name} para sincronizarlos con tu App de CartMaker.</p>
+                    </div>`;
+                return;
+            }
+
+            const totalUsd = state.cart.reduce((acc, c) => acc + c.unit_price_usd * c.quantity, 0);
+            const bcv = Number(STOREFRONT_DATA.bcv_rate || 0);
+            const totalBs = bcv > 0 ? (totalUsd * bcv) : 0;
+
+            const rowsHtml = state.cart.map((c, idx) => `
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid rgba(148,163,184,0.15);">
+                    <div style="display:flex;align-items:center;gap:12px;">
+                        <img src="${c.image_url}" style="width:52px;height:52px;border-radius:12px;object-fit:cover;">
+                        <div>
+                            <div style="font-weight:700;font-size:0.92rem;">${c.name}</div>
+                            <div style="font-size:0.78rem;color:var(--sf-text-secondary);">
+                                ${c.quantity} ${c.unit_label} × $${c.unit_price_usd.toFixed(2)}
+                                ${c.selected_variant ? ` · (${c.selected_variant.name || ''})` : ''}
+                            </div>
+                        </div>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <strong>$${(c.unit_price_usd * c.quantity).toFixed(2)}</strong>
+                        <button type="button" onclick="removeCartItem(${idx})" style="border:none;background:rgba(239,68,68,0.15);color:#EF4444;border-radius:8px;padding:4px 8px;cursor:pointer;">✕</button>
+                    </div>
+                </div>
+            `).join('');
+
+            container.innerHTML = `
+                <span class="sf-badge verified" style="margin-bottom:8px;">🔒 Checkout Protegido Exclusivo en CartMaker App</span>
+                <h2 class="sf-heading" style="font-size:1.5rem;margin-bottom:12px;">Tu Pedido en ${STOREFRONT_DATA.company.name}</h2>
+                <div style="max-height:260px;overflow-y:auto;margin-bottom:16px;">${rowsHtml}</div>
+
+                <div style="background:var(--sf-bg-primary);padding:14px 16px;border-radius:16px;border:1px solid var(--sf-border-glow);display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                    <div>
+                        <div style="font-size:0.78rem;color:var(--sf-text-secondary);">Monto Total Estimado</div>
+                        <div style="font-size:1.35rem;font-weight:800;">$${totalUsd.toFixed(2)} USD</div>
+                    </div>
+                    ${totalBs > 0 ? `<div style="text-align:right;font-weight:700;color:#10B981;">Bs. ${totalBs.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</div>` : ''}
+                </div>
+
+                <div id="handoffDynamicZone">
+                    <button type="button" class="sf-checkout-app-btn" style="width:100%;justify-content:center;padding:15px;" onclick="proceedToCartMakerAppCheckout()">
+                        🚀 Continuar y Pagar en la App de CartMaker
+                    </button>
+                </div>
+
+                <div class="sf-protection-banner">
+                    🛡️ <strong>¿Por qué el pago se completa únicamente en la App de CartMaker?</strong><br>
+                    En CartMaker protegemos tu dinero, reservamos el stock en tiempo real en la sucursal y te acreditamos tus <strong>Tokens de Fidelidad</strong> automáticamente.
+                </div>
+            `;
+        }
+
+        async function proceedToCartMakerAppCheckout() {
+            openCartDrawer();
+            const zone = document.getElementById('handoffDynamicZone');
+            if (!zone) return;
+            zone.innerHTML = `<div style="text-align:center;padding:16px;font-weight:700;">⏳ Sincronizando tu carrito con CartMaker App...</div>`;
+
+            try {
+                const resp = await fetch(STOREFRONT_DATA.handoff_endpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCookie('csrftoken') || '',
+                    },
+                    body: JSON.stringify({
+                        store_id: state.selectedBranchId !== 'ALL' ? state.selectedBranchId : STOREFRONT_DATA.initial_store_id,
+                        items: state.cart,
+                    }),
+                });
+                const data = await resp.json();
+                if (!resp.ok || !data.success) {
+                    zone.innerHTML = `<div style="color:#EF4444;padding:10px;">${data.error || 'No se pudo generar el enlace.'}</div>`;
+                    return;
+                }
+                renderHandoffReadyBox(data);
+            } catch (e) {
+                renderHandoffReadyBox({
+                    token: 'DIRECT',
+                    app_deep_link: STOREFRONT_DATA.app_deep_link,
+                    web_resume_url: window.location.href,
+                });
+            }
+        }
+
+        function renderHandoffReadyBox(handoffData) {
+            const zone = document.getElementById('handoffDynamicZone');
+            if (!zone) return;
+            zone.innerHTML = `
+                <div style="text-align:center;background:var(--sf-bg-primary);border:1px solid var(--sf-accent-primary);border-radius:18px;padding:18px;">
+                    <div style="font-weight:800;font-size:1.05rem;margin-bottom:6px;">✅ ¡Tu carrito está listo para abrirse en CartMaker!</div>
+                    <p style="font-size:0.84rem;color:var(--sf-text-secondary);margin-bottom:14px;">
+                        Si estás en tu teléfono, toca el botón de abajo. Si estás en computadora, escanea el QR con tu celular para abrir tu pedido en la App.
+                    </p>
+                    <a href="${handoffData.app_deep_link}" class="sf-checkout-app-btn" style="width:100%;justify-content:center;text-decoration:none;margin-bottom:12px;">
+                        📱 Abrir Mi Pedido en CartMaker App Ahora
+                    </a>
+                    <div class="sf-qr-box" id="handoffQrContainer"></div>
+                    <div style="margin-top:10px;font-size:0.78rem;color:var(--sf-text-secondary);">
+                        Código de Carrito: <strong style="color:var(--sf-text-primary);">${handoffData.token}</strong>
+                    </div>
+                </div>
+            `;
+            drawQrCode('handoffQrContainer', handoffData.web_resume_url || handoffData.app_deep_link);
+        }
+
+        function openAppHandoffModal() {
+            if (state.cart.length > 0) {
+                proceedToCartMakerAppCheckout();
+            } else {
+                openQrStandeeModal();
+            }
+        }
+
+        /* =========================================================
+           REPUTACIÓN Y KIT QR IMPRIMIBLE
+           ========================================================= */
+        function openReputationModal() {
+            const rep = STOREFRONT_DATA.reputation || {};
+            const dist = rep.star_distribution || {};
+            const total = Math.max(1, Number(rep.rating_count || 0));
+            const barsHtml = [5, 4, 3, 2, 1].map(star => {
+                const c = Number(dist[star] || 0);
+                const pct = Math.round((c / total) * 100);
+                return `
+                    <div style="display:flex;align-items:center;gap:10px;font-size:0.82rem;margin-bottom:6px;">
+                        <span style="width:42px;font-weight:700;">${star} ⭐</span>
+                        <div style="flex:1;height:8px;background:rgba(148,163,184,0.2);border-radius:999px;overflow:hidden;">
+                            <div style="width:${pct}%;height:100%;background:var(--sf-accent-gradient);"></div>
+                        </div>
+                        <span style="width:36px;text-align:right;color:var(--sf-text-secondary);">${c}</span>
+                    </div>`;
+            }).join('');
+
+            document.getElementById('reputationModalContent').innerHTML = `
+                <span class="sf-badge verified">🛡️ Reputación Verificada en CartMaker</span>
+                <h2 class="sf-heading" style="font-size:1.5rem;margin:10px 0 4px;">${STOREFRONT_DATA.company.name}</h2>
+                <p style="font-size:0.86rem;color:var(--sf-text-secondary);margin-bottom:16px;">
+                    ${STOREFRONT_DATA.company.razon_social ? `Razón Social: ${STOREFRONT_DATA.company.razon_social} · ` : ''}
+                    ${STOREFRONT_DATA.company.rif_number ? `RIF: ${STOREFRONT_DATA.company.rif_number}` : 'Comercio Verificado'}
+                </p>
+                <div style="display:flex;align-items:center;gap:20px;margin-bottom:18px;">
+                    <div style="text-align:center;background:var(--sf-bg-primary);padding:16px 22px;border-radius:18px;border:1px solid var(--sf-border-glow);">
+                        <div style="font-size:2.2rem;font-weight:800;">${rep.avg_rating || '5.0'}</div>
+                        <div style="font-size:0.76rem;color:var(--sf-text-secondary);">${rep.rating_count || 0} calificaciones</div>
+                    </div>
+                    <div style="flex:1;">${barsHtml}</div>
+                </div>
+            `;
+            document.getElementById('reputationModal').classList.add('open');
+        }
+
+        function closeReputationModal() {
+            document.getElementById('reputationModal').classList.remove('open');
+        }
+
+        function openQrStandeeModal() {
+            document.getElementById('qrStandeeModal').classList.add('open');
+            drawQrCode('storefrontQrCanvas', window.location.origin + window.location.pathname + '?src=qr_counter');
+        }
+
+        function closeQrStandeeModal() {
+            document.getElementById('qrStandeeModal').classList.remove('open');
+        }
+
+        function drawQrCode(containerId, textData) {
+            const el = document.getElementById(containerId);
+            if (!el || typeof qrcode === 'undefined') return;
+            try {
+                const qr = qrcode(0, 'M');
+                qr.addData(textData);
+                qr.make();
+                el.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 2 });
+            } catch (e) {
+                el.textContent = textData;
+            }
+        }
+
+        function copyStorefrontUrl() {
+            navigator.clipboard.writeText(window.location.origin + window.location.pathname);
+            alert('¡Enlace de la vitrina copiado al portapapeles!');
+        }
+
+        function getCookie(name) {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
+            return '';
+        }
+
+        /* =========================================================
+           INICIALIZACIÓN AL CARGAR LA VITRINA
+           ========================================================= */
+        document.addEventListener('DOMContentLoaded', () => {
+            initThemeSelector();
+            renderBranchesTabs();
+            renderStoriesReel();
+            renderSubcategoryPills();
+            applyFilters();
+            initInteractiveMap();
+
+            // Si viene desde un Link de Producto (/p/<item_id>/), abrimos su modal automáticamente
+            if (STOREFRONT_DATA.highlight_item_id) {
+                openProductModal(STOREFRONT_DATA.highlight_item_id);
+            }
+
+            // Si viene desde un Link de Orden Express (/orden-express/<token>/), pre-cargamos el carrito y abrimos el modal de la App
+            if (STOREFRONT_DATA.express_order_draft && Array.isArray(STOREFRONT_DATA.express_order_draft.items)) {
+                state.cart = STOREFRONT_DATA.express_order_draft.items.map((it, idx) => ({
+                    key: `${it.item_id}_${idx}`,
+                    item_id: it.item_id,
+                    store_id: STOREFRONT_DATA.express_order_draft.store_id,
+                    name: it.name,
+                    image_url: it.image_url || '/static/img/no_image.jpg',
+                    unit_price_usd: Number(it.unit_price_usd || 0),
+                    quantity: Number(it.quantity || 1),
+                    unit_label: it.unit_label || 'und',
+                    selected_variant: it.selected_variant,
+                }));
+                updateFloatingCartBar();
+                openCartDrawer();
+                renderHandoffReadyBox({
+                    token: STOREFRONT_DATA.express_order_draft.token,
+                    app_deep_link: `cartmaker://express-order?token=${STOREFRONT_DATA.express_order_draft.token}`,
+                    web_resume_url: window.location.href,
+                });
+            }
+        });
+    </script>
+</body>
+</html>

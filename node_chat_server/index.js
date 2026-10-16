@@ -43,6 +43,7 @@ loadEnvFromSh();
 
 const express = require('express');
 const http = require('http');
+const crypto = require('crypto');
 const { Server } = require('socket.io');
 const axios = require('axios');
 const jwt = require('jsonwebtoken');
@@ -69,9 +70,18 @@ if (!JWT_SECRET || !INTERNAL_SECRET) {
   process.exit(1);
 }
 
+function isValidMicroserviceToken(headerToken) {
+  if (!headerToken || typeof headerToken !== 'string') return false;
+  const bufA = Buffer.from(headerToken, 'utf8');
+  const bufB = Buffer.from(INTERNAL_SECRET, 'utf8');
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
 // 💡 RUTAS DE WEBHOOKS
 const DJANGO_WEBHOOK_URL = 'http://127.0.0.1:8000/chat/webhook/process_message/';
 const DJANGO_SUPPORT_WEBHOOK_URL = 'http://127.0.0.1:8000/chat/webhook/process_support_message/';
+const AXIOS_WEBHOOK_TIMEOUT_MS = 5000;
 
 // =========================================================================
 // 🔒 MIDDLEWARE DE AUTENTICACIÓN PROTEGIDO
@@ -102,9 +112,51 @@ io.use((socket, next) => {
 // =========================================================================
 // 🚀 TRACKING DE PRESENCIA EN TIEMPO REAL (In-Memory Maps)
 // =========================================================================
-// 💡 Ahora activeChats guarda el nombre COMPLETO de la sala ('order_X' o 'support_X')
+// 💡 activeChats mapea socket.id -> Set de nombres de sala ('order_X' o 'support_X')
 const activeChats = new Map(); 
 const onlineUsers = new Map(); 
+
+function addActiveRoom(socketId, roomName) {
+  if (!activeChats.has(socketId)) {
+    activeChats.set(socketId, new Set());
+  }
+  activeChats.get(socketId).add(roomName);
+}
+
+function removeActiveRoom(socketId, roomName) {
+  const rooms = activeChats.get(socketId);
+  if (rooms) {
+    rooms.delete(roomName);
+    if (rooms.size === 0) {
+      activeChats.delete(socketId);
+    }
+  }
+}
+
+function hasOtherUserSocketInRoom(roomName, userId, excludedSocketId) {
+  const room = io.sockets.adapter.rooms.get(roomName);
+  if (!room) return false;
+  for (const sid of room) {
+    if (sid === excludedSocketId) continue;
+    const s = io.sockets.sockets.get(sid);
+    if (s && String(s.user_id) === String(userId)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasCounterpartyInRoom(roomName, userId) {
+  const room = io.sockets.adapter.rooms.get(roomName);
+  if (!room) return false;
+  for (const sid of room) {
+    const s = io.sockets.sockets.get(sid);
+    if (s && String(s.user_id) !== String(userId)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 // =========================================================================
 // 🔌 API INTERNA PARA DJANGO (Asignación Inteligente)
@@ -112,7 +164,7 @@ const onlineUsers = new Map();
 
 // 1. Django pregunta: "¿Quién está conectado?"
 app.get('/internal/online-users', (req, res) => {
-  if (req.headers['x-microservice-token'] !== INTERNAL_SECRET) return res.status(403).send('Forbidden');
+  if (!isValidMicroserviceToken(req.headers['x-microservice-token'])) return res.status(403).send('Forbidden');
   
   // Devolvemos el array de IDs de todos los usuarios que tienen un socket activo
   res.json({ online_users: Array.from(onlineUsers.keys()) });
@@ -120,7 +172,7 @@ app.get('/internal/online-users', (req, res) => {
 
 // 2. Django ordena: "Notifica esta asignación"
 app.post('/internal/emit-assignment', (req, res) => {
-  if (req.headers['x-microservice-token'] !== INTERNAL_SECRET) return res.status(403).send('Forbidden');
+  if (!isValidMicroserviceToken(req.headers['x-microservice-token'])) return res.status(403).send('Forbidden');
   const { ticket, agent_id, client_id } = req.body;
 
   // A) Avisar al Agente en su Dashboard Web
@@ -137,7 +189,7 @@ app.post('/internal/emit-assignment', (req, res) => {
 
 // 3. Django ordena: "Cierra el ticket y bloquea a todos"
 app.post('/internal/emit-ticket-closed', (req, res) => {
-  if (req.headers['x-microservice-token'] !== INTERNAL_SECRET) return res.status(403).send('Forbidden');
+  if (!isValidMicroserviceToken(req.headers['x-microservice-token'])) return res.status(403).send('Forbidden');
   const { ticket_id, reason, client_id, agent_id } = req.body;
 
   // Cerrar el chat
@@ -172,17 +224,16 @@ io.on('connection', (socket) => {
       await axios.post(markReadUrl, {
         order_id: orderId,
         user_id: socket.user_id
-      }, { headers: { 'X-Microservice-Token': INTERNAL_SECRET } });
+      }, { headers: { 'X-Microservice-Token': INTERNAL_SECRET }, timeout: AXIOS_WEBHOOK_TIMEOUT_MS });
 
       socket.join(roomName);
-      activeChats.set(socket.id, roomName);
+      addActiveRoom(socket.id, roomName);
 
       console.log(`✅ Usuario [ID: ${socket.user_id}] entró a la sala de la orden: ${orderId}`);
 
       socket.to(roomName).emit('presence_change', { user_id: socket.user_id, status: 'online' });
 
-      const room = io.sockets.adapter.rooms.get(roomName);
-      if (room && room.size > 1) {
+      if (hasCounterpartyInRoom(roomName, socket.user_id)) {
         socket.emit('presence_change', { status: 'online' });
       } else {
         socket.emit('presence_change', { status: 'offline' });
@@ -206,18 +257,7 @@ io.on('connection', (socket) => {
   socket.on('send_message', async (data) => {
     const { order_id, text, message_type, media_url } = data;
     const roomName = `order_${order_id}`;
-    const room = io.sockets.adapter.rooms.get(roomName);
-
-    let isRecipientConnected = false;
-    if (room) {
-      for (const socketId of room) {
-        const clientSocket = io.sockets.sockets.get(socketId);
-        if (clientSocket && String(clientSocket.user_id) !== String(socket.user_id)) {
-          isRecipientConnected = true;
-          break;
-        }
-      }
-    }
+    const isRecipientConnected = hasCounterpartyInRoom(roomName, socket.user_id);
 
     try {
       const response = await axios.post(DJANGO_WEBHOOK_URL, {
@@ -227,7 +267,7 @@ io.on('connection', (socket) => {
         message_type: message_type || 'text',
         media_url: media_url || null,
         recipient_connected: isRecipientConnected
-      }, { headers: { 'X-Microservice-Token': INTERNAL_SECRET } });
+      }, { headers: { 'X-Microservice-Token': INTERNAL_SECRET }, timeout: AXIOS_WEBHOOK_TIMEOUT_MS });
 
       if (response.data.success) {
         io.to(roomName).emit('new_message', response.data.data);
@@ -239,8 +279,11 @@ io.on('connection', (socket) => {
 
   socket.on('leave_chat', (data) => {
     const roomName = `order_${data.order_id}`;
-    io.to(roomName).emit('presence_change', { user_id: socket.user_id, status: 'offline' });
     socket.leave(roomName);
+    removeActiveRoom(socket.id, roomName);
+    if (!hasOtherUserSocketInRoom(roomName, socket.user_id, socket.id)) {
+      io.to(roomName).emit('presence_change', { user_id: socket.user_id, status: 'offline' });
+    }
   });
 
   // =========================================================================
@@ -257,17 +300,16 @@ io.on('connection', (socket) => {
       await axios.post(markReadUrl, {
         ticket_id: ticketId,
         user_id: socket.user_id
-      }, { headers: { 'X-Microservice-Token': INTERNAL_SECRET } });
+      }, { headers: { 'X-Microservice-Token': INTERNAL_SECRET }, timeout: AXIOS_WEBHOOK_TIMEOUT_MS });
 
       socket.join(roomName);
-      activeChats.set(socket.id, roomName);
+      addActiveRoom(socket.id, roomName);
 
       console.log(`✅ Usuario [ID: ${socket.user_id}] entró al ticket de soporte: ${ticketId}`);
 
       socket.to(roomName).emit('support_presence_change', { user_id: socket.user_id, status: 'online' });
 
-      const room = io.sockets.adapter.rooms.get(roomName);
-      if (room && room.size > 1) {
+      if (hasCounterpartyInRoom(roomName, socket.user_id)) {
         socket.emit('support_presence_change', { status: 'online' });
       } else {
         socket.emit('support_presence_change', { status: 'offline' });
@@ -286,18 +328,7 @@ io.on('connection', (socket) => {
   socket.on('send_support_message', async (data) => {
     const { ticket_id, text, message_type, media_url } = data;
     const roomName = `support_${ticket_id}`;
-    const room = io.sockets.adapter.rooms.get(roomName);
-
-    let isRecipientConnected = false;
-    if (room) {
-      for (const socketId of room) {
-        const clientSocket = io.sockets.sockets.get(socketId);
-        if (clientSocket && String(clientSocket.user_id) !== String(socket.user_id)) {
-          isRecipientConnected = true;
-          break;
-        }
-      }
-    }
+    const isRecipientConnected = hasCounterpartyInRoom(roomName, socket.user_id);
 
     try {
       const response = await axios.post(DJANGO_SUPPORT_WEBHOOK_URL, {
@@ -307,7 +338,7 @@ io.on('connection', (socket) => {
         message_type: message_type || 'text',
         media_url: media_url || null,
         recipient_connected: isRecipientConnected
-      }, { headers: { 'X-Microservice-Token': INTERNAL_SECRET } });
+      }, { headers: { 'X-Microservice-Token': INTERNAL_SECRET }, timeout: AXIOS_WEBHOOK_TIMEOUT_MS });
 
       if (response.data.success) {
         io.to(roomName).emit('new_support_message', response.data.data);
@@ -322,33 +353,53 @@ io.on('connection', (socket) => {
 
   socket.on('leave_support_chat', (data) => {
     const roomName = `support_${data.ticket_id}`;
-    io.to(roomName).emit('support_presence_change', { user_id: socket.user_id, status: 'offline' });
     socket.leave(roomName);
+    removeActiveRoom(socket.id, roomName);
+    if (!hasOtherUserSocketInRoom(roomName, socket.user_id, socket.id)) {
+      io.to(roomName).emit('support_presence_change', { user_id: socket.user_id, status: 'offline' });
+    }
   });
 
   // =========================================================================
   // 📡 EVENTOS COMPARTIDOS
   // =========================================================================
   
-  // 💡 El evento 'typing' ahora es genérico. Se envía a la sala en la que esté el socket.
+  // 💡 El evento 'typing' soporta sala explícita o todas las salas activas del socket.
   socket.on('typing', (data) => {
-    const roomName = activeChats.get(socket.id);
-    if (roomName) {
-      socket.to(roomName).emit('typing_status', {
+    const explicitRoom = data && data.order_id
+      ? `order_${data.order_id}`
+      : (data && data.ticket_id ? `support_${data.ticket_id}` : null);
+
+    if (explicitRoom) {
+      socket.to(explicitRoom).emit('typing_status', {
         user_id: socket.user_id,
-        isTyping: data.isTyping
+        isTyping: Boolean(data.isTyping)
       });
+      return;
+    }
+
+    const rooms = activeChats.get(socket.id);
+    if (rooms) {
+      for (const roomName of rooms) {
+        socket.to(roomName).emit('typing_status', {
+          user_id: socket.user_id,
+          isTyping: Boolean(data && data.isTyping)
+        });
+      }
     }
   });
 
   socket.on('disconnect', () => {
-    const roomName = activeChats.get(socket.id);
-    if (roomName) {
-      // 💡 Identificamos qué tipo de sala estaba abandonando para emitir el evento correcto
-      if (roomName.startsWith('order_')) {
-        io.to(roomName).emit('presence_change', { user_id: socket.user_id, status: 'offline' });
-      } else if (roomName.startsWith('support_')) {
-        io.to(roomName).emit('support_presence_change', { user_id: socket.user_id, status: 'offline' });
+    const rooms = activeChats.get(socket.id);
+    if (rooms) {
+      for (const roomName of rooms) {
+        if (!hasOtherUserSocketInRoom(roomName, socket.user_id, socket.id)) {
+          if (roomName.startsWith('order_')) {
+            io.to(roomName).emit('presence_change', { user_id: socket.user_id, status: 'offline' });
+          } else if (roomName.startsWith('support_')) {
+            io.to(roomName).emit('support_presence_change', { user_id: socket.user_id, status: 'offline' });
+          }
+        }
       }
       activeChats.delete(socket.id);
     }

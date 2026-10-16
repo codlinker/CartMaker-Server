@@ -8,196 +8,270 @@ from django.db import transaction
 from .utils import *
 from django.core.cache import cache
 
-@receiver(pre_save, sender=MerchantPlanPayment)
-def on_payment_created(sender, instance: MerchantPlanPayment, **kwargs):
+@receiver(pre_save, sender=MerchantPlanPayment, dispatch_uid="capture_merchant_payment_prev_status")
+def _capture_merchant_payment_prev_status(sender, instance: MerchantPlanPayment, **kwargs):
     if instance.pk:
-        try:
-            with transaction.atomic():
-                # Bloqueamos la fila del pago para evitar condiciones de carrera (doble aprobación simultánea)
-                old_instance = sender.objects.select_for_update().select_related(
-                    'subscription__merchant', 'subscription__plan', 'subscription__merchant__wallet', 'target_plan'
-                ).get(pk=instance.pk)
+        old_row = sender.objects.filter(pk=instance.pk).values('status', 'verified_at').first()
+        if old_row:
+            instance._prev_status = old_row['status']
+            instance._prev_verified_at = old_row['verified_at']
+    else:
+        instance._prev_status = None
+        instance._prev_verified_at = None
 
-                if old_instance.status == PaymentStatus.PENDING and instance.status != old_instance.status:
-                    merchant = old_instance.subscription.merchant
-                    current_subscription = old_instance.subscription
-                    
-                    target_plan = old_instance.target_plan if old_instance.target_plan else current_subscription.plan
-                    plan_name = target_plan.name
-                    instance.verified_at = timezone.now()
 
-                    # --- CASO RECHAZADO ---
-                    if instance.status == PaymentStatus.REJECTED:
-                        if instance.rejection_reason == RejectionReason.FAKE_PROOF:
-                            instance.rejection_help = RejectionHelpText.FAKE_PROOF
-                        elif instance.rejection_reason == RejectionReason.NOT_ENOUGH_AMOUNT:
-                            instance.rejection_help = RejectionHelpText.NOT_ENOUGH_AMOUNT
-                        elif instance.rejection_reason == RejectionReason.INVALID_DATE:
-                            instance.rejection_help = RejectionHelpText.INVALID_DATE
-                        elif instance.rejection_reason == RejectionReason.INVALID_REFERENCE:
-                            instance.rejection_help = RejectionHelpText.INVALID_REFERENCE
-                        elif instance.rejection_reason == RejectionReason.OTHER:
-                            instance.rejection_help = RejectionHelpText.OTHER
-                        
-                        # 💡 FIX: Capturamos el string de rechazo antes del closure
-                        rejection_msg = instance.get_rejection_reason_display()
-                        
-                        # 💡 FIX: Postergamos la notificación
-                        def notify_merchant_rejected():
-                            NotificationManager.notify_payment_check(
-                                merchant.id, plan_name, False, instance.pk,
-                                rejection_reason=rejection_msg
-                            )
-                        transaction.on_commit(notify_merchant_rejected)
+@receiver(post_save, sender=MerchantPlanPayment, dispatch_uid="on_merchant_payment_status_changed_post_save")
+def on_payment_created(sender, instance: MerchantPlanPayment, created: bool, **kwargs):
+    if created:
+        return
+    prev_status = getattr(instance, '_prev_status', None)
+    if prev_status != PaymentStatus.PENDING or instance.status == PaymentStatus.PENDING:
+        return
 
-                    # --- CASO APROBADO (Con Prorrateo) ---
-                    elif instance.status == PaymentStatus.APPROVED:
-                        wallet = UserWallet.objects.select_for_update().get(user=merchant)
-                        is_plan_change = current_subscription.plan.id != target_plan.id
-                        
-                        # 1. PRORRATEO
-                        if is_plan_change and current_subscription.valid_until and current_subscription.valid_until > timezone.now():
-                            days_left = (current_subscription.valid_until - timezone.now()).total_seconds() / 86400.0
-                            daily_rate = float(current_subscription.plan.price) / 30.0
-                            remanent_usd = Decimal(str(round(days_left * daily_rate, 2)))
-                            
-                            if remanent_usd > 0:
-                                wallet.regist_transaction(
-                                    amount=remanent_usd, sub_type='merchant', 
-                                    description=f"Reintegro por cambio de plan ({current_subscription.plan.name})", transaction='add'
-                                )
+    try:
+        with transaction.atomic():
+            # Bloqueamos la fila del pago ya persistida y verificamos idempotencia con verified_at
+            locked_payment = sender.objects.select_for_update().select_related(
+                'subscription__merchant', 'subscription__plan', 'subscription__merchant__wallet', 'target_plan'
+            ).get(pk=instance.pk)
 
-                        # 2. ACREDITAMOS EL PAGO MÓVIL/TRANSFERENCIA
-                        monto_pagado_bs = Decimal(str(instance.amount))
-                        tasa_bcv = Decimal(str(instance.bcv_taxes_to_day))
-                        monto_pagado_usd = monto_pagado_bs / tasa_bcv
-                        
+            if locked_payment.verified_at is not None:
+                return
+
+            merchant = locked_payment.subscription.merchant
+            current_subscription = locked_payment.subscription
+            target_plan = locked_payment.target_plan if locked_payment.target_plan else current_subscription.plan
+            plan_name = target_plan.name
+            now = timezone.now()
+
+            # --- CASO RECHAZADO ---
+            if instance.status == PaymentStatus.REJECTED:
+                rejection_help = locked_payment.rejection_help
+                if instance.rejection_reason == RejectionReason.FAKE_PROOF:
+                    rejection_help = RejectionHelpText.FAKE_PROOF
+                elif instance.rejection_reason == RejectionReason.NOT_ENOUGH_AMOUNT:
+                    rejection_help = RejectionHelpText.NOT_ENOUGH_AMOUNT
+                elif instance.rejection_reason == RejectionReason.INVALID_DATE:
+                    rejection_help = RejectionHelpText.INVALID_DATE
+                elif instance.rejection_reason == RejectionReason.INVALID_REFERENCE:
+                    rejection_help = RejectionHelpText.INVALID_REFERENCE
+                elif instance.rejection_reason == RejectionReason.OTHER:
+                    rejection_help = RejectionHelpText.OTHER
+
+                sender.objects.filter(pk=instance.pk).update(
+                    verified_at=now,
+                    rejection_help=rejection_help
+                )
+                instance.verified_at = now
+                instance.rejection_help = rejection_help
+
+                rejection_msg = instance.get_rejection_reason_display()
+
+                def notify_merchant_rejected():
+                    NotificationManager.notify_payment_check(
+                        merchant.id, plan_name, False, instance.pk,
+                        rejection_reason=rejection_msg
+                    )
+                transaction.on_commit(notify_merchant_rejected)
+
+            # --- CASO APROBADO (Con Prorrateo) ---
+            elif instance.status == PaymentStatus.APPROVED:
+                wallet = UserWallet.objects.select_for_update().get(user=merchant)
+                is_plan_change = current_subscription.plan.id != target_plan.id
+
+                # 1. PRORRATEO
+                if is_plan_change and current_subscription.valid_until and current_subscription.valid_until > now:
+                    days_left = (current_subscription.valid_until - now).total_seconds() / 86400.0
+                    daily_rate = float(current_subscription.plan.price) / 30.0
+                    remanent_usd = Decimal(str(round(days_left * daily_rate, 2)))
+
+                    if remanent_usd > 0:
                         wallet.regist_transaction(
-                            amount=monto_pagado_usd, sub_type='merchant', 
-                            description=f"Recarga mediante transferencia (Ref: {instance.reference_number})", transaction='add'
+                            amount=remanent_usd, sub_type='merchant',
+                            description=f"Reintegro por cambio de plan ({current_subscription.plan.name})",
+                            transaction='add'
                         )
-                        
-                        # 3. VERIFICAMOS SI ALCANZA PARA EL NUEVO PLAN
-                        plan_price_usd = Decimal(str(target_plan.price))
-                        
-                        if wallet.balance >= plan_price_usd:
-                            excedente_usd = wallet.balance - plan_price_usd
-                            excedente_bs = round(excedente_usd * tasa_bcv, 2)
-                            
-                            wallet.regist_transaction(
-                                amount=plan_price_usd, sub_type='merchant', 
-                                description=f"Cobro de suscripción: {plan_name}", transaction='substract'
-                            )
-                            
-                            # 💡 FIX: Lógica de acumulación de tiempo y limpieza de banderas
-                            now = timezone.now()
-                            if current_subscription.valid_until and current_subscription.valid_until > now:
-                                subscription_valid_until = current_subscription.valid_until + relativedelta(months=1)
-                            else:
-                                subscription_valid_until = now + relativedelta(months=1)
 
-                            current_subscription.__class__.objects.filter(pk=current_subscription.pk).update(
-                                plan=target_plan, 
-                                valid_until=subscription_valid_until, 
-                                adquired_at=now,
-                                notified_5_days=False,
-                                notified_1_day=False,
-                                notified_hours=False
-                            )
-                            def notify_merchant_approved():
-                                NotificationManager.notify_payment_check(
-                                    user_id=merchant.id,
-                                    subscription_name=plan_name,
-                                    approved=True,
-                                    payment_id=instance.pk,
-                                    surplus_amount=float(excedente_bs)
-                                )
-                            transaction.on_commit(notify_merchant_approved)
-                        else:
-                            # 4. SI NO ALCANZA EL DINERO A PESAR DEL REINTEGRO
-                            instance.status = PaymentStatus.REJECTED
-                            instance.rejection_reason = RejectionReason.NOT_ENOUGH_AMOUNT
-                            instance.rejection_help = RejectionHelpText.NOT_ENOUGH_AMOUNT
-                            
-                            # 💡 FIX: Postergamos la notificación
-                            def notify_insufficient_funds():
-                                NotificationManager.notify_payment_check(
-                                    merchant.id, plan_name, False, instance.pk,
-                                    rejection_reason=f"Pago recibido, pero el monto total fue insuficiente para el nuevo plan. {round(float(monto_pagado_usd), 2)}$ fueron acreditados a tu saldo a favor."
-                                )
-                            transaction.on_commit(notify_insufficient_funds)
+                # 2. ACREDITAMOS EL PAGO MÓVIL/TRANSFERENCIA
+                monto_pagado_bs = Decimal(str(instance.amount))
+                tasa_bcv = Decimal(str(instance.bcv_taxes_to_day))
+                monto_pagado_usd = monto_pagado_bs / tasa_bcv
 
-        except sender.DoesNotExist:
-            pass
+                wallet.regist_transaction(
+                    amount=monto_pagado_usd, sub_type='merchant',
+                    description=f"Recarga mediante transferencia (Ref: {instance.reference_number})",
+                    transaction='add'
+                )
 
-@receiver(pre_save, sender=AtlasPlusPlanPayment, dispatch_uid="on_atlas_payment_status_changed_unique")
-def on_atlas_payment_status_changed(sender, instance: AtlasPlusPlanPayment, **kwargs):
+                # 3. VERIFICAMOS SI ALCANZA PARA EL NUEVO PLAN
+                plan_price_usd = Decimal(str(target_plan.price))
+
+                if wallet.balance >= plan_price_usd:
+                    excedente_usd = wallet.balance - plan_price_usd
+                    excedente_bs = round(excedente_usd * tasa_bcv, 2)
+
+                    wallet.regist_transaction(
+                        amount=plan_price_usd, sub_type='merchant',
+                        description=f"Cobro de suscripción: {plan_name}",
+                        transaction='substract'
+                    )
+
+                    if current_subscription.valid_until and current_subscription.valid_until > now:
+                        subscription_valid_until = current_subscription.valid_until + relativedelta(months=1)
+                    else:
+                        subscription_valid_until = now + relativedelta(months=1)
+
+                    current_subscription.__class__.objects.filter(pk=current_subscription.pk).update(
+                        plan=target_plan,
+                        valid_until=subscription_valid_until,
+                        adquired_at=now,
+                        notified_5_days=False,
+                        notified_1_day=False,
+                        notified_hours=False
+                    )
+                    sender.objects.filter(pk=instance.pk).update(verified_at=now)
+                    instance.verified_at = now
+
+                    def notify_merchant_approved():
+                        NotificationManager.notify_payment_check(
+                            user_id=merchant.id,
+                            subscription_name=plan_name,
+                            approved=True,
+                            payment_id=instance.pk,
+                            surplus_amount=float(excedente_bs)
+                        )
+                    transaction.on_commit(notify_merchant_approved)
+                else:
+                    # 4. SI NO ALCANZA EL DINERO A PESAR DEL REINTEGRO
+                    sender.objects.filter(pk=instance.pk).update(
+                        status=PaymentStatus.REJECTED,
+                        rejection_reason=RejectionReason.NOT_ENOUGH_AMOUNT,
+                        rejection_help=RejectionHelpText.NOT_ENOUGH_AMOUNT,
+                        verified_at=now
+                    )
+                    instance.status = PaymentStatus.REJECTED
+                    instance.rejection_reason = RejectionReason.NOT_ENOUGH_AMOUNT
+                    instance.rejection_help = RejectionHelpText.NOT_ENOUGH_AMOUNT
+                    instance.verified_at = now
+
+                    def notify_insufficient_funds():
+                        NotificationManager.notify_payment_check(
+                            merchant.id, plan_name, False, instance.pk,
+                            rejection_reason=f"Pago recibido, pero el monto total fue insuficiente para el nuevo plan. {round(float(monto_pagado_usd), 2)}$ fueron acreditados a tu saldo a favor."
+                        )
+                    transaction.on_commit(notify_insufficient_funds)
+    except sender.DoesNotExist:
+        pass
+
+
+@receiver(pre_save, sender=AtlasPlusPlanPayment, dispatch_uid="capture_atlas_payment_prev_status")
+def _capture_atlas_payment_prev_status(sender, instance: AtlasPlusPlanPayment, **kwargs):
     if instance.pk:
-        try:
-            with transaction.atomic():
-                # Bloqueamos la fila del pago para evitar doble acreditación simultánea
-                old_instance = sender.objects.select_for_update().select_related('plan__user__wallet').get(pk=instance.pk)
-                
-                if old_instance.status == PaymentStatus.PENDING and instance.status != old_instance.status:
-                    user = old_instance.plan.user
-                    atlas_plan = AtlasPlusPlan.objects.select_for_update().get(pk=old_instance.plan_id)
-                    instance.verified_at = timezone.now()
-                    config = SystemConfig.objects.latest('creation')
+        old_row = sender.objects.filter(pk=instance.pk).values('status', 'verified_at').first()
+        if old_row:
+            instance._prev_status = old_row['status']
+            instance._prev_verified_at = old_row['verified_at']
+    else:
+        instance._prev_status = None
+        instance._prev_verified_at = None
 
-                    # --- CASO RECHAZADO ---
-                    if instance.status == PaymentStatus.REJECTED:
-                        instance.rejection_help = int(instance.rejection_reason)
-                        rejection_msg = instance.get_rejection_reason_display()
-                        
-                        def notify_atlas_rejected():
-                            NotificationManager.notify_payment_check(
-                                user_id=user.id, subscription_name="Atlas Plus AI", 
-                                approved=False, payment_id=instance.pk, 
-                                rejection_reason=rejection_msg
-                            )
-                        transaction.on_commit(notify_atlas_rejected)
 
-                    # --- CASO APROBADO ---
-                    elif instance.status == PaymentStatus.APPROVED:
-                        wallet = UserWallet.objects.select_for_update().get(user=user)
-                        tasa_bcv = Decimal(str(instance.bcv_taxes_to_day))
-                        monto_pagado_usd = Decimal(str(instance.amount)) / tasa_bcv
-                        
-                        wallet.regist_transaction(monto_pagado_usd, 'atlas', f"Abono por Reporte Atlas (Ref: {instance.reference_number})", 'add')
-                        
-                        plan_price_usd = Decimal(str(config.atlas_plus_price_usd))
-                        
-                        if wallet.balance >= plan_price_usd:
-                            excedente_usd = wallet.balance - plan_price_usd
-                            excedente_bs = round(excedente_usd * tasa_bcv, 2)
-                            
-                            wallet.regist_transaction(plan_price_usd, 'atlas', "Cobro automático de suscripción Atlas Plus", 'substract')
-                            
-                            atlas_plan.tier = AtlasSubscriptionTier.PREMIUM
-                            atlas_plan.valid_until = timezone.now() + relativedelta(months=1)
-                            atlas_plan.save()
-                            
-                            def finalize_atlas_approval():
-                                cache.delete(f"cartmaker:tenant:{user.id}:subscriptions")
-                                NotificationManager.notify_payment_check(
-                                    user_id=user.id, subscription_name="Atlas Plus AI", 
-                                    approved=True, payment_id=instance.pk, surplus_amount=float(excedente_bs)
-                                )
-                            transaction.on_commit(finalize_atlas_approval)
-                        else:
-                            instance.status = PaymentStatus.REJECTED
-                            instance.rejection_reason = RejectionReason.NOT_ENOUGH_AMOUNT
-                            instance.rejection_help = RejectionHelpText.NOT_ENOUGH_AMOUNT
-                            
-                            def notify_atlas_insufficient():
-                                NotificationManager.notify_payment_check(
-                                    user_id=user.id, subscription_name="Atlas Plus AI", 
-                                    approved=False, payment_id=instance.pk,
-                                    rejection_reason=f"Monto insuficiente para Atlas Plus. Los {round(float(monto_pagado_usd), 2)}$ se guardaron en tu monedero."
-                                )
-                            transaction.on_commit(notify_atlas_insufficient)
-        except sender.DoesNotExist:
-            pass
+@receiver(post_save, sender=AtlasPlusPlanPayment, dispatch_uid="on_atlas_payment_status_changed_unique")
+def on_atlas_payment_status_changed(sender, instance: AtlasPlusPlanPayment, created: bool, **kwargs):
+    if created:
+        return
+    prev_status = getattr(instance, '_prev_status', None)
+    if prev_status != PaymentStatus.PENDING or instance.status == PaymentStatus.PENDING:
+        return
+
+    try:
+        with transaction.atomic():
+            # Bloqueamos la fila del pago y validamos idempotencia con verified_at
+            locked_payment = sender.objects.select_for_update().select_related('plan__user__wallet').get(pk=instance.pk)
+            if locked_payment.verified_at is not None:
+                return
+
+            user = locked_payment.plan.user
+            atlas_plan = AtlasPlusPlan.objects.select_for_update().get(pk=locked_payment.plan_id)
+            now = timezone.now()
+            config = SystemConfig.objects.latest('creation')
+
+            # --- CASO RECHAZADO ---
+            if instance.status == PaymentStatus.REJECTED:
+                rejection_help = int(instance.rejection_reason) if instance.rejection_reason is not None else None
+                sender.objects.filter(pk=instance.pk).update(
+                    verified_at=now,
+                    rejection_help=rejection_help
+                )
+                instance.verified_at = now
+                instance.rejection_help = rejection_help
+                rejection_msg = instance.get_rejection_reason_display()
+
+                def notify_atlas_rejected():
+                    NotificationManager.notify_payment_check(
+                        user_id=user.id, subscription_name="Atlas Plus AI",
+                        approved=False, payment_id=instance.pk,
+                        rejection_reason=rejection_msg
+                    )
+                transaction.on_commit(notify_atlas_rejected)
+
+            # --- CASO APROBADO ---
+            elif instance.status == PaymentStatus.APPROVED:
+                wallet = UserWallet.objects.select_for_update().get(user=user)
+                tasa_bcv = Decimal(str(instance.bcv_taxes_to_day))
+                monto_pagado_usd = Decimal(str(instance.amount)) / tasa_bcv
+
+                wallet.regist_transaction(
+                    monto_pagado_usd, 'atlas',
+                    f"Abono por Reporte Atlas (Ref: {instance.reference_number})", 'add'
+                )
+
+                plan_price_usd = Decimal(str(config.atlas_plus_price_usd))
+
+                if wallet.balance >= plan_price_usd:
+                    excedente_usd = wallet.balance - plan_price_usd
+                    excedente_bs = round(excedente_usd * tasa_bcv, 2)
+
+                    wallet.regist_transaction(
+                        plan_price_usd, 'atlas',
+                        "Cobro automático de suscripción Atlas Plus", 'substract'
+                    )
+
+                    atlas_plan.tier = AtlasSubscriptionTier.PREMIUM
+                    atlas_plan.valid_until = now + relativedelta(months=1)
+                    atlas_plan.save()
+
+                    sender.objects.filter(pk=instance.pk).update(verified_at=now)
+                    instance.verified_at = now
+
+                    def finalize_atlas_approval():
+                        cache.delete(f"cartmaker:tenant:{user.id}:subscriptions")
+                        NotificationManager.notify_payment_check(
+                            user_id=user.id, subscription_name="Atlas Plus AI",
+                            approved=True, payment_id=instance.pk, surplus_amount=float(excedente_bs)
+                        )
+                    transaction.on_commit(finalize_atlas_approval)
+                else:
+                    sender.objects.filter(pk=instance.pk).update(
+                        status=PaymentStatus.REJECTED,
+                        rejection_reason=RejectionReason.NOT_ENOUGH_AMOUNT,
+                        rejection_help=RejectionHelpText.NOT_ENOUGH_AMOUNT,
+                        verified_at=now
+                    )
+                    instance.status = PaymentStatus.REJECTED
+                    instance.rejection_reason = RejectionReason.NOT_ENOUGH_AMOUNT
+                    instance.rejection_help = RejectionHelpText.NOT_ENOUGH_AMOUNT
+                    instance.verified_at = now
+
+                    def notify_atlas_insufficient():
+                        NotificationManager.notify_payment_check(
+                            user_id=user.id, subscription_name="Atlas Plus AI",
+                            approved=False, payment_id=instance.pk,
+                            rejection_reason=f"Monto insuficiente para Atlas Plus. Los {round(float(monto_pagado_usd), 2)}$ se guardaron en tu monedero."
+                        )
+                    transaction.on_commit(notify_atlas_insufficient)
+    except sender.DoesNotExist:
+        pass
 
 
 # ==========================================

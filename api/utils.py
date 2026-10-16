@@ -21,52 +21,55 @@ def get_tokens_for_user(user):
         'access': str(refresh.access_token),
     }
 
+def _deliver_otp_email_sync(user_email: str, otp_code: str, timestamp_str: str) -> None:
+    context = {
+        'otp_code': otp_code,
+        'timestamp': timestamp_str,
+    }
+    subject = "Tu código de verificación de CartMaker"
+    from_email = settings.DEFAULT_FROM_EMAIL
+
+    text_content = render_to_string('emails/otp_verification.txt', context)
+    html_content = render_to_string('emails/otp_verification.html', context)
+
+    email = EmailMultiAlternatives(
+        subject=subject,
+        body=text_content,
+        from_email=from_email,
+        to=[user_email],
+    )
+    email.attach_alternative(html_content, "text/html")
+
+    logo_path = os.path.join(settings.BASE_DIR, 'web', 'static', 'img', 'logo_sin_letras.png')
+    try:
+        with open(logo_path, 'rb') as f:
+            logo_image = MIMEImage(f.read())
+            logo_image.add_header('Content-ID', '<logo_cartmaker>')
+            logo_image.add_header('Content-Disposition', 'inline', filename='logo.png')
+            email.attach(logo_image)
+    except Exception as img_error:
+        print(f"No se pudo cargar el logo para el correo: {img_error}")
+
+    email.send(fail_silently=False)
+    print(f"OTP ENVIADO CON ÉXITO A {user_email}: {otp_code}")
+
+
 def send_email_otp(user_email: str) -> str:
     otp_code = str(random.randint(10000, 99999))
     cache_key = f"otp_verification_{user_email}"
-    cache.set(cache_key, otp_code, timeout=60)
-    
-    context = {
-        'otp_code': otp_code,
-        'timestamp': datetime.now().strftime("%d/%m/%Y %I:%M %p")
-    }
-    
-    subject = "Tu código de verificación de CartMaker"
-    from_email = settings.DEFAULT_FROM_EMAIL
-    
-    try:
-        text_content = render_to_string('emails/otp_verification.txt', context)
-        html_content = render_to_string('emails/otp_verification.html', context)
-        
-        email = EmailMultiAlternatives(
-            subject=subject,
-            body=text_content,
-            from_email=from_email,
-            to=[user_email]
-        )
-        email.attach_alternative(html_content, "text/html")
-        
-        # --- LÓGICA PARA INCRUSTAR EL LOGO (CID INLINE) ---
-        logo_path = os.path.join(settings.BASE_DIR, 'web', 'static', 'img', 'logo_sin_letras.png')
-        
-        try:
-            with open(logo_path, 'rb') as f:
-                logo_image = MIMEImage(f.read())
-                # Le damos el ID exacto que usamos en el src="cid:logo_cartmaker" del HTML
-                logo_image.add_header('Content-ID', '<logo_cartmaker>')
-                # Indicamos que es un elemento en línea, no un archivo adjunto para descargar
-                logo_image.add_header('Content-Disposition', 'inline', filename='logo.png')
-                email.attach(logo_image)
-        except Exception as img_error:
-            print(f"No se pudo cargar el logo para el correo: {img_error}")
-        # --------------------------------------------------
+    cache.set(cache_key, otp_code, timeout=120)
+    timestamp_str = datetime.now().strftime("%d/%m/%Y %I:%M %p")
 
-        email.send(fail_silently=False)
-        print(f"OTP ENVIADO CON ÉXITO A {user_email}: {otp_code}")
-        
-    except Exception as e:
-        print(f"Error crítico en el despacho del OTP hacia {user_email}: {str(e)}")
-        raise e 
+    try:
+        from api.tasks import send_otp_email_task
+        send_otp_email_task.delay(user_email, otp_code, timestamp_str)
+    except Exception as broker_err:
+        print(f"Fallback síncrono para despacho OTP ({broker_err}):")
+        try:
+            _deliver_otp_email_sync(user_email, otp_code, timestamp_str)
+        except Exception as e:
+            print(f"Error crítico en el despacho del OTP hacia {user_email}: {str(e)}")
+            raise e
 
     return otp_code
 

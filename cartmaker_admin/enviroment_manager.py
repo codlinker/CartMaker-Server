@@ -263,8 +263,8 @@ class EnviromentManager:
             if env_variables[variable] is None:
                 missing_variables.append(variable)
             else:
-                if env_variables[variable] == "STORAGE_TYPE":
-                    if not env_variables[variable] in ['aws', 'local']:
+                if variable == "STORAGE_TYPE":
+                    if env_variables[variable] not in ['aws', 'local']:
                         print("********** ENVIROMENT MANAGER **********")
                         print(f"Tipo de almacenamiento {env_variables[variable]} no permitido.")
                         print("****************************************")
@@ -362,8 +362,15 @@ class EnviromentManager:
     def __execute_sh_file(self):
         """ Lee el archivo .sh de variables de entorno y 
         carga las variables en os.environ """
-        if os.path.exists("variables.sh"):
-            with open("variables.sh", 'r') as f:
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        candidate_paths = [
+            "variables.sh",
+            os.path.join(project_root, "variables.sh"),
+        ]
+        sh_path = next((p for p in candidate_paths if os.path.exists(p)), None)
+
+        if sh_path:
+            with open(sh_path, 'r', encoding='utf-8') as f:
                 for line in f:
                     # Limpiamos la línea y omitimos comentarios o líneas vacías
                     line = line.strip()
@@ -375,11 +382,19 @@ class EnviromentManager:
                         line = line.replace('export ', '', 1)
                     
                     if '=' in line:
-                        key, value = line.split('=', 1)
-                        # Quitamos comillas si las tienen
-                        value = value.strip("'").strip('"')
+                        key, raw_value = line.split('=', 1)
+                        raw_value = raw_value.strip()
+                        if raw_value.startswith(('"', "'")):
+                            quote_char = raw_value[0]
+                            end_quote_idx = raw_value.find(quote_char, 1)
+                            if end_quote_idx != -1:
+                                value = raw_value[1:end_quote_idx]
+                            else:
+                                value = raw_value.strip(quote_char)
+                        else:
+                            value = raw_value.split('#', 1)[0].strip()
                         os.environ[key.strip()] = value
-        else:
+        elif not os.environ.get("DJANGO_SECRET_KEY"):
             print("********** ENVIROMENT MANAGER **********\n")
             print("No se encontro el archivo variables.sh\n\nAsegurese de incluirlo en la ruta principal del proyecto.")
             print("\n****************************************")

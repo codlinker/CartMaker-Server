@@ -166,7 +166,8 @@ REST_FRAMEWORK = {
         'navigation': '120/minute', # Mapa y feeds. Sin sesión el cupo es por IP.
         'actions': '50/minute', # Para visualizacion de productos.
         'anti_bots':"1/second",
-    }
+    },
+    'NUM_PROXIES': 1,
 }
 
 SPECTACULAR_SETTINGS = {
@@ -425,6 +426,8 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'America/Caracas' 
 CELERY_ENABLE_UTC = False
+CELERY_TASK_SOFT_TIME_LIMIT = 300  # 5 minutos (permite captura limpia de SoftTimeLimitExceeded)
+CELERY_TASK_TIME_LIMIT = 360       # 6 minutos (SIGKILL de protección contra bloqueos de red/FFmpeg)
 
 CELERY_BEAT_SCHEDULE = {
     # Tarea 1: Limpiar ofertas de descuento expiradas en items. Todos los días a las 12:02 AM

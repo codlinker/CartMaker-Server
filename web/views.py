@@ -7,7 +7,8 @@ from django.template.loader import render_to_string
 from django.views.decorators.http import require_POST
 from django.contrib import messages
 from django.db import transaction
-from django.db.models import Count, Avg, F, Q, OuterRef, Subquery
+from django.db.models import Count, Avg, Sum, F, Q, OuterRef, Subquery
+from django.db.models.functions import Coalesce
 import json
 import requests
 from api.models import *
@@ -15,6 +16,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.core.paginator import Paginator
 from .decorators import *
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.utils.http import url_has_allowed_host_and_scheme
 
 ALLOWED_AVATAR_EXTENSIONS = {'jpg', 'jpeg', 'png', 'webp', 'heic'}
@@ -436,3 +438,387 @@ def landing_view(request):
 def pitch_deck_view(request):
     """ Presentación Ejecutiva interactiva para Socios Fundadores """
     return render(request, 'pitch_deck.html')
+
+
+# ==============================================================
+# 🛍️ VITRINA WEB PÚBLICA INTERACTIVA (PILAR 1 - OMNICANALIDAD)
+# ==============================================================
+def _build_storefront_context(
+    request,
+    company_or_store_id,
+    highlight_item_id: str = None,
+    express_order_draft: dict = None,
+):
+    from api.views.base import _get_cached_bcv_rate
+    from api.core.storefront_themes import STOREFRONT_THEMES, resolve_company_storefront_theme
+    from api.core.ve_geo import describe_zone
+    from django.http import Http404
+    import secrets
+
+    company = Company.objects.select_related('category').filter(id=company_or_store_id).first()
+    initial_store_id = request.GET.get('store_id')
+
+    if not company:
+        store_obj = CompanyStore.objects.select_related('company', 'company__category').filter(
+            id=company_or_store_id, is_active=True
+        ).first()
+        if not store_obj:
+            raise Http404("El comercio solicitado no existe o no está disponible.")
+        company = store_obj.company
+        initial_store_id = str(store_obj.id)
+
+    stores_qs = (
+        CompanyStore.objects.filter(company=company, is_active=True)
+        .select_related('location', 'location__mall')
+        .prefetch_related('contact_methods')
+        .order_by('-is_main_store', 'creation')
+    )
+    stores_list = list(stores_qs)
+    if not stores_list:
+        raise Http404("Este comercio no tiene sucursales activas actualmente.")
+
+    # Inventario activo en todas las sucursales de la compañía
+    items_qs = (
+        InventoryItem.objects.filter(store__company=company, store__is_active=True, paused=False, stock__gt=0)
+        .select_related(
+            'product',
+            'product__category',
+            'product__category__parent_category',
+            'store',
+            'store__location',
+            'offer',
+        )
+        .annotate(
+            avg_rating=Coalesce(Avg('product__califications__rating'), 0.0),
+            rating_count=Count('product__califications', distinct=True),
+        )
+        .order_by('-cached_popularity_score', '-creation')
+    )
+    items_raw = list(items_qs)
+
+    bcv_rate = _get_cached_bcv_rate(default=0.0)
+
+    # Determinar categoría padre dominante para el motor de 14 temas visuales
+    parent_cat_counts = {}
+    subcategories_map = {}
+    serialized_items = []
+
+    for it in items_raw:
+        item_json = it.get_json()
+        eff_usd = float(item_json.get('effective_price') or 0.0)
+        list_usd = float(item_json.get('list_price') or eff_usd)
+        item_json['effective_price_bs'] = round(eff_usd * bcv_rate, 2) if bcv_rate > 0 else None
+        item_json['list_price_bs'] = round(list_usd * bcv_rate, 2) if bcv_rate > 0 else None
+        item_json['store_id_str'] = str(it.store_id)
+        if item_json.get('creation'):
+            item_json['creation'] = item_json['creation'].isoformat() if hasattr(item_json['creation'], 'isoformat') else str(item_json['creation'])
+        if item_json.get('sold_out_time'):
+            item_json['sold_out_time'] = str(item_json['sold_out_time'])
+        if item_json.get('expiration_date'):
+            item_json['expiration_date'] = str(item_json['expiration_date'])
+        if item_json.get('offer') and item_json['offer'].get('valid_until'):
+            vu = item_json['offer']['valid_until']
+            item_json['offer']['valid_until'] = vu.isoformat() if hasattr(vu, 'isoformat') else str(vu)
+        if item_json.get('product') and item_json['product'].get('creation'):
+            pc = item_json['product']['creation']
+            item_json['product']['creation'] = pc.isoformat() if hasattr(pc, 'isoformat') else str(pc)
+        if item_json.get('product'):
+            item_json['product']['company_id'] = str(item_json['product']['company_id'])
+
+        cat_info = (item_json.get('product') or {}).get('category') or {}
+        sub_id = cat_info.get('id')
+        sub_name = cat_info.get('name') or 'General'
+        parent_name = cat_info.get('parent_category_name') or ''
+        if parent_name:
+            parent_cat_counts[parent_name] = parent_cat_counts.get(parent_name, 0) + 1
+        if sub_id:
+            subcategories_map[sub_id] = {'id': sub_id, 'name': sub_name, 'parent_name': parent_name}
+
+        serialized_items.append(item_json)
+
+    dominant_parent = (
+        max(parent_cat_counts.items(), key=lambda x: x[1])[0]
+        if parent_cat_counts
+        else ''
+    )
+
+    theme_override = (request.GET.get('theme') or '').strip().lower()
+    if theme_override and theme_override in STOREFRONT_THEMES:
+        theme = dict(STOREFRONT_THEMES[theme_override])
+    else:
+        theme = resolve_company_storefront_theme(
+            company_category_name=company.category.name if company.category else '',
+            dominant_parent_category=dominant_parent,
+        )
+
+    # Sucursales enriquecidas con zona geográfica y coordenadas para el mapa interactivo
+    branches_data = []
+    for s in stores_list:
+        s_json = s.get_json()
+        s_json['id'] = str(s.id)
+        loc = s_json.get('location')
+        if loc and loc.get('lat') is not None and loc.get('lng') is not None:
+            loc['zone_name'] = describe_zone(loc['lat'], loc['lng'])
+            if getattr(s.location, 'mall', None):
+                loc['mall_name'] = s.location.mall.name
+        branches_data.append(s_json)
+
+    # Video Stories activas de la compañía
+    now = timezone.now()
+    stories_qs = (
+        CompanyVideoStory.objects.filter(company=company, expires_at__gt=now)
+        .select_related('associated_item', 'associated_item__product', 'associated_item__store')
+        .order_by('-creation')[:12]
+    )
+    stories_data = []
+    for st in stories_qs:
+        if not st.video_file:
+            continue
+        stories_data.append({
+            'id': str(st.id),
+            'video_url': storage_manager.get_url(st.video_file),
+            'thumbnail_url': storage_manager.get_url(st.thumbnail) if st.thumbnail else None,
+            'description': st.description or company.name,
+            'duration_seconds': float(st.duration_seconds or 15.0),
+            'views_count': int(st.views_count or 0),
+            'associated_item_id': str(st.associated_item_id) if st.associated_item_id else None,
+            'associated_item_name': (
+                st.associated_item.product.name
+                if (st.associated_item and st.associated_item.product)
+                else None
+            ),
+            'associated_item_price_usd': (
+                float(st.associated_item.get_effective_price())
+                if st.associated_item
+                else None
+            ),
+        })
+
+    # Reputación, calificaciones y volumen de ventas
+    califications_qs = MerchantCalification.objects.filter(merchant=company).select_related('client').order_by('-creation')
+    rating_aggr = califications_qs.aggregate(avg=Avg('rating'), count=Count('id'))
+    avg_rating = round(float(rating_aggr['avg'] or 0.0), 2)
+    rating_count = int(rating_aggr['count'] or 0)
+
+    star_counts = {5: 0, 4: 0, 3: 0, 2: 0, 1: 0}
+    recent_reviews = []
+    for cal in califications_qs[:25]:
+        bucket = max(1, min(5, int(round(float(cal.rating or 5)))))
+        star_counts[bucket] += 1
+        if len(recent_reviews) < 8:
+            c_name = f"{cal.client.first_name} {cal.client.last_name[:1]}." if cal.client else "Cliente Verificado"
+            recent_reviews.append({
+                'client_name': c_name.strip(),
+                'rating': round(float(cal.rating), 1),
+                'date': timezone.localtime(cal.creation).strftime("%d/%m/%Y"),
+            })
+
+    total_sales_units = (
+        InventoryItemTransaction.objects.filter(
+            item__store__company=company,
+            transaction_type=TransactionType.OUTCOME,
+        ).aggregate(total=Sum('units'))['total']
+        or 0
+    )
+    total_sales_units = abs(int(total_sales_units))
+
+    main_branch = branches_data[0]
+    app_deep_link = f"cartmaker://store/{main_branch['id']}?company_id={company.id}"
+
+    company_data = company.get_json()
+    company_data['id'] = str(company.id)
+    company_data['avg_rating'] = avg_rating
+    company_data['rating_count'] = rating_count
+    company_data['total_sales_units'] = total_sales_units
+    company_data['merchant_type_label'] = company.get_merchant_type_display()
+
+    storefront_payload = {
+        'company': company_data,
+        'theme': theme,
+        'available_themes': [
+            {'key': k, 'label': v['category_label'], 'icon': v['hero_badge_icon']}
+            for k, v in STOREFRONT_THEMES.items()
+        ],
+        'branches': branches_data,
+        'initial_store_id': str(initial_store_id) if initial_store_id else main_branch['id'],
+        'subcategories': list(subcategories_map.values()),
+        'items': serialized_items,
+        'stories': stories_data,
+        'reputation': {
+            'avg_rating': avg_rating,
+            'rating_count': rating_count,
+            'star_distribution': star_counts,
+            'recent_reviews': recent_reviews,
+            'total_sales_units': total_sales_units,
+        },
+        'bcv_rate': bcv_rate,
+        'app_deep_link': app_deep_link,
+        'highlight_item_id': str(highlight_item_id) if highlight_item_id else None,
+        'express_order_draft': express_order_draft,
+        'handoff_endpoint': f"/tienda/{company.id}/handoff-cart/",
+    }
+
+    return {
+        'company': company_data,
+        'theme': theme,
+        'branches': branches_data,
+        'items_count': len(serialized_items),
+        'bcv_rate': bcv_rate,
+        'app_deep_link': app_deep_link,
+        'storefront_json': json.dumps(storefront_payload, ensure_ascii=False),
+    }
+
+
+def public_storefront_view(request, company_id):
+    """
+    Vitrina Web Pública Interactiva de un Comerciante en CartMaker.
+    Diseñada con motor camaleónico de 14 categorías, mapa interactivo con cálculo de ruta,
+    reproductor de Video Stories, filtros en tiempo real y Checkout exclusivo hacia CartMaker App.
+    """
+    context = _build_storefront_context(
+        request=request,
+        company_or_store_id=company_id,
+        highlight_item_id=request.GET.get('item_id'),
+    )
+    return render(request, 'storefront/public_catalog.html', context)
+
+
+def public_product_redirect_view(request, item_id):
+    """
+    Enlace corto de producto (/p/<item_id>/) compartido desde WhatsApp Status o Instagram Stories.
+    Abre la Vitrina Pública de la compañía con el modal interactivo del producto pre-abierto.
+    """
+    from django.http import Http404
+
+    item = (
+        InventoryItem.objects.select_related('store__company')
+        .filter(id=item_id, paused=False)
+        .first()
+    )
+    if not item:
+        prod = Product.objects.filter(id=item_id).first()
+        if prod:
+            item = InventoryItem.objects.filter(product=prod, paused=False).first()
+    if not item:
+        raise Http404("El producto solicitado ya no se encuentra disponible.")
+
+    context = _build_storefront_context(
+        request=request,
+        company_or_store_id=item.store.company_id,
+        highlight_item_id=str(item.id),
+    )
+    return render(request, 'storefront/public_catalog.html', context)
+
+
+def public_express_order_view(request, token: str):
+    """
+    Vista pública de un Link de Orden Express (/orden-express/<token>/) o Carrito Web compartido.
+    Pre-carga los artículos en la vitrina y abre el puente directo hacia la App de CartMaker.
+    """
+    from django.http import Http404
+
+    draft = cache.get(f"cm:handoff_token:{token}")
+    if not draft or not draft.get('company_id'):
+        raise Http404("Este enlace de orden express ha expirado o no es válido.")
+
+    context = _build_storefront_context(
+        request=request,
+        company_or_store_id=draft['company_id'],
+        express_order_draft=draft,
+    )
+    return render(request, 'storefront/public_catalog.html', context)
+
+
+@require_POST
+def create_web_cart_handoff_ajax(request, company_id):
+    """
+    Endpoint AJAX de la Vitrina Web Pública para empaquetar el carrito armado por el visitante
+    y generar un token de traspaso directo (`cmw_...`) hacia la App Móvil de CartMaker.
+    """
+    from api.views.base import _get_cached_bcv_rate
+    from datetime import timedelta
+    import secrets
+
+    try:
+        body = json.loads(request.body.decode('utf-8') or '{}')
+    except Exception:
+        return JsonResponse({'error': 'Payload JSON inválido.'}, status=400)
+
+    raw_items = body.get('items') or []
+    store_id = body.get('store_id')
+    if not isinstance(raw_items, list) or not raw_items:
+        return JsonResponse({'error': 'El carrito está vacío.'}, status=400)
+
+    company = get_object_or_404(Company, id=company_id)
+    item_ids = [str(x.get('item_id')) for x in raw_items if isinstance(x, dict) and x.get('item_id')]
+    db_items = {
+        str(it.id): it
+        for it in InventoryItem.objects.filter(
+            id__in=item_ids, store__company=company, paused=False
+        ).select_related('product', 'store', 'offer')
+    }
+
+    packaged = []
+    total_usd = 0.0
+    resolved_store_id = str(store_id) if store_id else None
+
+    for entry in raw_items:
+        if not isinstance(entry, dict):
+            continue
+        iid = str(entry.get('item_id') or '')
+        if iid not in db_items:
+            continue
+        inv = db_items[iid]
+        if inv.stock <= 0:
+            continue
+        qty = max(0.1, min(float(inv.stock), float(entry.get('quantity', 1) or 1)))
+        u_price = inv.get_effective_price()
+        line_usd = round(u_price * qty, 2)
+        total_usd += line_usd
+        if not resolved_store_id:
+            resolved_store_id = str(inv.store_id)
+        images = [storage_manager.get_url(img) for img in (inv.product.images or []) if img]
+        packaged.append({
+            'item_id': iid,
+            'product_id': str(inv.product_id),
+            'name': inv.product.name,
+            'image_url': images[0] if images else None,
+            'quantity': qty if inv.product.allow_fractional_quantity else int(qty),
+            'unit_price_usd': u_price,
+            'line_total_usd': line_usd,
+            'selected_variant': entry.get('selected_variant'),
+            'selected_modifiers': entry.get('selected_modifiers') or [],
+            'order_note': (entry.get('order_note') or '')[:250],
+        })
+
+    if not packaged:
+        return JsonResponse({'error': 'No hay productos disponibles con stock.'}, status=400)
+
+    token = f"cmw_{secrets.token_urlsafe(12)}"
+    bcv_rate = _get_cached_bcv_rate(default=0.0)
+    total_usd = round(total_usd, 2)
+    total_bs = round(total_usd * bcv_rate, 2) if bcv_rate > 0 else None
+
+    payload = {
+        'token': token,
+        'type': 'WEB_STOREFRONT_CART',
+        'company_id': str(company.id),
+        'company_name': company.name,
+        'store_id': resolved_store_id,
+        'items': packaged,
+        'total_usd': total_usd,
+        'total_bs': total_bs,
+        'bcv_rate': bcv_rate,
+        'created_at': timezone.now().isoformat(),
+        'expires_at': (timezone.now() + timedelta(hours=72)).isoformat(),
+    }
+    cache.set(f"cm:handoff_token:{token}", payload, timeout=72 * 3600)
+
+    domain = (getattr(settings, 'DOMAIN', 'https://www.cartmaker.app') or 'https://www.cartmaker.app').rstrip('/')
+    return JsonResponse({
+        'success': True,
+        'token': token,
+        'app_deep_link': f"cartmaker://web-cart?token={token}",
+        'web_resume_url': f"{domain}/orden-express/{token}/",
+        'cart': payload,
+    })

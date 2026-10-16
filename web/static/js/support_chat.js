@@ -286,29 +286,41 @@ function sendMessage() {
     socket.emit('typing', { isTyping: false });
 }
 
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
 function renderMessage(msg) {
     const div = document.createElement('div');
     const isAgent = msg.sender_id === AGENT_ID;
     div.className = `message ${isAgent ? 'agent' : 'client'}`;
     
-    let content = msg.text;
+    let content = escapeHtml(msg.text);
+    const safeMediaUrl = escapeHtml(msg.media_url);
     if (msg.message_type === 'image') {
         // Envolvemos la imagen en un contenedor para que mantenga un tamaño decente
         content = `<div style="max-width: 250px; overflow: hidden; border-radius: 8px;">
-                       <img src="${msg.media_url}" style="width: 100%; height: auto; display: block; border-radius: 8px;">
+                       <img src="${safeMediaUrl}" style="width: 100%; height: auto; display: block; border-radius: 8px;">
                    </div>`;
     } else if (msg.message_type === 'audio') {
-        content = `<audio controls src="${msg.media_url}" style="height:35px;"></audio>`;
+        content = `<audio controls src="${safeMediaUrl}" style="height:35px;"></audio>`;
     }
 
     const tickIcon = isAgent 
         ? `<span class="material-symbols-rounded tick-icon" style="font-size:14px;">${msg.status >= 3 ? 'done_all' : 'check'}</span>` 
         : '';
 
+    const safeTime = escapeHtml((msg.created_at || '').split(' ').slice(1).join(' '));
     div.innerHTML = `
         ${content}
         <div class="message-time">
-            ${msg.created_at.split(' ').slice(1).join(' ')}
+            ${safeTime}
             ${tickIcon}
         </div>
     `;

@@ -210,6 +210,8 @@ class AtlasManager:
         self.client = AsyncOpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=settings.OPENROUTER_API_KEY,
+            timeout=28.0,
+            max_retries=1,
             default_headers={
                 "HTTP-Referer": getattr(settings, 'DOMAIN', "http://localhost:8000"),
                 "X-Title": "CartMaker App"
@@ -1353,12 +1355,12 @@ Catálogo oficial (Categorías y Subcategorías):
                             "content": json.dumps(tool_payload, ensure_ascii=False)
                         })
 
-                    response = await self.client.chat.completions.create(
-                        model=self.model_name,
-                        messages=history,
-                        tools=_get_tools_schema(),
+                    response = await self._create_completion(
+                        history,
+                        thread_id,
+                        _get_tools_schema(),
+                        tool_choice="auto",
                         temperature=0.35,
-                        extra_body={"session_id": f"cartmaker-atlas-thread-{thread_id}"}
                     )
                     choice = response.choices[0]
 
@@ -1491,12 +1493,14 @@ Catálogo oficial (Categorías y Subcategorías):
             return {"products": [], "error": "Respuesta vacía."}
         try:
             clean = text_response.strip()
-            if clean.startswith('```json'):
-                clean = clean[7:]
-            if clean.startswith('```'):
-                clean = clean[3:]
-            if clean.endswith('```'):
-                clean = clean[:-3]
+            fenced_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", clean)
+            if fenced_match:
+                clean = fenced_match.group(1).strip()
+            else:
+                first_brace = clean.find("{")
+                last_brace = clean.rfind("}")
+                if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+                    clean = clean[first_brace:last_brace + 1]
             res = json.loads(clean.strip(), strict=False)
             if "products" in res and isinstance(res["products"], list):
                 fallback_sub = next(iter(subcats_map.values()), None) if subcats_map else None

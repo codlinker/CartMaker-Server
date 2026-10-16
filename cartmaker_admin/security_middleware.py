@@ -212,6 +212,12 @@ class CartMakerClientGatekeeperMiddleware:
             if self._is_authenticated_web_staff_bypass(request, path):
                 return self.get_response(request)
 
+            # Si se visita /api/docs desde un navegador sin sesión ni API Key, redirigir al login web
+            if not raw_api_key and path.startswith("/api/docs") and "text/html" in (request.headers.get("Accept") or ""):
+                from django.shortcuts import redirect
+                from urllib.parse import quote
+                return redirect(f"/auth/login/?next={quote(request.get_full_path())}")
+
             # Si no envió API Key o es inválida/revocada -> Rechazo inmediato
             if not raw_api_key:
                 return JsonResponse(

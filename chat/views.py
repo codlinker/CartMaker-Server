@@ -30,6 +30,18 @@ def _validate_chat_media(file_obj):
     return extension, None
 
 
+def _parse_pagination(request, default_limit=15, max_limit=100):
+    try:
+        offset = max(0, int(request.query_params.get('offset', 0)))
+    except (ValueError, TypeError):
+        offset = 0
+    try:
+        limit = min(max_limit, max(1, int(request.query_params.get('limit', default_limit))))
+    except (ValueError, TypeError):
+        limit = default_limit
+    return offset, limit
+
+
 # =========================================================================
 # 1. ENDPOINT PARA FLUTTER (Historial)
 # =========================================================================
@@ -40,8 +52,7 @@ class ChatViewSet(viewsets.ViewSet):
     def history(self, request):
         """ Devuelve el historial paginado de un chat """
         order_id = request.query_params.get('order_id')
-        offset = int(request.query_params.get('offset', 0))
-        limit = int(request.query_params.get('limit', 15))
+        offset, limit = _parse_pagination(request)
         
         if not order_id:
             return Response({"error": "Falta el ID de la orden."}, status=status.HTTP_400_BAD_REQUEST)
@@ -149,8 +160,7 @@ class SupportChatViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['get'])
     def history(self, request):
         ticket_id = request.query_params.get('ticket_id')
-        offset = int(request.query_params.get('offset', 0))
-        limit = int(request.query_params.get('limit', 15))
+        offset, limit = _parse_pagination(request)
         
         try:
             ticket = SupportTicket.objects.get(id=ticket_id)
@@ -226,8 +236,10 @@ class ChatWebhookViewSet(viewsets.ViewSet):
             )
 
             if not recipient_connected:
-                # Tu NotificationManager inteligente creado previamente
-                NotificationManager.notify_new_chat_message(order=order, sender_id=sender_id, text=text or "🖼️ Foto")
+                try:
+                    NotificationManager.notify_new_chat_message(order=order, sender_id=sender_id, text=text or "🖼️ Foto")
+                except Exception:
+                    pass
 
             return Response({"success": True, "data": msg.get_json()}, status=status.HTTP_200_OK)
         except Order.DoesNotExist:
@@ -319,7 +331,8 @@ class ChatWebhookViewSet(viewsets.ViewSet):
             if str(user_id) not in allowed_users:
                 return Response({"error": "No tienes acceso a este ticket"}, status=status.HTTP_403_FORBIDDEN)
 
-            SupportMessage.objects.filter(ticket_id=ticket_id, status__lt=3).exclude(sender_id=user_id).update(status=3)
+            with transaction.atomic():
+                SupportMessage.objects.filter(ticket_id=ticket_id, status__lt=3).exclude(sender_id=user_id).update(status=3)
             return Response({"success": True}, status=status.HTTP_200_OK)
         except SupportTicket.DoesNotExist:
             return Response({"error": "Ticket no encontrado"}, status=status.HTTP_404_NOT_FOUND)

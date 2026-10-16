@@ -8,3 +8,5 @@ venv
 cartmaker-key.pem
 .antigravity
 .agents
+test_*.py
+node_chat_server/test_client.js

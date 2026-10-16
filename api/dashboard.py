@@ -56,15 +56,17 @@ def build_metrics_for_range(start_date, end_date):
     # 6. Motor Financiero (Gráficos)
     revenue_dict = {}
     if start_date:
-        delta = (end_date.date() - start_date.date()).days
-        date_list = [(start_date + timedelta(days=i)).date() for i in range(delta + 1)]
+        delta = max(0, min((end_date.date() - start_date.date()).days, 365))
+        eff_start = end_date - timedelta(days=delta)
+        date_list = [(eff_start + timedelta(days=i)).date() for i in range(delta + 1)]
     else:
-        # Si es "Todo el historial", buscamos la fecha del primer pago
+        # Si es "Todo el historial", buscamos la fecha del primer pago (acotado a últimos 365 días para el eje X)
         first_payment = MerchantPlanPayment.objects.filter(status=1).order_by('verified_at').first()
         if first_payment and first_payment.verified_at:
             start_calc = first_payment.verified_at
-            delta = (end_date.date() - start_calc.date()).days
-            date_list = [(start_calc + timedelta(days=i)).date() for i in range(delta + 1)]
+            delta = max(0, min((end_date.date() - start_calc.date()).days, 365))
+            eff_start = end_date - timedelta(days=delta)
+            date_list = [(eff_start + timedelta(days=i)).date() for i in range(delta + 1)]
         else:
             date_list = [end_date.date()]
 
@@ -89,12 +91,22 @@ def build_metrics_for_range(start_date, end_date):
 
     revenue_values = list(revenue_dict.values())
 
-    # 💡 7. TRIPLE VISIÓN FINANCIERA (Movida aquí para que el HTML siempre la reciba)
-    try:
-        res = requests.get('https://ve.dolarapi.com/v1/dolares/oficial', timeout=5)
-        bcv_today = float(res.json().get('promedio', 1.0))
-    except:
-        bcv_today = 1.0
+    # 💡 7. TRIPLE VISIÓN FINANCIERA (Lectura desde Redis precalentado por Celery o fallback en BD, 0 bloqueo HTTP)
+    bcv_today = cache.get('cm:bcv_official_rate')
+    if bcv_today is None or float(bcv_today or 0) <= 0:
+        latest_rate = (
+            MerchantPlanPayment.objects.filter(bcv_taxes_to_day__gt=0)
+            .order_by('-creation')
+            .values_list('bcv_taxes_to_day', flat=True)
+            .first()
+            or AtlasPlusPlanPayment.objects.filter(bcv_taxes_to_day__gt=0)
+            .order_by('-creation')
+            .values_list('bcv_taxes_to_day', flat=True)
+            .first()
+        )
+        bcv_today = float(latest_rate) if latest_rate and float(latest_rate) > 0 else 1.0
+    else:
+        bcv_today = float(bcv_today)
 
     df_verified = date_filter("verified_at")
 
@@ -102,8 +114,8 @@ def build_metrics_for_range(start_date, end_date):
     total_bs += AtlasPlusPlanPayment.objects.filter(status=1, **df_verified).aggregate(s=Sum('amount'))['s'] or 0
     
     usd_hist_calc = ExpressionWrapper(F('amount') / F('bcv_taxes_to_day'), output_field=FloatField())
-    usd_historic = MerchantPlanPayment.objects.filter(status=1, **df_verified).aggregate(s=Sum(usd_hist_calc))['s'] or 0
-    usd_historic += AtlasPlusPlanPayment.objects.filter(status=1, **df_verified).aggregate(s=Sum(usd_hist_calc))['s'] or 0
+    usd_historic = MerchantPlanPayment.objects.filter(status=1, bcv_taxes_to_day__gt=0, **df_verified).aggregate(s=Sum(usd_hist_calc))['s'] or 0
+    usd_historic += AtlasPlusPlanPayment.objects.filter(status=1, bcv_taxes_to_day__gt=0, **df_verified).aggregate(s=Sum(usd_hist_calc))['s'] or 0
 
     usd_today = float(total_bs) / bcv_today
     differential = usd_today - float(usd_historic)

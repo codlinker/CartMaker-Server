@@ -12,20 +12,50 @@ class PlatinumEvaluator:
 
     @staticmethod
     def evaluate_all_companies():
+        thirty_days_ago = timezone.now() - timedelta(days=30)
         try:
             config = SystemConfig.objects.latest('creation')
+            min_sales = config.platinum_min_sells_per_month_requirement
+            min_rating = float(config.platinum_min_rating_promedy_requirement)
         except SystemConfig.DoesNotExist:
-            config = None
+            min_sales = 100
+            min_rating = 4.5
 
-        companies = Company.objects.all()
-        for company in companies:
-            PlatinumEvaluator.evaluate_company(company, config=config)
+        sales_by_company = dict(
+            InventoryItemTransaction.objects.filter(
+                transaction_type=1,
+                creation__gte=thirty_days_ago,
+            )
+            .values('item__store__company_id')
+            .annotate(total_sold=Sum('units'))
+            .values_list('item__store__company_id', 'total_sold')
+        )
+
+        ratings_by_company = dict(
+            MerchantCalification.objects.filter(
+                creation__gte=thirty_days_ago,
+            )
+            .values('merchant_id')
+            .annotate(average=Avg('rating'))
+            .values_list('merchant_id', 'average')
+        )
+
+        to_update = []
+        for company in Company.objects.only('id', 'is_platinum').iterator(chunk_size=500):
+            total_sold = abs(sales_by_company.get(company.id, 0) or 0)
+            avg_rating = float(ratings_by_company.get(company.id, 0.0) or 0.0)
+            should_be_platinum = (total_sold >= min_sales) and (avg_rating >= min_rating)
+            if company.is_platinum != should_be_platinum:
+                company.is_platinum = should_be_platinum
+                to_update.append(company)
+
+        if to_update:
+            Company.objects.bulk_update(to_update, ['is_platinum'], batch_size=500)
 
     @staticmethod
     def evaluate_company(company: Company, config: SystemConfig = None) -> bool:
         thirty_days_ago = timezone.now() - timedelta(days=30)
 
-        # Obtenemos los parámetros dinámicos desde SystemConfig
         if config is None:
             try:
                 config = SystemConfig.objects.latest('creation')
@@ -39,18 +69,17 @@ class PlatinumEvaluator:
             min_sales = 100
             min_rating = 4.5
 
-        # 1. Verificar volumen de ventas
-        # Reemplaza '1' por tu TransactionType.SALE si es diferente
-        sales_volume = InventoryItemTransaction.objects.filter(
-            item__store__company=company,
-            transaction_type=1, 
-            creation__gte=thirty_days_ago
-        ).aggregate(total_sold=Sum('units'))['total_sold'] or 0
+        sales_volume = abs(
+            InventoryItemTransaction.objects.filter(
+                item__store__company=company,
+                transaction_type=1,
+                creation__gte=thirty_days_ago,
+            ).aggregate(total_sold=Sum('units'))['total_sold'] or 0
+        )
 
         if sales_volume < min_sales:
             return PlatinumEvaluator._update_status(company, False)
 
-        # 2. Verificar promedio de calificaciones
         avg_rating = MerchantCalification.objects.filter(
             merchant=company,
             creation__gte=thirty_days_ago

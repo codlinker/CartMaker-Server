@@ -2090,13 +2090,21 @@ class ProductSearchEngine:
                 item['is_liked'] = str(item.get('id')) in liked
         return items
 
+    def _get_merchant_exclusion_scope(self) -> str:
+        if self.user and self.user.is_authenticated:
+            try:
+                return f":excl_{self.user.company.id}"
+            except Company.DoesNotExist:
+                pass
+        return ""
+
     def _get_cached_structural_feed(self, base_cache_key: str, queryset, page: int, page_size: int) -> list:
         """
         Abstracción DRY para resolver el Nivel Estructural de CUALQUIER feed.
         Hace el corte de paginación directo en PostgreSQL.
         """
-        # Le pegamos la página y el tamaño a la llave para aislar la memoria
-        cache_key = f"{base_cache_key}:p_{page}:sz_{page_size}"
+        # Le pegamos el alcance de exclusión de comercio (si aplica), la página y el tamaño a la llave para aislar la memoria
+        cache_key = f"{base_cache_key}{self._get_merchant_exclusion_scope()}:p_{page}:sz_{page_size}"
         
         structural_feed = cache.get(cache_key)
         
@@ -2232,8 +2240,8 @@ class ProductSearchEngine:
         approx_lng = round(self.user_location.x, 3)
         affinity_hash = self._get_affinity_hash()
         
-        # Llave de Redis aislada por página
-        cache_key = f"cartmaker:struct:home:{approx_lat}:{approx_lng}:{affinity_hash}:seed_{self.seed}:p_{page}:sz_{page_size}"
+        # Llave de Redis aislada por página y alcance de comerciante
+        cache_key = f"cartmaker:struct:home:{approx_lat}:{approx_lng}:{affinity_hash}{self._get_merchant_exclusion_scope()}:seed_{self.seed}:p_{page}:sz_{page_size}"
         structural_page_feed = cache.get(cache_key)
 
         # 🕵️ ESPÍA 2: ¿Qué llave estamos buscando?
