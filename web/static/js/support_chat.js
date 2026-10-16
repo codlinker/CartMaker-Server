@@ -360,7 +360,7 @@ if (btnTriggerClose) {
             // (Mantenemos el patrón original que redirige al dashboard)
             const form = document.createElement('form');
             form.method = 'POST';
-            form.action = `/support/close-ticket/${TICKET_ID}/`; // Ajusta esta URL si tu urls.py es distinta
+            form.action = `/support/ticket/${TICKET_ID}/close/`;
             
             const csrfInput = document.createElement('input');
             csrfInput.type = 'hidden';

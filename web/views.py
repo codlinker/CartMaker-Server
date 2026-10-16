@@ -352,13 +352,13 @@ def close_ticket(request, ticket_id):
         messages.error(request, "No tienes permisos para cerrar un ticket asignado a otro agente.")
         return redirect('web_dashboard')
 
-    reason_raw = request.POST.get('close_reason', CloseTicketReason.SOLVED)
+    reason_raw = request.POST.get('close_reason', SupportTicket.CloseReason.SOLVED)
     try:
         reason_val = int(reason_raw)
-        if reason_val not in CloseTicketReason.values:
-            reason_val = CloseTicketReason.SOLVED
+        if reason_val not in SupportTicket.CloseReason.values:
+            reason_val = SupportTicket.CloseReason.SOLVED
     except (ValueError, TypeError):
-        reason_val = CloseTicketReason.SOLVED
+        reason_val = SupportTicket.CloseReason.SOLVED
     
     ticket.closed = True
     ticket.close_time = timezone.now()

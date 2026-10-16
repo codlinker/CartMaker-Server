@@ -13,7 +13,7 @@ from api.cos import storage_manager
 
 ALLOWED_CHAT_MEDIA_EXTENSIONS = {
     'jpg', 'jpeg', 'png', 'webp', 'gif',
-    'mp3', 'wav', 'ogg', 'm4a', 'aac',
+    'mp3', 'wav', 'ogg', 'm4a', 'aac', 'webm',
     'mp4', 'mov', 'pdf'
 }
 MAX_CHAT_MEDIA_SIZE_BYTES = 15 * 1024 * 1024  # 15 MB
