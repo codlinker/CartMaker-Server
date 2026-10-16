@@ -5771,8 +5771,9 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
         if lat is None or lng is None:
             return Response({'error': 'Faltan parámetros obligatorios: lat, lng'}, status=status.HTTP_400_BAD_REQUEST)
 
+        effective_page_size = min(page_size, 10) if is_home_widget else page_size
         engine = ProductSearchEngine(lat, lng, user=request.user)
-        data_list = engine.get_offers_feed(page=page, page_size=page_size, sort_by=sort_by, price_order=price_order)
+        data_list = engine.get_offers_feed(page=page, page_size=effective_page_size, sort_by=sort_by, price_order=price_order)
 
         if is_home_widget:
             top_10 = data_list[:10]
@@ -5789,8 +5790,9 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
         if lat is None or lng is None:
             return Response({'error': 'Faltan parámetros obligatorios: lat, lng'}, status=status.HTTP_400_BAD_REQUEST)
 
+        effective_page_size = min(page_size, 10) if is_home_widget else page_size
         engine = ProductSearchEngine(lat, lng, user=request.user)
-        data_list = engine.get_stores_with_tokens_feed(page=page, page_size=page_size)
+        data_list = engine.get_stores_with_tokens_feed(page=page, page_size=effective_page_size)
 
         if is_home_widget:
             top_10 = data_list[:10]
@@ -5869,8 +5871,9 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
         if lat is None or lng is None:
             return Response({'error': 'Faltan parámetros obligatorios: lat, lng'}, status=status.HTTP_400_BAD_REQUEST)
 
+        effective_page_size = min(page_size, 10) if is_home_widget else page_size
         engine = ProductSearchEngine(lat, lng, user=request.user)
-        data_list = engine.get_favorites_feed(page=page, page_size=page_size, sort_by=sort_by, price_order=price_order)
+        data_list = engine.get_favorites_feed(page=page, page_size=effective_page_size, sort_by=sort_by, price_order=price_order)
 
         if is_home_widget:
             top_10 = data_list[:10]
@@ -5889,7 +5892,13 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
             return Response({'error': 'Falta el parámetro obligatorio: item_id'}, status=status.HTTP_400_BAD_REQUEST)
         try:
             item = InventoryItem.objects.select_related(
-                'product', 'store__company'
+                'product',
+                'product__category',
+                'product__category__parent_category',
+                'product__company',
+                'offer',
+                'store',
+                'store__company',
             ).prefetch_related('product__califications').annotate(
                 avg_rating=Round(Coalesce(Avg('product__califications__rating'), 0.0), 1),
                 rating_count=Count('product__califications')
@@ -5948,6 +5957,13 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
             object_id=target_id
         )
 
+        try:
+            cache.delete(f"cartmaker:affinity_profile:v1:{request.user.id}")
+            if hasattr(cache, 'delete_pattern'):
+                cache.delete_pattern(f"cartmaker:struct:favs:{request.user.id}:*")
+        except Exception:
+            pass
+
         if not created:
             like.delete()
             # Contamos cuántos likes quedaron tras eliminar
@@ -5998,7 +6014,10 @@ class AtlasViewSet(viewsets.ViewSet):
         return max(1, int((tomorrow - now_local).total_seconds()))
 
     def _anonymous_daily_limit(self) -> int:
-        return SystemConfig.objects.latest('creation').atlas_anonymous_daily_limit
+        try:
+            return SystemConfig.objects.latest('creation').atlas_anonymous_daily_limit
+        except SystemConfig.DoesNotExist:
+            return 5
 
     def _guest_token_from_request(self, request) -> str:
         return (request.META.get(self.GUEST_HEADER) or '').strip()
@@ -6065,15 +6084,21 @@ class AtlasViewSet(viewsets.ViewSet):
     # =========================================================================
     def _get_daily_limit(self, user) -> int:
         """Devuelve el límite de interacciones según el Tier del usuario."""
-        config = SystemConfig.objects.latest('creation')
+        try:
+            config = SystemConfig.objects.latest('creation')
+            plus_limit = config.atlas_plus_daily_limit
+            free_limit = config.atlas_free_daily_limit
+        except SystemConfig.DoesNotExist:
+            plus_limit = 75
+            free_limit = self.DAILY_FREE_LIMIT
         try:
             plan = user.atlas_plan
             # Si es Premium y el plan no ha vencido
             if plan.tier == AtlasSubscriptionTier.PREMIUM and plan.valid_until and plan.valid_until >= timezone.now():
-                return config.atlas_plus_daily_limit
+                return plus_limit
         except AtlasPlusPlan.DoesNotExist:
             pass
-        return config.atlas_free_daily_limit
+        return free_limit
 
     def _get_used_today(self, user) -> int:
         """Obtiene el consumo desde Redis, o lo reconstruye desde BD si se reinició el servidor."""
@@ -6358,7 +6383,13 @@ class AtlasViewSet(viewsets.ViewSet):
         items_dict = {}
         if all_product_ids:
             # Traemos la info viva para respetar el stock actual y pausas
-            fresh_items = InventoryItem.objects.filter(id__in=all_product_ids).select_related('product', 'store__company', 'store__mall')
+            fresh_items = InventoryItem.objects.filter(id__in=all_product_ids).select_related(
+                'product',
+                'product__category',
+                'store__company',
+                'store__location',
+                'store__location__mall',
+            )
             for item in fresh_items:
                 items_dict[str(item.id)] = item.get_json()
 
@@ -6568,8 +6599,24 @@ class AtlasViewSet(viewsets.ViewSet):
             seed=seed,
         )
 
-        search_meta = {}
+        injected_products = []
         smart_bundle = None
+        zone_transition = None
+        applied_filters = {}
+        tools_used = []
+
+        mode_raw = str(data.get('mode') or 'best').lower()
+        mode_map = {
+            'cheapest': 'cheap',
+            'cheap': 'cheap',
+            'nearest': 'nearby',
+            'nearby': 'nearby',
+            'fastest': 'nearby',
+            'balanced': 'best',
+            'best': 'best',
+            'discounts': 'cheap',
+        }
+        mapped_mode = mode_map.get(mode_raw, 'best')
 
         if intent == 'SHOPPING_LIST':
             raw_items = data.get('items') or []
@@ -6577,53 +6624,68 @@ class AtlasViewSet(viewsets.ViewSet):
                 raw_items = [x.strip() for x in raw_items.split(',') if x.strip()]
             title = str(data.get('title') or 'Compra Inteligente Atlas')
             budget_max_usd = _to_float(data.get('budget_max_usd'))
-            res_json, injected_products, action_command, smart_bundle = atlas_manager._execute_shopping_list(
-                items=raw_items,
-                titulo_plan=title,
-                presupuesto_max_usd=budget_max_usd,
-            )
-            search_meta = {
-                "intent": "SHOPPING_LIST",
-                "query": title,
-                "mode": "SMART_BUNDLE",
-                "ring_used_km": None,
-                "expanded": False,
-                "zone_transition": None,
-            }
+            plan = atlas_manager._execute_shopping_list({
+                'items': raw_items,
+                'titulo_plan': title,
+                'presupuesto_max_usd': budget_max_usd,
+                'mode': mapped_mode,
+            })
+            smart_bundle = plan
+            injected_products = list(plan.get('injected', []))
+            tools_used.append('armar_lista_o_receta')
         elif intent == 'SEARCH' or query:
-            mode = str(data.get('mode') or 'BALANCED').upper()
-            res_json, injected_products, action_command, search_meta = atlas_manager._execute_search(
-                query=query,
-                mode=mode,
-                categoria=data.get('category') or data.get('categoria'),
-                tienda_o_empresa=data.get('company') or data.get('tienda_o_empresa'),
-                solo_abiertos_ahora=_to_bool(data.get('only_open_now') or data.get('solo_abiertos_ahora'), False),
-                solo_ofertas=_to_bool(data.get('only_offers') or data.get('solo_ofertas'), False),
-                solo_descuento_tokens=_to_bool(data.get('only_token_discounts') or data.get('solo_descuento_tokens'), False),
-                solo_canjeables_por_usuario=_to_bool(data.get('only_user_redeemable_tokens'), False),
-                precio_min=_to_float(data.get('min_price') or data.get('precio_min')),
-                precio_max=_to_float(data.get('max_price') or data.get('precio_max')),
-                unidad_venta=data.get('selling_unit') or data.get('unidad_venta'),
-                atributo_o_variante=data.get('variant_or_attribute') or data.get('atributo_o_variante'),
-                solo_centro_comercial=_to_bool(data.get('mall_only') or data.get('solo_centro_comercial'), False),
-            )
+            search_args = {
+                'query': query,
+                'mode': mapped_mode,
+                'categoria': data.get('category') or data.get('categoria'),
+                'comercio_o_centro_comercial': data.get('company') or data.get('tienda_o_empresa'),
+                'solo_abiertos_ahora': _to_bool(data.get('only_open_now') or data.get('solo_abiertos_ahora'), False),
+                'solo_ofertas': _to_bool(data.get('only_offers') or data.get('solo_ofertas') or (mode_raw == 'discounts'), False),
+                'solo_con_descuento_tokens': _to_bool(data.get('only_token_discounts') or data.get('solo_descuento_tokens'), False),
+                'precio_min_usd': _to_float(data.get('min_price') or data.get('precio_min')),
+                'precio_max_usd': _to_float(data.get('max_price') or data.get('precio_max')),
+                'unidad_venta': data.get('selling_unit') or data.get('unidad_venta'),
+                'atributo_o_variante': data.get('variant_or_attribute') or data.get('atributo_o_variante'),
+                'solo_en_centro_comercial': _to_bool(data.get('mall_only') or data.get('solo_centro_comercial'), False),
+            }
+            db_res = atlas_manager._execute_search(search_args)
+            if db_res.get('applied_filters'):
+                applied_filters.update(db_res['applied_filters'])
+            if query:
+                applied_filters['query'] = query
+            if db_res.get('type') == 'results':
+                injected_products = list(db_res.get('data', []))
+                zone_transition = db_res.get('zone_transition')
+            tools_used.append('buscar_productos_inventario')
         else:
-            enfoque = str(data.get('enfoque') or data.get('focus') or 'PERSONALIZED').upper()
-            res_json, injected_products, action_command, search_meta = atlas_manager._execute_feed(
-                enfoque=enfoque,
-                categoria=data.get('category') or data.get('categoria'),
-            )
+            enfoque = str(data.get('enfoque') or data.get('focus') or 'parati').lower()
+            if enfoque in ('open_now', 'abiertos_cerca'):
+                applied_filters['only_open_now'] = True
+            elif enfoque in ('flash_offers', 'ofertas'):
+                applied_filters['only_offers'] = True
+            elif enfoque in ('token_rewards', 'mis_tokens'):
+                applied_filters['only_token_discounts'] = True
+            injected_products = atlas_manager._execute_personalized_feed({
+                'enfoque': enfoque,
+                'categoria': data.get('category') or data.get('categoria'),
+            })
+            tools_used.append('explorar_feed_personalizado')
 
         atlas_experience = atlas_manager._build_atlas_experience(
-            injected_products=injected_products,
-            action_command=action_command,
-            search_meta=search_meta,
-            smart_bundle=smart_bundle,
             user_text=query or intent,
+            injected_products=injected_products,
+            smart_bundle=smart_bundle,
+            zone_transition=zone_transition,
+            tools_used=tools_used,
+            applied_filters=applied_filters,
         )
-        if not isinstance(action_command, dict):
-            action_command = {"action": "NONE"}
-        action_command["atlas_experience"] = atlas_experience
+        action_command = {
+            "action": atlas_experience["ui_mode"],
+            "ui_mode": atlas_experience["ui_mode"],
+            "cinematic_directive": atlas_experience["cinematic_directive"],
+            "quick_actions": atlas_experience["quick_actions"],
+            "atlas_experience": atlas_experience,
+        }
 
         return Response({
             'success': True,
@@ -7309,7 +7371,10 @@ class UserViewSet(mixins.RetrieveModelMixin,
             request.user.preferred_categories.set(valid_categories)
             user_id = request.user.id
             transaction.on_commit(
-                lambda: cache.delete(f"cartmaker:tenant:{user_id}:profile")
+                lambda: (
+                    cache.delete(f"cartmaker:tenant:{user_id}:profile"),
+                    cache.delete(f"cartmaker:affinity_profile:v1:{user_id}"),
+                )
             )
 
         return Response(

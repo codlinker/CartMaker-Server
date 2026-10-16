@@ -42,10 +42,69 @@ class ProductSearchEngine:
         self.user = user
         self.seed = str(seed)
 
-        # Perfil híbrido: preferencias iniciales de Onboarding (Cold Start) + afinidad conductual real
-        self.user_onboarding_category_ids = []
-        self.onboarding_weight = 1.0
-        self.user_top_categories = self._build_user_affinity_profile()
+        # Carga perezosa (Lazy) + Caché en Redis del perfil híbrido de intereses:
+        # Evita disparar 11 consultas SQL en endpoints que no usan afinidad (ej. stores_with_tokens, favorites)
+        # o cuando Flutter lanza 4 peticiones simultáneas al abrir el Home.
+        self._affinity_loaded = False
+        self._user_onboarding_category_ids = []
+        self._onboarding_weight = 1.0
+        self._user_top_categories = []
+
+    def _ensure_affinity_loaded(self):
+        if self._affinity_loaded:
+            return
+        self._affinity_loaded = True
+        if not self.user or not self.user.is_authenticated:
+            self._user_onboarding_category_ids = []
+            self._onboarding_weight = 0.0
+            self._user_top_categories = []
+            return
+
+        cache_key = f"cartmaker:affinity_profile:v1:{self.user.id}"
+        cached = cache.get(cache_key)
+        if isinstance(cached, dict):
+            self._user_top_categories = cached.get('top_categories', [])
+            self._user_onboarding_category_ids = cached.get('onboarding_ids', [])
+            self._onboarding_weight = float(cached.get('onboarding_weight', 0.0))
+            return
+
+        self._user_top_categories = self._build_user_affinity_profile()
+        cache.set(
+            cache_key,
+            {
+                'top_categories': self._user_top_categories,
+                'onboarding_ids': self._user_onboarding_category_ids,
+                'onboarding_weight': self._onboarding_weight,
+            },
+            timeout=180,
+        )
+
+    @property
+    def user_top_categories(self) -> list:
+        self._ensure_affinity_loaded()
+        return self._user_top_categories
+
+    @user_top_categories.setter
+    def user_top_categories(self, value):
+        self._user_top_categories = value
+
+    @property
+    def user_onboarding_category_ids(self) -> list:
+        self._ensure_affinity_loaded()
+        return self._user_onboarding_category_ids
+
+    @user_onboarding_category_ids.setter
+    def user_onboarding_category_ids(self, value):
+        self._user_onboarding_category_ids = value
+
+    @property
+    def onboarding_weight(self) -> float:
+        self._ensure_affinity_loaded()
+        return self._onboarding_weight
+
+    @onboarding_weight.setter
+    def onboarding_weight(self, value):
+        self._onboarding_weight = value
 
     def _get_affinity_hash(self) -> str:
         """
@@ -108,26 +167,27 @@ class ProductSearchEngine:
             if item.get("feed_type") == "video" and item.get("associated_item"):
                 item_ids_to_fetch.add(item["associated_item"]["id"])
                 
-        volatile_states = self._get_items_volatile_state(list(item_ids_to_fetch))
+        volatile_states = self._get_items_volatile_state(list(item_ids_to_fetch)) if item_ids_to_fetch else {}
 
-        # 3. Bulk fetch de Likes (Conteos y Estado del Usuario)
+        # 3. Bulk fetch de Likes (Conteos y Estado del Usuario) restringido a los IDs de esta página
         product_ct = ContentType.objects.get_for_model(InventoryItem)
         video_ct = ContentType.objects.get_for_model(CompanyVideoStory)
         
-        # Conteos masivos
-        like_counts = UniversalLike.objects.filter(
-            Q(content_type=product_ct, object_id__in=product_ids) |
-            Q(content_type=video_ct, object_id__in=video_ids)
-        ).values('content_type', 'object_id').annotate(total=Count('id'))
-        
-        # Mapa: {(content_type_id, object_id): count}
-        count_map = {(d['content_type'], d['object_id']): d['total'] for d in like_counts}
+        like_filter = Q()
+        if product_ids:
+            like_filter |= Q(content_type=product_ct, object_id__in=product_ids)
+        if video_ids:
+            like_filter |= Q(content_type=video_ct, object_id__in=video_ids)
 
-        # Likes del usuario actual
+        count_map = {}
         user_likes_set = set()
-        if self.user and self.user.is_authenticated:
-            user_likes = UniversalLike.objects.filter(user=self.user).values('content_type', 'object_id')
-            user_likes_set = {(l['content_type'], l['object_id']) for l in user_likes}
+        if like_filter:
+            like_counts = UniversalLike.objects.filter(like_filter).values('content_type', 'object_id').annotate(total=Count('id'))
+            count_map = {(d['content_type'], d['object_id']): d['total'] for d in like_counts}
+
+            if self.user and self.user.is_authenticated:
+                user_likes = UniversalLike.objects.filter(user=self.user).filter(like_filter).values('content_type', 'object_id')
+                user_likes_set = {(l['content_type'], l['object_id']) for l in user_likes}
 
         final_feed = []
         
@@ -210,7 +270,14 @@ class ProductSearchEngine:
         # 1. Obtenemos los videos vigentes de tiendas cercanas
         qs_videos = CompanyVideoStory.objects.select_related(
             'company',
+            'associated_item',
+            'associated_item__product',
             'associated_item__product__category',
+            'associated_item__product__category__parent_category',
+            'associated_item__product__company',
+            'associated_item__offer',
+            'associated_item__store',
+            'associated_item__store__company',
         ).filter(
             expires_at__gt=now,
             video_file__isnull=False,
@@ -292,7 +359,13 @@ class ProductSearchEngine:
         qs = CompanyVideoStory.objects.select_related(
             'company',
             'associated_item',
-            'associated_item__product__category'
+            'associated_item__product',
+            'associated_item__product__category',
+            'associated_item__product__category__parent_category',
+            'associated_item__product__company',
+            'associated_item__offer',
+            'associated_item__store',
+            'associated_item__store__company',
         ).filter(
             expires_at__gt=now,
             video_file__isnull=False,
@@ -451,30 +524,27 @@ class ProductSearchEngine:
         product_ct = ContentType.objects.get_for_model(InventoryItem)
         video_ct = ContentType.objects.get_for_model(CompanyVideoStory)
 
-        # 1. AFINIDAD POR LIKES (Productos y Videos)
-        liked_product_ids = UniversalLike.objects.filter(
+        # 1. AFINIDAD POR LIKES (Productos y Videos en 1 sola consulta a UniversalLike)
+        raw_likes = list(UniversalLike.objects.filter(
             user=self.user,
-            content_type=product_ct,
-            creation__gte=date_threshold
-        ).values_list('object_id', flat=True)
+            content_type__in=[product_ct, video_ct],
+            creation__gte=date_threshold,
+        ).values_list('content_type_id', 'object_id'))
+
+        liked_product_ids = [oid for ct_id, oid in raw_likes if ct_id == product_ct.id]
+        liked_video_ids = [oid for ct_id, oid in raw_likes if ct_id == video_ct.id]
 
         liked_categories = list(InventoryItem.objects.filter(
-            id__in=list(liked_product_ids)
-        ).values_list('product__category_id', flat=True))
-
-        liked_video_ids = UniversalLike.objects.filter(
-            user=self.user,
-            content_type=video_ct,
-            creation__gte=date_threshold
-        ).values_list('object_id', flat=True)
+            id__in=liked_product_ids
+        ).values_list('product__category_id', flat=True)) if liked_product_ids else []
 
         liked_video_categories = list(CompanyVideoStory.objects.filter(
-            id__in=list(liked_video_ids),
+            id__in=liked_video_ids,
             associated_item__isnull=False
-        ).values_list('associated_item__product__category_id', flat=True))
+        ).values_list('associated_item__product__category_id', flat=True)) if liked_video_ids else []
 
         # 2. AFINIDAD POR VISUALIZACIONES / CARRITO / COMPRAS EN PRODUCTOS
-        view_logs = ProductViewLog.objects.filter(
+        view_logs = list(ProductViewLog.objects.filter(
             client=self.user,
             start_time__gte=date_threshold
         ).filter(
@@ -483,10 +553,10 @@ class ProductSearchEngine:
             'inventory_item__product__category_id',
             'added_to_cart',
             'bought',
-        )
+        ))
 
         # 3. AFINIDAD POR ENGAGEMENT EN VIDEOS
-        video_logs = VideoEngagementLog.objects.filter(
+        video_logs = list(VideoEngagementLog.objects.filter(
             client=self.user,
             timestamp__gte=date_threshold,
             video__associated_item__isnull=False,
@@ -501,29 +571,26 @@ class ProductSearchEngine:
             'interacted_with_product',
             'added_to_cart_from_video',
             'bought_from_video',
-        )
+        ))
 
-        # 4. AFINIDAD POR COMENTARIOS / PREGUNTAS (Alta Señal)
-        commented_product_ids = UniversalComment.objects.filter(
+        # 4. AFINIDAD POR COMENTARIOS / PREGUNTAS (Alta Señal en 1 sola consulta a UniversalComment)
+        raw_comments = list(UniversalComment.objects.filter(
             client=self.user,
-            content_type=product_ct,
-            question_creation__gte=date_threshold
-        ).values_list('object_id', flat=True)
-        
+            content_type__in=[product_ct, video_ct],
+            question_creation__gte=date_threshold,
+        ).values_list('content_type_id', 'object_id'))
+
+        commented_product_ids = [oid for ct_id, oid in raw_comments if ct_id == product_ct.id]
+        commented_video_ids = [oid for ct_id, oid in raw_comments if ct_id == video_ct.id]
+
         commented_prod_categories = list(InventoryItem.objects.filter(
-            id__in=list(commented_product_ids)
-        ).values_list('product__category_id', flat=True))
+            id__in=commented_product_ids
+        ).values_list('product__category_id', flat=True)) if commented_product_ids else []
 
-        commented_video_ids = UniversalComment.objects.filter(
-            client=self.user,
-            content_type=video_ct,
-            question_creation__gte=date_threshold
-        ).values_list('object_id', flat=True)
-        
         commented_video_categories = list(CompanyVideoStory.objects.filter(
-            id__in=list(commented_video_ids),
+            id__in=commented_video_ids,
             associated_item__isnull=False
-        ).values_list('associated_item__product__category_id', flat=True))
+        ).values_list('associated_item__product__category_id', flat=True)) if commented_video_ids else []
 
         # =========================================================================
         # 5. PONDERACIÓN ASIMÉTRICA DE INTERACCIONES Y DECAIMIENTO DEL ONBOARDING
@@ -576,15 +643,23 @@ class ProductSearchEngine:
         return top_5_category_ids
 
     def _get_base_active_queryset(self):
+        prod_cal_sub = ProductCalification.objects.filter(
+            product_id=OuterRef('product_id')
+        ).values('product_id')
+        prod_avg = prod_cal_sub.annotate(avg=Avg('rating')).values('avg')[:1]
+        prod_cnt = prod_cal_sub.annotate(cnt=Count('id')).values('cnt')[:1]
+
         qs = InventoryItem.objects.select_related(
             'product',
             'product__category',
+            'product__category__parent_category',
+            'product__company',
             'offer',
             'store',
-            'store__company'
+            'store__company',
         ).annotate(
-            avg_rating=Coalesce(Avg('product__califications__rating'), Value(0.0), output_field=FloatField()),
-            rating_count=Count('product__califications')
+            avg_rating=Coalesce(Subquery(prod_avg, output_field=FloatField()), Value(0.0), output_field=FloatField()),
+            rating_count=Coalesce(Subquery(prod_cnt, output_field=FloatField()), Value(0.0), output_field=FloatField()),
         ).filter(
             paused=False,
             stock__gt=0,
@@ -593,18 +668,12 @@ class ProductSearchEngine:
 
         # 💡 LÓGICA MOVIDA AQUÍ: Disponible globalmente para todos los endpoints
         if self.user and self.user.is_authenticated:
-            product_ct = ContentType.objects.get_for_model(InventoryItem)
-            is_liked_subquery = UniversalLike.objects.filter(
-                user=self.user, 
-                content_type=product_ct, 
-                object_id=Cast(OuterRef('pk'), output_field=CharField(max_length=50))
-            )
             is_viewed_subquery = ProductViewLog.objects.filter(
                 client=self.user,
                 inventory_item=OuterRef('pk')
             )
             qs = qs.annotate(
-                is_liked=Exists(is_liked_subquery),
+                is_liked=Value(False, output_field=BooleanField()),
                 is_viewed=Exists(is_viewed_subquery)
             )
             
@@ -624,25 +693,10 @@ class ProductSearchEngine:
         return qs
     
     def _annotate_proximity_flag(self, queryset):
+        # 1 sola función geodésica en SQL; is_very_close (<600m) e is_close (600m-1200m)
+        # se derivan en O(1) en Python dentro de InventoryItem.get_json() a partir de real_distance_meters.
         dist_expr = Distance('store__location__coordinates', self.user_location, spheroid=True)
-        
-        return queryset.annotate(
-            real_distance_meters=dist_expr,
-            is_very_close=Case(
-                When(store__location__coordinates__distance_lte=(self.user_location, D(m=599.99)), then=Value(True)),
-                default=Value(False),
-                output_field=BooleanField()
-            ),
-            is_close=Case(
-                When(
-                    store__location__coordinates__distance_gte=(self.user_location, D(m=600)),
-                    store__location__coordinates__distance_lte=(self.user_location, D(m=1200)),
-                    then=Value(True)
-                ),
-                default=Value(False),
-                output_field=BooleanField()
-            )
-        )
+        return queryset.annotate(real_distance_meters=dist_expr)
 
     def _annotate_ranking_score(self, queryset):
         """
@@ -743,13 +797,9 @@ class ProductSearchEngine:
         order_params = []
 
         if sort_by == 'distance':
-            qs = qs.annotate(distance_to_user=Distance('store__location__coordinates', self.user_location))
-            order_params.extend(['distance_to_user', 'id']) 
+            order_params.extend(['real_distance_meters', 'id'])
 
         elif sort_by == 'rating':
-            qs = qs.annotate(
-                avg_rating=Coalesce(Avg('product__califications__rating'), Value(0.0), output_field=FloatField())
-            )
             order_params.extend(['-avg_rating', 'id'])
 
         if price_order in ['asc', 'desc']:
@@ -2049,7 +2099,7 @@ class ProductSearchEngine:
         
         structural_feed = cache.get(cache_key)
         
-        if not structural_feed:
+        if structural_feed is None:
             # 1. Calculamos el offset y limit para SQL
             start = (page - 1) * page_size
             end = start + page_size
@@ -2058,15 +2108,17 @@ class ProductSearchEngine:
             structural_feed = []
             for item in queryset[start:end]:
                 item_data = item.get_json()
-                item_data["feed_type"] = "product" # 👈 LA SOLUCIÓN AQUÍ
+                item_data["feed_type"] = "product"
                 structural_feed.append(item_data)
             
-            # 3. Guardamos la estructura en Redis por 10 minutos
+            # 3. Guardamos la estructura en Redis por 10 minutos (incluyendo [] para evitar cache miss perpetuo)
             cache.set(cache_key, structural_feed, timeout=600)
 
-        # Copia: is_liked es del espectador y no puede quedar pegado en el caché compartido.
+        if not structural_feed:
+            return []
+
+        # Copia: is_liked y estados volátiles se inyectan en _stitch_and_filter_results
         structural_feed = [dict(item) for item in structural_feed]
-        structural_feed = self._stamp_viewer_likes(structural_feed)
         return self._stitch_and_filter_results(structural_feed)
 
     def get_category_feed(self, sub_category_id: int, page: int = 1, page_size: int = 20, sort_by: str = 'relevance', price_order: str = None, max_distance_meters: float = 10000) -> list:
@@ -2186,7 +2238,7 @@ class ProductSearchEngine:
         # 🕵️ ESPÍA 2: ¿Qué llave estamos buscando?
         print(f"🔍 [CACHE] Llave solicitada: {cache_key}")
         
-        if not structural_page_feed:
+        if structural_page_feed is None:
             print(f"⚙️ [CACHE MISS] Calculando feed fresco desde la Base de Datos...")
             ideal_videos_count = int(page_size * 0.75)  # Ej: 15 si el tamaño es 20
             
@@ -2279,6 +2331,7 @@ class ProductSearchEngine:
             print("--------------------------------------------------\n")
             
             if not videos_list and not products_list:
+                cache.set(cache_key, [], timeout=600)
                 return {"results": []}
 
             # 3. ENTRELAZAMOS
@@ -2287,9 +2340,8 @@ class ProductSearchEngine:
             # Guardamos el esqueleto de la página por 10 minutos
             cache.set(cache_key, structural_page_feed, timeout=600)
             
-        # 4. STITCHING VOLÁTIL
-        final_feed = self._stitch_and_filter_results([dict(item) for item in structural_page_feed])
-        final_feed = self._stamp_viewer_likes(final_feed)
+        # 4. STITCHING VOLÁTIL (incluye inyección de is_liked y likes_count)
+        final_feed = self._stitch_and_filter_results([dict(item) for item in structural_page_feed]) if structural_page_feed else []
         
         response_data = {"results": final_feed}
         
@@ -2307,16 +2359,26 @@ class ProductSearchEngine:
         approx_lng = round(self.user_location.x, 3)
         
         base_cache_key = f"cartmaker:struct:favs:{self.user.id}:{approx_lat}:{approx_lng}:{sort_by}:{price_order}"
+        cache_key = f"{base_cache_key}:p_{page}:sz_{page_size}"
+
+        cached = cache.get(cache_key)
+        if cached is not None:
+            if not cached:
+                return []
+            return self._stitch_and_filter_results([dict(item) for item in cached])
         
         # 1. Obtenemos el ContentType de InventoryItem
         product_ct = ContentType.objects.get_for_model(InventoryItem)
         
-        # 💡 FIX: Consultamos UniversalLike directamente. 
-        # Esto es mucho más seguro que depender de un GenericRelation en el modelo.
-        liked_product_ids = UniversalLike.objects.filter(
+        # 💡 FIX: Consultamos UniversalLike directamente.
+        liked_ids = list(UniversalLike.objects.filter(
             user=self.user,
             content_type=product_ct
-        ).values_list('object_id', flat=True)
+        ).values_list('object_id', flat=True))
+
+        if not liked_ids:
+            cache.set(cache_key, [], timeout=600)
+            return []
 
         # Construimos el QuerySet base
         qs = self._get_base_active_queryset()
@@ -2324,7 +2386,7 @@ class ProductSearchEngine:
         
         # Filtramos usando los IDs obtenidos de UniversalLike
         qs = qs.filter(
-            id__in=list(liked_product_ids),
+            id__in=liked_ids,
             store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters))
         )
         
@@ -2352,8 +2414,14 @@ class ProductSearchEngine:
         if not self.user or not self.user.is_authenticated:
             return []
 
+        merchant_avg_sub = MerchantCalification.objects.filter(
+            merchant_id=OuterRef('company_id')
+        ).values('merchant_id').annotate(avg=Avg('rating')).values('avg')[:1]
+
         # Filtramos billeteras con saldo > 0 de compañías que tengan tiendas cerca y activas
-        wallets = TokenWallet.objects.select_related('company', 'company__category').filter(
+        wallets = TokenWallet.objects.select_related('company', 'company__category').annotate(
+            company_avg_rating=Coalesce(Subquery(merchant_avg_sub, output_field=FloatField()), Value(0.0), output_field=FloatField())
+        ).filter(
             user=self.user,
             balance__gt=0,
             company__stores__is_active=True,
@@ -2366,11 +2434,7 @@ class ProductSearchEngine:
         results = []
         for wallet in wallets[start:end]:
             company = wallet.company
-            
-            # Obtenemos la calificación promedio de la compañía
-            avg_rating = MerchantCalification.objects.filter(
-                merchant=company
-            ).aggregate(average=Avg('rating'))['average'] or 0.0
+            avg_rating = float(getattr(wallet, 'company_avg_rating', 0.0) or 0.0)
             
             results.append({
                 "company_id": str(company.id),

@@ -521,19 +521,20 @@ Catálogo oficial (Categorías y Subcategorías):
 
     def _execute_personalized_feed(self, args: Dict[str, Any]) -> List[Dict[str, Any]]:
         enfoque = (args.get('enfoque') or 'parati').strip().lower()
+        cat_query = args.get('categoria') or args.get('category')
         engine = ProductSearchEngine(lat=self.user_lat, lng=self.user_lng, user=self.user, seed=self.seed)
 
-        if enfoque == 'ofertas':
+        if enfoque in ('ofertas', 'flash_offers'):
             return engine.search_purchase_candidates(
-                query="", max_distance_meters=15000.0, limit=6, only_offers=True, mode='cheap'
+                query="", max_distance_meters=15000.0, limit=6, only_offers=True, category_query=cat_query, mode='cheap'
             )
-        if enfoque == 'abiertos_cerca':
+        if enfoque in ('abiertos_cerca', 'open_now'):
             return engine.search_purchase_candidates(
-                query="", max_distance_meters=10000.0, limit=6, only_open_now=True, mode='nearby'
+                query="", max_distance_meters=10000.0, limit=6, only_open_now=True, category_query=cat_query, mode='nearby'
             )
-        if enfoque == 'mis_tokens':
+        if enfoque in ('mis_tokens', 'token_rewards'):
             return engine.search_purchase_candidates(
-                query="", max_distance_meters=15000.0, limit=6, only_user_redeemable_tokens=True, mode='best'
+                query="", max_distance_meters=15000.0, limit=6, only_user_redeemable_tokens=True, category_query=cat_query, mode='best'
             )
 
         favorite_category_ids = []

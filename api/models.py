@@ -1273,6 +1273,22 @@ class InventoryItem(models.Model):
         offer = self._active_offer()
         list_price = self.get_list_price()
         effective_price = self.get_effective_price()
+        if (
+            'store' in self._state.fields_cache
+            and 'company' in self.store._state.fields_cache
+            and 'product' in self._state.fields_cache
+            and self.product.company_id == self.store.company_id
+        ):
+            self.product._state.fields_cache.setdefault('company', self.store.company)
+
+        dist_m = self._distance_meters_value()
+        is_very_close = getattr(self, 'is_very_close', None)
+        if is_very_close is None:
+            is_very_close = (dist_m is not None and dist_m < 600.0)
+        is_close = getattr(self, 'is_close', None)
+        if is_close is None:
+            is_close = (dist_m is not None and 600.0 <= dist_m <= 1200.0)
+
         return {
             "id": str(self.id),
             "product": self.product.get_json(),
@@ -1295,14 +1311,14 @@ class InventoryItem(models.Model):
             "merchant_avg_rating": round(float(getattr(self, 'merchant_avg_rating', 0.0)), 2),
             "merchant_rating_count": int(getattr(self, 'merchant_rating_count', 0)),
             "is_platinum": bool(getattr(self.store.company, 'is_platinum', False)),
-            "is_very_close": bool(getattr(self, 'is_very_close', False)),
-            "is_close": bool(getattr(self, 'is_close', False)),
+            "is_very_close": bool(is_very_close),
+            "is_close": bool(is_close),
             "is_liked": bool(getattr(self, 'is_liked', False)),
             "likes_count": getattr(self, 'likes_count', 0),
             "work_hours": self.store.effective_work_hours,
             "work_days": self.store.effective_work_days,
             "is_open_now": self.store.is_currently_open,
-            "distance_meters": self._distance_meters_value(),
+            "distance_meters": dist_m,
         }
     
     def __str__(self):
