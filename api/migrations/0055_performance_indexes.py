@@ -21,11 +21,11 @@ class Migration(migrations.Migration):
         ),
         migrations.AddIndex(
             model_name="notification",
-            index=models.Index(fields=["user", "-creation"], name="notif_user_created_idx"),
+            index=models.Index(fields=["user", "-created_at"], name="notif_user_created_idx"),
         ),
         migrations.AddIndex(
             model_name="notification",
-            index=models.Index(fields=["user", "section", "-creation"], name="notif_user_sec_created_idx"),
+            index=models.Index(fields=["user", "section", "-created_at"], name="notif_user_sec_created_idx"),
         ),
         migrations.AddIndex(
             model_name="inventoryitem",

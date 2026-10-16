@@ -2424,3 +2424,197 @@
         gap: 36px;
     }
 }
+
+/* ==========================================================================
+   10. CONTROL TIPOGRÁFICO DE FRASES INSEPARABLES (HERO & SECCIONES)
+   ========================================================================== */
+.nowrap-phrase {
+    white-space: nowrap;
+    display: inline-block;
+}
+
+.heading-line-block {
+    display: block;
+    margin-top: 0.08em;
+}
+
+/* ==========================================================================
+   11. ANIMACIÓN POR SCROLL EXCLUSIVA EN #como-funciona (IMAGEN OFICIAL DEL CARRITO)
+   ========================================================================== */
+
+#como-funciona .section-header-center[data-cart-stage] {
+    --cart-p: 1;
+    --cart-size: 64px;
+    position: relative;
+}
+
+@media (min-width: 768px) {
+    #como-funciona .section-header-center[data-cart-stage] {
+        --cart-size: 86px;
+        max-width: 1020px;
+    }
+}
+
+/* Contenedor del título h2 donde pasa el carrito y pinta el texto en su rastro */
+#como-funciona .cm-trail-reveal-viewport {
+    position: relative;
+    width: 100%;
+    margin: 6px auto 18px;
+    padding-top: calc(var(--cart-size) + 12px);
+}
+
+@media (min-width: 768px) {
+    #como-funciona .cm-trail-reveal-viewport {
+        padding-top: 4px;
+        padding-bottom: 8px;
+        padding-left: calc(var(--cart-size) + 18px);
+        padding-right: calc(var(--cart-size) + 18px);
+    }
+}
+
+#como-funciona .cm-trail-reveal-viewport .section-title {
+    margin-bottom: 0;
+}
+
+/* Pista sutil inferior por donde avanza el carrito */
+#como-funciona .cm-cart-track-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(var(--cart-size) + 2px);
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(109, 73, 242, 0.10);
+    pointer-events: none;
+    z-index: 2;
+}
+
+@media (min-width: 768px) {
+    #como-funciona .cm-cart-track-line {
+        top: auto;
+        bottom: 2px;
+    }
+}
+
+/* Estela luminosa en el rastro recorrido por el carrito */
+#como-funciona .cm-cart-trail-fill {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: calc(var(--cart-p, 1) * 100%);
+    border-radius: 999px;
+    background: linear-gradient(90deg, rgba(109, 73, 242, 0.15) 0%, #6D49F2 48%, #EC4899 80%, #06B6D4 100%);
+    box-shadow: 0 0 14px rgba(109, 73, 242, 0.38);
+}
+
+#como-funciona .cm-cart-trail-sparks {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 56px;
+    height: 18px;
+    background: radial-gradient(ellipse at right center, rgba(6, 182, 212, 0.55) 0%, rgba(236, 72, 153, 0.28) 45%, transparent 75%);
+    filter: blur(3px);
+    opacity: var(--trail-glow-opacity, 0);
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+}
+
+/* Actor: Imagen Oficial del Carrito de CartMaker (logo_sin_letras.png) moviéndose de izquierda a derecha */
+#como-funciona .cm-cart-actor {
+    position: absolute;
+    top: 0;
+    left: calc(var(--cart-p, 1) * (100% - var(--cart-size)));
+    width: var(--cart-size);
+    height: var(--cart-size);
+    z-index: 6;
+    filter: drop-shadow(0 8px 16px rgba(56, 29, 115, 0.22));
+    will-change: left;
+    user-select: none;
+    pointer-events: none;
+}
+
+@media (min-width: 768px) {
+    #como-funciona .cm-cart-actor {
+        top: auto;
+        bottom: 4px;
+    }
+}
+
+#como-funciona .cm-cart-actor-img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+}
+
+/* Silueta tenue antes de que pase el carrito */
+#como-funciona .cm-trail-ghost-layer {
+    opacity: 0.09;
+    filter: saturate(0.15);
+    user-select: none;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+}
+
+#como-funciona [data-cart-stage].is-parked .cm-trail-ghost-layer {
+    opacity: 0;
+}
+
+/* Capa activa del título que se pinta de izquierda a derecha detrás del carrito */
+body.cm-cart-anim-ready #como-funciona .cm-trail-active-layer {
+    position: absolute;
+    top: calc(var(--cart-size) + 12px);
+    left: 0;
+    right: 0;
+    bottom: 0;
+    clip-path: inset(-20% calc((1 - var(--cart-p, 1)) * 100%) -20% 0);
+    will-change: clip-path;
+}
+
+@media (min-width: 768px) {
+    body.cm-cart-anim-ready #como-funciona .cm-trail-active-layer {
+        top: 4px;
+        bottom: 8px;
+        left: calc(var(--cart-size) + 18px);
+        right: calc(var(--cart-size) + 18px);
+    }
+}
+
+/* Estela vertical de luz justo detrás del carrito donde se pinta el texto */
+#como-funciona .cm-cart-wake-curtain {
+    position: absolute;
+    top: calc(var(--cart-size) + 6px);
+    bottom: 2px;
+    left: calc(var(--cart-p, 1) * 100%);
+    width: 32px;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent 0%, rgba(109, 73, 242, 0.10) 60%, rgba(6, 182, 212, 0.26) 100%);
+    border-right: 2px solid rgba(6, 182, 212, 0.55);
+    pointer-events: none;
+    opacity: var(--trail-glow-opacity, 0);
+    transition: opacity 0.2s ease;
+    z-index: 4;
+}
+
+@media (min-width: 768px) {
+    #como-funciona .cm-cart-wake-curtain {
+        top: 0;
+        bottom: 4px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body.cm-cart-anim-ready #como-funciona .cm-trail-active-layer {
+        position: static;
+        clip-path: none !important;
+    }
+    #como-funciona .cm-trail-ghost-layer,
+    #como-funciona .cm-cart-wake-curtain,
+    #como-funciona .cm-cart-track-line,
+    #como-funciona .cm-cart-actor {
+        display: none !important;
+    }
+}

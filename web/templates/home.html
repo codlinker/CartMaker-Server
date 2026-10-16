@@ -4,7 +4,7 @@
 {% block title %}CartMaker — Todo el comercio de tu zona en tiempo real{% endblock %}
 
 {% block extra_head %}
-    <link rel="stylesheet" href="{% static 'css/home.css' %}">
+    <link rel="stylesheet" href="{% static 'css/home.css' %}?v=20261016_cart_img">
 {% endblock %}
 
 {% block content %}
@@ -57,11 +57,11 @@
             <!-- Columna Izquierda: Copy Dinámico de Alto Impacto -->
             <div class="hero-copy-col">
                 <h1 class="hero-headline" id="heroHeadline">
-                    Todo el comercio de <span class="text-gradient-clickup">tu zona</span> en tiempo real. A minutos de ti.
+                    Todo el comercio de <span class="text-gradient-clickup nowrap-phrase">tu zona</span> en tiempo real. <span class="nowrap-phrase">A minutos de ti.</span>
                 </h1>
 
                 <p class="hero-subheadline" id="heroSubheadline">
-                    Descubre en <strong>videos verticales de 30s</strong>, Mapa 3D y con <strong>Atlas IA</strong> qué tiendas, locales o emprendedores tienen exactamente lo que buscas en tu zona, con stock en vivo y precios claros en <strong>USD y Bs. (BCV)</strong>. <em>Quién sabe, capaz tu vecino vende lo que buscas.</em>
+                    Descubre en <strong>videos verticales de 30s</strong>, Mapa 3D y con <strong>Atlas IA</strong> qué tiendas, locales o emprendedores tienen exactamente lo que buscas en tu zona, con stock en vivo y precios claros en <strong>USD (BCV) y Bs.</strong> <em>Quién sabe, capaz tu vecino vende lo que buscas.</em>
                 </p>
 
                 <!-- Micro-beneficios dinámicos según el tab activo -->
@@ -174,10 +174,11 @@
      ========================================================================== -->
 <section class="friction-section reveal-on-scroll" id="como-funciona">
     <div class="container">
-        <div class="section-header-center">
+        <div class="section-header-center" data-cart-stage data-cart-img="{% static 'img/logo_sin_letras.png' %}">
             <span class="eyebrow-pill">EL FIN DE LA FRICCIÓN COMERCIAL</span>
             <h2 class="section-title">
-                Por qué comprar o vender en <span class="text-gradient-clickup">tu propia zona</span> necesitaba una revolución
+                Por qué comprar o vender <span class="nowrap-phrase">en <span class="text-gradient-clickup">tu propia zona</span></span>
+                <span class="heading-line-block">necesitaba una verdadera evolución</span>
             </h2>
             <p class="section-subtitle">
                 Muchas veces terminas pagando un envío costoso desde el otro extremo de la ciudad por un repuesto, tecnología o producto que una tienda o emprendedor tenía listo en tu misma zona.
@@ -222,7 +223,7 @@
                     <span class="material-symbols-rounded">check_circle</span>
                     <div>
                         <strong>En CartMaker: Stock, Horarios y Tokens en Vivo</strong>
-                        <p>Precios claros en USD y Bs. (tasa BCV), unidades exactas disponibles, horario de atención en vivo y descuentos instantáneos con Club Tokens.</p>
+                        <p>Precios claros en USD (BCV) y Bs., unidades exactas disponibles, horario de atención en vivo y descuentos instantáneos con Club Tokens.</p>
                     </div>
                 </div>
             </article>
@@ -928,7 +929,7 @@
                     <li><span class="material-symbols-rounded">check_circle</span> Videos verticales de 30s en CartMaker TV e Historias</li>
                     <li><span class="material-symbols-rounded">check_circle</span> Ubicación en Mapa 3D y módulo de Logística GPS</li>
                     <li><span class="material-symbols-rounded">check_circle</span> Modo Emprendedor (Cédula) o Empresa (KYB Mercantil)</li>
-                    <li><span class="material-symbols-rounded">check_circle</span> Precios automáticos en USD y Bs. (Tasa BCV)</li>
+                    <li><span class="material-symbols-rounded">check_circle</span> Precios automáticos en USD (BCV) y Bs.</li>
                     <li><span class="material-symbols-rounded">check_circle</span> Chat por pedido con notas de voz y Respuestas Rápidas</li>
                     <li><span class="material-symbols-rounded">check_circle</span> Analíticas de Ventas/Atlas, Historias y Gamificación</li>
                     <li><span class="material-symbols-rounded">check_circle</span> Fidelización con Club Tokens y descuentos automáticos</li>
@@ -1157,5 +1158,5 @@
 {% endblock %}
 
 {% block extra_scripts %}
-    <script src="{% static 'js/home.js' %}"></script>
+    <script src="{% static 'js/home.js' %}?v=20261016_cart_img"></script>
 {% endblock %}

@@ -13,8 +13,8 @@ document.addEventListener("DOMContentLoaded", () => {
        ========================================================================== */
     const personaData = {
         "buyer": {
-            headline: 'Todo el comercio de <span class="text-gradient-clickup">tu zona</span> en tiempo real. A minutos de ti.',
-            subheadline: 'Descubre en <strong>videos verticales de 30s</strong>, Mapa 3D y con <strong>Atlas IA</strong> qué tiendas, locales o emprendedores tienen exactamente lo que buscas en tu zona, con stock en vivo y precios claros en <strong>USD y Bs. (BCV)</strong>. <em>Quién sabe, capaz tu vecino vende lo que buscas.</em>',
+            headline: 'Todo el comercio de <span class="text-gradient-clickup nowrap-phrase">tu zona</span> en tiempo real. <span class="nowrap-phrase">A minutos de ti.</span>',
+            subheadline: 'Descubre en <strong>videos verticales de 30s</strong>, Mapa 3D y con <strong>Atlas IA</strong> qué tiendas, locales o emprendedores tienen exactamente lo que buscas en tu zona, con stock en vivo y precios claros en <strong>USD (BCV) y Bs.</strong> <em>Quién sabe, capaz tu vecino vende lo que buscas.</em>',
             pills: [
                 'Cero «¿Precio al DM?»: stock real, descuentos con Tokens y precios BCV al instante',
                 '¿Vendes? Toma una foto y Atlas IA registra todo tu inventario en 15 segundos',
@@ -22,7 +22,7 @@ document.addEventListener("DOMContentLoaded", () => {
             ]
         },
         "home-seller": {
-            headline: 'Crea tu tienda virtual <span class="text-gradient-clickup">100% gratis</span> y vende en toda tu zona.',
+            headline: 'Crea tu tienda virtual <span class="text-gradient-clickup nowrap-phrase">100% gratis</span> y vende en <span class="nowrap-phrase">toda tu zona.</span>',
             subheadline: hasCommission
                 ? `¿Vendes desde casa o por internet? Abre tu comercio en CartMaker con <strong>$0 de mensualidad</strong> (solo ${commissionPct}% cuando concretas una venta). Toma una foto y <strong>Atlas IA registra todo tu inventario en 15 segundos</strong>.`
                 : `¿Vendes desde casa o por internet? Abre tu comercio y vende en toda tu zona <strong>100% gratis</strong>. Toma una foto y <strong>Atlas IA registra todo tu inventario en 15 segundos</strong>.`,
@@ -33,7 +33,7 @@ document.addEventListener("DOMContentLoaded", () => {
             ]
         },
         "shop-seller": {
-            headline: 'Conecta el inventario de tu local al <span class="text-gradient-clickup">radar de tu zona</span> en 15 segundos.',
+            headline: 'Conecta el inventario de tu local al <span class="text-gradient-clickup nowrap-phrase">radar de tu zona</span> <span class="nowrap-phrase">en 15 segundos.</span>',
             subheadline: 'Miles de clientes buscan en tu zona lo que hoy tienes en tu mostrador. Digitaliza tu catálogo en <strong>15 segundos con una foto gracias a Atlas IA</strong>, aparece en el Mapa 3D y despacha con cálculo de ruta GPS.',
             pills: [
                 'En 15s registras todo tu inventario con la función «Agregar varios ✨» de Atlas IA',
@@ -351,5 +351,144 @@ document.addEventListener("DOMContentLoaded", () => {
                 card.style.transform = '';
             });
         });
+    }
+
+    /* ==========================================================================
+       9. ANIMACIÓN POR SCROLL EXCLUSIVA EN #como-funciona (IMAGEN OFICIAL DEL CARRITO)
+       ========================================================================== */
+    // Limpiar cualquier atributo residual fuera de #como-funciona por seguridad
+    document.querySelectorAll('[data-cart-stage]').forEach((el) => {
+        if (!el.closest('#como-funciona')) {
+            el.removeAttribute('data-cart-stage');
+        }
+    });
+
+    const comoFuncionaStage = document.querySelector('#como-funciona .section-header-center');
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    if (comoFuncionaStage && !prefersReducedMotion) {
+        comoFuncionaStage.setAttribute('data-cart-stage', '');
+        const heading = comoFuncionaStage.querySelector('h2');
+
+        if (heading) {
+            const clamp = (val, min, max) => Math.max(min, Math.min(max, val));
+
+            // Contenedor de revelación progresiva exclusivamente para el título de #como-funciona
+            const viewport = document.createElement('div');
+            viewport.className = 'cm-trail-reveal-viewport';
+
+            const ghostLayer = document.createElement('div');
+            ghostLayer.className = 'cm-trail-ghost-layer';
+            ghostLayer.setAttribute('aria-hidden', 'true');
+
+            const activeLayer = document.createElement('div');
+            activeLayer.className = 'cm-trail-active-layer';
+
+            comoFuncionaStage.insertBefore(viewport, heading);
+
+            const headingClone = heading.cloneNode(true);
+            headingClone.removeAttribute('id');
+            ghostLayer.appendChild(headingClone);
+            activeLayer.appendChild(heading);
+
+            // Línea de rastro detrás del carrito
+            const trackLine = document.createElement('div');
+            trackLine.className = 'cm-cart-track-line';
+            trackLine.setAttribute('aria-hidden', 'true');
+
+            const trailFill = document.createElement('div');
+            trailFill.className = 'cm-cart-trail-fill';
+
+            const trailSparks = document.createElement('div');
+            trailSparks.className = 'cm-cart-trail-sparks';
+
+            trailFill.appendChild(trailSparks);
+            trackLine.appendChild(trailFill);
+
+            const wakeCurtain = document.createElement('div');
+            wakeCurtain.className = 'cm-cart-wake-curtain';
+            wakeCurtain.setAttribute('aria-hidden', 'true');
+
+            // Usar directamente la imagen oficial del carrito (logo_sin_letras.png), sin SVG inline
+            const cartActor = document.createElement('div');
+            cartActor.className = 'cm-cart-actor';
+            cartActor.setAttribute('aria-hidden', 'true');
+
+            const cartImg = document.createElement('img');
+            cartImg.className = 'cm-cart-actor-img';
+            cartImg.src = comoFuncionaStage.dataset.cartImg || '/static/img/logo_sin_letras.png';
+            cartImg.alt = 'Carrito CartMaker';
+            cartActor.appendChild(cartImg);
+
+            viewport.appendChild(ghostLayer);
+            viewport.appendChild(activeLayer);
+            viewport.appendChild(trackLine);
+            viewport.appendChild(wakeCurtain);
+            viewport.appendChild(cartActor);
+
+            document.body.classList.add('cm-cart-anim-ready');
+
+            let currentP = 0;
+            let targetP = 0;
+            let isParked = false;
+            let rafId = null;
+
+            const computeTarget = () => {
+                const vh = window.innerHeight || document.documentElement.clientHeight;
+                const startY = vh * 0.88;
+                const endY = vh * 0.45;
+                const rect = viewport.getBoundingClientRect();
+                const raw = (startY - rect.top) / Math.max(1, startY - endY);
+                targetP = clamp(raw, 0, 1);
+            };
+
+            const tickScroll = () => {
+                const diff = targetP - currentP;
+                let needsNextFrame = false;
+
+                if (Math.abs(diff) > 0.0008) {
+                    currentP = currentP + diff * 0.18;
+                    needsNextFrame = true;
+                } else {
+                    currentP = targetP;
+                }
+
+                const isMoving = currentP > 0.02 && currentP < 0.985;
+                comoFuncionaStage.style.setProperty('--cart-p', currentP.toFixed(4));
+                comoFuncionaStage.style.setProperty('--trail-glow-opacity', isMoving ? '1' : '0');
+
+                if (currentP >= 0.985 && !isParked) {
+                    isParked = true;
+                    comoFuncionaStage.classList.add('is-parked');
+                } else if (currentP < 0.92 && isParked) {
+                    isParked = false;
+                    comoFuncionaStage.classList.remove('is-parked');
+                }
+
+                if (needsNextFrame) {
+                    rafId = requestAnimationFrame(tickScroll);
+                } else {
+                    rafId = null;
+                }
+            };
+
+            const onScrollOrResize = () => {
+                computeTarget();
+                if (!rafId) {
+                    rafId = requestAnimationFrame(tickScroll);
+                }
+            };
+
+            computeTarget();
+            currentP = targetP;
+            comoFuncionaStage.style.setProperty('--cart-p', currentP.toFixed(4));
+            if (currentP >= 0.985) {
+                isParked = true;
+                comoFuncionaStage.classList.add('is-parked');
+            }
+
+            window.addEventListener('scroll', onScrollOrResize, { passive: true });
+            window.addEventListener('resize', onScrollOrResize, { passive: true });
+        }
     }
 });
