@@ -28,6 +28,10 @@ class ChatMessage(models.Model):
 
     class Meta:
         ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['order', '-created_at'], name='chat_msg_order_created_idx'),
+            models.Index(fields=['order', 'status'], name='chat_msg_order_status_idx'),
+        ]
 
     def get_json(self) -> dict:
         time_str = timezone.localtime(self.created_at).strftime("%d/%m/%Y %I:%M %p").lower()
@@ -39,8 +43,8 @@ class ChatMessage(models.Model):
 
         return {
             'id': self.id,
-            'order_id': self.order.id,
-            'sender_id': str(self.sender.id),
+            'order_id': self.order_id,
+            'sender_id': str(self.sender_id),
             'sender_name': f"{self.sender.first_name} {self.sender.last_name}",
             'text': self.text,
             'message_type': self.message_type,

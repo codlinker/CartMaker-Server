@@ -1534,6 +1534,7 @@ class ProductSearchEngine:
             'product__category',
             'product__category__parent_category',
             'product__company',
+            'offer',
             'store',
             'store__location',
             'store__location__mall',

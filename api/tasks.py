@@ -94,25 +94,28 @@ def cleanup_expired_offers():
             expired_offers.delete()
             logger.info(f"✅ Se eliminaron {count} ofertas expiradas del inventario.")
             
-            # Iteramos los ítems afectados para limpiar el caché de sus respectivas zonas
-            for item_id in affected_item_ids:
+            # Pre-cargamos los ítems afectados y sus coordenadas en un solo viaje a la BD
+            affected_items = InventoryItem.objects.filter(
+                id__in=affected_item_ids
+            ).select_related('store__location')
+
+            invalidated_zones = set()
+            for item in affected_items:
                 try:
-                    item = InventoryItem.objects.select_related('store__location').get(id=item_id)
-                    location = item.store.location
-                    approx_lat = round(location.coordinates.y, 3)
-                    approx_lng = round(location.coordinates.x, 3)
-                    
-                    # Forzamos la regeneración del esqueleto estructural eliminando la llave de la zona
-                    cache.delete_pattern(f"cartmaker:struct:home:{approx_lat}:{approx_lng}:*")
-                    
-                    # Adicionalmente, eliminamos su llave volátil para que el método _stitch_and_filter_results
-                    # rehidrate en caliente el nuevo estado sin la oferta activa
-                    cache.delete(f"cartmaker:volatile:item:{item_id}")
-                    
+                    location = getattr(item.store, 'location', None)
+                    if location and location.coordinates:
+                        approx_lat = round(location.coordinates.y, 3)
+                        approx_lng = round(location.coordinates.x, 3)
+                        zone_key = (approx_lat, approx_lng)
+                        if zone_key not in invalidated_zones:
+                            invalidated_zones.add(zone_key)
+                            cache.delete_pattern(f"cartmaker:struct:home:{approx_lat}:{approx_lng}:*")
                 except Exception as e:
-                    # Si un ítem fue borrado en paralelo, continuamos con el resto del lote de invalidación
-                    logger.warning(f"No se pudo invalidar el caché para el item {item_id}: {e}")
-                    continue
+                    logger.warning(f"No se pudo invalidar el caché de zona para el item {item.id}: {e}")
+
+            volatile_keys = [f"cartmaker:volatile:item:{item_id}" for item_id in affected_item_ids]
+            if volatile_keys:
+                cache.delete_many(volatile_keys)
             
     except Exception as e:
         logger.error(f"❌ Error en cleanup_expired_offers: {e}")

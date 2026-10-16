@@ -349,6 +349,9 @@ class User(AbstractBaseUser, PermissionsMixin):
         """
         Retorna la lista ordenada de IDs de categorías principales preferidas por el usuario.
         """
+        prefetched = getattr(self, '_prefetched_objects_cache', None)
+        if prefetched and 'preferred_categories' in prefetched:
+            return sorted(cat.id for cat in prefetched['preferred_categories'])
         return list(
             self.preferred_categories.order_by('id').values_list('id', flat=True)
         )
@@ -444,6 +447,11 @@ class Notification(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'is_read'], name='notif_user_unread_idx'),
+            models.Index(fields=['user', '-created_at'], name='notif_user_created_idx'),
+            models.Index(fields=['user', 'section', '-created_at'], name='notif_user_sec_created_idx'),
+        ]
 
     def __str__(self):
         return f"[{self.get_category_display()}] {self.title} - {self.user.username}"
@@ -538,13 +546,18 @@ class Mall(models.Model):
               else f"{settings.DOMAIN}/{self.img_url}"
 
     def get_json(self) -> dict:
+        prefetched = getattr(self, '_prefetched_objects_cache', None)
+        if prefetched and 'stores' in prefetched:
+            store_ids = [s.id for s in prefetched['stores']]
+        else:
+            store_ids = list(self.stores.values_list('id', flat=True))
         return {
             'id': self.id,
             'name': self.name,
             'lat': self.coordinates.y,
             'lng': self.coordinates.x,
             # Solo devolvemos los IDs de las ubicaciones asociadas
-            'store_location_ids': list(self.stores.values_list('id', flat=True)),
+            'store_location_ids': store_ids,
             'floors_quantity':self.floors_quantity,
             'img_url':self.get_img_url()
         }
@@ -974,17 +987,21 @@ class Category(models.Model):
         return get_subcategory_schema(parent_category_name=self.name)
 
     def get_json(self) -> dict:
+        subs = []
+        for sub in self.subcategories.all():
+            sub._state.fields_cache.setdefault('parent_category', self)
+            subs.append({
+                "id": sub.id,
+                "name": sub.name,
+                "img_url": sub.get_img_url(),
+                "product_schema": sub.get_product_schema(),
+            })
         return {
             "id": self.id,
             "name": self.name,
             "img_url": self.get_img_url(),
             "default_product_schema": self.get_product_schema(),
-            "sub_categories": [{
-                "id": sub.id,
-                "name": sub.name,
-                "img_url": sub.get_img_url(),
-                "product_schema": sub.get_product_schema(),
-            } for sub in self.subcategories.all()] 
+            "sub_categories": subs,
         }
     
     def get_img_url(self) -> str:
@@ -1235,6 +1252,12 @@ class InventoryItem(models.Model):
         help_text="Puntuación precalculada de interacciones (visitas, carritos, compras). Evita JOINs masivos. Usado por el motor de busqueda."
     )
 
+    class Meta:
+        indexes = [
+            models.Index(fields=['store', 'paused', 'stock'], name='inv_store_paused_stock_idx'),
+            models.Index(fields=['paused', 'stock'], name='inv_paused_stock_idx'),
+        ]
+
     def _active_offer(self):
         try:
             offer = self.offer
@@ -1334,7 +1357,7 @@ class InventoryItemOffer(models.Model):
         percentage (int): Porcentaje de descuento aplicado.
     """
     product_item = models.OneToOneField(InventoryItem, on_delete=models.CASCADE, related_name='offer')
-    valid_until = models.DateTimeField()
+    valid_until = models.DateTimeField(db_index=True)
     percentage = models.IntegerField()
 
     def get_json(self) -> dict:
@@ -1395,6 +1418,13 @@ class Order(models.Model):
     cancellation_topic = models.IntegerField(choices=CancellationReason.choices, null=True, blank=True)
     withdrawal_type = models.IntegerField(choices=WithdrawalType.choices)
     client_location = models.ForeignKey(ClientLocation, on_delete=models.SET_NULL, null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['client', '-creation'], name='order_client_creation_idx'),
+            models.Index(fields=['store', 'status', '-creation'], name='order_store_status_idx'),
+            models.Index(fields=['status', 'creation'], name='order_status_creation_idx'),
+        ]
 
 class TokenWallet(models.Model):
     """
@@ -1497,18 +1527,30 @@ class SupportTicket(models.Model):
     close_time = models.DateTimeField(null=True, blank=True)
     waiting_for_client_reply = models.BooleanField(default=False)
 
+    class Meta:
+        indexes = [
+            models.Index(fields=['client', '-creation'], name='ticket_client_creation_idx'),
+            models.Index(fields=['closed', '-creation'], name='ticket_closed_creation_idx'),
+        ]
+
     def get_json(self) -> dict:
         time_str = timezone.localtime(self.creation).strftime("%d/%m/%Y %I:%M %p").lower()
-        unread_client = self.messages.filter(status__lt=3).exclude(sender=self.client).count()
-        unread_agent = self.messages.filter(status__lt=3).exclude(sender=self.agent).count() if self.agent else self.messages.count()
+        unread_client = getattr(self, 'unread_client_count', None)
+        if unread_client is None:
+            unread_client = self.messages.filter(status__lt=3).exclude(sender_id=self.client_id).count()
+        unread_agent = getattr(self, 'unread_agent_count', None)
+        if unread_agent is None:
+            unread_agent = self.messages.filter(status__lt=3).exclude(sender_id=self.agent_id).count() if self.agent_id else self.messages.count()
+
+        agent_obj = self.agent if self.agent_id else None
 
         return {
             'id': self.id,
-            'client_id': str(self.client.id) if self.client else None,
-            'agent_id': str(self.agent.id) if self.agent else None,
-            'agent_name': f"{self.agent.first_name} {self.agent.last_name}" if self.agent else None,
+            'client_id': str(self.client_id) if self.client_id else None,
+            'agent_id': str(self.agent_id) if self.agent_id else None,
+            'agent_name': f"{agent_obj.first_name} {agent_obj.last_name}" if agent_obj else None,
             # 💡 1. ENVIAMOS LA FOTO DE PERFIL DEL AGENTE
-            'agent_image': self.agent.get_profile_picture_url() if self.agent and self.agent.profile_picture else None,
+            'agent_image': agent_obj.get_profile_picture_url() if agent_obj and agent_obj.profile_picture else None,
             'topic': self.get_topic_display(), 
             'topic_id': self.topic,
             'title': self.title,
@@ -1544,14 +1586,18 @@ class SupportMessage(models.Model):
 
     class Meta:
         ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['ticket', '-created_at'], name='supp_msg_ticket_created_idx'),
+            models.Index(fields=['ticket', 'status'], name='supp_msg_ticket_status_idx'),
+        ]
 
     def get_json(self) -> dict:
         time_str = timezone.localtime(self.created_at).strftime("%d/%m/%Y %I:%M %p").lower()
         absolute_media_url = storage_manager.get_url(self.media_url) if self.media_url else ""
         return {
             'id': self.id,
-            'ticket_id': self.ticket.id,
-            'sender_id': str(self.sender.id),
+            'ticket_id': self.ticket_id,
+            'sender_id': str(self.sender_id),
             'sender_name': f"{self.sender.first_name} {self.sender.last_name}",
             'text': self.text,
             'message_type': self.message_type,
@@ -1841,7 +1887,7 @@ class MerchantPlanPayment(models.Model):
         
         return {
             'id': self.id,
-            'subscription': self.subscription.id,
+            'subscription': self.subscription_id,
             "plan_name": self.subscription.plan.name,
             'reference_number': self.reference_number,
             'payment_proof_url': storage_manager.get_url(self.payment_proof_url),
@@ -1941,7 +1987,6 @@ class AtlasPlusPlanPayment(models.Model):
     payment_proof_preview.fget.short_description = "Comprobante de Pago"
 
     def get_json(self)->dict:
-        print("GET JSON")
         return {
             'id':self.id,
             'reference_number':self.reference_number,
@@ -1993,6 +2038,11 @@ class AtlasMessage(models.Model):
     text = models.TextField()
     product_ids = models.JSONField(default=list, blank=True)
     action_command = models.JSONField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['conversation', '-creation'], name='atlas_msg_conv_created_idx'),
+        ]
 
 
 # ==========================================
@@ -2105,6 +2155,13 @@ class ProductViewLog(models.Model):
     start_time = models.DateTimeField()
     end_time = models.DateTimeField(null=True, blank=True)
 
+    class Meta:
+        indexes = [
+            models.Index(fields=['client', 'inventory_item'], name='pvlog_client_item_idx'),
+            models.Index(fields=['inventory_item', 'start_time'], name='pvlog_item_start_idx'),
+            models.Index(fields=['client', 'start_time'], name='pvlog_client_start_idx'),
+        ]
+
 class StoreViewLog(models.Model):
     """
     Registro de tráfico en el perfil de una tienda.
@@ -2179,6 +2236,10 @@ class UniversalLike(models.Model):
     class Meta:
         # Evita que un usuario le de más de un like a la misma entidad exacta
         unique_together = ('user', 'content_type', 'object_id')
+        indexes = [
+            models.Index(fields=['content_type', 'object_id'], name='ulike_ct_obj_idx'),
+            models.Index(fields=['user', 'content_type', 'creation'], name='ulike_user_ct_created_idx'),
+        ]
 
 
 class UniversalComment(models.Model):
@@ -2197,13 +2258,24 @@ class UniversalComment(models.Model):
     answer_text = models.TextField(null=True, blank=True)
     answer_creation = models.DateTimeField(null=True, blank=True)
 
-    def get_json(self):
-        # Resolvemos dinámicamente la compañía dueña del recurso
+    class Meta:
+        indexes = [
+            models.Index(fields=['content_type', 'object_id'], name='ucomment_ct_obj_idx'),
+            models.Index(fields=['client', 'question_creation'], name='ucomment_client_created_idx'),
+        ]
+
+    def get_json(self, target_obj=None):
+        # Resolvemos dinámicamente la compañía dueña del recurso sin N+1 si target_obj fue pre-cargado
+        resolved_target = target_obj if target_obj is not None else getattr(self, '_prefetched_target_obj', None)
+        if resolved_target is None:
+            resolved_target = self.content_object
+
+        ct_model = self.content_type.model
         company = None
-        if self.content_type.model == 'inventoryitem' and self.content_object:
-            company = self.content_object.store.company
-        elif self.content_type.model == 'companyvideostory' and self.content_object:
-            company = self.content_object.company
+        if ct_model == 'inventoryitem' and resolved_target:
+            company = resolved_target.store.company
+        elif ct_model == 'companyvideostory' and resolved_target:
+            company = resolved_target.company
 
         company_image_url = ""
         company_name = "Comercio"
@@ -2214,15 +2286,15 @@ class UniversalComment(models.Model):
 
         # 💡 NUEVO: Resolvemos el nombre del ítem para que el comercio sepa a qué le están preguntando
         item_name = "Artículo no disponible"
-        if self.content_type.model == 'inventoryitem' and self.content_object:
-            item_name = self.content_object.product.name
-        elif self.content_type.model == 'companyvideostory' and self.content_object:
+        if ct_model == 'inventoryitem' and resolved_target:
+            item_name = resolved_target.product.name
+        elif ct_model == 'companyvideostory' and resolved_target:
             item_name = "Video Promocional"
 
         return {
             "id": self.id,
             "client_data": {
-                "id": self.client.id,
+                "id": self.client_id,
                 "name": f"{self.client.first_name} {self.client.last_name}",
                 "profile_picture": self.client.get_profile_picture_url()
             },
@@ -2232,7 +2304,7 @@ class UniversalComment(models.Model):
             },
             "target_info": {
                 "name": item_name,
-                "type": self.content_type.model,
+                "type": ct_model,
                 "target_id": self.object_id
             },
             "question_text": self.question_text,
@@ -2330,6 +2402,10 @@ class VideoEngagementLog(models.Model):
     class Meta:
         verbose_name = _("Log de Engagement de Video")
         verbose_name_plural = _("Logs de Engagement de Video")
+        indexes = [
+            models.Index(fields=['client', 'video'], name='veng_client_video_idx'),
+            models.Index(fields=['client', 'timestamp'], name='veng_client_ts_idx'),
+        ]
 
 
 # =========================================================================
@@ -2493,6 +2569,10 @@ class CartMakerApiKey(models.Model):
                 'id', 'prefix', 'hashed_key', 'scope', 'is_active', 'expires_at'
             ).first()
             if not key_obj:
+                try:
+                    cache.set(cache_key, {'invalid': True}, timeout=60)
+                except Exception:
+                    pass
                 return False
             record = {
                 'id': str(key_obj.id),
@@ -2506,7 +2586,7 @@ class CartMakerApiKey(models.Model):
             except Exception:
                 pass
 
-        if not record.get('is_active'):
+        if record.get('invalid') or not record.get('is_active'):
             return False
 
         expires_at_ts = record.get('expires_at_ts')
@@ -2524,7 +2604,7 @@ class CartMakerApiKey(models.Model):
         # Actualización ligera (throttled cada 5 min) de last_used_at
         usage_throttle_key = f"cmk_used:{prefix}"
         try:
-            if not cache.get(usage_throttle_key):
+            if cache.get(usage_throttle_key) is None:
                 cls.objects.filter(prefix=prefix).update(last_used_at=timezone.now())
                 cache.set(usage_throttle_key, 1, timeout=300)
         except Exception:

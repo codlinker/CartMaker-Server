@@ -48,8 +48,8 @@ class ChatViewSet(viewsets.ViewSet):
         
         try:
             order = Order.objects.select_related('store__company').get(id=order_id)
-            is_client = order.client == request.user
-            is_merchant = order.store.company.owner == request.user
+            is_client = order.client_id == request.user.id
+            is_merchant = order.store.company.owner_id == request.user.id
 
             if not is_client and not is_merchant:
                 return Response({"error": "No tienes acceso."}, status=status.HTTP_403_FORBIDDEN)
@@ -107,7 +107,7 @@ class ChatViewSet(viewsets.ViewSet):
             company = order.store.company
             
             # Validamos que el usuario logueado sea el dueño
-            if company.owner != request.user:
+            if company.owner_id != request.user.id:
                 return Response({"error": "No tienes acceso a esta compañía."}, status=status.HTTP_403_FORBIDDEN)
 
             if request.method == 'GET':
@@ -284,8 +284,8 @@ class ChatWebhookViewSet(viewsets.ViewSet):
             )
             
             # 💡 EL FIX: Calculamos exactamente quién es el que debe recibir la notificación global
-            is_client = (str(sender_id) == str(ticket.client.id))
-            recipient_id = str(ticket.agent.id) if is_client and ticket.agent else str(ticket.client.id)
+            is_client = (str(sender_id) == str(ticket.client_id))
+            recipient_id = str(ticket.agent_id) if (is_client and ticket.agent_id) else str(ticket.client_id)
 
             if not recipient_connected:
                 try:

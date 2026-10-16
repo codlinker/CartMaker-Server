@@ -1451,6 +1451,11 @@ Catálogo oficial (Categorías y Subcategorías):
     def _get_available_subcategories(self) -> List[Dict[str, Any]]:
         from api.core.category_schemas import get_subcategory_schema
 
+        cache_key = "cartmaker:global:atlas_subcategories_schema_v2"
+        cached_items = cache.get(cache_key)
+        if cached_items is not None:
+            return cached_items
+
         items = []
         for s in SubCategory.objects.select_related('parent_category').all():
             schema = get_subcategory_schema(
@@ -1469,6 +1474,7 @@ Catálogo oficial (Categorías y Subcategorías):
                 "supports_variants": bool(schema.get("supports_variants", True)),
                 "supports_modifier_groups": bool(schema.get("supports_modifier_groups", False)),
             })
+        cache.set(cache_key, items, timeout=600)
         return items
 
     def _parse_gemini_json_response(

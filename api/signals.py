@@ -215,7 +215,27 @@ def invalidate_atlas_subscriptions_cache(sender, instance, **kwargs):
 
 @receiver(post_save, sender=ProductViewLog)
 def on_view_log_saved(sender, instance, **kwargs):
-    transaction.on_commit(lambda: recalculate_item_popularity(instance.inventory_item_id))
+    item_id = instance.inventory_item_id
+    client_id = instance.client_id
+    high_signal = bool(getattr(instance, 'added_to_cart', False) or getattr(instance, 'bought', False))
+
+    def _run():
+        if high_signal and client_id:
+            try:
+                cache.delete(f"cartmaker:affinity_profile:v1:{client_id}")
+            except Exception:
+                pass
+        debounce_key = f"cartmaker:pop_debounce:{item_id}"
+        if not high_signal:
+            try:
+                if cache.get(debounce_key) is not None:
+                    return
+                cache.set(debounce_key, 1, timeout=30)
+            except Exception:
+                pass
+        recalculate_item_popularity(item_id)
+
+    transaction.on_commit(_run)
 
 @receiver(post_delete, sender=ProductViewLog)
 def on_view_log_deleted(sender, instance, **kwargs):
@@ -240,7 +260,8 @@ def delete_item_volatile_cache(sender, instance: InventoryItem, **kwargs):
             location = instance.store.location
             approx_lat = round(location.coordinates.y, 3)
             approx_lng = round(location.coordinates.x, 3)
-            cache.delete_pattern(f"cartmaker:struct:home:{approx_lat}:{approx_lng}:*")
+            if hasattr(cache, 'delete_pattern'):
+                cache.delete_pattern(f"cartmaker:struct:home:{approx_lat}:{approx_lng}:*")
         except Exception:
             pass
     transaction.on_commit(finalize_item_deletion)
@@ -248,17 +269,26 @@ def delete_item_volatile_cache(sender, instance: InventoryItem, **kwargs):
 @receiver(post_save, sender=Product)
 def invalidate_structural_cache_on_product_change(sender, instance: Product, **kwargs):
     def clear_structure_cache():
-        item_ids = list(instance.inventory_items.values_list('id', flat=True))
-        if item_ids:
-            cache.delete_many([f"cartmaker:struct:item:{uid}" for uid in item_ids])
-        stores_ids = instance.inventory_items.values_list('store_id', flat=True).distinct()
-        for store_id in stores_ids:
+        rows = list(
+            instance.inventory_items.select_related('store__location').values_list(
+                'id', 'store__location__coordinates'
+            )
+        )
+        if not rows:
+            return
+        cache.delete_many([f"cartmaker:struct:item:{uid}" for uid, _ in rows])
+        seen_coords = set()
+        for _, coords in rows:
+            if not coords:
+                continue
+            key_pair = (round(coords.y, 3), round(coords.x, 3))
+            if key_pair in seen_coords:
+                continue
+            seen_coords.add(key_pair)
             try:
-                store_location = StoreLocation.objects.get(store_id=store_id)
-                approx_lat = round(store_location.coordinates.y, 3)
-                approx_lng = round(store_location.coordinates.x, 3)
-                cache.delete_pattern(f"cartmaker:struct:home:{approx_lat}:{approx_lng}:*")
-            except StoreLocation.DoesNotExist:
+                if hasattr(cache, 'delete_pattern'):
+                    cache.delete_pattern(f"cartmaker:struct:home:{key_pair[0]}:{key_pair[1]}:*")
+            except Exception:
                 continue
     transaction.on_commit(clear_structure_cache)
 

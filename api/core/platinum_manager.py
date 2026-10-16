@@ -12,20 +12,30 @@ class PlatinumEvaluator:
 
     @staticmethod
     def evaluate_all_companies():
+        try:
+            config = SystemConfig.objects.latest('creation')
+        except SystemConfig.DoesNotExist:
+            config = None
+
         companies = Company.objects.all()
         for company in companies:
-            PlatinumEvaluator.evaluate_company(company)
+            PlatinumEvaluator.evaluate_company(company, config=config)
 
     @staticmethod
-    def evaluate_company(company: Company) -> bool:
+    def evaluate_company(company: Company, config: SystemConfig = None) -> bool:
         thirty_days_ago = timezone.now() - timedelta(days=30)
 
         # Obtenemos los parámetros dinámicos desde SystemConfig
-        try:
-            config = SystemConfig.objects.latest('creation')
+        if config is None:
+            try:
+                config = SystemConfig.objects.latest('creation')
+            except SystemConfig.DoesNotExist:
+                config = None
+
+        if config is not None:
             min_sales = config.platinum_min_sells_per_month_requirement
             min_rating = float(config.platinum_min_rating_promedy_requirement)
-        except SystemConfig.DoesNotExist:
+        else:
             min_sales = 100
             min_rating = 4.5
 

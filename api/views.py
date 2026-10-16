@@ -672,7 +672,9 @@ class GetCompanyProducts(APIView):
             page = request.GET.get('page', 1)
             
             # 💡 NUEVO: Filtramos el queryset si viene el category_id
-            products_query = company.products.all()
+            products_query = company.products.select_related(
+                'category', 'category__parent_category', 'company'
+            ).all()
             if category_id:
                 products_query = products_query.filter(category_id=category_id)
                 
@@ -736,8 +738,8 @@ class GetStoreInventoryItems(APIView):
 
     def get(self, request, store_id=None):
         try:
-            store = CompanyStore.objects.get(id=store_id)
-            if store.company.owner.id != request.user.id:
+            store = CompanyStore.objects.select_related('company').get(id=store_id)
+            if store.company.owner_id != request.user.id:
                 return Response({'error': 'No tiene permisos para esta sucursal.'}, status=status.HTTP_406_NOT_ACCEPTABLE)
 
             # 1. Categorías únicas del inventario de esta sucursal
@@ -751,7 +753,13 @@ class GetStoreInventoryItems(APIView):
 
             # 2. QuerySet base optimizado con select_related
             items_query = InventoryItem.objects.filter(store=store).select_related(
-                'product', 'product__category', 'offer', 'store__company'
+                'product',
+                'product__category',
+                'product__category__parent_category',
+                'product__company',
+                'offer',
+                'store',
+                'store__company',
             )
             
             if category_id:
@@ -2115,7 +2123,7 @@ class CartMakerMapViewSet(viewsets.ViewSet):
         # =========================================================================
         # 2. CACHE MISS: CONSULTA PESADA A POSTGIS
         # =========================================================================
-        if not cached_features:
+        if cached_features is None:
             bbox = Polygon.from_bbox((min_lng, min_lat, max_lng, max_lat))
             bbox.srid = 4326
 
@@ -2249,19 +2257,39 @@ class CartMakerMapViewSet(viewsets.ViewSet):
             # =========================================================================
             # CACHE MISS ESTRUCTURAL: CONSULTA OPTIMIZADA A POSTGRESQL
             # =========================================================================
-            if not structural_data:
-                # Recuperamos tu QuerySet base original con todas sus relaciones cargadas
+            if structural_data is None:
+                # Recuperamos el QuerySet base con todas sus relaciones cargadas
                 queryset = InventoryItem.objects.select_related(
-                    'product', 'product__category', 'offer', 'store', 'store__company'
+                    'product',
+                    'product__category',
+                    'product__category__parent_category',
+                    'product__company',
+                    'offer',
+                    'store',
+                    'store__company',
                 ).filter(
                     store_id=store_id,
                     paused=False,
                     stock__gt=0
                 )
                 
+                prod_avg_sq = Subquery(
+                    ProductCalification.objects.filter(product_id=OuterRef('product_id'))
+                    .values('product_id')
+                    .annotate(v=Avg('rating'))
+                    .values('v')[:1],
+                    output_field=FloatField()
+                )
+                prod_cnt_sq = Subquery(
+                    ProductCalification.objects.filter(product_id=OuterRef('product_id'))
+                    .values('product_id')
+                    .annotate(c=Count('id'))
+                    .values('c')[:1],
+                    output_field=IntegerField()
+                )
                 queryset = queryset.annotate(
-                    avg_rating=Round(Coalesce(Avg('product__califications__rating'), 0.0), 1),
-                    rating_count=Count('product__califications')
+                    avg_rating=Round(Coalesce(prod_avg_sq, Value(0.0, output_field=FloatField())), 1),
+                    rating_count=Coalesce(prod_cnt_sq, Value(0, output_field=IntegerField()))
                 )
 
                 # Aplicar filtro por SubCategoría si viene en los parámetros
@@ -2394,11 +2422,11 @@ class GetMallsCache(APIView):
         cache_key = "cartmaker:global:malls"
         cached_data = cache.get(cache_key)
 
-        if cached_data:
+        if cached_data is not None:
             return Response(cached_data, status=status.HTTP_200_OK)
 
         # Cache Miss
-        malls = Mall.objects.all()
+        malls = Mall.objects.prefetch_related('stores').all()
         malls_data = [m.get_json() for m in malls]
         data = {'malls': malls_data}
         
@@ -2414,7 +2442,7 @@ class CompanyCacheAPI(APIView):
         cache_key = f"cartmaker:tenant:{request.user.id}:company"
         cached_data = cache.get(cache_key)
 
-        if cached_data:
+        if cached_data is not None:
             if cached_data.get("message") == "Suscripción expirada.":
                 cache.delete(cache_key)
             elif "error_status" in cached_data:
@@ -2423,16 +2451,24 @@ class CompanyCacheAPI(APIView):
                 return Response(cached_data, status=status.HTTP_200_OK)
             
         try:
-            company = Company.objects.get(owner=request.user).get_json()
+            company_obj = Company.objects.select_related('category').get(owner=request.user)
+            company = company_obj.get_json()
         except Company.DoesNotExist:
             error_data = {"error_status": status.HTTP_404_NOT_FOUND, "message": "No ha configurado su tienda."}
             cache.set(cache_key, error_data, timeout=300)
             return Response({'message': error_data["message"]}, status=error_data["error_status"])
 
-        stores = [company_store.get_json() for company_store in CompanyStore.objects.filter(company_id=company['id']).order_by('creation')]
+        stores_qs = CompanyStore.objects.filter(
+            company_id=company['id']
+        ).select_related(
+            'location', 'location__mall', 'company'
+        ).prefetch_related(
+            'contact_methods'
+        ).order_by('creation')
+        stores = [company_store.get_json() for company_store in stores_qs]
 
-        item_ct = ContentType.objects.get(model='inventoryitem')
-        video_ct = ContentType.objects.get(model='companyvideostory')
+        item_ct = ContentType.objects.get_for_model(InventoryItem)
+        video_ct = ContentType.objects.get_for_model(CompanyVideoStory)
 
         items_pks = InventoryItem.objects.filter(store__company_id=company['id']).values_list('id', flat=True)
         videos_pks = CompanyVideoStory.objects.filter(company_id=company['id']).values_list('id', flat=True)
@@ -2464,17 +2500,17 @@ class SubscriptionsCacheAPI(APIView):
         cache_key = f"cartmaker:tenant:{request.user.id}:subscriptions"
         cached_data = cache.get(cache_key)
 
-        if cached_data:
+        if cached_data is not None:
             return Response(cached_data, status=status.HTTP_200_OK)
 
         # Cache Miss
         user = User.objects.select_related(
             'subscription__plan',
             'atlas_plan',
+            'wallet',
         ).prefetch_related(
-            'subscription__payments',
+            'subscription__payments__subscription__plan',
             'atlas_plan__payments',
-            'wallet'
         ).get(id=request.user.id)
 
         merchant_subscription = user.subscription if hasattr(user, 'subscription') else None
@@ -2494,7 +2530,6 @@ class SubscriptionsCacheAPI(APIView):
             subscriptions_payments['atlas'] = [atlas_payment.get_json() for atlas_payment in atlas_subscription.payments.all()]
         if merchant_subscription:
             subscriptions_payments['merchant'] = [merchant_payment.get_json() for merchant_payment in merchant_subscription.payments.all()]
-        print("SUBSCRIPTIONS PAYMENTS ATLAS: ", subscriptions_payments['atlas'])
         data = {
             "merchant_subscription": merchant_subscription.get_json() if merchant_subscription else None,
             "atlas_subscription": atlas_subscription.get_json() if atlas_subscription else None,
@@ -2580,7 +2615,7 @@ class HomeCacheAPI(APIView):
         cache_key = "cartmaker:global:home"
         cached_data = cache.get(cache_key)
 
-        if cached_data:
+        if cached_data is not None:
             return Response(cached_data, status=status.HTTP_200_OK)
 
         # Cache Miss
@@ -2850,7 +2885,25 @@ class SupportTicketViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
 
     def list(self, request):
-        tickets = SupportTicket.objects.filter(client=request.user).order_by('-creation')
+        tickets = SupportTicket.objects.filter(
+            client=request.user
+        ).select_related('agent').annotate(
+            unread_client_count=Count(
+                'messages',
+                filter=Q(messages__status__lt=3) & ~Q(messages__sender_id=F('client_id'))
+            ),
+            unread_agent_count=Case(
+                When(
+                    agent__isnull=False,
+                    then=Count(
+                        'messages',
+                        filter=Q(messages__status__lt=3) & ~Q(messages__sender_id=F('agent_id'))
+                    )
+                ),
+                default=Count('messages'),
+                output_field=IntegerField()
+            )
+        ).order_by('-creation')
         data = [ticket.get_json() for ticket in tickets]
         return Response({'data': data}, status=status.HTTP_200_OK)
 
@@ -3270,45 +3323,39 @@ class AnalyticsViewSet(viewsets.ViewSet):
             else:
                 new_customers += 1
 
-        # --- 3. EXTRACCIÓN VIP Y ANALÍTICA DE GAMIFICACIÓN ---
-        # Buscamos transacciones contables del catálogo con reglas de gamificación activas
-        gamified_items = InventoryItem.objects.filter(
-            store__company=company,
-            product__discounts_by_tokens_active=True
-        ).select_related('product')
+        # --- 3. EXTRACCIÓN VIP Y ANALÍTICA DE GAMIFICACIÓN (EN LOTE, SIN N+1) ---
+        gamified_sales_txs = InventoryItemTransaction.objects.filter(
+            item__store__company=company,
+            item__product__discounts_by_tokens_active=True,
+            transaction_type=TransactionType.OUTCOME,
+            creation__gte=time_horizon
+        ).select_related('item__product')
 
         gamified_products_stats = {}
         revenue_from_token_orders = 0.0
 
-        for item in gamified_items:
-            # Traemos todos los egresos reales de este producto gamificado
-            item_sales = InventoryItemTransaction.objects.filter(
-                item=item,
-                transaction_type=TransactionType.OUTCOME,
-                creation__gte=time_horizon
-            )
+        for tx in gamified_sales_txs:
+            item = tx.item
+            qty = abs(tx.units)
+            price = float(item.custom_price if item.custom_price else item.product.price)
+            subtotal = qty * price
             
-            for tx in item_sales:
-                qty = abs(tx.units)
-                price = float(item.custom_price if item.custom_price else item.product.price)
-                subtotal = qty * price
-                
-                # Si hubo tokens redimidos en la ventana de tiempo, asumimos impacto del programa
-                if tokens_redeemed > 0:
-                    revenue_from_token_orders += subtotal
+            # Si hubo tokens redimidos en la ventana de tiempo, asumimos impacto del programa
+            if tokens_redeemed > 0:
+                revenue_from_token_orders += subtotal
 
-                pid = str(item.product.id)
-                if pid not in gamified_products_stats:
-                    gamified_products_stats[pid] = {
-                        'id': pid,
-                        'name': item.product.name,
-                        'image': storage_manager.get_url(item.product.images[0]) if item.product.images else None,
-                        'units_sold': 0,
-                        'revenue': 0.0,
-                        'discount_investment': 0.0
-                    }
-                gamified_products_stats[pid]['units_sold'] += qty
-                gamified_products_stats[pid]['revenue'] += subtotal
+            pid = str(item.product.id)
+            if pid not in gamified_products_stats:
+                gamified_products_stats[pid] = {
+                    'id': pid,
+                    'name': item.product.name,
+                    'image': storage_manager.get_url(item.product.images[0]) if item.product.images else None,
+                    'units_sold': 0,
+                    'revenue': 0.0,
+                    'discount_investment': 0.0
+                }
+            gamified_products_stats[pid]['units_sold'] += qty
+            gamified_products_stats[pid]['revenue'] += subtotal
 
         # Construcción sintética del Top VIP basado en volumen analítico de compras
         top_vips_logs = ProductViewLog.objects.filter(
@@ -3439,23 +3486,26 @@ class AnalyticsViewSet(viewsets.ViewSet):
 
         time_horizon = timezone.now() - timedelta(days=30)
         
-        # Traemos todas las transacciones de venta (OUTCOME) del mes
-        sales_txs = InventoryItemTransaction.objects.filter(
+        # Traemos todas las transacciones de venta (OUTCOME) del mes con item__product pre-cargado
+        sales_txs = list(InventoryItemTransaction.objects.filter(
             item__store__company=company,
             transaction_type=TransactionType.OUTCOME,
             creation__gte=time_horizon
-        ).select_related('item__store')
+        ).select_related('item__store', 'item__product'))
 
         total_revenue = 0.0
         # Consideramos cada transacción contable de venta como una entrada en caja
-        total_sales_records = sales_txs.count()
+        total_sales_records = len(sales_txs)
 
         branches_data = {}
-        stores = CompanyStore.objects.filter(company=company)
+        stores = CompanyStore.objects.filter(company=company).annotate(
+            total_items_count=Count('product_items'),
+            low_stock_items_count=Count('product_items', filter=Q(product_items__stock__lte=5))
+        )
         
         for store in stores:
-            total_items = InventoryItem.objects.filter(store=store).count()
-            low_stock_items = InventoryItem.objects.filter(store=store, stock__lte=5).count()
+            total_items = store.total_items_count
+            low_stock_items = store.low_stock_items_count
             
             health_status = "Estable"
             if total_items > 0:
@@ -3484,7 +3534,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
             
             total_revenue += subtotal
             
-            store_id = tx.item.store.id
+            store_id = tx.item.store_id
             if store_id in branches_data:
                 branches_data[store_id]['orders'] += 1
                 branches_data[store_id]['revenue'] += subtotal
@@ -3687,19 +3737,26 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
             return Response({"error": "No tienes una compañía registrada."}, status=status.HTTP_403_FORBIDDEN)
 
         now = timezone.now()
-        stores = company.stores.filter(is_active=True).prefetch_related(
-            'product_items', 'product_items__product', 'product_items__linked_stories'
+        active_stories_prefetch = Prefetch(
+            'linked_stories',
+            queryset=CompanyVideoStory.objects.filter(expires_at__gt=now, video_file__isnull=False),
+            to_attr='active_linked_stories'
         )
+        active_items_prefetch = Prefetch(
+            'product_items',
+            queryset=InventoryItem.objects.filter(paused=False, stock__gt=0).select_related('product').prefetch_related(active_stories_prefetch),
+            to_attr='active_product_items'
+        )
+        stores = company.stores.filter(is_active=True).prefetch_related(active_items_prefetch)
         
         data = []
         for store in stores:
             items_data = []
-            # Filtramos ítems con stock y que no estén pausados
-            inventory_items = store.product_items.filter(paused=False, stock__gt=0)
+            inventory_items = getattr(store, 'active_product_items', [])
             
             for item in inventory_items:
-                # Verificamos si tiene un video vigente activo
-                active_story = item.linked_stories.filter(expires_at__gt=now, video_file__isnull=False).first()
+                active_stories = getattr(item, 'active_linked_stories', [])
+                active_story = active_stories[0] if active_stories else None
                 
                 img_url = ""
                 if item.product.images and len(item.product.images) > 0:
@@ -3727,7 +3784,15 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
             return Response({"error": "No tienes una compañía registrada."}, status=status.HTTP_403_FORBIDDEN)
 
         videos = self.queryset.filter(company=company).select_related(
-            'company', 'associated_item', 'associated_item__product'
+            'company',
+            'associated_item',
+            'associated_item__product',
+            'associated_item__product__category',
+            'associated_item__product__category__parent_category',
+            'associated_item__product__company',
+            'associated_item__offer',
+            'associated_item__store',
+            'associated_item__store__company',
         ).order_by('-creation')
         
         page_number = request.GET.get('page', 1)
@@ -3904,8 +3969,6 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
                 # 5. Crear el registro en la Base de Datos
                 expires_at = timezone.now() + timedelta(hours=72)
 
-                print("FILTER MATRIX: ", filter_matrix)
-
                 # 💡 Creamos la historia. Como "associated_item" es un ForeignKey, 
                 # la BD permite que varios videos apunten al mismo producto sin chocar.
                 story = CompanyVideoStory.objects.create(
@@ -3960,9 +4023,14 @@ class OrderViewSet(viewsets.ViewSet):
         try:
             # Buscamos la orden garantizando que el usuario sea el cliente O el dueño de la compañía
             order = Order.objects.select_related(
-                'store__company', 
+                'client',
+                'store__company',
+                'store__company__owner',
                 'store__location',
                 'client_location'
+            ).prefetch_related(
+                'client__contact_methods',
+                'store__contact_methods'
             ).get(
                 Q(id=pk) & (Q(client=request.user) | Q(store__company__owner=request.user))
             )
@@ -3983,10 +4051,7 @@ class OrderViewSet(viewsets.ViewSet):
             client_lng = float(order.client_location.coordinates.x) if order.client_location else None
             client_address = order.client_location.description if order.client_location else None
 
-            is_merchant_mode = False
-            if hasattr(request.user, 'company'):
-                if request.user.company.id == order.store.company.id:
-                    is_merchant_mode = True
+            is_merchant_mode = (company.owner_id == request.user.id)
 
             contact_methods_dict = {
                 ContactMethodType(contact.method_type).name.lower(): contact.get_json()
@@ -4004,7 +4069,7 @@ class OrderViewSet(viewsets.ViewSet):
                 "is_merchant_mode":is_merchant_mode,
                 'status': order.status,
                 'withdrawal_type': order.withdrawal_type,
-                'store_id': str(order.store.id),
+                'store_id': str(order.store_id),
                 'store_name': company.name,
                 'store_image': store_image_url,
                 'store_lat': store_lat,
@@ -4036,11 +4101,14 @@ class OrderViewSet(viewsets.ViewSet):
     def list(self, request):
         # 💡 Optimizamos con select_related para traer la info de la tienda, la compañía y la ubicación de entrega de un solo golpe
         orders = Order.objects.select_related(
-            'store__company', 
+            'client',
+            'store__company',
+            'store__company__owner',
             'store__location',
             'client_location'
         ).prefetch_related(
-            'store__contact_methods'
+            'store__contact_methods',
+            'client__contact_methods'
         ).filter(client=request.user).order_by('-creation')
         
         orders_data = []
@@ -4931,16 +4999,13 @@ class CartViewSet(viewsets.ViewSet):
                 # Invalidamos caché volátil y notificamos tras commit exitoso
                 volatile_keys_to_del = [f"cartmaker:volatile:item:{item.id}" for item in inventory_items]
                 struct_keys_to_del = [f"cartmaker:struct:item:{item.id}" for item in inventory_items]
-                merchant_id = store.company.owner.id
+                merchant_id = store.company.owner_id
                 final_order_id = order.id
                 final_store_name = store.name
                 final_total = order.cart.get('total', 0.0)
 
                 def _post_order_commit():
-                    for v_key in volatile_keys_to_del:
-                        cache.delete(v_key)
-                    for s_key in struct_keys_to_del:
-                        cache.delete(s_key)
+                    cache.delete_many(volatile_keys_to_del + struct_keys_to_del)
                     firebase_admin.NotificationManager.notify_order_created(
                         merchant_id=merchant_id,
                         order_id=final_order_id,
@@ -5152,15 +5217,19 @@ class ClientCompanyViewSet(viewsets.ViewSet):
         try:
             # 1. Determinar qué tienda consultar (PRIORIDAD AL STORE_ID)
             # 💡 Agregamos "!= 'null'" por si el frontend manda la palabra string por error en la URL
+            base_store_qs = CompanyStore.objects.select_related(
+                'company', 'company__category', 'location', 'location__mall'
+            ).prefetch_related('contact_methods')
+
             if store_id and store_id != 'null': 
-                store = CompanyStore.objects.select_related('company', 'company__category').filter(
+                store = base_store_qs.filter(
                     id=store_id,
                     is_active=True
                 ).first()
 
                 # Parche: Si no la encontró, verificamos si por error Flutter mandó el ID de la compañía aquí
                 if not store:
-                    store = CompanyStore.objects.select_related('company', 'company__category').filter(
+                    store = base_store_qs.filter(
                         company_id=store_id,
                         is_main_store=True,
                         is_active=True
@@ -5172,7 +5241,7 @@ class ClientCompanyViewSet(viewsets.ViewSet):
                 
             elif company_id and company_id != 'null':
                 # Solo entramos aquí si Flutter explícitamente NO mandó un store_id
-                store = CompanyStore.objects.select_related('company', 'company__category').filter(
+                store = base_store_qs.filter(
                     company_id=company_id, 
                     is_active=True
                 ).order_by('-is_main_store', 'creation').first()
@@ -5206,7 +5275,9 @@ class ClientCompanyViewSet(viewsets.ViewSet):
                 product__inventory_items__paused=False
             ).distinct().values('id', 'name')
 
-            available_stores_qs = CompanyStore.objects.select_related('location').filter(
+            available_stores_qs = CompanyStore.objects.select_related(
+                'company', 'location', 'location__mall'
+            ).prefetch_related('contact_methods').filter(
                 company=company,
                 is_active=True
             ).order_by('-is_main_store', 'creation')
@@ -5349,15 +5420,15 @@ class UniversalConversationViewSet(viewsets.ViewSet):
         calculando sus preguntas pendientes para servir como panel histórico.
         """
         user = request.user
-        item_ct = ContentType.objects.get(model='inventoryitem')
-        video_ct = ContentType.objects.get(model='companyvideostory')
+        item_ct = ContentType.objects.get_for_model(InventoryItem)
+        video_ct = ContentType.objects.get_for_model(CompanyVideoStory)
 
         # ==========================================
         # 1. OBTENER TODO EL INVENTARIO Y SUS ALERTAS
         # ==========================================
-        db_items = InventoryItem.objects.select_related('product', 'store__company').filter(
+        db_items = list(InventoryItem.objects.select_related('product').filter(
             store__company__owner=user
-        )
+        ))
         items_ids_strs = [str(item.id) for item in db_items]
 
         products_summary = UniversalComment.objects.filter(
@@ -5371,7 +5442,7 @@ class UniversalConversationViewSet(viewsets.ViewSet):
         # ==========================================
         # 2. OBTENER TODAS LAS VIDEO HISTORIAS Y SUS ALERTAS
         # ==========================================
-        db_videos = CompanyVideoStory.objects.filter(company__owner=user)
+        db_videos = list(CompanyVideoStory.objects.filter(company__owner=user))
         videos_ids_strs = [str(vid.id) for vid in db_videos]
 
         videos_summary = UniversalComment.objects.filter(
@@ -5383,20 +5454,20 @@ class UniversalConversationViewSet(viewsets.ViewSet):
         videos_dict = {video['object_id']: video['pending'] for video in videos_summary}
 
         # ==========================================
-        # 3. COMPILACIÓN DE DATA COMPLETA
+        # 3. COMPILACIÓN DE DATA COMPLETA (SIN LLAMAR A get_json() COMPLETO)
         # ==========================================
         data = []
 
         # Mapeamos absolutamente todos los productos
         for item in db_items:
             item_id_str = str(item.id)
-            product_json = item.product.get_json()
-            images = product_json.get('images', [])
+            prod = item.product
+            first_img = storage_manager.get_url(prod.images[0]) if prod.images else ''
             
             data.append({
                 "id": item_id_str,
-                "name": product_json.get('name', 'Producto sin nombre'),
-                "image": images[0] if images else '',
+                "name": prod.name or 'Producto sin nombre',
+                "image": first_img,
                 "type": "product",
                 "pending_questions_count": products_dict.get(item_id_str, 0),
                 "creation": item.creation # 💡 Inyectamos la fecha nativa para ordenar
@@ -5405,15 +5476,14 @@ class UniversalConversationViewSet(viewsets.ViewSet):
         # Mapeamos absolutamente todos los videos
         for vid in db_videos:
             vid_id_str = str(vid.id)
-            vid_json = vid.get_json()
-            
-            raw_desc = vid_json.get('description') or ''
+            raw_desc = vid.description or ''
             clean_desc = raw_desc.strip() if raw_desc else "Video Historia sin descripción"
+            thumb_url = storage_manager.get_url(vid.thumbnail) if vid.thumbnail else ''
             
             data.append({
                 "id": vid_id_str,
                 "name": clean_desc if len(clean_desc) <= 40 else clean_desc[:40] + "...",
-                "image": vid_json.get('thumbnail_url') or '', 
+                "image": thumb_url, 
                 "type": "video",
                 "pending_questions_count": videos_dict.get(vid_id_str, 0),
                 "creation": vid.creation # 💡 Inyectamos la fecha nativa para ordenar
@@ -5449,18 +5519,27 @@ class UniversalConversationViewSet(viewsets.ViewSet):
         if not content_model:
             return Response({'error': 'Tipo de contenido no soportado.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        content_type_obj = ContentType.objects.get(model=content_model)
+        content_type_obj = ContentType.objects.get_for_model(
+            InventoryItem if content_model == 'inventoryitem' else CompanyVideoStory
+        )
         
-        # Filtramos por el tipo y el ID (Usamos select_related genérico si es necesario)
+        # Pre-resolvemos el objeto padre una sola vez con sus relaciones para evitar 60-80 N+1 GenericForeignKey queries
+        target_obj = None
+        if content_model == 'inventoryitem':
+            target_obj = InventoryItem.objects.select_related('store__company', 'product').filter(id=target_id).first()
+        else:
+            target_obj = CompanyVideoStory.objects.select_related('company').filter(id=target_id).first()
+
+        # Filtramos por el tipo y el ID
         comments = UniversalComment.objects.filter(
             content_type=content_type_obj,
             object_id=target_id
-        ).select_related('client').order_by('-question_creation')
+        ).select_related('client', 'content_type').order_by('-question_creation')
 
         paginator = UniversalConversationPagination()
         paginated_qs = paginator.paginate_queryset(comments, request)
 
-        data = [q.get_json() for q in paginated_qs]
+        data = [q.get_json(target_obj=target_obj) for q in paginated_qs]
         return paginator.get_paginated_response(data)
 
     @action(detail=False, methods=['post'])
@@ -6857,11 +6936,22 @@ class ProductViewSet(viewsets.ModelViewSet):
 
         try:
             with transaction.atomic():
-                # 1. Preparar las instancias en memoria
+                # 1. Pre-cargar subcategorías involucradas en un solo viaje a la BD
+                category_ids = {prod_data['category_id'] for prod_data in products_list if prod_data.get('category_id')}
+                categories_map = {
+                    cat.id: cat
+                    for cat in SubCategory.objects.select_related('parent_category').filter(id__in=category_ids)
+                }
+
+                # 2. Preparar las instancias en memoria
                 product_instances = []
                 
                 for prod_data in products_list:
-                    category = SubCategory.objects.select_related('parent_category').get(id=prod_data['category_id'])
+                    cat_id = prod_data.get('category_id')
+                    category = categories_map.get(int(cat_id)) if str(cat_id).isdigit() else categories_map.get(cat_id)
+                    if not category:
+                        raise SubCategory.DoesNotExist(f"Subcategoría {cat_id} no encontrada.")
+
                     discounts_data = prod_data.get('discounts_data', [])
                     if isinstance(discounts_data, str) and discounts_data.strip():
                         try:
@@ -6897,10 +6987,10 @@ class ProductViewSet(viewsets.ModelViewSet):
                     )
                     product_instances.append(product)
 
-                # 2. BULK CREATE REAL (Un solo viaje a la BD)
+                # 3. BULK CREATE REAL (Un solo viaje a la BD)
                 created_products = Product.objects.bulk_create(product_instances)
 
-                # 3. Manejo de imágenes (Requiere los IDs que acabamos de generar)
+                # 4. Manejo de imágenes (Requiere los IDs que acabamos de generar)
                 for prod_index, product in enumerate(created_products):
                     prod_data = products_list[prod_index]
                     image_order = prod_data.get('image_order', [])
@@ -6926,10 +7016,13 @@ class ProductViewSet(viewsets.ModelViewSet):
                         else:
                             final_images.append(item)
 
-                    # 4. Actualizamos el array de imágenes
                     product.images = final_images
-                    product.save(update_fields=['images'])
-                    
+
+                # 5. BULK UPDATE de imágenes en un solo viaje a la BD
+                if created_products:
+                    Product.objects.bulk_update(created_products, ['images'])
+
+                for product in created_products:
                     created_products_json.append(product.get_json())
 
             return Response({'success': True, 'data': created_products_json}, status=status.HTTP_201_CREATED)

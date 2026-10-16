@@ -156,7 +156,7 @@ def custom_dashboard_context(request, context):
         metrics = cache.get(f'admin_dashboard_metrics_{period}')
 
     # Seguro anti-fallos por si Celery no ha corrido o el caché se borró
-    if not metrics:
+    if metrics is None:
         if period == 'all': start = None
         elif period == '365d': start = now - timedelta(days=365)
         elif period == '180d': start = now - timedelta(days=180)
