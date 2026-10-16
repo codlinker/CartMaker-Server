@@ -12,6 +12,7 @@ class COS:
 
     def __init__(self):
         self.storage_type = getattr(settings, 'STORAGE_TYPE', 'local')
+        self._verified_local_to_s3 = set()
         
         if self.storage_type == 'aws':
             self.s3_client = boto3.client(
@@ -78,6 +79,32 @@ class COS:
         clean_path = relative_path.lstrip('/')
 
         if self.storage_type == 'aws':
+            # Auto-curación (Self-Healing): si el archivo fue guardado en MEDIA_ROOT cuando
+            # STORAGE_TYPE estaba en 'local', lo sincronizamos automáticamente hacia S3
+            # para que tanto la App Móvil como la Web lo carguen desde S3 sin error 403.
+            if clean_path not in self._verified_local_to_s3:
+                local_full_path = os.path.join(settings.MEDIA_ROOT, clean_path)
+                if os.path.isfile(local_full_path):
+                    try:
+                        content_type, _ = mimetypes.guess_type(local_full_path)
+                        extra_args = {'ContentType': content_type} if content_type else {}
+                        with open(local_full_path, 'rb') as local_f:
+                            self.s3_client.upload_fileobj(
+                                local_f,
+                                self.bucket_name,
+                                clean_path,
+                                ExtraArgs=extra_args,
+                            )
+                        self._verified_local_to_s3.add(clean_path)
+                    except Exception as e:
+                        print(f"⚠️ Fallback a media local para {clean_path}: {e}")
+                        base_url = f"{settings.DOMAIN}{settings.MEDIA_URL}" if not skip_media else settings.DOMAIN
+                        if not base_url.endswith('/'):
+                            base_url += "/"
+                        return f"{base_url}{clean_path}"
+                else:
+                    self._verified_local_to_s3.add(clean_path)
+
             return f"https://{self.bucket_name}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{clean_path}"
         else:
             base_url = f"{settings.DOMAIN}{settings.MEDIA_URL}" if not skip_media else settings.DOMAIN

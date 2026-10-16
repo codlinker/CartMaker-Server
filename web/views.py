@@ -619,7 +619,13 @@ def _build_storefront_context(
     total_sales_units = abs(int(total_sales_units))
 
     main_branch = branches_data[0]
-    app_deep_link = f"cartmaker://store/{main_branch['id']}?company_id={company.id}"
+    active_store_id = str(initial_store_id) if initial_store_id else main_branch['id']
+    if highlight_item_id:
+        hl_match = next((x for x in serialized_items if str(x.get('id')) == str(highlight_item_id)), None)
+        hl_store_id = hl_match.get('store_id_str') if hl_match else active_store_id
+        app_deep_link = f"cartmaker://product/{highlight_item_id}?store_id={hl_store_id}&company_id={company.id}"
+    else:
+        app_deep_link = f"cartmaker://store/{active_store_id}?company_id={company.id}"
 
     company_data = company.get_json()
     company_data['id'] = str(company.id)

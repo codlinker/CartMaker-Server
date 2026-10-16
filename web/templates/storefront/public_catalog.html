@@ -32,22 +32,55 @@
 
     <style>
         :root {
+            --cm-btn-gradient: linear-gradient(135deg, #6D49F2 0%, #7C3AED 100%);
+            --cm-primary-purple: #6D49F2;
             --sf-bg-primary: {{ theme.bg_primary|default:"#FAFAFC" }};
             --sf-bg-secondary: {{ theme.bg_secondary|default:"#F3F2F8" }};
             --sf-bg-card: {{ theme.bg_card|default:"#FFFFFF" }};
             --sf-text-primary: {{ theme.text_primary|default:"#0F0B1D" }};
             --sf-text-secondary: {{ theme.text_secondary|default:"#4B4660" }};
             --sf-accent-primary: {{ theme.accent_primary|default:"#6D49F2" }};
-            --sf-accent-secondary: {{ theme.accent_secondary|default:"#06B6D4" }};
+            --sf-accent-secondary: {{ theme.accent_secondary|default:"#7C3AED" }};
             --sf-accent-gradient: {{ theme.accent_gradient|safe }};
             --sf-border-glow: {{ theme.border_glow|default:"rgba(109, 73, 242, 0.16)" }};
             --sf-orb-1: {{ theme.orb_1|default:"#6D49F2" }};
             --sf-orb-2: {{ theme.orb_2|default:"#FF3366" }};
-            --sf-orb-3: {{ theme.orb_3|default:"#06B6D4" }};
+            --sf-orb-3: {{ theme.orb_3|default:"#7C3AED" }};
             --sf-font-heading: {{ theme.font_heading|safe }};
             --sf-font-body: {{ theme.font_body|safe }};
             --sf-card-aspect: {{ theme.card_aspect|default:"1 / 1" }};
             --sf-ambient: {{ theme.ambient_pattern|safe }};
+        }
+
+        /* Moneda Oficial de Tokens CartMaker (Círculo Naranja con Estrella Blanca en el Centro) */
+        .cm-token-coin {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #FBBF24 0%, #F59E0B 55%, #EA580C 100%);
+            color: #FFFFFF;
+            box-shadow: 0 2px 6px rgba(245, 158, 11, 0.40), inset 0 1px 1px rgba(255, 255, 255, 0.45);
+            flex-shrink: 0;
+            vertical-align: middle;
+        }
+
+        .cm-token-coin .material-symbols-rounded {
+            font-size: 12px !important;
+            color: #FFFFFF !important;
+            font-variation-settings: 'FILL' 1, 'wght' 700, 'GRAD' 0, 'opsz' 20;
+            line-height: 1;
+        }
+
+        .cm-token-coin.coin-lg {
+            width: 24px;
+            height: 24px;
+        }
+
+        .cm-token-coin.coin-lg .material-symbols-rounded {
+            font-size: 15px !important;
         }
 
         body.storefront-light-page {
@@ -78,7 +111,7 @@
         }
 
         .text-gradient-category {
-            background: var(--sf-accent-gradient);
+            background: var(--cm-btn-gradient);
             -webkit-background-clip: text;
             background-clip: text;
             color: transparent;
@@ -190,6 +223,7 @@
             background: #10B981;
             box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
             animation: sfPulseEmerald 2s infinite;
+            flex-shrink: 0;
         }
 
         .sf-pulse-dot.closed {
@@ -282,9 +316,11 @@
         @media (max-width: 980px) {
             .sf-hero-grid {
                 grid-template-columns: 1fr;
+                gap: 18px;
             }
             .sf-hero-card {
-                padding: 20px;
+                padding: 18px;
+                border-radius: 22px;
             }
         }
 
@@ -301,12 +337,6 @@
             align-items: flex-start;
         }
 
-        @media (max-width: 600px) {
-            .sf-merchant-top-row {
-                flex-direction: column;
-            }
-        }
-
         .sf-avatar-stage {
             position: relative;
             flex-shrink: 0;
@@ -319,7 +349,7 @@
             object-fit: cover;
             background: #F8FAFC;
             border: 3px solid #FFFFFF;
-            box-shadow: 0 12px 28px rgba(15, 11, 29, 0.12), 0 0 0 2px var(--sf-accent-primary);
+            box-shadow: 0 12px 28px rgba(15, 11, 29, 0.12), 0 0 0 2px var(--cm-primary-purple);
         }
 
         .sf-platinum-badge {
@@ -347,25 +377,25 @@
         .sf-badges-wrap {
             display: flex;
             flex-wrap: wrap;
-            gap: 8px;
-            margin-bottom: 10px;
+            gap: 6px;
+            margin-bottom: 8px;
         }
 
         .sf-chip {
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            padding: 5px 12px;
+            padding: 5px 11px;
             border-radius: 999px;
-            font-size: 0.75rem;
+            font-size: 0.74rem;
             font-weight: 700;
-            background: var(--sf-bg-secondary);
-            color: var(--sf-accent-primary);
-            border: 1px solid var(--sf-border-glow);
+            background: rgba(109, 73, 242, 0.08);
+            color: var(--cm-primary-purple);
+            border: 1px solid rgba(109, 73, 242, 0.18);
         }
 
         .sf-chip .material-symbols-rounded {
-            font-size: 16px;
+            font-size: 15px;
         }
 
         .sf-chip.chip-open {
@@ -389,21 +419,21 @@
         .sf-chip.chip-tokens {
             background: rgba(245, 158, 11, 0.12);
             color: #B45309;
-            border-color: rgba(245, 158, 11, 0.30);
+            border-color: rgba(245, 158, 11, 0.32);
         }
 
         .sf-merchant-name {
-            font-size: clamp(1.75rem, 3.2vw, 2.5rem);
+            font-size: clamp(1.45rem, 3.2vw, 2.4rem);
             font-weight: 800;
-            line-height: 1.1;
-            margin-bottom: 8px;
+            line-height: 1.12;
+            margin-bottom: 6px;
             color: var(--sf-text-primary);
         }
 
         .sf-merchant-tagline {
             color: var(--sf-text-secondary);
-            font-size: 0.96rem;
-            line-height: 1.5;
+            font-size: 0.92rem;
+            line-height: 1.45;
             max-width: 640px;
         }
 
@@ -420,15 +450,15 @@
             display: inline-flex;
             align-items: center;
             gap: 9px;
-            font-size: 0.86rem;
+            font-size: 0.85rem;
             font-weight: 600;
             color: var(--sf-text-secondary);
         }
 
         .sf-category-perks li .material-symbols-rounded {
             font-size: 18px;
-            color: var(--sf-accent-primary);
-            background: var(--sf-bg-secondary);
+            color: var(--cm-primary-purple);
+            background: rgba(109, 73, 242, 0.08);
             width: 28px;
             height: 28px;
             border-radius: 8px;
@@ -445,12 +475,6 @@
             gap: 12px;
         }
 
-        @media (max-width: 640px) {
-            .sf-metrics-row {
-                grid-template-columns: 1fr;
-            }
-        }
-
         .sf-metric-card {
             background: var(--sf-bg-primary);
             border: 1px solid rgba(15, 11, 29, 0.08);
@@ -464,7 +488,7 @@
         }
 
         .sf-metric-card:hover {
-            border-color: var(--sf-accent-primary);
+            border-color: var(--cm-primary-purple);
             background: #FFFFFF;
             transform: translateY(-2px);
             box-shadow: 0 10px 24px rgba(15, 11, 29, 0.06);
@@ -525,7 +549,7 @@
         .sf-mapbox-viewport-wrap {
             position: relative;
             width: 100%;
-            height: 225px;
+            height: 220px;
             background: #E2E8F0;
         }
 
@@ -536,27 +560,27 @@
 
         .sf-map-floating-pill {
             position: absolute;
-            top: 12px;
-            left: 12px;
+            top: 10px;
+            left: 10px;
             z-index: 5;
             background: rgba(255, 255, 255, 0.92);
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
             border: 1px solid rgba(15, 11, 29, 0.10);
             border-radius: 999px;
-            padding: 5px 12px;
+            padding: 5px 11px;
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            font-size: 0.74rem;
+            font-size: 0.72rem;
             font-weight: 700;
             color: var(--sf-text-primary);
             box-shadow: 0 4px 14px rgba(15, 11, 29, 0.08);
         }
 
         .sf-map-floating-pill .material-symbols-rounded {
-            font-size: 16px;
-            color: var(--sf-accent-primary);
+            font-size: 15px;
+            color: var(--cm-primary-purple);
         }
 
         /* Pin 3D Personalizado de CartMaker en Mapbox */
@@ -572,7 +596,7 @@
             height: 44px;
             border-radius: 14px;
             background: #FFFFFF;
-            border: 3px solid var(--sf-accent-primary);
+            border: 3px solid var(--cm-primary-purple);
             box-shadow: 0 8px 20px rgba(109, 73, 242, 0.35);
             overflow: hidden;
             display: flex;
@@ -596,7 +620,7 @@
             height: 0;
             border-left: 7px solid transparent;
             border-right: 7px solid transparent;
-            border-top: 9px solid var(--sf-accent-primary);
+            border-top: 9px solid var(--cm-primary-purple);
             margin-top: -1px;
         }
 
@@ -629,15 +653,15 @@
 
         .sf-address-text .material-symbols-rounded {
             font-size: 18px;
-            color: var(--sf-accent-primary);
+            color: var(--cm-primary-purple);
         }
 
         .sf-distance-chip {
             font-family: var(--font-mono);
             font-size: 0.75rem;
             font-weight: 700;
-            color: var(--sf-accent-primary);
-            background: var(--sf-bg-secondary);
+            color: var(--cm-primary-purple);
+            background: rgba(109, 73, 242, 0.08);
             padding: 3px 9px;
             border-radius: 999px;
         }
@@ -671,7 +695,7 @@
 
         .sf-eta-label .material-symbols-rounded {
             font-size: 15px;
-            color: var(--sf-accent-primary);
+            color: var(--cm-primary-purple);
         }
 
         .sf-eta-box strong {
@@ -684,7 +708,7 @@
         .sf-btn-route {
             width: 100%;
             border: none;
-            background: var(--sf-accent-gradient);
+            background: var(--cm-btn-gradient);
             color: #FFFFFF;
             font-family: var(--sf-font-heading);
             font-weight: 700;
@@ -744,12 +768,12 @@
         }
 
         .sf-branch-tab:hover {
-            border-color: var(--sf-accent-primary);
+            border-color: var(--cm-primary-purple);
             color: var(--sf-text-primary);
         }
 
         .sf-branch-tab.active {
-            background: var(--sf-accent-gradient);
+            background: var(--cm-btn-gradient);
             color: #FFFFFF;
             border-color: transparent;
             box-shadow: 0 8px 20px rgba(109, 73, 242, 0.25);
@@ -821,7 +845,7 @@
             height: 78px;
             border-radius: 50%;
             padding: 3px;
-            background: var(--sf-accent-gradient);
+            background: var(--cm-btn-gradient);
             position: relative;
             transition: transform 0.2s ease;
         }
@@ -843,7 +867,7 @@
             position: absolute;
             bottom: 0;
             right: 0;
-            background: var(--sf-accent-primary);
+            background: var(--cm-primary-purple);
             color: #FFFFFF;
             width: 24px;
             height: 24px;
@@ -895,7 +919,7 @@
             font-weight: 800;
             text-transform: uppercase;
             letter-spacing: 0.06em;
-            color: var(--sf-accent-primary);
+            color: var(--cm-primary-purple);
         }
 
         .sf-catalog-eyebrow img {
@@ -905,7 +929,7 @@
         }
 
         .sf-catalog-main-heading {
-            font-size: clamp(1.35rem, 2.5vw, 1.75rem);
+            font-size: clamp(1.3rem, 2.5vw, 1.75rem);
             font-weight: 800;
             color: var(--sf-text-primary);
             display: flex;
@@ -913,7 +937,7 @@
             gap: 8px;
         }
 
-        /* Barra de Moneda (USD + Bs / Solo USD / Solo Bs) + Tasa BCV justo arriba del catálogo */
+        /* Barra de Moneda (USD + Bs / Solo USD) + Tasa BCV justo arriba del catálogo */
         .sf-currency-toolbar {
             display: flex;
             align-items: center;
@@ -969,7 +993,7 @@
         }
 
         .sf-curr-btn.active {
-            background: var(--sf-accent-gradient);
+            background: var(--cm-btn-gradient);
             color: #FFFFFF;
             box-shadow: 0 4px 12px rgba(109, 73, 242, 0.25);
         }
@@ -1025,8 +1049,8 @@
 
         .sf-search-input:focus {
             background: #FFFFFF;
-            border-color: var(--sf-accent-primary);
-            box-shadow: 0 0 0 3px var(--sf-border-glow);
+            border-color: var(--cm-primary-purple);
+            box-shadow: 0 0 0 3px rgba(109, 73, 242, 0.15);
         }
 
         .sf-select-wrap {
@@ -1039,7 +1063,7 @@
             position: absolute;
             left: 12px;
             font-size: 18px;
-            color: var(--sf-accent-primary);
+            color: var(--cm-primary-purple);
             pointer-events: none;
         }
 
@@ -1058,7 +1082,7 @@
 
         .sf-cart-trigger-btn {
             border: none;
-            background: var(--sf-accent-gradient);
+            background: var(--cm-btn-gradient);
             color: #FFFFFF;
             padding: 11px 18px;
             border-radius: 14px;
@@ -1116,12 +1140,12 @@
         }
 
         .sf-filter-pill:hover {
-            border-color: var(--sf-accent-primary);
+            border-color: var(--cm-primary-purple);
             color: var(--sf-text-primary);
         }
 
         .sf-filter-pill.active {
-            background: var(--sf-accent-gradient);
+            background: var(--cm-btn-gradient);
             color: #FFFFFF;
             border-color: transparent;
             box-shadow: 0 4px 12px rgba(109, 73, 242, 0.22);
@@ -1132,15 +1156,8 @@
            ========================================================= */
         .sf-products-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(265px, 1fr));
+            grid-template-columns: repeat(auto-fill, minmax(255px, 1fr));
             gap: 20px;
-        }
-
-        @media (max-width: 600px) {
-            .sf-products-grid {
-                grid-template-columns: repeat(2, 1fr);
-                gap: 12px;
-            }
         }
 
         .sf-product-card {
@@ -1155,11 +1172,12 @@
             position: relative;
             cursor: pointer;
             box-shadow: 0 6px 18px rgba(15, 11, 29, 0.04);
+            min-width: 0;
         }
 
         .sf-product-card:hover {
             transform: translateY(-5px);
-            border-color: var(--sf-accent-primary);
+            border-color: var(--cm-primary-purple);
             box-shadow: 0 18px 38px rgba(15, 11, 29, 0.10);
         }
 
@@ -1185,14 +1203,15 @@
 
         .sf-card-top-badges {
             position: absolute;
-            top: 10px;
-            left: 10px;
-            right: 10px;
+            top: 8px;
+            left: 8px;
+            right: 8px;
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
             pointer-events: none;
-            gap: 6px;
+            gap: 4px;
+            flex-wrap: wrap;
         }
 
         .sf-offer-tag {
@@ -1200,63 +1219,62 @@
             color: #FFFFFF;
             font-family: var(--sf-font-heading);
             font-weight: 800;
-            font-size: 0.72rem;
-            padding: 4px 10px;
+            font-size: 0.7rem;
+            padding: 3px 8px;
             border-radius: 999px;
             display: inline-flex;
             align-items: center;
-            gap: 3px;
+            gap: 2px;
             box-shadow: 0 4px 12px rgba(239, 68, 68, 0.32);
         }
 
         .sf-offer-tag .material-symbols-rounded {
-            font-size: 14px;
+            font-size: 13px;
         }
 
         .sf-token-tag {
-            background: rgba(255, 255, 255, 0.94);
+            background: rgba(255, 255, 255, 0.95);
             backdrop-filter: blur(8px);
             color: #B45309;
-            border: 1px solid rgba(245, 158, 11, 0.4);
+            border: 1px solid rgba(245, 158, 11, 0.45);
             font-family: var(--sf-font-heading);
             font-weight: 800;
-            font-size: 0.68rem;
-            padding: 4px 9px;
+            font-size: 0.66rem;
+            padding: 3px 8px 3px 4px;
             border-radius: 999px;
             display: inline-flex;
             align-items: center;
-            gap: 4px;
+            gap: 5px;
             box-shadow: 0 4px 10px rgba(15, 11, 29, 0.08);
         }
 
-        .sf-token-tag .material-symbols-rounded {
-            font-size: 14px;
-            color: #F59E0B;
-        }
-
         .sf-product-body {
-            padding: 15px 16px;
+            padding: 14px 15px;
             display: flex;
             flex-direction: column;
             gap: 6px;
             flex: 1;
+            min-width: 0;
         }
 
         .sf-product-cat {
-            font-size: 0.7rem;
+            font-size: 0.68rem;
             text-transform: uppercase;
-            letter-spacing: 0.05em;
-            color: var(--sf-accent-primary);
+            letter-spacing: 0.04em;
+            color: var(--cm-primary-purple);
             font-weight: 800;
             display: flex;
             align-items: center;
             gap: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .sf-product-title {
-            font-size: 0.96rem;
+            font-size: 0.95rem;
             font-weight: 800;
-            line-height: 1.32;
+            line-height: 1.3;
             color: var(--sf-text-primary);
             display: -webkit-box;
             -webkit-line-clamp: 2;
@@ -1272,12 +1290,38 @@
         }
 
         .sf-spec-chip {
-            font-size: 0.68rem;
+            font-size: 0.67rem;
             font-weight: 600;
-            padding: 2px 8px;
+            padding: 2px 7px;
             border-radius: 6px;
             background: var(--sf-bg-secondary);
             color: var(--sf-text-secondary);
+            max-width: 100%;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .sf-token-earn-hint {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            color: #B45309;
+            background: rgba(245, 158, 11, 0.10);
+            border: 1px solid rgba(245, 158, 11, 0.25);
+            padding: 3px 8px 3px 5px;
+            border-radius: 8px;
+            margin-top: 2px;
+            width: fit-content;
+            max-width: 100%;
+        }
+
+        .sf-token-earn-hint span:last-child {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .sf-price-row {
@@ -1292,20 +1336,20 @@
 
         .sf-price-main {
             font-family: var(--sf-font-heading);
-            font-size: 1.24rem;
+            font-size: 1.22rem;
             font-weight: 800;
             color: var(--sf-text-primary);
             line-height: 1.1;
         }
 
         .sf-price-old {
-            font-size: 0.74rem;
+            font-size: 0.72rem;
             color: #94A3B8;
             text-decoration: line-through;
         }
 
         .sf-price-bs {
-            font-size: 0.75rem;
+            font-size: 0.74rem;
             font-weight: 700;
             color: #059669;
             margin-top: 2px;
@@ -1313,7 +1357,7 @@
 
         .sf-add-btn {
             border: none;
-            background: var(--sf-accent-gradient);
+            background: var(--cm-btn-gradient);
             color: #FFFFFF;
             padding: 9px 14px;
             border-radius: 12px;
@@ -1323,14 +1367,16 @@
             cursor: pointer;
             display: inline-flex;
             align-items: center;
+            justify-content: center;
             gap: 5px;
-            box-shadow: 0 4px 12px rgba(109, 73, 242, 0.22);
+            box-shadow: 0 4px 12px rgba(109, 73, 242, 0.24);
             transition: transform 0.16s ease, box-shadow 0.16s ease;
+            flex-shrink: 0;
         }
 
         .sf-add-btn:hover {
-            transform: scale(1.04);
-            box-shadow: 0 6px 16px rgba(109, 73, 242, 0.32);
+            transform: scale(1.03);
+            box-shadow: 0 6px 16px rgba(109, 73, 242, 0.34);
         }
 
         .sf-add-btn .material-symbols-rounded {
@@ -1350,7 +1396,7 @@
             background: rgba(255, 255, 255, 0.96);
             backdrop-filter: blur(20px);
             -webkit-backdrop-filter: blur(20px);
-            border: 2px solid var(--sf-accent-primary);
+            border: 2px solid var(--cm-primary-purple);
             border-radius: 22px;
             padding: 14px 20px;
             display: flex;
@@ -1366,18 +1412,9 @@
             transform: translateX(-50%) translateY(0);
         }
 
-        @media (max-width: 640px) {
-            .sf-floating-cart-bar {
-                flex-direction: column;
-                align-items: stretch;
-                bottom: 12px;
-                padding: 14px;
-            }
-        }
-
         .sf-checkout-app-btn {
             border: none;
-            background: var(--sf-accent-gradient);
+            background: var(--cm-btn-gradient);
             color: #FFFFFF;
             padding: 12px 22px;
             border-radius: 14px;
@@ -1387,6 +1424,7 @@
             cursor: pointer;
             display: inline-flex;
             align-items: center;
+            justify-content: center;
             gap: 8px;
             box-shadow: 0 8px 24px rgba(109, 73, 242, 0.30);
             transition: transform 0.18s ease, box-shadow 0.18s ease;
@@ -1432,13 +1470,15 @@
 
         .sf-modal-close {
             position: absolute;
-            top: 16px;
-            right: 16px;
+            top: 14px;
+            right: 14px;
+            z-index: 10;
             width: 38px;
             height: 38px;
             border-radius: 50%;
-            border: 1px solid rgba(15, 11, 29, 0.10);
-            background: var(--sf-bg-primary);
+            border: 1px solid rgba(15, 11, 29, 0.12);
+            background: rgba(255, 255, 255, 0.92);
+            backdrop-filter: blur(6px);
             color: var(--sf-text-primary);
             display: flex;
             align-items: center;
@@ -1457,10 +1497,14 @@
             gap: 24px;
         }
 
-        @media (max-width: 720px) {
-            .sf-detail-grid {
-                grid-template-columns: 1fr;
-            }
+        .sf-modal-main-img {
+            width: 100%;
+            border-radius: 18px;
+            aspect-ratio: 1 / 1;
+            object-fit: contain;
+            background: #F8FAFC;
+            padding: 8px;
+            border: 1px solid rgba(15, 11, 29, 0.08);
         }
 
         .sf-variant-btn {
@@ -1478,7 +1522,7 @@
         }
 
         .sf-variant-btn.selected {
-            background: var(--sf-accent-gradient);
+            background: var(--cm-btn-gradient);
             color: #FFFFFF;
             border-color: transparent;
             box-shadow: 0 4px 12px rgba(109, 73, 242, 0.24);
@@ -1488,7 +1532,7 @@
             background: #FFFFFF;
             padding: 16px;
             border-radius: 20px;
-            border: 2px solid var(--sf-border-glow);
+            border: 2px solid rgba(109, 73, 242, 0.18);
             display: inline-flex;
             align-items: center;
             justify-content: center;
@@ -1516,6 +1560,286 @@
             flex-shrink: 0;
             margin-top: 1px;
         }
+
+        /* =========================================================
+           OPTIMIZACIÓN MÓVIL INTEGRAL (UX NATIVA EN TELÉFONOS)
+           ========================================================= */
+        @media (max-width: 768px) {
+            .top-announcement-bar {
+                padding: 6px 12px;
+            }
+            .announcement-inner {
+                justify-content: space-between;
+                gap: 8px;
+            }
+            .announcement-text {
+                display: none;
+            }
+            .public-header-wrapper {
+                padding: 8px 10px;
+            }
+            .public-navbar {
+                padding: 8px 12px;
+                border-radius: 18px;
+                width: 100%;
+                max-width: 100%;
+                box-sizing: border-box;
+                gap: 8px;
+            }
+            .brand-logo-box {
+                width: 34px;
+                height: 34px;
+            }
+            .nav-brand-text {
+                font-size: 1.05rem;
+            }
+            .nav-brand-tag {
+                display: none;
+            }
+            .nav-right-actions {
+                gap: 6px !important;
+                flex-wrap: nowrap !important;
+            }
+            .nav-qr-btn-label {
+                display: none;
+            }
+            .btn-nav-secondary {
+                padding: 8px 10px !important;
+                border-radius: 11px !important;
+            }
+            .btn-nav-primary {
+                padding: 8px 12px !important;
+                font-size: 0.76rem !important;
+                border-radius: 11px !important;
+                white-space: nowrap;
+            }
+            .sf-detail-grid {
+                grid-template-columns: 1fr;
+                gap: 14px;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .sf-stage-wrapper {
+                padding: 8px 0 90px;
+            }
+            .sf-container {
+                padding: 0 12px;
+            }
+            .sf-top-pill-row {
+                margin-bottom: 10px;
+            }
+            .sf-atlas-verified-pill {
+                display: none;
+            }
+            .sf-live-pill {
+                width: 100%;
+                justify-content: center;
+                font-size: 0.72rem;
+                padding: 5px 10px;
+            }
+            .sf-hero-card {
+                padding: 14px;
+                border-radius: 20px;
+                margin-bottom: 14px;
+            }
+            .sf-merchant-identity {
+                gap: 12px;
+            }
+            .sf-merchant-top-row {
+                flex-direction: row;
+                align-items: center;
+                gap: 12px;
+            }
+            .sf-merchant-avatar {
+                width: 64px;
+                height: 64px;
+                border-radius: 16px;
+            }
+            .sf-badges-wrap {
+                gap: 4px;
+                margin-bottom: 4px;
+            }
+            .sf-chip {
+                font-size: 0.66rem;
+                padding: 3px 8px;
+                gap: 4px;
+            }
+            .sf-chip .material-symbols-rounded {
+                font-size: 13px;
+            }
+            .sf-merchant-name {
+                font-size: 1.28rem;
+                margin-bottom: 2px;
+            }
+            .sf-merchant-tagline {
+                font-size: 0.78rem;
+                display: -webkit-box;
+                -webkit-line-clamp: 2;
+                -webkit-box-orient: vertical;
+                overflow: hidden;
+            }
+            .sf-category-perks {
+                display: none;
+            }
+            /* Métricas en fila horizontal compacta de 3 columnas en móvil */
+            .sf-metrics-row {
+                grid-template-columns: repeat(3, 1fr);
+                gap: 6px;
+            }
+            .sf-metric-card {
+                flex-direction: column;
+                text-align: center;
+                padding: 9px 6px;
+                gap: 4px;
+                border-radius: 14px;
+            }
+            .sf-metric-icon {
+                width: 30px;
+                height: 30px;
+                border-radius: 9px;
+            }
+            .sf-metric-icon .material-symbols-rounded {
+                font-size: 17px;
+            }
+            .sf-metric-val {
+                font-size: 0.86rem;
+            }
+            .sf-metric-lbl {
+                font-size: 0.63rem;
+                line-height: 1.15;
+            }
+            /* Mapa compacto en móvil */
+            .sf-mapbox-viewport-wrap {
+                height: 155px;
+            }
+            .sf-map-logistics-panel {
+                padding: 10px 12px;
+                gap: 8px;
+            }
+            .sf-address-text {
+                font-size: 0.76rem;
+            }
+            .sf-btn-route {
+                font-size: 0.75rem;
+                padding: 9px 10px;
+            }
+            /* Cabecera de catálogo y barra de filtros en móvil */
+            .sf-catalog-stage-header {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 10px;
+                margin-bottom: 10px;
+            }
+            .sf-currency-toolbar {
+                justify-content: space-between;
+                gap: 6px;
+            }
+            .sf-bcv-live-badge {
+                font-size: 0.72rem;
+                padding: 6px 10px;
+            }
+            .sf-curr-btn {
+                font-size: 0.73rem;
+                padding: 6px 10px;
+            }
+            .sf-filters-bar {
+                padding: 12px;
+                border-radius: 18px;
+                margin-bottom: 14px;
+            }
+            .sf-filters-top {
+                gap: 8px;
+                margin-bottom: 10px;
+            }
+            .sf-search-input-wrap {
+                min-width: 100%;
+                order: 1;
+            }
+            .sf-search-input {
+                font-size: 0.84rem;
+                padding: 10px 12px 10px 38px;
+            }
+            .sf-select-wrap {
+                flex: 1;
+                order: 2;
+            }
+            .sf-select {
+                width: 100%;
+                font-size: 0.76rem;
+                padding: 9px 10px 9px 32px;
+            }
+            .sf-cart-trigger-btn {
+                order: 3;
+                padding: 9px 12px;
+                font-size: 0.76rem;
+            }
+            /* Grilla de 2 columnas en móvil sin cortes de botón */
+            .sf-products-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 10px;
+            }
+            .sf-product-card {
+                border-radius: 16px;
+            }
+            .sf-product-body {
+                padding: 10px;
+                gap: 4px;
+            }
+            .sf-product-cat {
+                font-size: 0.62rem;
+            }
+            .sf-product-title {
+                font-size: 0.83rem;
+                line-height: 1.25;
+            }
+            .sf-specs-preview {
+                display: none;
+            }
+            .sf-price-row {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 8px;
+                padding-top: 8px;
+            }
+            .sf-price-main {
+                font-size: 1.05rem;
+            }
+            .sf-price-bs {
+                font-size: 0.68rem;
+            }
+            .sf-add-btn {
+                width: 100%;
+                padding: 8px 10px;
+                font-size: 0.75rem;
+                border-radius: 10px;
+            }
+            /* Barra flotante de carrito en móvil */
+            .sf-floating-cart-bar {
+                flex-direction: column;
+                align-items: stretch;
+                bottom: 10px;
+                padding: 12px 14px;
+                gap: 10px;
+                border-radius: 18px;
+            }
+            /* Modales estilo Bottom Sheet nativo en móvil */
+            .sf-modal-backdrop {
+                align-items: flex-end;
+                padding: 0;
+            }
+            .sf-modal-card {
+                border-radius: 24px 24px 0 0;
+                max-height: 92vh;
+                padding: 18px 16px 24px;
+                width: 100%;
+            }
+            .sf-modal-main-img {
+                max-height: 210px;
+                aspect-ratio: 16 / 10;
+                object-fit: contain;
+            }
+        }
     </style>
 </head>
 <body class="landing-page storefront-light-page" data-card-style="{{ theme.card_style }}">
@@ -1529,7 +1853,7 @@
             <p class="announcement-text">
                 Estás explorando el inventario en tiempo real de <strong>{{ company.name }}</strong> sincronizado con <strong>CartMaker &amp; Atlas IA</strong>.
             </p>
-            <a href="{{ app_deep_link }}" onclick="openAppHandoffModal(); return false;" class="announcement-cta">
+            <a href="{{ app_deep_link }}" onclick="triggerPrimaryAppOpen(event);" class="announcement-cta">
                 Abrir en la App <span class="material-symbols-rounded">arrow_forward</span>
             </a>
         </div>
@@ -1551,13 +1875,13 @@
             </a>
 
             <div class="nav-right-actions" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                <button type="button" class="btn-nav-secondary" onclick="openQrStandeeModal()" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+                <button type="button" class="btn-nav-secondary" onclick="openQrStandeeModal()" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;" title="Ver Código QR de la Tienda">
                     <span class="material-symbols-rounded" style="font-size:18px;">qr_code_2</span>
-                    <span>QR de Tienda</span>
+                    <span class="nav-qr-btn-label">QR de Tienda</span>
                 </button>
-                <a href="{{ app_deep_link }}" onclick="openAppHandoffModal(); return false;" class="btn-nav-primary">
+                <a href="{{ app_deep_link }}" onclick="triggerPrimaryAppOpen(event);" class="btn-nav-primary" style="background:var(--cm-btn-gradient);">
                     <span class="material-symbols-rounded">smartphone</span>
-                    <span>Abrir en CartMaker App</span>
+                    <span>Abrir en la App</span>
                 </a>
             </div>
         </nav>
@@ -1597,7 +1921,7 @@
                     <div class="sf-merchant-identity">
                         <div class="sf-merchant-top-row">
                             <div class="sf-avatar-stage">
-                                <img src="{{ company.image|default:'/static/img/no_image.jpg' }}" alt="{{ company.name }}" class="sf-merchant-avatar" onerror="this.src='/static/img/no_image.jpg'">
+                                <img src="{{ company.image|default:'/static/img/no_image.jpg' }}" alt="{{ company.name }}" class="sf-merchant-avatar" onerror="handleStorefrontImgError(this)">
                                 {% if company.is_platinum %}
                                 <span class="sf-platinum-badge">
                                     <span class="material-symbols-rounded icon-filled">workspace_premium</span> PLATINUM
@@ -1605,7 +1929,7 @@
                                 {% endif %}
                             </div>
 
-                            <div style="flex:1;">
+                            <div style="flex:1;min-width:0;">
                                 <div class="sf-badges-wrap">
                                     <span class="sf-chip">
                                         <span class="material-symbols-rounded">{{ theme.hero_badge_icon }}</span>
@@ -1620,14 +1944,14 @@
                                     {% if company.kyb_status == 2 %}
                                     <span class="sf-chip chip-kyb" title="Empresa verificada legalmente en SENIAT/SAREN">
                                         <span class="material-symbols-rounded icon-filled">verified</span>
-                                        <span>Empresa Verificada KYB</span>
+                                        <span>Verificada KYB</span>
                                     </span>
                                     {% endif %}
 
                                     {% if company.gamification_enabled %}
-                                    <span class="sf-chip chip-tokens">
-                                        <span class="material-symbols-rounded icon-filled">toll</span>
-                                        <span>Gana {{ company.gamification_tokens_per_dollar }} Tokens por cada $1</span>
+                                    <span class="sf-chip chip-tokens" title="Acumula Tokens en tus compras para canjear descuentos reales">
+                                        <span class="cm-token-coin"><span class="material-symbols-rounded icon-filled">star</span></span>
+                                        <span>+{{ company.gamification_tokens_per_dollar }} Tokens/$1 para descuentos</span>
                                     </span>
                                     {% endif %}
                                 </div>
@@ -1654,8 +1978,8 @@
                                     <span class="material-symbols-rounded icon-filled">star</span>
                                 </div>
                                 <div>
-                                    <div class="sf-metric-val">{{ company.avg_rating|default:"5.0" }} <small style="font-weight:600;color:var(--sf-text-secondary);font-size:0.8rem;">({{ company.rating_count }})</small></div>
-                                    <div class="sf-metric-lbl">Calificación Verificada</div>
+                                    <div class="sf-metric-val">{{ company.avg_rating|default:"5.0" }} <small style="font-weight:600;color:var(--sf-text-secondary);font-size:0.78rem;">({{ company.rating_count }})</small></div>
+                                    <div class="sf-metric-lbl">Calificación</div>
                                 </div>
                             </div>
 
@@ -1665,7 +1989,7 @@
                                 </div>
                                 <div>
                                     <div class="sf-metric-val">{{ items_count }}</div>
-                                    <div class="sf-metric-lbl">Productos en Stock</div>
+                                    <div class="sf-metric-lbl">En Stock</div>
                                 </div>
                             </div>
 
@@ -1675,7 +1999,7 @@
                                 </div>
                                 <div>
                                     <div class="sf-metric-val">100% App</div>
-                                    <div class="sf-metric-lbl">Compra Protegida CartMaker</div>
+                                    <div class="sf-metric-lbl">Compra Protegida</div>
                                 </div>
                             </div>
                         </div>
@@ -1750,7 +2074,7 @@
             </section>
 
             <!-- =========================================================
-                 CABECERA DEL CATÁLOGO + SELECTOR DE MONEDA (USD + Bs / Solo USD / Solo Bs)
+                 CABECERA DEL CATÁLOGO + SELECTOR DE MONEDA (USD + Bs / Solo USD)
                  UBICADO JUSTO ARRIBA DEL CATÁLOGO PARA MÁXIMA ERGONOMÍA
                  ========================================================= -->
             <section id="catalogoSection">
@@ -1783,9 +2107,6 @@
                             <button type="button" class="sf-curr-btn" data-curr="USD" onclick="setCurrencyMode('USD')">
                                 <span>Solo USD</span>
                             </button>
-                            <button type="button" class="sf-curr-btn" data-curr="BS" onclick="setCurrencyMode('BS')">
-                                <span>Solo Bs</span>
-                            </button>
                         </div>
                     </div>
                 </div>
@@ -1797,7 +2118,7 @@
                     <div class="sf-filters-top">
                         <div class="sf-search-input-wrap">
                             <span class="material-symbols-rounded sf-search-icon">search</span>
-                            <input type="search" id="catalogSearchInput" class="sf-search-input" placeholder="Buscar producto, marca, talla, modelo o especificación en {{ company.name }}..." oninput="applyFilters()">
+                            <input type="search" id="catalogSearchInput" class="sf-search-input" placeholder="Buscar producto, marca, talla o modelo en {{ company.name }}..." oninput="applyFilters()">
                         </div>
 
                         <div class="sf-select-wrap">
@@ -1813,7 +2134,7 @@
 
                         <button type="button" class="sf-cart-trigger-btn" onclick="openCartDrawer()">
                             <span class="material-symbols-rounded">shopping_bag</span>
-                            <span>Mi Carrito (<span id="topCartCounter">0</span>)</span>
+                            <span>Carrito (<span id="topCartCounter">0</span>)</span>
                         </button>
                     </div>
 
@@ -1831,27 +2152,27 @@
          ========================================================= -->
     <div class="sf-floating-cart-bar" id="floatingCartBar">
         <div style="display:flex;align-items:center;gap:12px;">
-            <div class="brand-logo-box" style="width:42px;height:42px;flex-shrink:0;">
+            <div class="brand-logo-box" style="width:40px;height:40px;flex-shrink:0;">
                 <img src="{% static 'img/logo_sin_letras.svg' %}" alt="CartMaker" class="nav-logo-svg">
             </div>
             <div>
-                <div style="font-size:0.78rem;color:var(--sf-text-secondary);font-weight:600;">
-                    <span id="floatingCartItemsCount">0</span> productos listos para pedir en <strong>{{ company.name }}</strong>
+                <div style="font-size:0.76rem;color:var(--sf-text-secondary);font-weight:600;">
+                    <span id="floatingCartItemsCount">0</span> productos listos en <strong>{{ company.name }}</strong>
                 </div>
-                <div style="font-size:1.22rem;font-weight:800;color:var(--sf-text-primary);">
+                <div style="font-size:1.15rem;font-weight:800;color:var(--sf-text-primary);">
                     Total: <span id="floatingCartTotalUsd">$0.00</span>
-                    <small id="floatingCartTotalBs" style="font-size:0.84rem;color:#059669;margin-left:8px;font-weight:700;"></small>
+                    <small id="floatingCartTotalBs" style="font-size:0.8rem;color:#059669;margin-left:6px;font-weight:700;"></small>
                 </div>
             </div>
         </div>
-        <div style="display:flex;gap:10px;align-items:center;">
-            <button type="button" class="sf-curr-btn" style="border:1px solid rgba(15,11,29,0.14);padding:10px 16px;" onclick="openCartDrawer()">
+        <div style="display:flex;gap:8px;align-items:center;">
+            <button type="button" class="sf-curr-btn" style="border:1px solid rgba(15,11,29,0.14);padding:10px 14px;" onclick="openCartDrawer()">
                 <span class="material-symbols-rounded" style="font-size:18px;">visibility</span>
                 <span>Ver Carrito</span>
             </button>
-            <button type="button" class="sf-checkout-app-btn" onclick="proceedToCartMakerAppCheckout()">
+            <button type="button" class="sf-checkout-app-btn" style="flex:1;" onclick="proceedToCartMakerAppCheckout()">
                 <span class="material-symbols-rounded">rocket_launch</span>
-                <span>Completar Compra en CartMaker App</span>
+                <span>Comprar en CartMaker App</span>
             </button>
         </div>
     </div>
@@ -1960,7 +2281,7 @@
             onlyTokens: false,
             searchQuery: '',
             sortBy: 'featured',
-            currencyMode: 'BOTH', // 'BOTH' | 'USD' | 'BS'
+            currencyMode: 'BOTH', // 'BOTH' | 'USD'
             cart: [],
             activeModalItem: null,
             activeVariantIdx: 0,
@@ -1973,6 +2294,22 @@
             userLng: null,
         };
 
+        /* Auto-recuperación de imágenes subidas cuando el servidor operaba en modo local (/media/) antes de S3 */
+        function handleStorefrontImgError(imgEl) {
+            if (!imgEl) return;
+            const currentSrc = imgEl.getAttribute('src') || '';
+            if (!imgEl.dataset.triedLocalMedia && currentSrc.includes('amazonaws.com/')) {
+                const parts = currentSrc.split('amazonaws.com/');
+                if (parts.length > 1 && parts[1]) {
+                    imgEl.dataset.triedLocalMedia = '1';
+                    imgEl.src = '/media/' + parts[1].replace(/^\/+/, '');
+                    return;
+                }
+            }
+            imgEl.onerror = null;
+            imgEl.src = '/static/img/no_image.jpg';
+        }
+
         /* =========================================================
            1. MOTOR DE DIBUJO EN CANVAS HTML5 POR CATEGORÍA DE TIENDA
            ========================================================= */
@@ -1982,7 +2319,7 @@
             const ctx = canvas.getContext('2d');
             const mode = (STOREFRONT_DATA.theme && STOREFRONT_DATA.theme.canvas_mode) || 'atlas_radar';
             const primaryHex = (STOREFRONT_DATA.theme && STOREFRONT_DATA.theme.accent_primary) || '#6D49F2';
-            const secondaryHex = (STOREFRONT_DATA.theme && STOREFRONT_DATA.theme.accent_secondary) || '#06B6D4';
+            const secondaryHex = (STOREFRONT_DATA.theme && STOREFRONT_DATA.theme.accent_secondary) || '#7C3AED';
 
             let width = 0;
             let height = 0;
@@ -2145,7 +2482,7 @@
         }
 
         /* =========================================================
-           2. FORMATO DE MONEDA (USD + Bs / Solo USD / Solo Bs)
+           2. FORMATO DE MONEDA (USD + Bs / Solo USD)
            ========================================================= */
         function formatPriceHtml(usdVal) {
             const usd = Number(usdVal || 0);
@@ -2155,18 +2492,14 @@
             if (state.currencyMode === 'USD' || bcv <= 0) {
                 return `<div class="sf-price-main">$${usd.toFixed(2)}</div>`;
             }
-            if (state.currencyMode === 'BS') {
-                return `<div class="sf-price-main">Bs. ${bs.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</div>
-                        <div class="sf-price-bs">Ref. $${usd.toFixed(2)} USD</div>`;
-            }
             return `<div class="sf-price-main">$${usd.toFixed(2)}</div>
                     <div class="sf-price-bs">Bs. ${bs.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</div>`;
         }
 
         function setCurrencyMode(mode) {
-            state.currencyMode = mode;
+            state.currencyMode = mode === 'USD' ? 'USD' : 'BOTH';
             document.querySelectorAll('.sf-curr-btn[data-curr]').forEach(btn => {
-                btn.classList.toggle('active', btn.getAttribute('data-curr') === mode);
+                btn.classList.toggle('active', btn.getAttribute('data-curr') === state.currencyMode);
             });
             applyFilters();
             updateFloatingCartBar();
@@ -2210,11 +2543,11 @@
 
             if (branch.is_currently_open) {
                 statusEl.className = 'sf-chip chip-open';
-                statusEl.innerHTML = `<span class="material-symbols-rounded icon-filled">check_circle</span><span>Abierto Ahora${scheduleStr ? ' · ' + scheduleStr : ''}</span>`;
+                statusEl.innerHTML = `<span class="material-symbols-rounded icon-filled">check_circle</span><span>Abierto${scheduleStr ? ' · ' + scheduleStr : ''}</span>`;
                 if (topDot) topDot.classList.remove('closed');
             } else {
                 statusEl.className = 'sf-chip chip-closed';
-                statusEl.innerHTML = `<span class="material-symbols-rounded">schedule</span><span>Cerrado ahora${scheduleStr ? ' · Horario: ' + scheduleStr : ''}</span>`;
+                statusEl.innerHTML = `<span class="material-symbols-rounded">schedule</span><span>Cerrado${scheduleStr ? ' · ' + scheduleStr : ''}</span>`;
                 if (topDot) topDot.classList.add('closed');
             }
 
@@ -2271,7 +2604,7 @@
                 pinEl.className = 'cm-mapbox-pin';
                 pinEl.innerHTML = `
                     <div class="cm-mapbox-pin-bubble">
-                        <img src="${avatarUrl}" alt="${b.name}" onerror="this.src='/static/img/no_image.jpg'">
+                        <img src="${avatarUrl}" alt="${b.name}" onerror="handleStorefrontImgError(this)">
                     </div>
                     <div class="cm-mapbox-pin-tip"></div>
                 `;
@@ -2358,7 +2691,6 @@
             const mbToken = STOREFRONT_DATA.mapbox_api_key || '';
 
             try {
-                // 1. Intentamos primero con Mapbox Directions API oficial
                 const mbUrl = `https://api.mapbox.com/directions/v5/mapbox/driving/${uLng},${uLat};${sLng},${sLat}?geometries=geojson&overview=full&access_token=${mbToken}`;
                 const resp = await fetch(mbUrl);
                 if (resp.ok) {
@@ -2436,7 +2768,7 @@
             container.innerHTML = stories.map((st, idx) => `
                 <div class="sf-story-item" onclick="openStoryModal(${idx})">
                     <div class="sf-story-ring">
-                        <img src="${st.thumbnail_url || STOREFRONT_DATA.company.image || '/static/img/no_image.jpg'}" class="sf-story-thumb" alt="Story">
+                        <img src="${st.thumbnail_url || STOREFRONT_DATA.company.image || '/static/img/no_image.jpg'}" class="sf-story-thumb" alt="Story" onerror="handleStorefrontImgError(this)">
                         <span class="sf-story-play-badge">
                             <span class="material-symbols-rounded icon-filled">play_arrow</span>
                         </span>
@@ -2473,8 +2805,19 @@
         }
 
         /* =========================================================
-           5. FILTROS Y GRILLA DE PRODUCTOS CON ICONOS VECTORIALES
+           5. FILTROS Y GRILLA DE PRODUCTOS CON DATOS REALES DE GAMIFICACIÓN
            ========================================================= */
+        function getMaxTokenDiscountPct(productObj) {
+            if (!productObj || !productObj.discounts_by_tokens_active) return 0;
+            const tiers = Array.isArray(productObj.discounts_data) ? productObj.discounts_data : [];
+            let maxPct = 0;
+            tiers.forEach(t => {
+                const d = Number(t.discount || t.percentage || 0);
+                if (d > maxPct) maxPct = d;
+            });
+            return maxPct;
+        }
+
         function renderSubcategoryPills() {
             const subs = STOREFRONT_DATA.subcategories || [];
             const container = document.getElementById('subcategoryPillsContainer');
@@ -2488,8 +2831,8 @@
             </button>`;
             if (STOREFRONT_DATA.company.gamification_enabled) {
                 html += `<button type="button" class="sf-filter-pill ${state.onlyTokens ? 'active' : ''}" onclick="toggleTokensFilter()">
-                    <span class="material-symbols-rounded">toll</span>
-                    <span>Acepta Tokens</span>
+                    <span class="cm-token-coin"><span class="material-symbols-rounded icon-filled">star</span></span>
+                    <span>Descuento con Tokens</span>
                 </button>`;
             }
             subs.forEach(sc => {
@@ -2562,31 +2905,42 @@
             const grid = document.getElementById('productsGridContainer');
             if (!items.length) {
                 grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:52px 20px;background:#FFFFFF;border-radius:24px;border:1px solid rgba(15,11,29,0.08);">
-                    <span class="material-symbols-rounded" style="font-size:44px;color:var(--sf-accent-primary);margin-bottom:8px;">search_off</span>
+                    <span class="material-symbols-rounded" style="font-size:44px;color:var(--cm-primary-purple);margin-bottom:8px;">search_off</span>
                     <h3 style="margin-bottom:6px;">No encontramos productos con esos filtros</h3>
                     <p style="color:var(--sf-text-secondary);font-size:0.9rem;">Prueba limpiando tu búsqueda o seleccionando Todas las Sedes.</p>
                 </div>`;
                 return;
             }
 
+            const gamificationActive = Boolean(STOREFRONT_DATA.company && STOREFRONT_DATA.company.gamification_enabled);
+            const ratePerDollar = Number((STOREFRONT_DATA.company && STOREFRONT_DATA.company.gamification_tokens_per_dollar) || 0);
+
             grid.innerHTML = items.map(it => {
                 const p = it.product || {};
                 const img = (p.images && p.images[0]) ? p.images[0] : '/static/img/no_image.jpg';
                 const hasOffer = Number(it.offer_percentage || 0) > 0;
                 const acceptsTokens = Boolean(p.discounts_by_tokens_active);
-                const attrEntries = Object.entries(p.attributes || {}).slice(0, 3);
+                const maxTokenPct = getMaxTokenDiscountPct(p);
+                const estTokens = (gamificationActive && ratePerDollar > 0)
+                    ? Math.floor(Number(it.effective_price || 0) * ratePerDollar)
+                    : 0;
+                const attrEntries = Object.entries(p.attributes || {}).slice(0, 2);
                 const specsHtml = attrEntries.map(([k, v]) => `<span class="sf-spec-chip">${k}: ${v}</span>`).join('');
+
+                const tokenBadgeLabel = maxTokenPct > 0
+                    ? `Canjea hasta -${maxTokenPct}%`
+                    : `Descuento con Tokens`;
 
                 return `
                 <article class="sf-product-card" onclick="openProductModal('${it.id}')">
                     <div class="sf-product-media">
-                        <img src="${img}" alt="${p.name}" class="sf-product-img" loading="lazy" onerror="this.src='/static/img/no_image.jpg'">
+                        <img src="${img}" alt="${p.name}" class="sf-product-img" loading="lazy" onerror="handleStorefrontImgError(this)">
                         <div class="sf-card-top-badges">
                             <div>
                                 ${hasOffer ? `<span class="sf-offer-tag"><span class="material-symbols-rounded">bolt</span> -${it.offer_percentage}%</span>` : ''}
                             </div>
                             <div>
-                                ${acceptsTokens ? `<span class="sf-token-tag"><span class="material-symbols-rounded icon-filled">toll</span> Canje Tokens</span>` : ''}
+                                ${acceptsTokens ? `<span class="sf-token-tag"><span class="cm-token-coin"><span class="material-symbols-rounded icon-filled">star</span></span> <span>${tokenBadgeLabel}</span></span>` : ''}
                             </div>
                         </div>
                     </div>
@@ -2597,6 +2951,12 @@
                         </div>
                         <h3 class="sf-product-title">${p.name}</h3>
                         ${specsHtml ? `<div class="sf-specs-preview">${specsHtml}</div>` : ''}
+                        ${estTokens > 0 ? `
+                            <div class="sf-token-earn-hint" title="Ganas Tokens reales según la configuración del comerciante para canjear descuentos">
+                                <span class="cm-token-coin" style="width:15px;height:15px;"><span class="material-symbols-rounded icon-filled" style="font-size:10px !important;">star</span></span>
+                                <span>Ganas +${estTokens} Tokens para descuentos</span>
+                            </div>
+                        ` : ''}
                         <div class="sf-price-row">
                             <div>
                                 ${formatPriceHtml(it.effective_price)}
@@ -2613,7 +2973,7 @@
         }
 
         /* =========================================================
-           6. MODAL INTERACTIVO DE PRODUCTO (SDUI VARIANTES & EXTRAS)
+           6. MODAL INTERACTIVO DE PRODUCTO (SDUI VARIANTES & DESCUENTOS REALES POR TOKENS)
            ========================================================= */
         function openProductModal(itemId) {
             const item = (STOREFRONT_DATA.items || []).find(x => String(x.id) === String(itemId));
@@ -2638,12 +2998,17 @@
                 unitPrice = Number(variants[state.activeVariantIdx].price);
             }
             const lineTotal = unitPrice * state.activeQty;
-            const tokensEarned = STOREFRONT_DATA.company.gamification_enabled
-                ? Math.round(lineTotal * Number(STOREFRONT_DATA.company.gamification_tokens_per_dollar || 0))
+            const ratePerDollar = Number((STOREFRONT_DATA.company && STOREFRONT_DATA.company.gamification_tokens_per_dollar) || 0);
+            const tokensEarned = (STOREFRONT_DATA.company && STOREFRONT_DATA.company.gamification_enabled && ratePerDollar > 0)
+                ? Math.floor(lineTotal * ratePerDollar)
                 : 0;
 
+            const discountTiers = (p.discounts_by_tokens_active && Array.isArray(p.discounts_data))
+                ? p.discounts_data.filter(t => Number(t.tokens || 0) > 0 && Number(t.discount || 0) > 0)
+                : [];
+
             const variantsHtml = variants.length ? `
-                <div style="margin-top:14px;">
+                <div style="margin-top:12px;">
                     <div style="font-size:0.8rem;font-weight:700;margin-bottom:6px;">Selecciona Variante / Presentación:</div>
                     <div>
                         ${variants.map((v, i) => `
@@ -2656,23 +3021,56 @@
             ` : '';
 
             const attrsHtml = attrs.length ? `
-                <div style="margin-top:14px;display:grid;grid-template-columns:repeat(2,1fr);gap:8px;">
+                <div style="margin-top:12px;display:grid;grid-template-columns:repeat(2,1fr);gap:8px;">
                     ${attrs.map(([k, v]) => `
-                        <div style="background:var(--sf-bg-primary);padding:9px 12px;border-radius:12px;border:1px solid rgba(15,11,29,0.08);font-size:0.8rem;">
-                            <span style="color:var(--sf-text-secondary);display:block;font-size:0.72rem;">${k}</span>
+                        <div style="background:var(--sf-bg-primary);padding:8px 11px;border-radius:12px;border:1px solid rgba(15,11,29,0.08);font-size:0.78rem;">
+                            <span style="color:var(--sf-text-secondary);display:block;font-size:0.7rem;">${k}</span>
                             <strong>${v}</strong>
                         </div>
                     `).join('')}
                 </div>
             ` : '';
 
+            const tokenTiersHtml = discountTiers.length ? `
+                <div style="margin-top:8px;padding-top:8px;border-top:1px dashed rgba(245,158,11,0.35);">
+                    <div style="font-size:0.75rem;font-weight:800;color:#92400E;margin-bottom:6px;">
+                        Descuentos configurados en este producto al canjear tus Tokens:
+                    </div>
+                    <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                        ${discountTiers.map(tier => {
+                            const pct = Number(tier.discount || 0);
+                            const reqTokens = Number(tier.tokens || 0);
+                            const finalUsd = Math.max(0, unitPrice * (1 - pct / 100));
+                            return `
+                                <span style="display:inline-flex;align-items:center;gap:5px;background:#FFFFFF;border:1px solid rgba(245,158,11,0.45);border-radius:10px;padding:4px 9px;font-size:0.74rem;font-weight:700;color:#B45309;">
+                                    <span class="cm-token-coin" style="width:15px;height:15px;"><span class="material-symbols-rounded icon-filled" style="font-size:10px !important;">star</span></span>
+                                    <span>${reqTokens} Tokens = <strong>-${pct}%</strong> ($${finalUsd.toFixed(2)})</span>
+                                </span>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            ` : '';
+
+            const gamificationBoxHtml = (tokensEarned > 0 || discountTiers.length > 0) ? `
+                <div style="margin-top:14px;background:rgba(245,158,11,0.09);border:1px solid rgba(245,158,11,0.32);border-radius:14px;padding:11px 13px;">
+                    ${tokensEarned > 0 ? `
+                        <div style="font-size:0.8rem;color:#B45309;font-weight:700;display:flex;align-items:center;gap:8px;">
+                            <span class="cm-token-coin coin-lg"><span class="material-symbols-rounded icon-filled">star</span></span>
+                            <span>Con esta compra acumulas <strong>+${tokensEarned} Tokens</strong> (${ratePerDollar} Tokens por cada $1) <strong>para canjear descuentos</strong> en ${STOREFRONT_DATA.company.name}.</span>
+                        </div>
+                    ` : ''}
+                    ${tokenTiersHtml}
+                </div>
+            ` : '';
+
             document.getElementById('productModalContent').innerHTML = `
                 <div class="sf-detail-grid">
                     <div>
-                        <img src="${images[0]}" id="modalMainImg" alt="${p.name}" style="width:100%;border-radius:18px;aspect-ratio:1/1;object-fit:cover;border:1px solid rgba(15,11,29,0.08);">
+                        <img src="${images[0]}" id="modalMainImg" alt="${p.name}" class="sf-modal-main-img" onerror="handleStorefrontImgError(this)">
                         ${images.length > 1 ? `
-                            <div style="display:flex;gap:8px;margin-top:10px;overflow-x:auto;">
-                                ${images.map(u => `<img src="${u}" onclick="document.getElementById('modalMainImg').src='${u}'" style="width:60px;height:60px;border-radius:10px;object-fit:cover;cursor:pointer;border:1px solid rgba(15,11,29,0.12);">`).join('')}
+                            <div style="display:flex;gap:8px;margin-top:8px;overflow-x:auto;">
+                                ${images.map(u => `<img src="${u}" onclick="document.getElementById('modalMainImg').src=this.src" onerror="handleStorefrontImgError(this)" style="width:54px;height:54px;border-radius:10px;object-fit:cover;cursor:pointer;border:1px solid rgba(15,11,29,0.12);">`).join('')}
                             </div>
                         ` : ''}
                     </div>
@@ -2681,36 +3079,30 @@
                             <span class="material-symbols-rounded">storefront</span>
                             <span>${p.category?.name || 'Catálogo'} · Sede ${item.store_name}</span>
                         </span>
-                        <h2 class="sf-heading" style="font-size:1.55rem;margin:10px 0 6px;">${p.name}</h2>
-                        <div style="margin-bottom:10px;">
+                        <h2 class="sf-heading" style="font-size:1.38rem;margin:8px 0 6px;">${p.name}</h2>
+                        <div style="margin-bottom:8px;">
                             ${formatPriceHtml(unitPrice)}
                             <small style="color:var(--sf-text-secondary);font-weight:600;display:inline-flex;align-items:center;gap:4px;margin-top:4px;">
                                 <span class="material-symbols-rounded" style="font-size:15px;color:#059669;">inventory_2</span>
                                 Stock disponible: ${item.stock} ${p.unit_label || 'und'}
                             </small>
                         </div>
-                        <p style="font-size:0.9rem;color:var(--sf-text-secondary);margin-bottom:12px;">${p.description || ''}</p>
+                        <p style="font-size:0.86rem;color:var(--sf-text-secondary);margin-bottom:10px;">${p.description || ''}</p>
                         ${variantsHtml}
                         ${attrsHtml}
+                        ${gamificationBoxHtml}
 
-                        <div style="margin-top:18px;display:flex;align-items:center;gap:12px;">
+                        <div style="margin-top:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
                             <div style="display:inline-flex;align-items:center;background:var(--sf-bg-primary);border:1px solid rgba(15,11,29,0.12);border-radius:12px;">
                                 <button type="button" style="border:none;background:transparent;color:inherit;padding:10px 14px;font-weight:800;cursor:pointer;" onclick="adjustModalQty(-1)">−</button>
-                                <span style="padding:0 12px;font-weight:800;">${state.activeQty} ${p.unit_label || ''}</span>
+                                <span style="padding:0 10px;font-weight:800;font-size:0.9rem;">${state.activeQty} ${p.unit_label || ''}</span>
                                 <button type="button" style="border:none;background:transparent;color:inherit;padding:10px 14px;font-weight:800;cursor:pointer;" onclick="adjustModalQty(1)">+</button>
                             </div>
-                            <button type="button" class="sf-checkout-app-btn" style="flex:1;justify-content:center;" onclick="addModalItemToCart()">
+                            <button type="button" class="sf-checkout-app-btn" style="flex:1;min-width:190px;justify-content:center;" onclick="addModalItemToCart()">
                                 <span class="material-symbols-rounded">add_shopping_cart</span>
-                                <span>Agregar al Carrito ($${lineTotal.toFixed(2)})</span>
+                                <span>Agregar ($${lineTotal.toFixed(2)})</span>
                             </button>
                         </div>
-
-                        ${tokensEarned > 0 ? `
-                            <div style="margin-top:12px;font-size:0.8rem;color:#B45309;font-weight:700;display:flex;align-items:center;gap:6px;">
-                                <span class="material-symbols-rounded icon-filled" style="color:#F59E0B;font-size:18px;">toll</span>
-                                <span>Al completar esta compra en la App de CartMaker ganas +${tokensEarned} Tokens en ${STOREFRONT_DATA.company.name}.</span>
-                            </div>
-                        ` : ''}
                     </div>
                 </div>
             `;
@@ -2806,7 +3198,7 @@
             if (!state.cart.length) {
                 container.innerHTML = `
                     <div style="text-align:center;padding:30px 10px;">
-                        <span class="material-symbols-rounded" style="font-size:48px;color:var(--sf-accent-primary);margin-bottom:8px;">shopping_bag</span>
+                        <span class="material-symbols-rounded" style="font-size:48px;color:var(--cm-primary-purple);margin-bottom:8px;">shopping_bag</span>
                         <h3 class="sf-heading" style="font-size:1.4rem;margin-bottom:8px;">Tu carrito está vacío</h3>
                         <p style="color:var(--sf-text-secondary);font-size:0.9rem;">Agrega productos del catálogo de ${STOREFRONT_DATA.company.name} para sincronizarlos con tu App de CartMaker.</p>
                     </div>`;
@@ -2816,14 +3208,18 @@
             const totalUsd = state.cart.reduce((acc, c) => acc + c.unit_price_usd * c.quantity, 0);
             const bcv = Number(STOREFRONT_DATA.bcv_rate || 0);
             const totalBs = bcv > 0 ? (totalUsd * bcv) : 0;
+            const ratePerDollar = Number((STOREFRONT_DATA.company && STOREFRONT_DATA.company.gamification_tokens_per_dollar) || 0);
+            const totalTokens = (STOREFRONT_DATA.company && STOREFRONT_DATA.company.gamification_enabled && ratePerDollar > 0)
+                ? Math.floor(totalUsd * ratePerDollar)
+                : 0;
 
             const rowsHtml = state.cart.map((c, idx) => `
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid rgba(15,11,29,0.08);">
                     <div style="display:flex;align-items:center;gap:12px;">
-                        <img src="${c.image_url}" style="width:52px;height:52px;border-radius:12px;object-fit:cover;border:1px solid rgba(15,11,29,0.08);">
+                        <img src="${c.image_url}" onerror="handleStorefrontImgError(this)" style="width:52px;height:52px;border-radius:12px;object-fit:cover;border:1px solid rgba(15,11,29,0.08);">
                         <div>
-                            <div style="font-weight:700;font-size:0.92rem;">${c.name}</div>
-                            <div style="font-size:0.78rem;color:var(--sf-text-secondary);">
+                            <div style="font-weight:700;font-size:0.9rem;">${c.name}</div>
+                            <div style="font-size:0.76rem;color:var(--sf-text-secondary);">
                                 ${c.quantity} ${c.unit_label} × $${c.unit_price_usd.toFixed(2)}
                                 ${c.selected_variant ? ` · (${c.selected_variant.name || ''})` : ''}
                             </div>
@@ -2843,16 +3239,23 @@
                     <span class="material-symbols-rounded">verified_user</span>
                     <span>Checkout Protegido Exclusivo en CartMaker App</span>
                 </span>
-                <h2 class="sf-heading" style="font-size:1.5rem;margin-bottom:12px;">Tu Pedido en ${STOREFRONT_DATA.company.name}</h2>
-                <div style="max-height:260px;overflow-y:auto;margin-bottom:16px;">${rowsHtml}</div>
+                <h2 class="sf-heading" style="font-size:1.45rem;margin-bottom:12px;">Tu Pedido en ${STOREFRONT_DATA.company.name}</h2>
+                <div style="max-height:240px;overflow-y:auto;margin-bottom:14px;">${rowsHtml}</div>
 
-                <div style="background:var(--sf-bg-primary);padding:14px 16px;border-radius:16px;border:1px solid rgba(15,11,29,0.08);display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <div style="background:var(--sf-bg-primary);padding:14px 16px;border-radius:16px;border:1px solid rgba(15,11,29,0.08);display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
                     <div>
-                        <div style="font-size:0.78rem;color:var(--sf-text-secondary);font-weight:600;">Monto Total Estimado</div>
-                        <div style="font-size:1.35rem;font-weight:800;">$${totalUsd.toFixed(2)} USD</div>
+                        <div style="font-size:0.76rem;color:var(--sf-text-secondary);font-weight:600;">Monto Total Estimado</div>
+                        <div style="font-size:1.3rem;font-weight:800;">$${totalUsd.toFixed(2)} USD</div>
                     </div>
                     ${totalBs > 0 ? `<div style="text-align:right;font-weight:800;color:#059669;">Bs. ${totalBs.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</div>` : ''}
                 </div>
+
+                ${totalTokens > 0 ? `
+                    <div style="margin-bottom:14px;background:rgba(245,158,11,0.10);border:1px solid rgba(245,158,11,0.32);border-radius:12px;padding:9px 12px;display:flex;align-items:center;gap:8px;font-size:0.78rem;font-weight:700;color:#B45309;">
+                        <span class="cm-token-coin"><span class="material-symbols-rounded icon-filled">star</span></span>
+                        <span>Con este pedido ganas <strong>+${totalTokens} Tokens</strong> para canjear descuentos en ${STOREFRONT_DATA.company.name}.</span>
+                    </div>
+                ` : ''}
 
                 <div id="handoffDynamicZone">
                     <button type="button" class="sf-checkout-app-btn" style="width:100%;justify-content:center;padding:15px;" onclick="proceedToCartMakerAppCheckout()">
@@ -2865,7 +3268,7 @@
                     <span class="material-symbols-rounded">shield_lock</span>
                     <div>
                         <strong>¿Por qué el pago se completa únicamente en la App de CartMaker?</strong><br>
-                        En CartMaker protegemos tu dinero, reservamos el stock en tiempo real en la sucursal y te acreditamos tus <strong>Tokens de Fidelidad</strong> automáticamente.
+                        En CartMaker protegemos tu dinero, reservamos el stock en tiempo real en la sucursal y te acreditamos tus <strong>Tokens de Fidelidad</strong> para canjear descuentos automáticamente.
                     </div>
                 </div>
             `;
@@ -2912,13 +3315,13 @@
             if (!zone) return;
             state.handoffResult = handoffData;
             zone.innerHTML = `
-                <div style="text-align:center;background:var(--sf-bg-primary);border:1px solid var(--sf-accent-primary);border-radius:18px;padding:18px;">
-                    <div style="font-weight:800;font-size:1.05rem;margin-bottom:6px;display:flex;align-items:center;justify-content:center;gap:6px;color:#059669;">
+                <div style="text-align:center;background:var(--sf-bg-primary);border:1px solid var(--cm-primary-purple);border-radius:18px;padding:18px;">
+                    <div style="font-weight:800;font-size:1.02rem;margin-bottom:6px;display:flex;align-items:center;justify-content:center;gap:6px;color:#059669;">
                         <span class="material-symbols-rounded icon-filled">check_circle</span>
                         <span>¡Tu carrito está listo para abrirse en CartMaker!</span>
                     </div>
-                    <p style="font-size:0.84rem;color:var(--sf-text-secondary);margin-bottom:14px;">
-                        Si estás en tu teléfono, toca el botón de abajo. Si estás en computadora, escanea el QR con tu celular para abrir tu pedido en la App.
+                    <p style="font-size:0.82rem;color:var(--sf-text-secondary);margin-bottom:14px;">
+                        Si estás en tu teléfono, toca el botón morado. Si estás en computadora, escanea el QR con la cámara de tu celular para abrir tu pedido en la App.
                     </p>
                     <a href="${handoffData.app_deep_link}" class="sf-checkout-app-btn" style="width:100%;justify-content:center;text-decoration:none;margin-bottom:12px;">
                         <span class="material-symbols-rounded">smartphone</span>
@@ -2931,7 +3334,7 @@
                     <div>
                         <div class="sf-qr-box" id="handoffQrContainer"></div>
                     </div>
-                    <div style="margin-top:10px;font-size:0.78rem;color:var(--sf-text-secondary);">
+                    <div style="margin-top:10px;font-size:0.76rem;color:var(--sf-text-secondary);">
                         Código de Carrito: <strong style="color:var(--sf-text-primary);font-family:var(--font-mono);">${handoffData.token}</strong>
                     </div>
                 </div>
@@ -2949,6 +3352,37 @@
                 ? state.handoffResult.app_deep_link
                 : (state.handoffResult.web_resume_url || state.handoffResult.app_deep_link);
             drawQrCode('handoffQrContainer', targetPayload);
+        }
+
+        function getActiveStoreDeepLink() {
+            const companyId = (STOREFRONT_DATA.company && STOREFRONT_DATA.company.id) || '';
+            if (state.activeModalItem && state.activeModalItem.id) {
+                const stId = state.activeModalItem.store_id_str || STOREFRONT_DATA.initial_store_id || '';
+                return `cartmaker://product/${state.activeModalItem.id}?store_id=${stId}&company_id=${companyId}`;
+            }
+            if (STOREFRONT_DATA.highlight_item_id) {
+                const hlItem = (STOREFRONT_DATA.items || []).find(x => String(x.id) === String(STOREFRONT_DATA.highlight_item_id));
+                const stId = (hlItem && hlItem.store_id_str) || STOREFRONT_DATA.initial_store_id || '';
+                return `cartmaker://product/${STOREFRONT_DATA.highlight_item_id}?store_id=${stId}&company_id=${companyId}`;
+            }
+            const activeStoreId = (state.selectedBranchId && state.selectedBranchId !== 'ALL')
+                ? state.selectedBranchId
+                : (STOREFRONT_DATA.initial_store_id || ((STOREFRONT_DATA.branches && STOREFRONT_DATA.branches[0]) ? STOREFRONT_DATA.branches[0].id : companyId));
+            return `cartmaker://store/${activeStoreId}?company_id=${companyId}`;
+        }
+
+        function triggerPrimaryAppOpen(event) {
+            if (event) event.preventDefault();
+            if (state.cart.length > 0) {
+                proceedToCartMakerAppCheckout();
+                return false;
+            }
+            if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '')) {
+                window.location.href = getActiveStoreDeepLink();
+                return false;
+            }
+            openQrStandeeModal();
+            return false;
         }
 
         function openAppHandoffModal() {
@@ -2975,7 +3409,7 @@
                             ${star} <span class="material-symbols-rounded icon-filled" style="font-size:15px;color:#F59E0B;">star</span>
                         </span>
                         <div style="flex:1;height:8px;background:#E2E8F0;border-radius:999px;overflow:hidden;">
-                            <div style="width:${pct}%;height:100%;background:var(--sf-accent-gradient);"></div>
+                            <div style="width:${pct}%;height:100%;background:var(--cm-btn-gradient);"></div>
                         </div>
                         <span style="width:36px;text-align:right;color:var(--sf-text-secondary);font-weight:600;">${c}</span>
                     </div>`;
@@ -3040,7 +3474,7 @@
         }
 
         /* =========================================================
-           9. INICIALIZACIÓN AL CARGAR LA VITRINA
+           9. INICIALIZACIÓN Y REDIRECCIÓN REACTIVA A CARTMAKER APP EN MÓVIL
            ========================================================= */
         document.addEventListener('DOMContentLoaded', () => {
             initCategoryCanvasStage();
@@ -3050,9 +3484,8 @@
             applyFilters();
             initInteractiveMap();
 
-            if (STOREFRONT_DATA.highlight_item_id) {
-                openProductModal(STOREFRONT_DATA.highlight_item_id);
-            }
+            const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+            const companyId = (STOREFRONT_DATA.company && STOREFRONT_DATA.company.id) || '';
 
             if (STOREFRONT_DATA.express_order_draft && Array.isArray(STOREFRONT_DATA.express_order_draft.items)) {
                 state.cart = STOREFRONT_DATA.express_order_draft.items.map((it, idx) => ({
@@ -3078,13 +3511,35 @@
                     app_deep_link: draftDeepLink,
                     web_resume_url: window.location.href,
                 });
-                // Si el usuario acaba de escanear el QR desde su teléfono y abrió /orden-express/<token>/,
-                // lanzamos automáticamente el deep link de CartMaker App sin requerir un toque extra.
-                if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '')) {
+                if (isMobileDevice) {
                     setTimeout(() => {
                         window.location.href = draftDeepLink;
                     }, 180);
                 }
+                return;
+            }
+
+            if (STOREFRONT_DATA.highlight_item_id) {
+                openProductModal(STOREFRONT_DATA.highlight_item_id);
+                if (isMobileDevice) {
+                    const itemId = STOREFRONT_DATA.highlight_item_id;
+                    const hlItem = (STOREFRONT_DATA.items || []).find(x => String(x.id) === String(itemId));
+                    const storeId = (hlItem && hlItem.store_id_str) || STOREFRONT_DATA.initial_store_id || '';
+                    setTimeout(() => {
+                        window.location.href = "cartmaker://product/" + itemId + "?store_id=" + storeId + "&company_id=" + companyId;
+                    }, 180);
+                }
+                return;
+            }
+
+            // Ruta de tienda (/t/<company_id>/ o /tienda/<company_id>/): auto-disparo en móvil a los 180ms
+            if (isMobileDevice && companyId) {
+                const storeId = (state.selectedBranchId && state.selectedBranchId !== 'ALL')
+                    ? state.selectedBranchId
+                    : (STOREFRONT_DATA.initial_store_id || ((STOREFRONT_DATA.branches && STOREFRONT_DATA.branches[0]) ? STOREFRONT_DATA.branches[0].id : companyId));
+                setTimeout(() => {
+                    window.location.href = "cartmaker://store/" + storeId + "?company_id=" + companyId;
+                }, 180);
             }
         });
     </script>
