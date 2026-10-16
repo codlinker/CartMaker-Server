@@ -658,6 +658,8 @@ def _build_storefront_context(
         'handoff_endpoint': f"/tienda/{company.id}/handoff-cart/",
     }
 
+    from django.core.serializers.json import DjangoJSONEncoder
+
     return {
         'company': company_data,
         'theme': theme,
@@ -665,7 +667,7 @@ def _build_storefront_context(
         'items_count': len(serialized_items),
         'bcv_rate': bcv_rate,
         'app_deep_link': app_deep_link,
-        'storefront_json': json.dumps(storefront_payload, ensure_ascii=False),
+        'storefront_json': json.dumps(storefront_payload, cls=DjangoJSONEncoder, ensure_ascii=False),
     }
 
 
