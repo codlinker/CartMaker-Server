@@ -5979,7 +5979,7 @@ class AtlasViewSet(viewsets.ViewSet):
     GUEST_HEADER = 'HTTP_X_CARTMAKER_GUEST'
 
     def get_permissions(self):
-        if self.action in ('guest_session', 'current_thread', 'message'):
+        if self.action in ('guest_session', 'current_thread', 'message', 'stage_radar', 'stage_radar_dash'):
             return [AllowAny()]
         return [IsAuthenticated()]
 
@@ -6266,7 +6266,7 @@ class AtlasViewSet(viewsets.ViewSet):
             is_premium = plan.tier == AtlasSubscriptionTier.PREMIUM and plan.valid_until and plan.valid_until >= timezone.now()
             free_left = self._get_free_interactions_left(request.user)
             latest_thread = AtlasThread.objects.filter(plan=plan).order_by('-id').first()
-            nombre_usuario = request.user.first_name if request.user.first_name else "mi pana"
+            nombre_usuario = request.user.first_name.strip() if request.user.first_name else ""
         else:
             token = self._guest_token_from_request(request)
             if not self._known_guest(token):
@@ -6277,7 +6277,14 @@ class AtlasViewSet(viewsets.ViewSet):
             is_premium = False
             free_left = self._anon_remaining(token, self._client_ip(request))
             latest_thread = AtlasThread.objects.filter(guest_key=token).order_by('-id').first()
-            nombre_usuario = "mi pana"
+            nombre_usuario = ""
+
+        starter_quick_actions = [
+            {"id": "qa_open_now", "label": "🟢 Abiertos ahora", "prompt": "Muéstrame tiendas y productos abiertos ahorita cerca de mi ubicación", "action_type": "STAGE_RADAR", "radar_params": {"intent": "FEED", "enfoque": "OPEN_NOW"}},
+            {"id": "qa_flash_offers", "label": "⚡ Ofertas Flash", "prompt": "¿Qué ofertas y descuentos hay cerca de mí hoy?", "action_type": "STAGE_RADAR", "radar_params": {"intent": "FEED", "enfoque": "FLASH_OFFERS"}},
+            {"id": "qa_tokens", "label": "🪙 Canjear Tokens", "prompt": "¿En qué productos puedo canjear o ganar tokens hoy?", "action_type": "STAGE_RADAR", "radar_params": {"intent": "FEED", "enfoque": "TOKEN_REWARDS"}},
+            {"id": "qa_smart_bundle", "label": "🛒 Armar compra inteligente", "prompt": "Ayúdame a armar una lista de mercado al mejor precio en mi zona", "action_type": "SEND_PROMPT"},
+        ]
 
         if not latest_thread:
             if request.user.is_authenticated:
@@ -6285,25 +6292,48 @@ class AtlasViewSet(viewsets.ViewSet):
             else:
                 latest_thread = AtlasThread.objects.create(guest_key=token, plan=None)
             
-            # 💡 2. BANCO DE SALUDOS INICIALES DINÁMICOS (Anti-bot)
+            saludo_nombre = f", {nombre_usuario}" if nombre_usuario else ""
+            # 💡 2. BANCO DE SALUDOS INICIALES DINÁMICOS (Naturales, sin muletillas prohibidas)
             saludos_templates = [
-                f"¡Epa, {nombre_usuario}! Qué fino tenerte por aquí. Soy Atlas. Dime qué andas buscando hoy y te lo consigo en las tiendas de tu zona en un dos por tres.",
-                f"¡Hola, {nombre_usuario}! Por aquí Atlas. Vengo a resolverte la vida con las compras. ¿Qué te hace falta hoy para buscártelo de una?",
-                f"¡Qué más, {nombre_usuario}! Te saluda Atlas. Estoy activo para cuadrarte las mejores ofertas y productos cerca de ti. ¿Por dónde empezamos?",
-                f"¡Epa, {nombre_usuario}! ¿Cómo va todo? Soy Atlas, tu contacto directo con los comercios de la zona. Cuéntame, ¿qué tienes en mente comprar hoy?",
-                f"¡Hola, {nombre_usuario}! Aquí Atlas reportándose. Estoy listo para rastrear el inventario de la zona y conseguirte exactamente lo que necesitas. ¿Qué buscas hoy?",
-                f"¡Qué bueno verte por acá, {nombre_usuario}! Soy Atlas. Si estás buscando algo específico o solo quieres ver qué hay de bueno en las tiendas hoy, avísame y nos movemos."
+                f"¡Epa{saludo_nombre}! Qué bueno tenerte por aquí. Soy Atlas. Dime qué andas buscando hoy y rastreo el inventario de tu zona al instante.",
+                f"¡Hola{saludo_nombre}! Por aquí Atlas. Estoy listo para conseguirte el mejor precio, armar tu mercado o mostrarte qué tiendas están abiertas ahorita.",
+                f"¡Qué más{saludo_nombre}! Te saluda Atlas. Dime qué producto necesitas o toca uno de los accesos rápidos para explorar el radar de tu zona.",
+                f"¡Hola{saludo_nombre}! Aquí Atlas reportándose. Cuéntame qué tienes en mente comprar hoy y te ubico las mejores opciones cerca de ti.",
             ]
             
-            # Selección aleatoria
             mensaje_bienvenida = random.choice(saludos_templates)
+            welcome_experience = {
+                "version": "2.0",
+                "ui_mode": "CONVERSATIONAL",
+                "cinematic_directive": {
+                    "animation_type": "IDLE_PULSE",
+                    "mood_theme": "DEFAULT",
+                    "auto_expand_map": False,
+                    "show_radar_pulse": False,
+                    "sound_haptic_cue": "SOFT_POP",
+                    "camera_keyframes": [],
+                    "target_bounding_box": None,
+                    "route_polyline_points": [],
+                },
+                "stores_map": [],
+                "comparison_highlights": None,
+                "smart_bundle": None,
+                "video_reels": [],
+                "token_opportunities": {
+                    "items_with_redeemable_discount": 0,
+                    "max_immediate_savings_usd": 0.0,
+                    "best_item_id": None,
+                },
+                "zone_transition": None,
+                "quick_actions": starter_quick_actions,
+            }
             
-            # Lo guardamos como si fuera una respuesta generada por la IA (origin=2)
             AtlasMessage.objects.create(
                 conversation=latest_thread,
-                origin=2, # 2 es tu constante ORIGIN_AI en AtlasManager
+                origin=2,
                 text=mensaje_bienvenida,
-                product_ids=[]
+                product_ids=[],
+                action_command={"action": "NONE", "atlas_experience": welcome_experience}
             )
             
         # 💡 FEATURE: PAGINACIÓN (Por defecto carga 15 mensajes)
@@ -6328,7 +6358,7 @@ class AtlasViewSet(viewsets.ViewSet):
         items_dict = {}
         if all_product_ids:
             # Traemos la info viva para respetar el stock actual y pausas
-            fresh_items = InventoryItem.objects.filter(id__in=all_product_ids).select_related('product', 'store__company')
+            fresh_items = InventoryItem.objects.filter(id__in=all_product_ids).select_related('product', 'store__company', 'store__mall')
             for item in fresh_items:
                 items_dict[str(item.id)] = item.get_json()
 
@@ -6341,19 +6371,19 @@ class AtlasViewSet(viewsets.ViewSet):
             if p_ids:
                 msg_type = 'products'
                 for pid in p_ids:
-                    if pid in items_dict:
-                        msg_products.append(items_dict[pid])
+                    if str(pid) in items_dict:
+                        msg_products.append(items_dict[str(pid)])
                     else:
-                        # Fallback: El item fue borrado o no existe
                         msg_products.append({"id": pid, "paused": True, "stock": 0})
 
-            # 💡 Aseguramos la integridad del JSON
             cmd = getattr(m, 'action_command', None)
             if isinstance(cmd, str):
                 try:
                     cmd = json.loads(cmd)
-                except:
+                except Exception:
                     cmd = None
+
+            msg_experience = cmd.get("atlas_experience") if isinstance(cmd, dict) else None
 
             messages_data.append({
                 "id": m.id,
@@ -6362,7 +6392,8 @@ class AtlasViewSet(viewsets.ViewSet):
                 "type": msg_type,
                 "products": msg_products if msg_products else None,
                 "creation": m.creation.isoformat(),
-                "action_command": cmd # 💡 Usamos la variable limpia
+                "action_command": cmd,
+                "atlas_experience": msg_experience,
             })
 
         if request.user.is_authenticated:
@@ -6378,6 +6409,7 @@ class AtlasViewSet(viewsets.ViewSet):
             'is_premium': is_premium,
             'daily_limit': daily_limit,
             'login_required': login_required,
+            'initial_quick_actions': starter_quick_actions,
             'messages': messages_data
         }, status=status.HTTP_200_OK)
 
@@ -6387,7 +6419,6 @@ class AtlasViewSet(viewsets.ViewSet):
     @action(detail=True, methods=['post'])
     def message(self, request, pk=None):
         text = request.data.get('text')
-        # 💡 EXTRAEMOS LA FOTO EN BASE64 DESDE EL JSON (Si existe)
         image_base64 = request.data.get('image_base64')
         
         if not text:
@@ -6430,9 +6461,8 @@ class AtlasViewSet(viewsets.ViewSet):
                 )
             atlas_user = None
 
-        # Flutter manda la coordenada: dispositivo si es invitado, ubicación elegida si hay sesión.
-        lat = float(request.data.get('lat', 0.0))
-        lng = float(request.data.get('lng', 0.0))
+        lat = float(request.data.get('lat', 0.0) or 0.0)
+        lng = float(request.data.get('lng', 0.0) or 0.0)
         user_locations = request.data.get('locations', []) or []
 
         atlas_manager = atlas.AtlasManager(
@@ -6443,16 +6473,36 @@ class AtlasViewSet(viewsets.ViewSet):
             seed=str(thread.id)
         )
 
-        # 💡 PASAMOS LA FOTO AL MOTOR DE ATLAS
         resultado = async_to_sync(atlas_manager.send_chat_message_async)(thread_id=thread.id, user_text=text, image_base64=image_base64)
         
         if not resultado.get('success'):
             if guest_token:
                 self._refund_anon(guest_token, guest_ip)
-            elif not is_premium:
-                try: cache.decr(f"cartmaker:atlas:daily_usage:{request.user.id}")
-                except: pass
+            else:
+                try:
+                    cache_key = f"cartmaker:atlas:daily_usage:{request.user.id}"
+                    current = cache.get(cache_key)
+                    if current and int(current) > 0:
+                        cache.decr(cache_key)
+                except Exception:
+                    pass
             return Response({'error': resultado.get('error')}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # 💡 ZERO-RESULTS QUOTA SHIELD: Si el usuario buscó un producto y no había stock en ninguna zona,
+        # no le penalizamos su cuota diaria.
+        quota_refunded = False
+        if resultado.get('zero_results_refund_eligible'):
+            quota_refunded = True
+            if guest_token:
+                self._refund_anon(guest_token, guest_ip)
+            else:
+                try:
+                    cache_key = f"cartmaker:atlas:daily_usage:{request.user.id}"
+                    current = cache.get(cache_key)
+                    if current and int(current) > 0:
+                        cache.decr(cache_key)
+                except Exception:
+                    pass
 
         if guest_token:
             free_left = self._anon_remaining(guest_token, guest_ip)
@@ -6463,7 +6513,6 @@ class AtlasViewSet(viewsets.ViewSet):
             daily_limit = self._get_daily_limit(request.user)
             login_required = False
             
-        # 💡 Nos aseguramos de imprimir para debuguear si está saliendo bien
         print(f"📦 [VIEWS] Comando enviado al Frontend: {resultado.get('action_command')}")
             
         return Response({
@@ -6472,9 +6521,125 @@ class AtlasViewSet(viewsets.ViewSet):
             'free_interactions_left': free_left,
             'daily_limit': daily_limit,
             'login_required': login_required,
+            'quota_refunded': quota_refunded,
             'injected_products': resultado.get('injected_products'),
-            'action_command': resultado.get('action_command')
+            'action_command': resultado.get('action_command'),
+            'atlas_experience': resultado.get('atlas_experience'),
         }, status=status.HTTP_200_OK)
+
+    # ------------------------------------------------------------------------
+    # ENDPOINT 0-TOKENS (<50ms): GET/POST /api/v1/atlas/stage_radar/
+    # Permite al Frontend disparar escaneos de radar, filtros rápidos, cambios
+    # de cámara en el mapa o armar combos SIN gastar tokens de Gemini ni cuota.
+    # ------------------------------------------------------------------------
+    def _handle_stage_radar(self, request):
+        data = request.data if request.method == 'POST' else request.query_params
+        try:
+            lat = float(data.get('lat', 0.0) or 0.0)
+            lng = float(data.get('lng', 0.0) or 0.0)
+        except (TypeError, ValueError):
+            lat, lng = 0.0, 0.0
+
+        user_locations = data.get('locations', []) if isinstance(data.get('locations'), list) else []
+        atlas_user = request.user if request.user.is_authenticated else None
+        seed = str(data.get('seed') or (atlas_user.id if atlas_user else 'stage-radar'))
+
+        intent = str(data.get('intent', 'FEED') or 'FEED').upper()
+        query = str(data.get('query', '') or '').strip()
+
+        def _to_bool(val, default=False):
+            if val is None:
+                return default
+            if isinstance(val, bool):
+                return val
+            return str(val).strip().lower() in ('1', 'true', 'yes', 'si', 'sí')
+
+        def _to_float(val):
+            try:
+                return float(val) if val is not None and val != '' else None
+            except (TypeError, ValueError):
+                return None
+
+        atlas_manager = atlas.AtlasManager(
+            user_lat=lat,
+            user_lng=lng,
+            user_locations=user_locations,
+            user=atlas_user,
+            seed=seed,
+        )
+
+        search_meta = {}
+        smart_bundle = None
+
+        if intent == 'SHOPPING_LIST':
+            raw_items = data.get('items') or []
+            if isinstance(raw_items, str):
+                raw_items = [x.strip() for x in raw_items.split(',') if x.strip()]
+            title = str(data.get('title') or 'Compra Inteligente Atlas')
+            budget_max_usd = _to_float(data.get('budget_max_usd'))
+            res_json, injected_products, action_command, smart_bundle = atlas_manager._execute_shopping_list(
+                items=raw_items,
+                titulo_plan=title,
+                presupuesto_max_usd=budget_max_usd,
+            )
+            search_meta = {
+                "intent": "SHOPPING_LIST",
+                "query": title,
+                "mode": "SMART_BUNDLE",
+                "ring_used_km": None,
+                "expanded": False,
+                "zone_transition": None,
+            }
+        elif intent == 'SEARCH' or query:
+            mode = str(data.get('mode') or 'BALANCED').upper()
+            res_json, injected_products, action_command, search_meta = atlas_manager._execute_search(
+                query=query,
+                mode=mode,
+                categoria=data.get('category') or data.get('categoria'),
+                tienda_o_empresa=data.get('company') or data.get('tienda_o_empresa'),
+                solo_abiertos_ahora=_to_bool(data.get('only_open_now') or data.get('solo_abiertos_ahora'), False),
+                solo_ofertas=_to_bool(data.get('only_offers') or data.get('solo_ofertas'), False),
+                solo_descuento_tokens=_to_bool(data.get('only_token_discounts') or data.get('solo_descuento_tokens'), False),
+                solo_canjeables_por_usuario=_to_bool(data.get('only_user_redeemable_tokens'), False),
+                precio_min=_to_float(data.get('min_price') or data.get('precio_min')),
+                precio_max=_to_float(data.get('max_price') or data.get('precio_max')),
+                unidad_venta=data.get('selling_unit') or data.get('unidad_venta'),
+                atributo_o_variante=data.get('variant_or_attribute') or data.get('atributo_o_variante'),
+                solo_centro_comercial=_to_bool(data.get('mall_only') or data.get('solo_centro_comercial'), False),
+            )
+        else:
+            enfoque = str(data.get('enfoque') or data.get('focus') or 'PERSONALIZED').upper()
+            res_json, injected_products, action_command, search_meta = atlas_manager._execute_feed(
+                enfoque=enfoque,
+                categoria=data.get('category') or data.get('categoria'),
+            )
+
+        atlas_experience = atlas_manager._build_atlas_experience(
+            injected_products=injected_products,
+            action_command=action_command,
+            search_meta=search_meta,
+            smart_bundle=smart_bundle,
+            user_text=query or intent,
+        )
+        if not isinstance(action_command, dict):
+            action_command = {"action": "NONE"}
+        action_command["atlas_experience"] = atlas_experience
+
+        return Response({
+            'success': True,
+            'zero_token_engine': True,
+            'injected_products': injected_products,
+            'action_command': action_command,
+            'atlas_experience': atlas_experience,
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get', 'post'], url_path='stage_radar')
+    def stage_radar(self, request):
+        return self._handle_stage_radar(request)
+
+    @action(detail=False, methods=['get', 'post'], url_path='stage-radar')
+    def stage_radar_dash(self, request):
+        return self._handle_stage_radar(request)
 
 class InventoryItemViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
