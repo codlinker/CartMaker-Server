@@ -1,6 +1,8 @@
-from datetime import datetime
+from datetime import datetime, timedelta
+import secrets
+from typing import Optional
 import uuid
-from django.db import models
+from django.db import models, transaction
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
 from django.contrib.gis.db import models as gis_models
 from pgvector.django import HnswIndex, VectorField
@@ -9,6 +11,7 @@ from django.conf import settings
 from .cos import storage_manager
 from colorfield.fields import ColorField
 from django.core.exceptions import ValidationError
+from django.core.cache import cache
 from django.utils import timezone
 from django.utils.html import mark_safe
 from decimal import Decimal
@@ -2237,15 +2240,7 @@ class AtlasPlusInvoice(models.Model):
                 full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
                 buyer_name = (full_name or user.email.split('@')[0]).upper()
                 if user.cedula_number:
-                    nat_prefix = 'V'
-                    if user.nacionality == UserNacionality.FOREIGNER:
-                        nat_prefix = 'E'
-                    elif user.nacionality == UserNacionality.JURIDICAL:
-                        nat_prefix = 'J'
-                    elif user.nacionality == UserNacionality.GOVERNMENT:
-                        nat_prefix = 'G'
-                    elif user.nacionality == UserNacionality.PASSPORT:
-                        nat_prefix = 'P'
+                    nat_prefix = 'E' if getattr(user, 'nacionality', 0) == UserNacionality.EXTRANJERO else 'V'
                     clean_ced = str(user.cedula_number).strip().upper()
                     if clean_ced and clean_ced[0] in ('V', 'E', 'J', 'G', 'P'):
                         buyer_document = clean_ced
