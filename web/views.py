@@ -311,7 +311,7 @@ def payments_dashboard_view(request):
         invoices_usd_sum = round(approved_atlas_count * atlas_target_usd, 2)
 
     billing_issuer = system_config.get_billing_issuer_json()
-    bank_accounts = list(CartMakerBankAccount.objects.filter(is_active=True).order_by('bank_code', 'id'))
+    bank_accounts = list(CartMakerBankAccount.objects.filter(active=True).order_by('bank', 'id'))
 
     rejection_choices = [
         {'id': int(choice[0]), 'label': str(choice[1])} 

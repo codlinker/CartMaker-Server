@@ -34,8 +34,8 @@
                             <div class="identity-block">
                                 <span class="id-main-text">{{ payment.plan.user.first_name }} {{ payment.plan.user.last_name }}</span>
                                 <span class="id-sub-text">{{ payment.plan.user.email }}</span>
-                                {% if payment.plan.user.cedula %}
-                                <span class="id-doc-tag">C.I./RIF: {{ payment.plan.user.cedula }}</span>
+                                {% if payment.plan.user.cedula_number %}
+                                <span class="id-doc-tag">C.I./RIF: {{ payment.plan.user.cedula_number }}</span>
                                 {% endif %}
                             </div>
                         </td>

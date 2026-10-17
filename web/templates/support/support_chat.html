@@ -46,7 +46,7 @@
                         </span>
                     {% else %}
                         <span class="dossier-pill pill-slate">
-                            <span class="material-symbols-rounded">badge</span> C.I.: {{ ticket.client.cedula|default:"Sin registrar" }}
+                            <span class="material-symbols-rounded">badge</span> C.I.: {{ ticket.client.cedula_number|default:"Sin registrar" }}
                         </span>
                     {% endif %}
 

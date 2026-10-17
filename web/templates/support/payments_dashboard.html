@@ -25,8 +25,8 @@
             <div class="issuer-card-top">
                 <span class="material-symbols-rounded issuer-icon">receipt_long</span>
                 <div>
-                    <span class="issuer-eyebrow">EMISOR FISCAL ACTIVO (BD DINÁMICA)</span>
-                    <strong class="issuer-name">{{ billing_issuer.business_name }}</strong>
+                    <span class="issuer-eyebrow">EMISOR FISCAL ACTIVO ({{ billing_issuer.issuer_type_label|upper }})</span>
+                    <strong class="issuer-name">{{ billing_issuer.issuer_name }}</strong>
                 </div>
             </div>
             <div class="issuer-meta-pills">
@@ -34,7 +34,7 @@
                 {% if billing_issuer.cedula %}
                 <span class="issuer-pill"><strong>C.I.:</strong> {{ billing_issuer.cedula }}</span>
                 {% endif %}
-                <span class="issuer-pill issuer-pill-emerald">IVA {{ billing_issuer.iva_rate_pct }}%</span>
+                <span class="issuer-pill issuer-pill-emerald">IVA {{ billing_issuer.iva_percentage }}%</span>
             </div>
         </div>
         {% endif %}
