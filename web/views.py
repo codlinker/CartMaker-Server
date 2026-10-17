@@ -22,6 +22,61 @@ from django.utils.http import url_has_allowed_host_and_scheme
 ALLOWED_AVATAR_EXTENSIONS = {'jpg', 'jpeg', 'png', 'webp', 'heic'}
 MAX_AVATAR_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
 
+
+def format_ve_currency(val, include_dollar_suffix: bool = False) -> str:
+    """
+    Formatea un monto numérico según la convención monetaria en Venezuela:
+    separador de miles con punto (.), separador decimal con coma (,) y, cuando es USD,
+    el símbolo de dólar ($) ubicado a la derecha del monto (ej. 1.800,00$).
+    """
+    try:
+        num = float(val or 0.0)
+    except (TypeError, ValueError):
+        num = 0.0
+    sign = "-" if num < 0 else ""
+    abs_num = abs(num)
+    us_formatted = f"{abs_num:,.2f}"
+    ve_str = us_formatted.replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"{sign}{ve_str}$" if include_dollar_suffix else f"{sign}{ve_str}"
+
+
+def _enrich_payment_for_console(payment, payment_type: str, default_target_usd: float = 3.99):
+    """
+    Adjunta atributos formateados en nomenclatura monetaria venezolana (1.800,00$ / 1.151,12 Bs.)
+    y métricas de suficiencia cambiaria para la Consola de Conciliación Bancaria.
+    """
+    amount_bs = float(getattr(payment, 'amount', 0.0) or 0.0)
+    bcv_rate = float(getattr(payment, 'bcv_taxes_to_day', 0.0) or 0.0)
+    if payment_type == 'merchant':
+        target_plan = getattr(payment, 'target_plan', None) or getattr(
+            getattr(payment, 'subscription', None), 'plan', None
+        )
+        target_usd = float(getattr(target_plan, 'price', 0.0) or 0.0)
+        plan_name = getattr(target_plan, 'name', 'Plan Comercio')
+    else:
+        target_usd = float(default_target_usd or 3.99)
+        plan_name = 'Atlas Plus AI'
+
+    equiv_usd = round(amount_bs / bcv_rate, 2) if bcv_rate > 0 else 0.0
+    covers_plan = (equiv_usd >= (target_usd - 0.02)) if target_usd > 0 else True
+    diff_usd = round(equiv_usd - target_usd, 2)
+
+    payment.plan_label = plan_name
+    payment.amount_bs_ve = f"{format_ve_currency(amount_bs, include_dollar_suffix=False)} Bs."
+    payment.bcv_rate_ve = (
+        f"{format_ve_currency(bcv_rate, include_dollar_suffix=False)} Bs./$" if bcv_rate > 0 else "N/D"
+    )
+    payment.equiv_usd = equiv_usd
+    payment.equiv_usd_ve = format_ve_currency(equiv_usd, include_dollar_suffix=True)
+    payment.target_usd = target_usd
+    payment.target_usd_ve = format_ve_currency(target_usd, include_dollar_suffix=True)
+    payment.covers_plan = covers_plan
+    payment.diff_usd_ve = format_ve_currency(abs(diff_usd), include_dollar_suffix=True)
+    raw_proof = getattr(payment, 'payment_proof_url', None)
+    payment.proof_full_url = storage_manager.get_url(raw_proof) if raw_proof else None
+    return payment
+
+
 # ==============================================================
 # 🔒 VISTAS DE AUTENTICACIÓN (COMPARTIDAS)
 # ==============================================================
@@ -83,14 +138,19 @@ def logout_view(request):
     return redirect('web_login')
 
 # ==============================================================
-# 💳 VISTAS PRIVADAS (PAGOS)
+# 💳 VISTAS PRIVADAS (PAGOS Y FACTURACIÓN SENIAT)
 # ==============================================================
 @login_required(login_url='/auth/login/')
 @payments_access_required
 def payments_dashboard_view(request):
     """
-    Dashboard unificado para la conciliación y aprobación de pagos en CartMaker.
+    Dashboard unificado para la conciliación bancaria, activación de planes y emisión de facturas SENIAT en CartMaker.
     """
+    from api.views.base import _get_cached_bcv_rate
+
+    system_config = SystemConfig.objects.order_by('-creation').first() or SystemConfig.objects.create()
+    atlas_target_usd = float(getattr(system_config, 'atlas_plus_price_usd', 3.99) or 3.99)
+
     # ==============================================================
     # 🔄 LÓGICA DE RECARGA DE PANELES VIA AJAX (GET)
     # ==============================================================
@@ -98,24 +158,37 @@ def payments_dashboard_view(request):
         target_deck = request.GET.get('deck')
         
         if target_deck == 'merchant':
-            merchant_pending = MerchantPlanPayment.objects.filter(status=0).select_related('subscription__merchant', 'subscription__plan', 'target_plan').order_by('-creation')
-            merchant_history = MerchantPlanPayment.objects.filter(status__in=[1, 2]).select_related('subscription__merchant', 'subscription__plan', 'target_plan').order_by('-verified_at')[:15]
+            merchant_pending_qs = MerchantPlanPayment.objects.filter(status=0).select_related(
+                'subscription__merchant', 'subscription__plan', 'target_plan'
+            ).order_by('-creation')
+            merchant_history_qs = MerchantPlanPayment.objects.filter(status__in=[1, 2]).select_related(
+                'subscription__merchant', 'subscription__plan', 'target_plan'
+            ).order_by('-verified_at')[:20]
+
+            merchant_pending = [_enrich_payment_for_console(p, 'merchant', atlas_target_usd) for p in merchant_pending_qs]
+            merchant_history = [_enrich_payment_for_console(p, 'merchant', atlas_target_usd) for p in merchant_history_qs]
             
             html = render_to_string('support/partials/merchant_deck_content.html', {
                 'merchant_pending': merchant_pending,
-                'merchant_history': merchant_history
+                'merchant_history': merchant_history,
             })
-            return JsonResponse({'success': True, 'html': html, 'pending_count': merchant_pending.count()})
+            return JsonResponse({'success': True, 'html': html, 'pending_count': len(merchant_pending)})
             
         elif target_deck == 'atlas':
-            atlas_pending = AtlasPlusPlanPayment.objects.filter(status=0).select_related('plan__user').order_by('-creation')
-            atlas_history = AtlasPlusPlanPayment.objects.filter(status__in=[1, 2]).select_related('plan__user', 'invoice').order_by('-verified_at')[:15]
+            atlas_pending_qs = AtlasPlusPlanPayment.objects.filter(status=0).select_related('plan__user').order_by('-creation')
+            atlas_history_qs = AtlasPlusPlanPayment.objects.filter(status__in=[1, 2]).select_related(
+                'plan__user', 'invoice'
+            ).order_by('-verified_at')[:20]
+
+            atlas_pending = [_enrich_payment_for_console(p, 'atlas', atlas_target_usd) for p in atlas_pending_qs]
+            atlas_history = [_enrich_payment_for_console(p, 'atlas', atlas_target_usd) for p in atlas_history_qs]
             
             html = render_to_string('support/partials/atlas_deck_content.html', {
                 'atlas_pending': atlas_pending,
-                'atlas_history': atlas_history
+                'atlas_history': atlas_history,
             })
-            return JsonResponse({'success': True, 'html': html, 'pending_count': atlas_pending.count()})
+            return JsonResponse({'success': True, 'html': html, 'pending_count': len(atlas_pending)})
+
     # ==============================================================
     # ⚡ PROCESAMIENTO DE ACCIONES VIA AJAX (POST)
     # ==============================================================
@@ -156,17 +229,43 @@ def payments_dashboard_view(request):
 
                 # full_clean() disparará las validaciones del modelo y clean() asociados
                 payment.full_clean()
-                payment.save() # Ejecuta el pre_save de tus signals asincrónicas de billetera y notificaciones
+                payment.save() # Ejecuta el pre_save de signals (activación de plan, billetera y emisión de factura SENIAT)
 
-            resp_payload = {
-                'success': True,
-                'message': f'El pago fue {"aprobado" if int(new_status) == 1 else "rechazado"} correctamente.'
-            }
-            if payment_type == 'atlas' and int(new_status) == 1:
-                inv = AtlasPlusInvoice.objects.filter(payment=payment).first()
-                if inv:
-                    resp_payload['invoice_number'] = inv.invoice_number
-                    resp_payload['invoice_url'] = inv.invoice_url
+            payment.refresh_from_db()
+
+            if int(new_status) == 1 and payment.status == PaymentStatus.REJECTED:
+                resp_payload = {
+                    'success': True,
+                    'status': int(payment.status),
+                    'auto_credited_wallet': True,
+                    'message': (
+                        'El monto reportado en Bs. no cubría la tarifa total del plan. '
+                        'El sistema acreditó automáticamente el equivalente en dólares a la Billetera CartMaker del usuario '
+                        'y cerró el reporte como abono parcial.'
+                    ),
+                }
+            elif payment.status == PaymentStatus.APPROVED:
+                resp_payload = {
+                    'success': True,
+                    'status': 1,
+                    'auto_credited_wallet': False,
+                    'message': 'El pago fue validado y aprobado correctamente.',
+                }
+                if payment_type == 'atlas':
+                    inv = AtlasPlusInvoice.objects.filter(payment=payment).first()
+                    if inv:
+                        resp_payload['invoice_number'] = inv.invoice_number
+                        resp_payload['invoice_url'] = inv.invoice_url
+                        resp_payload['message'] = (
+                            f'Pago validado con éxito. Plan Atlas Plus activado y Factura Digital SENIAT Nº {inv.invoice_number} emitida.'
+                        )
+            else:
+                resp_payload = {
+                    'success': True,
+                    'status': 2,
+                    'auto_credited_wallet': False,
+                    'message': 'El reporte de pago fue rechazado y el usuario fue notificado.',
+                }
             return JsonResponse(resp_payload)
 
         except ValidationError as e:
@@ -175,27 +274,45 @@ def payments_dashboard_view(request):
             return JsonResponse({'success': False, 'error': f'Fallo crítico: {str(e)}'}, status=500)
 
     # ==============================================================
-    # 📊 CARGA OPTIMIZADA DE TABLEROS (GET) - ANTI N+1
+    # 📊 CARGA OPTIMIZADA DE TABLEROS Y MÉTRICAS (GET) - ANTI N+1
     # ==============================================================
-    # Filtro: status=0 (PENDING)
-    merchant_pending = MerchantPlanPayment.objects.filter(status=0) \
+    merchant_pending_qs = MerchantPlanPayment.objects.filter(status=0) \
         .select_related('subscription__merchant', 'subscription__plan', 'target_plan') \
         .order_by('-creation')
 
-    atlas_pending = AtlasPlusPlanPayment.objects.filter(status=0) \
+    atlas_pending_qs = AtlasPlusPlanPayment.objects.filter(status=0) \
         .select_related('plan__user') \
         .order_by('-creation')
 
-    # Historial reciente de transiciones resueltas (status 1 o 2)
-    merchant_history = MerchantPlanPayment.objects.filter(status__in=[1, 2]) \
+    merchant_history_qs = MerchantPlanPayment.objects.filter(status__in=[1, 2]) \
         .select_related('subscription__merchant', 'subscription__plan', 'target_plan') \
-        .order_by('-verified_at')[:15]
+        .order_by('-verified_at')[:20]
 
-    atlas_history = AtlasPlusPlanPayment.objects.filter(status__in=[1, 2]) \
+    atlas_history_qs = AtlasPlusPlanPayment.objects.filter(status__in=[1, 2]) \
         .select_related('plan__user', 'invoice') \
-        .order_by('-verified_at')[:15]
+        .order_by('-verified_at')[:20]
 
-    # Reconstrucción limpia de los Enums estructurales para consumo del Front-End sin romper traducciones
+    merchant_pending = [_enrich_payment_for_console(p, 'merchant', atlas_target_usd) for p in merchant_pending_qs]
+    atlas_pending = [_enrich_payment_for_console(p, 'atlas', atlas_target_usd) for p in atlas_pending_qs]
+    merchant_history = [_enrich_payment_for_console(p, 'merchant', atlas_target_usd) for p in merchant_history_qs]
+    atlas_history = [_enrich_payment_for_console(p, 'atlas', atlas_target_usd) for p in atlas_history_qs]
+
+    # KPIs Financieros y Fiscales
+    bcv_live_rate = _get_cached_bcv_rate(default=0.0)
+    expected_bs_live = round(atlas_target_usd * bcv_live_rate, 2) if bcv_live_rate > 0 else 0.0
+
+    approved_atlas_qs = AtlasPlusPlanPayment.objects.filter(status=PaymentStatus.APPROVED)
+    approved_atlas_count = approved_atlas_qs.count()
+    approved_atlas_bs_sum = float(approved_atlas_qs.aggregate(total=Coalesce(Sum('amount'), 0.0))['total'] or 0.0)
+
+    invoices_count = AtlasPlusInvoice.objects.count()
+    invoices_usd_sum = float(AtlasPlusInvoice.objects.aggregate(total=Coalesce(Sum('total_usd'), 0.0))['total'] or 0.0)
+    if invoices_usd_sum <= 0.0 and approved_atlas_count > 0:
+        invoices_usd_sum = round(approved_atlas_count * atlas_target_usd, 2)
+
+    billing_issuer = system_config.get_billing_issuer_json()
+    bank_accounts = list(CartMakerBankAccount.objects.filter(is_active=True).order_by('bank_code', 'id'))
+
     rejection_choices = [
         {'id': int(choice[0]), 'label': str(choice[1])} 
         for choice in RejectionReason.choices
@@ -208,6 +325,20 @@ def payments_dashboard_view(request):
         'atlas_history': atlas_history,
         'rejection_choices': rejection_choices, 
         'rejection_choices_json': json.dumps(rejection_choices),
+        'billing_issuer': billing_issuer,
+        'bank_accounts': bank_accounts,
+        'kpis': {
+            'total_pending': len(atlas_pending) + len(merchant_pending),
+            'atlas_pending_count': len(atlas_pending),
+            'merchant_pending_count': len(merchant_pending),
+            'approved_atlas_count': approved_atlas_count,
+            'approved_atlas_bs_ve': f"{format_ve_currency(approved_atlas_bs_sum, include_dollar_suffix=False)} Bs.",
+            'approved_atlas_usd_ve': format_ve_currency(invoices_usd_sum, include_dollar_suffix=True),
+            'invoices_count': invoices_count,
+            'atlas_price_usd_ve': format_ve_currency(atlas_target_usd, include_dollar_suffix=True),
+            'bcv_live_rate_ve': f"{format_ve_currency(bcv_live_rate, include_dollar_suffix=False)} Bs./$" if bcv_live_rate > 0 else "Sincronizando",
+            'expected_bs_live_ve': f"{format_ve_currency(expected_bs_live, include_dollar_suffix=False)} Bs." if expected_bs_live > 0 else "—",
+        },
     }
 
     return render(request, 'support/payments_dashboard.html', context)
@@ -332,9 +463,16 @@ def dashboard_view(request):
     avg_time = closed_tickets.aggregate(avg_diff=Avg(F('close_time') - F('creation')))['avg_diff']
     avg_hours = round(avg_time.total_seconds() / 3600, 1) if avg_time else 0
 
+    total_active_count = active_tickets.count()
+    urgent_agent_count = active_tickets.filter(waiting_for_client_reply=False).count()
+    waiting_client_count = active_tickets.filter(waiting_for_client_reply=True).count()
+    total_closed_count = closed_tickets.count()
+
     analytics = {
-        'total_active': active_tickets.count(),
-        'total_closed': closed_tickets.count(),
+        'total_active': total_active_count,
+        'urgent_agent_count': urgent_agent_count,
+        'waiting_client_count': waiting_client_count,
+        'total_closed': total_closed_count,
         'avg_hours': avg_hours,
         'topics': {'labels': topics_labels, 'data': topics_values},
         'reasons': {'labels': reasons_labels, 'data': reasons_values}
@@ -395,15 +533,32 @@ def close_ticket(request, ticket_id):
 @login_required(login_url='/auth/login/')
 @support_access_required
 def support_agent_chat(request, ticket_id):
-    ticket = get_object_or_404(SupportTicket, id=ticket_id)
+    ticket = get_object_or_404(SupportTicket.objects.select_related('client', 'agent'), id=ticket_id)
     if ticket.agent and ticket.agent != request.user and not request.user.is_superuser:
         messages.error(request, "No tienes permisos para acceder al chat de otro agente.")
         return redirect('web_dashboard')
+
+    client = ticket.client
+    client_company = Company.objects.filter(owner=client).first() if client else None
+    client_atlas = AtlasPlusPlan.objects.filter(user=client).first() if client else None
+    client_wallet = UserWallet.objects.filter(user=client).first() if client else None
+    wallet_balance_ve = format_ve_currency(
+        getattr(client_wallet, 'balance', 0.0) if client_wallet else 0.0,
+        include_dollar_suffix=True,
+    )
+    client_orders_count = Order.objects.filter(client=client).count() if client else 0
+    client_tickets_count = SupportTicket.objects.filter(client=client).count() if client else 0
+
     refresh = RefreshToken.for_user(request.user)
     return render(request, 'support/support_chat.html', {
         'ticket': ticket,
         'agent_id': str(request.user.id),
-        'jwt_token': str(refresh.access_token)
+        'jwt_token': str(refresh.access_token),
+        'client_company': client_company,
+        'client_atlas': client_atlas,
+        'wallet_balance_ve': wallet_balance_ve,
+        'client_orders_count': client_orders_count,
+        'client_tickets_count': client_tickets_count,
     })
 
 # ==============================================================
@@ -449,21 +604,6 @@ def pitch_deck_view(request):
 # ==============================================================
 # 🛍️ VITRINA WEB PÚBLICA INTERACTIVA (PILAR 1 - OMNICANALIDAD)
 # ==============================================================
-def format_ve_currency(val, include_dollar_suffix: bool = False) -> str:
-    """
-    Formatea un monto numérico según la convención monetaria en Venezuela:
-    separador de miles con punto (.), separador decimal con coma (,) y, cuando es USD,
-    el símbolo de dólar ($) ubicado a la derecha del monto (ej. 1.800,00$).
-    """
-    try:
-        num = float(val or 0.0)
-    except (TypeError, ValueError):
-        num = 0.0
-    sign = "-" if num < 0 else ""
-    abs_num = abs(num)
-    us_formatted = f"{abs_num:,.2f}"
-    ve_str = us_formatted.replace(",", "X").replace(".", ",").replace("X", ".")
-    return f"{sign}{ve_str}$" if include_dollar_suffix else f"{sign}{ve_str}"
 
 
 def calculate_storefront_route_metrics(

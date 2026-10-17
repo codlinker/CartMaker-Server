@@ -1,58 +1,115 @@
 {% extends 'base.html' %}
 {% load static %}
 
+{% block title %}Ticket #{{ ticket.id|stringformat:"05d" }} · Sala de Soporte | CartMaker HQ{% endblock %}
+
 {% block extra_head %}
-    <link rel="stylesheet" href="{% static 'css/support_chat.css' %}">
+    <link rel="stylesheet" href="{% static 'css/support_chat.css' %}?v=20261017_cm">
 {% endblock %}
 
 {% block content %}
 <div class="chat-interface-wrapper">
-    
-    <aside class="chat-sidebar">
+
+    <!-- Panel Lateral: Expediente 360° del Ticket y del Cliente -->
+    <aside class="chat-sidebar" id="chatSidebar">
         <div class="sidebar-header">
-            <a href="{% url 'web_dashboard' %}" class="btn-back">
+            <a href="{% url 'web_dashboard' %}" class="btn-back" title="Volver al Monitor de Casos">
                 <span class="material-symbols-rounded">arrow_back</span>
             </a>
-            <h3>Detalles del Ticket</h3>
+            <div>
+                <span class="sidebar-ticket-eyebrow">EXPEDIENTE DE SOPORTE</span>
+                <h3>Ticket #{{ ticket.id|stringformat:"05d" }}</h3>
+            </div>
         </div>
-        
+
         <div class="ticket-info-panel">
-            <div class="info-group">
-                <label>ID del Ticket</label>
-                <div class="info-value">#{{ ticket.id|stringformat:"05d" }}</div>
-            </div>
-            
-            <div class="info-group">
-                <label>Cliente</label>
-                <div class="info-value client-profile">
-                    {% if ticket.client.profile_picture %}
-                        <img src="{{ ticket.client.get_profile_picture_url }}" class="small-avatar">
-                    {% else %}
-                        <span class="material-symbols-rounded small-avatar-placeholder">account_circle</span>
-                    {% endif %}
-                    {{ ticket.client.first_name }} {{ ticket.client.last_name }}
+            <!-- Tarjeta 1: Ficha 360° del Cliente -->
+            <div class="dossier-card">
+                <div class="dossier-client-top">
+                    <div class="dossier-avatar">
+                        {% if ticket.client.profile_picture %}
+                            <img src="{{ ticket.client.get_profile_picture_url }}" alt="Avatar Cliente">
+                        {% else %}
+                            <span class="material-symbols-rounded">person</span>
+                        {% endif %}
+                    </div>
+                    <div class="dossier-client-meta">
+                        <strong>{{ ticket.client.first_name }} {{ ticket.client.last_name }}</strong>
+                        <span class="dossier-email">{{ ticket.client.email }}</span>
+                    </div>
                 </div>
+
+                <div class="dossier-badges-row">
+                    {% if ticket.client.id_verification_status == 2 %}
+                        <span class="dossier-pill pill-emerald">
+                            <span class="material-symbols-rounded">verified_user</span> KYC Verificado
+                        </span>
+                    {% else %}
+                        <span class="dossier-pill pill-slate">
+                            <span class="material-symbols-rounded">badge</span> C.I.: {{ ticket.client.cedula|default:"Sin registrar" }}
+                        </span>
+                    {% endif %}
+
+                    {% if client_atlas and client_atlas.is_active %}
+                        <span class="dossier-pill pill-purple">
+                            <span class="material-symbols-rounded">auto_awesome</span> Atlas Plus Activo
+                        </span>
+                    {% else %}
+                        <span class="dossier-pill pill-slate">Plan Atlas Gratuito</span>
+                    {% endif %}
+                </div>
+
+                <div class="dossier-stats-grid">
+                    <div class="dossier-stat-item">
+                        <span class="d-stat-label">Billetera USD</span>
+                        <strong class="d-stat-val">{{ wallet_balance_ve }}</strong>
+                    </div>
+                    <div class="dossier-stat-item">
+                        <span class="d-stat-label">Órdenes</span>
+                        <strong class="d-stat-val">{{ client_orders_count }}</strong>
+                    </div>
+                    <div class="dossier-stat-item">
+                        <span class="d-stat-label">Tickets</span>
+                        <strong class="d-stat-val">{{ client_tickets_count }}</strong>
+                    </div>
+                </div>
+
+                {% if client_company %}
+                <div class="dossier-merchant-box">
+                    <div class="merchant-box-info">
+                        <span class="material-symbols-rounded">storefront</span>
+                        <div>
+                            <strong>{{ client_company.name }}</strong>
+                            <span>RIF: {{ client_company.rif|default:"N/A" }}</span>
+                        </div>
+                    </div>
+                    <a href="/tienda/{{ client_company.id }}/" target="_blank" rel="noopener" class="merchant-storefront-link" title="Ver Vitrina Pública">
+                        <span class="material-symbols-rounded">open_in_new</span>
+                    </a>
+                </div>
+                {% endif %}
             </div>
-            
+
+            <!-- Tarjeta 2: Detalles del Caso -->
             <div class="info-group">
-                <label>Tema</label>
+                <label>Categoría del Caso</label>
                 <div class="info-value">
                     <span class="ticket-topic topic-{{ ticket.topic }}">{{ ticket.get_topic_display }}</span>
                 </div>
             </div>
 
             <div class="info-group">
-                <label>Asunto</label>
+                <label>Asunto Reportado</label>
                 <div class="info-value title">{{ ticket.title }}</div>
             </div>
 
             <div class="info-group">
-                <label>Descripción Original</label>
+                <label>Descripción Original del Cliente</label>
                 <div class="info-value description">{{ ticket.description }}</div>
             </div>
-            
+
             <div class="info-group">
-                <label>Fecha de Creación</label>
+                <label>Apertura del Caso</label>
                 <div class="info-value">{{ ticket.creation|date:"d/m/Y h:i A" }}</div>
             </div>
         </div>
@@ -60,21 +117,23 @@
         <div class="sidebar-actions">
             {% if not ticket.closed %}
                 <button type="button" id="btn-trigger-close" class="btn-action close-ticket">
-                    <span class="material-symbols-rounded">lock</span>
-                    Cerrar Ticket
+                    <span class="material-symbols-rounded">task_alt</span>
+                    Resolver / Cerrar Ticket
                 </button>
-                
                 <input type="hidden" id="csrf_token" value="{{ csrf_token }}">
             {% else %}
-                <div class="closed-notice" style="background: rgba(229, 57, 53, 0.1); border: 1px solid rgba(229, 57, 53, 0.3); padding: 1.2rem; border-radius: 16px; text-align: center;">
-                    <span class="material-symbols-rounded" style="color: var(--error-red); font-size: 32px; margin-bottom: 8px;">lock</span>
-                    <p style="color: #FF8A80; font-weight: 800; font-size: 0.9rem; margin: 0;">Ticket Finalizado</p>
-                    <p style="color: var(--light-grey); font-size: 0.8rem; margin-top: 4px;">Razón: {{ ticket.get_close_reason_display }}</p>
+                <div class="closed-notice">
+                    <span class="material-symbols-rounded">lock</span>
+                    <div>
+                        <strong>Ticket Finalizado</strong>
+                        <span>Dictamen: {{ ticket.get_close_reason_display }}</span>
+                    </div>
                 </div>
             {% endif %}
         </div>
     </aside>
 
+    <!-- Área Principal de Conversación en Vivo -->
     <div class="chat-main-area">
         <header class="chat-header">
             <div class="chat-header-client">
@@ -88,19 +147,22 @@
                 </div>
                 <div class="client-status-info">
                     <h2>{{ ticket.client.first_name }} {{ ticket.client.last_name }}</h2>
-                    <span class="status-text" id="client-status-text">Buscando conexión...</span>
+                    <span class="status-text" id="client-status-text">Conectando a la sala en tiempo real...</span>
                 </div>
             </div>
-            
-            <button class="mobile-details-toggle" id="btnToggleDetails">
-                <span class="material-symbols-rounded">info</span>
-            </button>
+
+            <div class="chat-header-right">
+                <span class="chat-ticket-pill">#{{ ticket.id|stringformat:"05d" }}</span>
+                <button class="mobile-details-toggle" id="btnToggleDetails" title="Ver expediente del cliente">
+                    <span class="material-symbols-rounded">info</span>
+                </button>
+            </div>
         </header>
 
         <div class="chat-messages-container" id="chat-messages">
             <div class="history-loader" id="history-loader">
                 <span class="material-symbols-rounded spinner">sync</span>
-                Cargando historial...
+                <span>Sincronizando historial de conversación...</span>
             </div>
         </div>
 
@@ -108,25 +170,49 @@
             <span id="typing-indicator"></span>
         </div>
 
-        <div class="chat-input-area" {% if ticket.closed %}style="opacity: 0.5; pointer-events: none; filter: grayscale(100%);"{% endif %}>
+        {% if not ticket.closed %}
+        <!-- Barra de Respuestas Rápidas (Macros Operativos 1-Toque) -->
+        <div class="quick-replies-bar" id="quickRepliesBar">
+            <span class="quick-replies-label">
+                <span class="material-symbols-rounded">bolt</span> Respuestas rápidas:
+            </span>
+            <button type="button" class="quick-reply-chip" data-reply="¡Hola {{ ticket.client.first_name }}! Te saluda {{ user.first_name|default:'el equipo' }} de Soporte CartMaker. Ya estoy revisando tu caso para ayudarte de inmediato.">
+                👋 Saludo inicial
+            </button>
+            <button type="button" class="quick-reply-chip" data-reply="Estamos verificando la información y la referencia en nuestro sistema. Permíteme un par de minutos por favor.">
+                🔍 Verificando datos
+            </button>
+            <button type="button" class="quick-reply-chip" data-reply="¡Listo! Tu pago de Atlas Plus fue conciliado exitosamente y tu Factura Digital SENIAT ya se encuentra disponible.">
+                🧾 Pago y Factura Atlas
+            </button>
+            <button type="button" class="quick-reply-chip" data-reply="Ya aplicamos el ajuste correspondiente en tu cuenta. ¿Podrías verificar en la aplicación y confirmarme si todo aparece en orden?">
+                ✅ Confirmar solución
+            </button>
+            <button type="button" class="quick-reply-chip" data-reply="¡Gracias por comunicarte con Soporte CartMaker! Si necesitas cualquier otra asistencia, estamos siempre a tu disposición.">
+                🙌 Despedida
+            </button>
+        </div>
+        {% endif %}
+
+        <div class="chat-input-area" {% if ticket.closed %}style="opacity: 0.55; pointer-events: none;"{% endif %}>
             <input type="file" id="media-input" accept="image/*" hidden {% if ticket.closed %}disabled{% endif %}>
-            
-            <button class="btn-attach" id="btn-attach" aria-label="Adjuntar archivo" {% if ticket.closed %}disabled{% endif %}>
+
+            <button class="btn-attach" id="btn-attach" aria-label="Adjuntar imagen" title="Adjuntar imagen" {% if ticket.closed %}disabled{% endif %}>
                 <span class="material-symbols-rounded">attach_file</span>
             </button>
-            
+
             <div class="input-wrapper">
-                <input type="text" id="message-input" 
-                    placeholder="{% if ticket.closed %}Este ticket ha sido cerrado{% else %}Escribe un mensaje aquí...{% endif %}" 
-                    autocomplete="off" 
+                <input type="text" id="message-input"
+                    placeholder="{% if ticket.closed %}Este ticket ha sido finalizado ({{ ticket.get_close_reason_display }}){% else %}Escribe un mensaje para el cliente o selecciona una respuesta rápida...{% endif %}"
+                    autocomplete="off"
                     {% if ticket.closed %}disabled{% endif %}>
             </div>
-            
-            <button class="btn-mic" id="btn-mic" aria-label="Grabar audio" style="background: transparent; border: none; color: var(--primary); cursor: pointer; padding: 10px; display: flex; align-items: center; justify-content: center; outline: none; border-radius: 50%;" {% if ticket.closed %}disabled{% endif %}>
+
+            <button class="btn-mic" id="btn-mic" aria-label="Grabar nota de voz" title="Grabar nota de voz" {% if ticket.closed %}disabled{% endif %}>
                 <span class="material-symbols-rounded">mic</span>
             </button>
-            
-            <button class="btn-send" id="send-button" aria-label="Enviar" {% if ticket.closed %}disabled{% endif %}>
+
+            <button class="btn-send" id="send-button" aria-label="Enviar mensaje" title="Enviar mensaje" {% if ticket.closed %}disabled{% endif %}>
                 <span class="material-symbols-rounded">send</span>
             </button>
         </div>
@@ -143,5 +229,5 @@
         document.querySelector('.chat-sidebar').classList.toggle('active');
     });
 </script>
-<script src="{% static 'js/support_chat.js' %}?v=20261016_fix"></script>
+<script src="{% static 'js/support_chat.js' %}?v=20261017_cm"></script>
 {% endblock %}

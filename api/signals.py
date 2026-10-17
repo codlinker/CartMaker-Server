@@ -31,8 +31,8 @@ def on_payment_created(sender, instance: MerchantPlanPayment, created: bool, **k
     try:
         with transaction.atomic():
             # Bloqueamos la fila del pago ya persistida y verificamos idempotencia con verified_at
-            locked_payment = sender.objects.select_for_update().select_related(
-                'subscription__merchant', 'subscription__plan', 'subscription__merchant__wallet', 'target_plan'
+            locked_payment = sender.objects.select_for_update(of=('self',)).select_related(
+                'subscription__merchant', 'subscription__plan', 'target_plan'
             ).get(pk=instance.pk)
 
             if locked_payment.verified_at is not None:
@@ -76,7 +76,7 @@ def on_payment_created(sender, instance: MerchantPlanPayment, created: bool, **k
 
             # --- CASO APROBADO (Con Prorrateo) ---
             elif instance.status == PaymentStatus.APPROVED:
-                wallet = UserWallet.objects.select_for_update().get(user=merchant)
+                wallet, _ = UserWallet.objects.select_for_update().get_or_create(user=merchant)
                 is_plan_change = current_subscription.plan.id != target_plan.id
 
                 # 1. PRORRATEO
@@ -186,15 +186,15 @@ def on_atlas_payment_status_changed(sender, instance: AtlasPlusPlanPayment, crea
 
     try:
         with transaction.atomic():
-            # Bloqueamos la fila del pago y validamos idempotencia con verified_at
-            locked_payment = sender.objects.select_for_update().select_related('plan__user__wallet').get(pk=instance.pk)
+            # Bloqueamos únicamente la fila del pago (of=('self',)) para evitar FOR UPDATE sobre LEFT OUTER JOINs
+            locked_payment = sender.objects.select_for_update(of=('self',)).select_related('plan__user').get(pk=instance.pk)
             if locked_payment.verified_at is not None:
                 return
 
             user = locked_payment.plan.user
             atlas_plan = AtlasPlusPlan.objects.select_for_update().get(pk=locked_payment.plan_id)
             now = timezone.now()
-            config = SystemConfig.objects.latest('creation')
+            config = SystemConfig.objects.order_by('-creation').first() or SystemConfig.objects.create()
 
             # --- CASO RECHAZADO ---
             if instance.status == PaymentStatus.REJECTED:
@@ -217,7 +217,7 @@ def on_atlas_payment_status_changed(sender, instance: AtlasPlusPlanPayment, crea
 
             # --- CASO APROBADO ---
             elif instance.status == PaymentStatus.APPROVED:
-                wallet = UserWallet.objects.select_for_update().get(user=user)
+                wallet, _ = UserWallet.objects.select_for_update().get_or_create(user=user)
                 tasa_bcv = Decimal(str(instance.bcv_taxes_to_day))
                 monto_pagado_usd = Decimal(str(instance.amount)) / tasa_bcv
 

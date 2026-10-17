@@ -4,7 +4,7 @@
 {% block title %}Acceso Operativo | CartMaker HQ{% endblock %}
 
 {% block extra_head %}
-    <link rel="stylesheet" href="{% static 'css/login.css' %}">
+    <link rel="stylesheet" href="{% static 'css/login.css' %}?v=20261017_cm">
 {% endblock %}
 
 {% block content %}
@@ -13,53 +13,76 @@
     <div class="login-orb orb-2" aria-hidden="true"></div>
 
     <div class="login-shell">
-        <!-- Panel Informativo lateral (Visible en Desktop, compacto en Móvil) -->
+        <!-- Panel de Identidad Operativa CartMaker HQ -->
         <div class="login-brand-panel">
             <div class="login-brand-badge">
                 <span class="pulse-dot-emerald"></span>
-                <span>CARTMAKER HQ · RED OPERATIVA</span>
+                <span>CARTMAKER HQ · CONSOLA OPERATIVA</span>
             </div>
-            <h1>Centro de Control de Soporte y Finanzas</h1>
+
+            <h1>Centro Unificado de Soporte, Tesorería y Facturación Fiscal</h1>
             <p>
-                Consola unificada en tiempo real para la atención de tickets con WebSockets y auditoría de conciliación bancaria (BCV / Atlas Plus AI).
+                Gestiona en tiempo real la atención al cliente con WebSockets, la conciliación bancaria de Pago Móvil (Tasa BCV) y la emisión automática de facturas digitales SENIAT para Atlas Plus AI.
             </p>
 
             <div class="login-capabilities-list">
                 <div class="cap-item">
-                    <span class="material-symbols-rounded">support_agent</span>
+                    <div class="cap-icon-box">
+                        <span class="material-symbols-rounded">account_balance</span>
+                    </div>
                     <div>
-                        <strong>Soporte en Tiempo Real</strong>
-                        <span>Chat bidireccional con clientes, notas de voz y métricas de SLA.</span>
+                        <strong>Conciliación Bancaria &amp; Tasa BCV</strong>
+                        <span>Validación instantánea de referencias en Bolívares con cálculo automático en USD (3,99$) y abono inteligente a billetera.</span>
                     </div>
                 </div>
+
                 <div class="cap-item">
-                    <span class="material-symbols-rounded">account_balance</span>
+                    <div class="cap-icon-box">
+                        <span class="material-symbols-rounded">receipt_long</span>
+                    </div>
                     <div>
-                        <strong>Conciliación Bancaria</strong>
-                        <span>Verificación instantánea de referencias Pago Móvil y suscripciones Atlas Plus.</span>
+                        <strong>Facturación Digital SENIAT Automatizada</strong>
+                        <span>Emisión correlativa inmediata al aprobar pagos de Atlas Plus AI con verificación criptográfica e impresión A4.</span>
                     </div>
                 </div>
+
+                <div class="cap-item">
+                    <div class="cap-icon-box">
+                        <span class="material-symbols-rounded">support_agent</span>
+                    </div>
+                    <div>
+                        <strong>Soporte Omnicanal en Tiempo Real</strong>
+                        <span>Sala de chat en vivo con notas de voz, respuestas rápidas, expediente 360° del cliente y métricas de SLA.</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="login-role-pills">
+                <span class="role-pill"><span class="material-symbols-rounded">verified_user</span> Staff Autorizado</span>
+                <span class="role-pill"><span class="material-symbols-rounded">lock</span> Sesión Auditada</span>
+                <span class="role-pill"><span class="material-symbols-rounded">auto_awesome</span> Atlas Plus 2.0</span>
             </div>
         </div>
 
-        <!-- Tarjeta del Formulario -->
+        <!-- Tarjeta de Autenticación -->
         <div class="login-card">
             <div class="login-header">
-                <div class="login-icon-ring">
-                    <span class="material-symbols-rounded">shield_lock</span>
+                <div class="login-logo-showcase">
+                    <img src="{% static 'img/logo_sin_letras.svg' %}" alt="CartMaker Logo">
                 </div>
-                <h2>Iniciar Sesión</h2>
-                <p>Ingresa con tus credenciales autorizadas de CartMaker</p>
+                <span class="login-card-eyebrow">ACCESO RESTRINGIDO</span>
+                <h2>Iniciar Sesión en Consola</h2>
+                <p>Ingresa con tus credenciales operativas de CartMaker</p>
             </div>
 
-            <form method="POST" class="login-form" novalidate>
+            <form method="POST" class="login-form" id="hqLoginForm" novalidate>
                 {% csrf_token %}
                 {% if request.GET.next %}
                     <input type="hidden" name="next" value="{{ request.GET.next }}">
                 {% endif %}
 
                 <div class="input-group">
-                    <label for="id_username">Correo Corporativo</label>
+                    <label for="id_username">Correo Corporativo o de Agente</label>
                     <div class="input-field-wrap">
                         <span class="material-symbols-rounded field-icon">mail</span>
                         <input
@@ -67,6 +90,7 @@
                             name="username"
                             id="id_username"
                             placeholder="agente@cartmaker.app"
+                            value="{{ form.username.value|default:'' }}"
                             autocomplete="username"
                             autofocus
                             required
@@ -92,15 +116,32 @@
                     </div>
                 </div>
 
-                <button type="submit" class="btn-submit">
-                    <span>Ingresar a la Consola</span>
-                    <span class="material-symbols-rounded">arrow_forward</span>
+                <button type="submit" class="btn-submit" id="loginSubmitBtn">
+                    <span id="loginSubmitText">Ingresar al Centro de Control</span>
+                    <span class="material-symbols-rounded" id="loginSubmitIcon">arrow_forward</span>
                 </button>
             </form>
 
+            <div class="login-modules-hint">
+                <div class="module-hint-item">
+                    <span class="material-symbols-rounded">headset_mic</span>
+                    <span>Consola Soporte</span>
+                </div>
+                <span class="hint-dot">•</span>
+                <div class="module-hint-item">
+                    <span class="material-symbols-rounded">payments</span>
+                    <span>Consola Pagos</span>
+                </div>
+                <span class="hint-dot">•</span>
+                <div class="module-hint-item">
+                    <span class="material-symbols-rounded">description</span>
+                    <span>SENIAT</span>
+                </div>
+            </div>
+
             <div class="login-security-footnote">
                 <span class="material-symbols-rounded">verified_user</span>
-                <span>Sesión protegida mediante cifrado TLS y tokens JWT firmados.</span>
+                <span>Protegido con cifrado TLS, tokens JWT firmados y bloqueo transaccional.</span>
             </div>
         </div>
     </div>
@@ -116,6 +157,16 @@
                 const isPwd = pwdInput.type === 'password';
                 pwdInput.type = isPwd ? 'text' : 'password';
                 pwdIcon.textContent = isPwd ? 'visibility_off' : 'visibility';
+            });
+        }
+
+        const loginForm = document.getElementById('hqLoginForm');
+        const submitBtn = document.getElementById('loginSubmitBtn');
+        const submitText = document.getElementById('loginSubmitText');
+        if (loginForm && submitBtn && submitText) {
+            loginForm.addEventListener('submit', () => {
+                submitBtn.style.opacity = '0.85';
+                submitText.textContent = 'Verificando credenciales...';
             });
         }
     });

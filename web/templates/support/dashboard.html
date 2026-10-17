@@ -1,16 +1,16 @@
 {% extends 'base.html' %}
 {% load static %}
 
-{% block title %}Dashboard | CartMaker Soporte{% endblock %}
+{% block title %}Centro de Soporte al Cliente | CartMaker HQ{% endblock %}
 
 {% block extra_head %}
-    <link rel="stylesheet" href="{% static 'css/support_chat.css' %}">
+    <link rel="stylesheet" href="{% static 'css/support_chat.css' %}?v=20261017_cm">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 {% endblock %}
 
 {% block content %}
 <div class="agent-workspace">
-    <!-- Menú Lateral -->
+    <!-- Menú Lateral de Consola -->
     <aside class="agent-sidebar">
         <div class="sidebar-user">
             <div class="avatar-sm">
@@ -22,55 +22,142 @@
             </div>
             <div class="user-details">
                 <h4>{{ user.first_name }} {{ user.last_name }}</h4>
-                <span>Agente de Soporte</span>
+                <span>Agente de Soporte HQ</span>
             </div>
         </div>
 
         <nav class="sidebar-nav">
             <button class="nav-btn active" data-target="panel-monitor">
                 <span class="material-symbols-rounded">monitoring</span>
-                Monitor de Tickets
+                <span>Monitor de Casos</span>
+                <span class="sidebar-counter-pill" id="sidebar-active-pill">{{ analytics_data.total_active }}</span>
             </button>
             <button class="nav-btn" data-target="panel-analytics">
                 <span class="material-symbols-rounded">insert_chart</span>
-                Analíticas
+                <span>Analíticas &amp; SLA</span>
             </button>
             <button class="nav-btn" data-target="panel-profile">
                 <span class="material-symbols-rounded">manage_accounts</span>
-                Mi Perfil
+                <span>Mi Perfil Operativo</span>
             </button>
         </nav>
+
+        <div class="sidebar-status-box">
+            <div class="sidebar-status-row">
+                <span class="pulse-dot-online"></span>
+                <span>WebSockets Activo</span>
+            </div>
+            <p>Recibiendo asignaciones y mensajes de soporte en tiempo real.</p>
+        </div>
     </aside>
 
     <!-- Contenedor Principal de Paneles -->
     <main class="agent-main-content">
-        
-        <!-- PANEL A: MONITOR -->
+
+        <!-- PANEL A: MONITOR DE CASOS -->
         <section id="panel-monitor" class="dash-panel active">
             <div class="panel-header">
                 <div>
-                    <h2 class="panel-title">Panel de Casos</h2>
-                    <p class="panel-subtitle">Gestiona las solicitudes activas e históricas asignadas a tu cuenta.</p>
+                    <span class="panel-eyebrow">
+                        <span class="material-symbols-rounded">support_agent</span>
+                        ATENCIÓN OMNICANAL EN TIEMPO REAL
+                    </span>
+                    <h2 class="panel-title">Monitor de Casos de Soporte</h2>
+                    <p class="panel-subtitle">Gestiona las solicitudes activas e históricas asignadas a tu estación de trabajo.</p>
                 </div>
                 <div class="ticket-stats">
                     <span class="stat-badge" id="active-tickets-badge">
                         <span class="material-symbols-rounded">confirmation_number</span>
-                        <span id="total-active-counter">{{ active_tickets.count }}</span> Activos
+                        <span id="total-active-counter">{{ active_tickets.paginator.count|default:analytics_data.total_active }}</span> Casos Activos
                     </span>
                 </div>
             </div>
 
-            <!-- Selector de Pestañas -->
-            <div class="ticket-tabs-wrapper" style="display: flex; gap: 10px; margin-bottom: 24px; background: rgba(255,255,255,0.04); padding: 6px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.08); width: fit-content; max-width: 100%; flex-wrap: wrap;">
-                <button class="ticket-tab-toggle active" data-tab="tab-active-content" style="position: relative; background: rgba(109, 73, 242, 0.22); border: 1px solid rgba(109, 73, 242, 0.4); border-radius: 10px; font-size: 14px; font-weight: 800; color: #FFFFFF; cursor: pointer; padding: 9px 16px; transition: all 0.2s;">
-                    Tickets Activos
-                    <span id="new-tickets-alert-badge" style="display: none; position: absolute; top: -8px; right: -10px; background: #EF4444; color: white; border-radius: 999px; padding: 2px 7px; font-size: 11px; font-weight: 800; box-shadow: 0 4px 10px rgba(239,68,68,0.5);">0</span>
-                </button>
-                <button class="ticket-tab-toggle" data-tab="tab-closed-content" style="background: transparent; border: 1px solid transparent; border-radius: 10px; font-size: 14px; font-weight: 700; color: #94A3B8; cursor: pointer; padding: 9px 16px; transition: all 0.2s;">
-                    Historial Cerrados
-                </button>
+            <!-- Franja de KPIs Operativos de Soporte -->
+            <div class="support-kpi-strip">
+                <div class="sup-kpi-card">
+                    <div class="sup-kpi-icon sup-icon-purple">
+                        <span class="material-symbols-rounded">inbox</span>
+                    </div>
+                    <div>
+                        <span class="sup-kpi-label">Casos Abiertos</span>
+                        <strong class="sup-kpi-val" id="kpi-open-count">{{ analytics_data.total_active }}</strong>
+                    </div>
+                </div>
+
+                <div class="sup-kpi-card sup-kpi-urgent">
+                    <div class="sup-kpi-icon sup-icon-danger">
+                        <span class="material-symbols-rounded">priority_high</span>
+                    </div>
+                    <div>
+                        <span class="sup-kpi-label">Requieren tu Respuesta</span>
+                        <strong class="sup-kpi-val" id="kpi-urgent-count">{{ analytics_data.urgent_agent_count }}</strong>
+                    </div>
+                </div>
+
+                <div class="sup-kpi-card">
+                    <div class="sup-kpi-icon sup-icon-amber">
+                        <span class="material-symbols-rounded">hourglass_top</span>
+                    </div>
+                    <div>
+                        <span class="sup-kpi-label">Esperando al Cliente</span>
+                        <strong class="sup-kpi-val" id="kpi-waiting-count">{{ analytics_data.waiting_client_count }}</strong>
+                    </div>
+                </div>
+
+                <div class="sup-kpi-card">
+                    <div class="sup-kpi-icon sup-icon-emerald">
+                        <span class="material-symbols-rounded">verified</span>
+                    </div>
+                    <div>
+                        <span class="sup-kpi-label">Resueltos (SLA {{ analytics_data.avg_hours }}h)</span>
+                        <strong class="sup-kpi-val">{{ analytics_data.total_closed }}</strong>
+                    </div>
+                </div>
             </div>
 
+            <!-- Barra de Pestañas + Buscador y Filtros en Tiempo Real -->
+            <div class="monitor-toolbar">
+                <div class="ticket-tabs-wrapper">
+                    <button class="ticket-tab-toggle active" data-tab="tab-active-content">
+                        <span class="material-symbols-rounded">bolt</span>
+                        <span>Tickets Activos</span>
+                        <span id="new-tickets-alert-badge" class="new-ticket-floating-badge" style="display: none;">0</span>
+                    </button>
+                    <button class="ticket-tab-toggle" data-tab="tab-closed-content">
+                        <span class="material-symbols-rounded">inventory_2</span>
+                        <span>Historial Cerrados</span>
+                    </button>
+                </div>
+
+                <div class="monitor-filters-group">
+                    <div class="monitor-search-wrap">
+                        <span class="material-symbols-rounded">search</span>
+                        <input
+                            type="text"
+                            id="ticketSearchInput"
+                            placeholder="Buscar por #ID, asunto, cliente o mensaje..."
+                            autocomplete="off"
+                        >
+                    </div>
+
+                    <select id="ticketStateFilter" class="monitor-filter-select" aria-label="Filtrar por estado">
+                        <option value="all">Todos los estados</option>
+                        <option value="agent">Requieren mi atención</option>
+                        <option value="client">Esperando al cliente</option>
+                    </select>
+
+                    <select id="ticketTopicFilter" class="monitor-filter-select" aria-label="Filtrar por tema">
+                        <option value="all">Todos los temas</option>
+                        <option value="0">Problema con Orden</option>
+                        <option value="1">Reclamo sobre Tienda</option>
+                        <option value="2">Problema con Cuenta</option>
+                        <option value="3">Otro</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Pestaña: Tickets Activos -->
             <div class="ticket-view-tab" id="tab-active-content">
                 <div class="tickets-grid" id="dashboard-tickets-grid">
                     {% if active_tickets %}
@@ -79,20 +166,22 @@
                         <div class="empty-tickets">
                             <span class="material-symbols-rounded">task_alt</span>
                             <h3>¡Todo al día!</h3>
-                            <p>No tienes tickets asignados en este momento.</p>
+                            <p>No tienes tickets activos asignados en este momento.</p>
                         </div>
                     {% endif %}
                 </div>
-                
+
                 {% if active_tickets.has_next %}
-                    <div class="load-more-container" style="text-align: center; margin-top: 2rem;">
-                        <button class="btn-action btn-load-more" data-tab="active" data-page="2" style="background: rgba(109, 73, 242, 0.1); color: var(--primary); border: 1px solid var(--primary); padding: 10px 24px; border-radius: 12px; font-weight: 700; cursor: pointer; transition: all 0.3s;">
+                    <div class="load-more-container">
+                        <button class="btn-action btn-load-more" data-tab="active" data-page="2">
+                            <span class="material-symbols-rounded">expand_more</span>
                             Cargar más tickets
                         </button>
                     </div>
                 {% endif %}
             </div>
 
+            <!-- Pestaña: Historial Cerrados -->
             <div class="ticket-view-tab" id="tab-closed-content" style="display: none;">
                 <div class="tickets-grid" id="dashboard-closed-tickets-grid">
                     {% if closed_tickets %}
@@ -107,8 +196,9 @@
                 </div>
 
                 {% if closed_tickets.has_next %}
-                    <div class="load-more-container" style="text-align: center; margin-top: 2rem;">
-                        <button class="btn-action btn-load-more" data-tab="closed" data-page="2" style="background: rgba(109, 73, 242, 0.1); color: var(--primary); border: 1px solid var(--primary); padding: 10px 24px; border-radius: 12px; font-weight: 700; cursor: pointer; transition: all 0.3s;">
+                    <div class="load-more-container">
+                        <button class="btn-action btn-load-more" data-tab="closed" data-page="2">
+                            <span class="material-symbols-rounded">expand_more</span>
                             Cargar más historial
                         </button>
                     </div>
@@ -120,8 +210,12 @@
         <section id="panel-analytics" class="dash-panel">
             <div class="panel-header">
                 <div>
+                    <span class="panel-eyebrow">
+                        <span class="material-symbols-rounded">insights</span>
+                        MÉTRICAS DE CALIDAD &amp; TIEMPO DE RESPUESTA
+                    </span>
                     <h2 class="panel-title">Rendimiento Operativo</h2>
-                    <p class="panel-subtitle">Métricas basadas en tu historial de atención al cliente.</p>
+                    <p class="panel-subtitle">Indicadores calculados sobre tu historial de casos atendidos y cerrados.</p>
                 </div>
             </div>
 
@@ -130,27 +224,34 @@
                     <div class="metric-icon"><span class="material-symbols-rounded">task_alt</span></div>
                     <div class="metric-info">
                         <h3>{{ analytics_data.total_closed }}</h3>
-                        <p>Tickets Atendidos</p>
+                        <p>Tickets Resueltos / Cerrados</p>
                     </div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-icon"><span class="material-symbols-rounded">timer</span></div>
                     <div class="metric-info">
                         <h3>{{ analytics_data.avg_hours }} hrs</h3>
-                        <p>Tiempo Promedio de Resolución</p>
+                        <p>Tiempo Promedio de Resolución (SLA)</p>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon"><span class="material-symbols-rounded">pending_actions</span></div>
+                    <div class="metric-info">
+                        <h3>{{ analytics_data.total_active }}</h3>
+                        <p>Casos Actualmente en Cola</p>
                     </div>
                 </div>
             </div>
 
             <div class="charts-grid">
                 <div class="chart-box">
-                    <h3>Distribución por Tema</h3>
+                    <h3>Distribución por Tema de Consulta</h3>
                     <div class="canvas-container">
                         <canvas id="topicsChart"></canvas>
                     </div>
                 </div>
                 <div class="chart-box">
-                    <h3>Motivos de Cierre</h3>
+                    <h3>Distribución por Motivo de Cierre</h3>
                     <div class="canvas-container">
                         <canvas id="reasonsChart"></canvas>
                     </div>
@@ -162,8 +263,12 @@
         <section id="panel-profile" class="dash-panel">
             <div class="panel-header">
                 <div>
+                    <span class="panel-eyebrow">
+                        <span class="material-symbols-rounded">badge</span>
+                        IDENTIDAD DEL AGENTE EN SALA DE SOPORTE
+                    </span>
                     <h2 class="panel-title">Configuración de Perfil</h2>
-                    <p class="panel-subtitle">Actualiza tus datos y fotografía mostrada a los clientes.</p>
+                    <p class="panel-subtitle">Actualiza tus datos visibles y fotografía mostrada a los clientes durante el chat.</p>
                 </div>
             </div>
 
@@ -178,10 +283,23 @@
                                 <span class="material-symbols-rounded default-avatar">account_circle</span>
                             {% endif %}
                         </div>
-                        <label for="profileImageInput" class="avatar-edit-btn">
+                        <label for="profileImageInput" class="avatar-edit-btn" title="Cambiar foto de perfil">
                             <span class="material-symbols-rounded">photo_camera</span>
                         </label>
                         <input type="file" id="profileImageInput" name="profile_picture" accept="image/*" hidden>
+                    </div>
+
+                    <div class="agent-permissions-strip">
+                        <span class="perm-chip"><span class="material-symbols-rounded">mail</span> {{ user.email }}</span>
+                        {% if user.is_superuser %}
+                        <span class="perm-chip perm-chip-purple"><span class="material-symbols-rounded">shield_person</span> Superusuario</span>
+                        {% endif %}
+                        {% if user.can_check_support or user.is_superuser %}
+                        <span class="perm-chip perm-chip-emerald"><span class="material-symbols-rounded">support_agent</span> Soporte Activo</span>
+                        {% endif %}
+                        {% if user.can_check_payments or user.is_superuser %}
+                        <span class="perm-chip perm-chip-emerald"><span class="material-symbols-rounded">account_balance</span> Conciliación Bancaria</span>
+                        {% endif %}
                     </div>
 
                     <div class="form-row">
@@ -197,7 +315,7 @@
 
                     <button type="submit" class="btn-save-profile">
                         <span class="material-symbols-rounded">save</span>
-                        Guardar Cambios
+                        Guardar Cambios de Perfil
                     </button>
                 </form>
             </div>
@@ -212,5 +330,5 @@
     const JWT_TOKEN = "{{ jwt_token }}";
 </script>
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-<script src="{% static 'js/dashboard.js' %}"></script>
+<script src="{% static 'js/dashboard.js' %}?v=20261017_cm"></script>
 {% endblock %}

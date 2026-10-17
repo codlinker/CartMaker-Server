@@ -1,51 +1,132 @@
 {% extends 'base.html' %}
 {% load static %}
 
-{% block title %}Consola de Conciliación Bancaria | CartMaker HQ{% endblock %}
+{% block title %}Consola de Conciliación Bancaria & Facturación SENIAT | CartMaker HQ{% endblock %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{% static 'css/payments_dashboard.css' %}">
+<link rel="stylesheet" href="{% static 'css/payments_dashboard.css' %}?v=20261017_cm">
 {% endblock %}
 
 {% block content %}
 <div class="payments-workspace">
+    <!-- Encabezado Ejecutivo + Ficha del Emisor Fiscal Activo -->
     <div class="dashboard-header animate__animated animate__fadeIn">
         <div class="header-title-block">
             <span class="console-eyebrow">
                 <span class="material-symbols-rounded">verified_user</span>
-                FINANZAS &amp; TESORERÍA · TASA BCV
+                TESORERÍA, PAGO MÓVIL &amp; FACTURACIÓN DIGITAL SENIAT
             </span>
             <h1>Consola de Conciliación Bancaria</h1>
-            <p>Auditoría y validación inmediata de transferencias y Pago Móvil para suscripciones Atlas Plus AI y operaciones históricas.</p>
+            <p>Auditoría en tiempo real de reportes en Bolívares (Tasa BCV), activación automática de planes Atlas Plus AI y emisión de facturas legales.</p>
+        </div>
+
+        {% if billing_issuer %}
+        <div class="issuer-summary-card">
+            <div class="issuer-card-top">
+                <span class="material-symbols-rounded issuer-icon">receipt_long</span>
+                <div>
+                    <span class="issuer-eyebrow">EMISOR FISCAL ACTIVO (BD DINÁMICA)</span>
+                    <strong class="issuer-name">{{ billing_issuer.business_name }}</strong>
+                </div>
+            </div>
+            <div class="issuer-meta-pills">
+                <span class="issuer-pill"><strong>RIF:</strong> {{ billing_issuer.rif }}</span>
+                {% if billing_issuer.cedula %}
+                <span class="issuer-pill"><strong>C.I.:</strong> {{ billing_issuer.cedula }}</span>
+                {% endif %}
+                <span class="issuer-pill issuer-pill-emerald">IVA {{ billing_issuer.iva_rate_pct }}%</span>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Franja de KPIs Financieros y Operativos -->
+    <div class="financial-kpi-grid animate__animated animate__fadeIn">
+        <div class="fin-kpi-card {% if kpis.total_pending > 0 %}fin-kpi-highlight{% endif %}">
+            <div class="fin-kpi-icon icon-amber">
+                <span class="material-symbols-rounded">pending_actions</span>
+            </div>
+            <div class="fin-kpi-body">
+                <span class="fin-kpi-label">Pendientes por Conciliar</span>
+                <div class="fin-kpi-value" id="kpi-total-pending">{{ kpis.total_pending }}</div>
+                <span class="fin-kpi-sub">{{ kpis.atlas_pending_count }} Atlas Plus · {{ kpis.merchant_pending_count }} Comercios</span>
+            </div>
+        </div>
+
+        <div class="fin-kpi-card">
+            <div class="fin-kpi-icon icon-emerald">
+                <span class="material-symbols-rounded">payments</span>
+            </div>
+            <div class="fin-kpi-body">
+                <span class="fin-kpi-label">Recaudación Atlas Plus</span>
+                <div class="fin-kpi-value">{{ kpis.approved_atlas_usd_ve }}</div>
+                <span class="fin-kpi-sub">{{ kpis.approved_atlas_bs_ve }} ({{ kpis.approved_atlas_count }} aprobados)</span>
+            </div>
+        </div>
+
+        <div class="fin-kpi-card">
+            <div class="fin-kpi-icon icon-purple">
+                <span class="material-symbols-rounded">description</span>
+            </div>
+            <div class="fin-kpi-body">
+                <span class="fin-kpi-label">Facturas SENIAT Emitidas</span>
+                <div class="fin-kpi-value">{{ kpis.invoices_count }}</div>
+                <span class="fin-kpi-sub">Serie correlativa automática</span>
+            </div>
+        </div>
+
+        <div class="fin-kpi-card">
+            <div class="fin-kpi-icon icon-cyan">
+                <span class="material-symbols-rounded">currency_exchange</span>
+            </div>
+            <div class="fin-kpi-body">
+                <span class="fin-kpi-label">Tarifa Atlas Plus &amp; BCV</span>
+                <div class="fin-kpi-value">{{ kpis.atlas_price_usd_ve }} <small>/ mes</small></div>
+                <span class="fin-kpi-sub">Tasa: {{ kpis.bcv_live_rate_ve }} (≈ {{ kpis.expected_bs_live_ve }})</span>
+            </div>
         </div>
     </div>
 
+    <!-- Barra de Control: Pestañas, Buscador Instantáneo y Sincronización -->
     <div class="payments-matrix-container">
         <div class="matrix-tabs">
             <div class="matrix-tabs-group">
-                <button class="matrix-tab-btn active" data-target="merchant-deck" onclick="changeDeck(this)">
-                    <span class="material-symbols-rounded">storefront</span>
-                    <span>Ecosistema Comercios</span>
-                    <span class="badge-count-glow" id="badge-merchant">{{ merchant_pending|length }}</span>
-                </button>
-                <button class="matrix-tab-btn" data-target="atlas-deck" onclick="changeDeck(this)">
+                <button class="matrix-tab-btn active" data-target="atlas-deck" onclick="changeDeck(this)">
                     <span class="material-symbols-rounded">auto_awesome</span>
                     <span>Módulo Atlas Plus AI</span>
                     <span class="badge-count-glow" id="badge-atlas">{{ atlas_pending|length }}</span>
                 </button>
+                <button class="matrix-tab-btn" data-target="merchant-deck" onclick="changeDeck(this)">
+                    <span class="material-symbols-rounded">storefront</span>
+                    <span>Ecosistema Comercios</span>
+                    <span class="badge-count-glow" id="badge-merchant">{{ merchant_pending|length }}</span>
+                </button>
             </div>
-            <button class="btn-sync-deck" onclick="refreshActiveDeck()">
-                <span class="material-symbols-rounded">sync</span>
-                <span>Sincronizar</span>
-            </button>
+
+            <div class="matrix-toolbar-right">
+                <div class="matrix-search-box">
+                    <span class="material-symbols-rounded search-icon">search</span>
+                    <input
+                        type="text"
+                        id="paymentsSearchInput"
+                        placeholder="Buscar por referencia, correo, nombre o factura..."
+                        oninput="filterPaymentsTable()"
+                        autocomplete="off"
+                    >
+                </div>
+                <button class="btn-sync-deck" id="btnSyncDeck" onclick="refreshActiveDeck()">
+                    <span class="material-symbols-rounded" id="syncDeckIcon">sync</span>
+                    <span>Sincronizar</span>
+                </button>
+            </div>
         </div>
 
-        <div id="merchant-deck" class="deck-view active animate__animated animate__fadeIn">
-            {% include 'support/partials/merchant_deck_content.html' %}
-        </div>
-
-        <div id="atlas-deck" class="deck-view animate__animated animate__fadeIn">
+        <div id="atlas-deck" class="deck-view active animate__animated animate__fadeIn">
             {% include 'support/partials/atlas_deck_content.html' %}
+        </div>
+
+        <div id="merchant-deck" class="deck-view animate__animated animate__fadeIn">
+            {% include 'support/partials/merchant_deck_content.html' %}
         </div>
     </div>
 </div>
@@ -57,5 +138,5 @@
     const ENDPOINT_URI = window.location.href;
     const APP_CSRF_TOKEN = "{{ csrf_token }}";
 </script>
-<script src="{% static 'js/payments_dashboard.js' %}"></script>
+<script src="{% static 'js/payments_dashboard.js' %}?v=20261017_cm"></script>
 {% endblock %}

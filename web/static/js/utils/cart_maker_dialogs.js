@@ -1,22 +1,22 @@
 /**
  * CartMaker Dialogs - Wrapper modular para SweetAlert2
- * Mantiene la consistencia de UI/UX en toda la plataforma.
+ * Mantiene la consistencia de UI/UX del Design System de CartMaker en toda la plataforma.
  */
 class CartMakerModal {
-    // Configuración base inyectando las clases CSS de CartMaker
     static get baseConfig() {
         return {
-            background: 'rgba(20, 15, 30, 0.95)',
-            color: '#ffffff',
-            backdrop: 'rgba(0, 0, 0, 0.75)',
-            buttonsStyling: false, // Desactivamos estilos por defecto para usar los nuestros
+            background: '#FFFFFF',
+            color: '#0F0B1D',
+            backdrop: 'rgba(15, 11, 29, 0.55)',
+            buttonsStyling: false,
             customClass: {
                 popup: 'cm-modal-popup',
                 title: 'cm-modal-title',
                 htmlContainer: 'cm-modal-text',
-                confirmButton: 'btn-save-profile cm-modal-btn', // Reutilizamos tu clase de botón
-                cancelButton: 'btn-action close-ticket cm-modal-btn cm-modal-cancel', 
-                input: 'custom-select'
+                actions: 'cm-modal-actions',
+                confirmButton: 'cm-modal-btn cm-modal-confirm',
+                cancelButton: 'cm-modal-btn cm-modal-cancel',
+                input: 'cm-modal-select'
             },
             showClass: {
                 popup: 'animate__animated animate__fadeInUp animate__faster'
@@ -28,15 +28,34 @@ class CartMakerModal {
     }
 
     /**
-     * Modal de Éxito genérico
+     * Modal de Éxito genérico (soporta texto o HTML enriquecido como enlaces de Factura Digital)
      */
-    static success(title, text = '') {
-        return Swal.fire({
+    static success(title, text = '', options = {}) {
+        const config = {
             ...this.baseConfig,
             icon: 'success',
             title: title,
+            iconColor: '#10B981',
+            confirmButtonText: options.confirmButtonText || 'Entendido',
+        };
+        if (options.html) {
+            config.html = options.html;
+        } else {
+            config.text = text;
+        }
+        return Swal.fire(config);
+    }
+
+    /**
+     * Modal de Advertencia / Información operativa
+     */
+    static warning(title, text = '') {
+        return Swal.fire({
+            ...this.baseConfig,
+            icon: 'warning',
+            title: title,
             text: text,
-            iconColor: 'var(--success-green)',
+            iconColor: '#F59E0B',
             confirmButtonText: 'Entendido'
         });
     }
@@ -50,7 +69,7 @@ class CartMakerModal {
             icon: 'error',
             title: title,
             text: text,
-            iconColor: 'var(--error-red)',
+            iconColor: '#EF4444',
             confirmButtonText: 'Aceptar'
         });
     }
@@ -61,14 +80,14 @@ class CartMakerModal {
     static async confirm(title, text, confirmText = 'Confirmar', cancelText = 'Cancelar') {
         const result = await Swal.fire({
             ...this.baseConfig,
-            icon: 'warning',
+            icon: 'question',
             title: title,
             text: text,
-            iconColor: 'var(--warning-yellow)',
+            iconColor: '#6D49F2',
             showCancelButton: true,
             confirmButtonText: confirmText,
             cancelButtonText: cancelText,
-            reverseButtons: true // Coloca el botón principal a la derecha
+            reverseButtons: true
         });
         return result.isConfirmed;
     }
@@ -86,9 +105,9 @@ class CartMakerModal {
             cancelButtonText: 'Cancelar',
             reverseButtons: true,
             focusConfirm: false,
-            preConfirm: preConfirm // Callback inyectado para validar/extraer datos del DOM
+            preConfirm: preConfirm
         });
-        
-        return result; // Retorna { isConfirmed: true, value: ... }
+
+        return result;
     }
 }

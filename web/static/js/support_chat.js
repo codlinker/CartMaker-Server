@@ -11,12 +11,38 @@ const statusDot = document.getElementById('client-status-dot');
 const statusText = document.getElementById('client-status-text');
 const loader = document.getElementById('history-loader');
 
-// 💡 NUEVO: Capturar elementos multimedia
 const btnAttach = document.getElementById('btn-attach');
 const mediaInput = document.getElementById('media-input');
 const btnMic = document.getElementById('btn-mic');
 
 let typingTimeout;
+
+// =========================================================================
+// ⚡ RESPUESTAS RÁPIDAS (MACROS DE 1 TOQUE)
+// =========================================================================
+document.querySelectorAll('.quick-reply-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+        if (!input || input.disabled) return;
+        const replyText = chip.getAttribute('data-reply') || '';
+        input.value = replyText;
+        input.focus();
+        socket.emit('typing', { isTyping: true });
+    });
+});
+
+/**
+ * Lightbox para ampliar imágenes enviadas en el chat de soporte
+ */
+function previewChatImage(imageUrl) {
+    if (!imageUrl) return;
+    Swal.fire({
+        ...CartMakerModal.baseConfig,
+        title: 'Imagen Adjunta en Soporte',
+        imageUrl: imageUrl,
+        imageAlt: 'Adjunto del chat',
+        confirmButtonText: 'Cerrar Vista'
+    });
+}
 
 async function loadHistory() {
     try {
@@ -24,14 +50,14 @@ async function loadHistory() {
             headers: { 'Authorization': `Bearer ${JWT_TOKEN}` }
         });
         const json = await response.json();
-        loader.style.display = 'none';
-        
+        if (loader) loader.style.display = 'none';
+
         if (json.data) {
             json.data.forEach(msg => renderMessage(msg));
             scrollToBottom();
         }
     } catch (e) {
-        loader.style.display = 'none';
+        if (loader) loader.style.display = 'none';
     }
 }
 
@@ -48,7 +74,7 @@ socket.on('support_presence_change', (data) => {
     if (data.user_id !== AGENT_ID) {
         if (data.status === 'online') {
             statusDot.classList.add('online');
-            statusText.textContent = 'Cliente en línea';
+            statusText.textContent = 'Cliente en línea ahora';
         } else {
             statusDot.classList.remove('online');
             statusText.textContent = 'Cliente desconectado';
@@ -58,7 +84,7 @@ socket.on('support_presence_change', (data) => {
 
 socket.on('typing_status', (data) => {
     if (data.user_id !== AGENT_ID) {
-        typingIndicator.textContent = data.isTyping ? "Escribiendo..." : "";
+        typingIndicator.textContent = data.isTyping ? "El cliente está escribiendo..." : "";
     }
 });
 
@@ -69,35 +95,32 @@ socket.on('support_room_read_receipt', () => {
 });
 
 socket.on('ticket_closed', (data) => {
-    // 1. Bloquear inputs lógicamente
     input.disabled = true;
     input.placeholder = `Ticket Cerrado: ${data.reason}`;
     sendBtn.disabled = true;
     btnAttach.disabled = true;
     btnMic.disabled = true;
-    
-    // 2. Apagar el área de input visualmente
+
     const inputArea = document.querySelector('.chat-input-area');
     if (inputArea) {
-        inputArea.style.opacity = '0.5';
+        inputArea.style.opacity = '0.55';
         inputArea.style.pointerEvents = 'none';
-        inputArea.style.filter = 'grayscale(100%)';
-        inputArea.style.transition = 'all 0.4s ease';
     }
-    
-    // 3. Actualizar estado del cliente (Corrección de clase)
-    statusDot.className = 'status-dot'; // Mantenemos la clase base
-    statusDot.style.background = 'var(--error-red)';
-    statusDot.style.boxShadow = '0 0 10px var(--error-red)'; // Brillo rojo
-    
+    const quickBar = document.getElementById('quickRepliesBar');
+    if (quickBar) {
+        quickBar.style.display = 'none';
+    }
+
+    statusDot.className = 'status-dot';
+    statusDot.style.background = '#EF4444';
     statusText.textContent = `Cerrado: ${data.reason}`;
-    statusText.style.color = 'var(--error-red)';
+    statusText.style.color = '#DC2626';
     statusText.style.fontWeight = '800';
 });
 
 input.addEventListener('input', () => {
     socket.emit('typing', { isTyping: input.value.trim().length > 0 });
-    
+
     clearTimeout(typingTimeout);
     typingTimeout = setTimeout(() => {
         socket.emit('typing', { isTyping: false });
@@ -121,12 +144,10 @@ let isRecording = false;
 
 btnMic.addEventListener('click', async () => {
     if (!isRecording) {
-        // 1. Iniciar Grabación
         try {
-            // Pedimos permiso al navegador para usar el micrófono
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             mediaRecorder = new MediaRecorder(stream);
-            
+
             mediaRecorder.ondataavailable = event => {
                 if (event.data.size > 0) {
                     audioChunks.push(event.data);
@@ -134,27 +155,21 @@ btnMic.addEventListener('click', async () => {
             };
 
             mediaRecorder.onstop = async () => {
-                // Creamos el archivo final en formato webm o mp4 (soportado por HTML5)
                 const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                audioChunks = []; 
-                
-                // Apagamos la luz roja del micrófono en la pestaña del navegador
+                audioChunks = [];
                 stream.getTracks().forEach(track => track.stop());
 
-                // Bloqueamos inputs mientras se sube
                 const originalPlaceholder = input.placeholder;
-                input.placeholder = "Subiendo audio...";
+                input.placeholder = "Subiendo nota de voz...";
                 input.disabled = true;
                 btnAttach.disabled = true;
                 sendBtn.disabled = true;
                 btnMic.disabled = true;
 
-                // Preparamos el FormData simulando un archivo
                 const formData = new FormData();
                 formData.append('file', audioBlob, `audio_agente_${Date.now()}.webm`);
 
                 try {
-                    // Usamos el MISMO endpoint que preparamos para las fotos de soporte
                     const response = await fetch('/chat/support/upload-media/', {
                         method: 'POST',
                         headers: { 'Authorization': `Bearer ${JWT_TOKEN}` },
@@ -164,19 +179,18 @@ btnMic.addEventListener('click', async () => {
                     const json = await response.json();
 
                     if (response.ok && json.url) {
-                        // Enviamos el mensaje por el socket
                         socket.emit('send_support_message', {
                             ticket_id: TICKET_ID,
-                            text: '', 
+                            text: '',
                             message_type: 'audio',
                             media_url: json.url
                         });
                     } else {
-                        CartMakerModal.error("Oops", "Error al subir el audio. Verifica tu conexión.");
+                        CartMakerModal.error("Error de subida", "No se pudo subir la nota de voz. Verifica tu conexión.");
                     }
                 } catch (error) {
                     console.error("Error de red subiendo audio:", error);
-                    alert("Fallo de conexión al enviar la nota de voz.");
+                    CartMakerModal.error("Fallo de conexión", "No fue posible enviar la nota de voz.");
                 } finally {
                     input.placeholder = originalPlaceholder;
                     input.disabled = false;
@@ -188,28 +202,27 @@ btnMic.addEventListener('click', async () => {
 
             mediaRecorder.start();
             isRecording = true;
-            
-            // 💡 Efectos visuales de grabación
-            btnMic.style.color = 'white';
-            btnMic.style.backgroundColor = 'var(--error-red)';
+
+            btnMic.style.color = '#FFFFFF';
+            btnMic.style.backgroundColor = '#EF4444';
+            btnMic.style.borderColor = '#EF4444';
             btnMic.innerHTML = '<span class="material-symbols-rounded">stop</span>';
-            input.placeholder = "Grabando... (Click en Stop para enviar)";
-            input.disabled = true; 
+            input.placeholder = "Grabando nota de voz... (Pulsa Stop para enviar)";
+            input.disabled = true;
             sendBtn.style.display = 'none';
             btnAttach.style.display = 'none';
 
         } catch (err) {
             console.error("Error accediendo al micrófono:", err);
-            CartMakerModal.error("Permiso denegado", "No se pudo acceder al micrófono. Verifica los permisos del navegador.");
+            CartMakerModal.error("Permiso requerido", "No se pudo acceder al micrófono. Verifica los permisos del navegador.");
         }
     } else {
-        // 2. Detener Grabación (dispara mediaRecorder.onstop automáticamente)
         mediaRecorder.stop();
         isRecording = false;
-        
-        // Restauramos los estilos del botón
-        btnMic.style.color = 'var(--primary)';
-        btnMic.style.backgroundColor = 'transparent';
+
+        btnMic.style.color = '';
+        btnMic.style.backgroundColor = '';
+        btnMic.style.borderColor = '';
         btnMic.innerHTML = '<span class="material-symbols-rounded">mic</span>';
         sendBtn.style.display = 'flex';
         btnAttach.style.display = 'flex';
@@ -217,7 +230,7 @@ btnMic.addEventListener('click', async () => {
 });
 
 // =========================================================================
-// 💡 NUEVO: LÓGICA DE SUBIDA DE IMÁGENES
+// 🖼️ LÓGICA DE SUBIDA DE IMÁGENES
 // =========================================================================
 btnAttach.addEventListener('click', () => {
     mediaInput.click();
@@ -227,7 +240,6 @@ mediaInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    // Bloqueamos inputs temporalmente
     const originalPlaceholder = input.placeholder;
     input.placeholder = "Subiendo imagen...";
     input.disabled = true;
@@ -238,10 +250,10 @@ mediaInput.addEventListener('change', async (e) => {
     formData.append('file', file);
 
     try {
-        const response = await fetch('/chat/support/upload-media/', { 
+        const response = await fetch('/chat/support/upload-media/', {
             method: 'POST',
-            headers: { 
-                'Authorization': `Bearer ${JWT_TOKEN}` 
+            headers: {
+                'Authorization': `Bearer ${JWT_TOKEN}`
             },
             body: formData
         });
@@ -251,7 +263,7 @@ mediaInput.addEventListener('change', async (e) => {
         if (response.ok && json.url) {
             socket.emit('send_support_message', {
                 ticket_id: TICKET_ID,
-                text: '', 
+                text: '',
                 message_type: 'image',
                 media_url: json.url
             });
@@ -266,10 +278,9 @@ mediaInput.addEventListener('change', async (e) => {
         input.disabled = false;
         btnAttach.disabled = false;
         sendBtn.disabled = false;
-        mediaInput.value = ''; // Limpiamos el input
+        mediaInput.value = '';
     }
 });
-// =========================================================================
 
 function sendMessage() {
     const text = input.value.trim();
@@ -300,20 +311,19 @@ function renderMessage(msg) {
     const div = document.createElement('div');
     const isAgent = msg.sender_id === AGENT_ID;
     div.className = `message ${isAgent ? 'agent' : 'client'}`;
-    
+
     let content = escapeHtml(msg.text);
     const safeMediaUrl = escapeHtml(msg.media_url);
     if (msg.message_type === 'image') {
-        // Envolvemos la imagen en un contenedor para que mantenga un tamaño decente
-        content = `<div style="max-width: 250px; overflow: hidden; border-radius: 8px;">
-                       <img src="${safeMediaUrl}" style="width: 100%; height: auto; display: block; border-radius: 8px;">
+        content = `<div style="max-width: 260px; overflow: hidden; border-radius: 12px; cursor: pointer;" onclick="previewChatImage('${safeMediaUrl}')">
+                       <img src="${safeMediaUrl}" style="width: 100%; height: auto; display: block; border-radius: 12px;" alt="Adjunto">
                    </div>`;
     } else if (msg.message_type === 'audio') {
-        content = `<audio controls src="${safeMediaUrl}" style="height:35px;"></audio>`;
+        content = `<audio controls src="${safeMediaUrl}" style="height:36px; max-width:250px;"></audio>`;
     }
 
-    const tickIcon = isAgent 
-        ? `<span class="material-symbols-rounded tick-icon" style="font-size:14px;">${msg.status >= 3 ? 'done_all' : 'check'}</span>` 
+    const tickIcon = isAgent
+        ? `<span class="material-symbols-rounded tick-icon" style="font-size:15px;">${msg.status >= 3 ? 'done_all' : 'check'}</span>`
         : '';
 
     const safeTime = escapeHtml((msg.created_at || '').split(' ').slice(1).join(' '));
@@ -324,7 +334,7 @@ function renderMessage(msg) {
             ${tickIcon}
         </div>
     `;
-    
+
     messagesContainer.appendChild(div);
 }
 
@@ -333,47 +343,41 @@ function scrollToBottom() {
 }
 
 // =========================================================================
-// 🔒 LÓGICA DE CIERRE DE TICKET CON MODAL PERSONALIZADO
+// 🔒 LÓGICA DE CIERRE DE TICKET CON MODAL UNIFICADO CARTMAKER
 // =========================================================================
 const btnTriggerClose = document.getElementById('btn-trigger-close');
 
 if (btnTriggerClose) {
     btnTriggerClose.addEventListener('click', async () => {
-        
-        // 1. Invocamos el formulario modal usando la estructura limpia
         const result = await CartMakerModal.form({
-            title: 'Cerrar Ticket',
+            title: 'Resolver y Cerrar Ticket',
             html: `
-                <div style="text-align: left; margin-top: 10px;">
-                    <label style="font-size: 0.85rem; color: var(--light-grey); font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; display: block;">
-                        Selecciona el motivo de resolución:
+                <div style="text-align: left; margin-top: 8px;">
+                    <label style="font-size: 0.78rem; color: #475569; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; display: block;">
+                        Selecciona el dictamen de resolución:
                     </label>
-                    <select id="swal-close-reason" class="custom-select" style="width: 100%; box-sizing: border-box; text-align: left;">
+                    <select id="swal-close-reason" class="cm-modal-select">
                         <option value="0">Resuelto con éxito</option>
                         <option value="1">No se pudo resolver</option>
-                        <option value="2">Spam / Inválido</option>
+                        <option value="2">Spam / Solicitud inválida</option>
                         <option value="3">El cliente no responde</option>
                     </select>
                 </div>
             `,
             confirmText: 'Confirmar Cierre',
             preConfirm: () => {
-                // Extraemos el valor del DOM dentro de Swal antes de que se cierre
                 return document.getElementById('swal-close-reason').value;
             }
         });
 
-        // 2. Si el agente confirmó (no canceló)
         if (result.isConfirmed) {
             const reasonId = result.value;
             const csrfToken = document.getElementById('csrf_token').value;
 
-            // 3. Creamos un formulario dinámico para enviar el POST a Django 
-            // (Mantenemos el patrón original que redirige al dashboard)
             const form = document.createElement('form');
             form.method = 'POST';
             form.action = `/support/ticket/${TICKET_ID}/close/`;
-            
+
             const csrfInput = document.createElement('input');
             csrfInput.type = 'hidden';
             csrfInput.name = 'csrfmiddlewaretoken';
@@ -388,7 +392,6 @@ if (btnTriggerClose) {
             form.appendChild(reasonInput);
             document.body.appendChild(form);
 
-            // 4. Feedback visual opcional antes de redirigir
             Swal.showLoading();
             form.submit();
         }
