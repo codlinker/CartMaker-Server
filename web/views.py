@@ -443,6 +443,67 @@ def pitch_deck_view(request):
 # ==============================================================
 # 🛍️ VITRINA WEB PÚBLICA INTERACTIVA (PILAR 1 - OMNICANALIDAD)
 # ==============================================================
+def format_ve_currency(val, include_dollar_suffix: bool = False) -> str:
+    """
+    Formatea un monto numérico según la convención monetaria en Venezuela:
+    separador de miles con punto (.), separador decimal con coma (,) y, cuando es USD,
+    el símbolo de dólar ($) ubicado a la derecha del monto (ej. 1.800,00$).
+    """
+    try:
+        num = float(val or 0.0)
+    except (TypeError, ValueError):
+        num = 0.0
+    sign = "-" if num < 0 else ""
+    abs_num = abs(num)
+    us_formatted = f"{abs_num:,.2f}"
+    ve_str = us_formatted.replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"{sign}{ve_str}$" if include_dollar_suffix else f"{sign}{ve_str}"
+
+
+def calculate_storefront_route_metrics(
+    u_lat: float,
+    u_lng: float,
+    s_lat: float,
+    s_lng: float,
+) -> dict:
+    """
+    Calcula en sub-milisegundos la distancia geodésica Haversine, la distancia vial
+    estimada urbana (factor de tortuosidad 1.28x) y los tiempos estimados de llegada (ETA)
+    en Carro, Moto y A pie para la Vitrina Pública de CartMaker.
+    """
+    import math
+
+    R = 6371.0
+    lat1_rad = math.radians(float(u_lat))
+    lat2_rad = math.radians(float(s_lat))
+    d_lat = math.radians(float(s_lat) - float(u_lat))
+    d_lng = math.radians(float(s_lng) - float(u_lng))
+
+    a = (
+        math.sin(d_lat / 2.0) ** 2
+        + math.cos(lat1_rad) * math.cos(lat2_rad) * (math.sin(d_lng / 2.0) ** 2)
+    )
+    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(max(0.0, 1.0 - a)))
+    straight_km = R * c
+    road_km = straight_km * 1.28
+
+    car_minutes = max(2, int(round((road_km / 28.0) * 60.0)))
+    moto_minutes = max(1, int(round(car_minutes * 0.68)))
+    walk_minutes = max(3, int(round((road_km / 4.8) * 60.0)))
+
+    return {
+        'straight_km': round(straight_km, 3),
+        'road_km': round(road_km, 2),
+        'car_minutes': car_minutes,
+        'moto_minutes': moto_minutes,
+        'walk_minutes': walk_minutes,
+        'distance_label': f"{road_km:.1f} km",
+        'eta_car_label': f"{car_minutes} min",
+        'eta_moto_label': f"{moto_minutes} min",
+        'eta_walk_label': f"{walk_minutes} min",
+    }
+
+
 def _build_storefront_context(
     request,
     company_or_store_id,
@@ -453,6 +514,7 @@ def _build_storefront_context(
     from api.core.storefront_themes import STOREFRONT_THEMES, resolve_company_storefront_theme
     from api.core.ve_geo import describe_zone
     from django.http import Http404
+    import math
     import secrets
 
     company = Company.objects.select_related('category').filter(id=company_or_store_id).first()
@@ -497,6 +559,7 @@ def _build_storefront_context(
     items_raw = list(items_qs)
 
     bcv_rate = _get_cached_bcv_rate(default=0.0)
+    bcv_rate_ve = format_ve_currency(bcv_rate, include_dollar_suffix=False)
 
     # Determinar categoría padre dominante para el motor de 14 temas visuales
     parent_cat_counts = {}
@@ -507,8 +570,14 @@ def _build_storefront_context(
         item_json = it.get_json()
         eff_usd = float(item_json.get('effective_price') or 0.0)
         list_usd = float(item_json.get('list_price') or eff_usd)
-        item_json['effective_price_bs'] = round(eff_usd * bcv_rate, 2) if bcv_rate > 0 else None
-        item_json['list_price_bs'] = round(list_usd * bcv_rate, 2) if bcv_rate > 0 else None
+        eff_bs = round(eff_usd * bcv_rate, 2) if bcv_rate > 0 else None
+        list_bs = round(list_usd * bcv_rate, 2) if bcv_rate > 0 else None
+        item_json['effective_price_bs'] = eff_bs
+        item_json['list_price_bs'] = list_bs
+        item_json['effective_price_ve'] = format_ve_currency(eff_usd, include_dollar_suffix=True)
+        item_json['list_price_ve'] = format_ve_currency(list_usd, include_dollar_suffix=True)
+        item_json['effective_price_bs_ve'] = format_ve_currency(eff_bs, include_dollar_suffix=False) if eff_bs is not None else None
+        item_json['list_price_bs_ve'] = format_ve_currency(list_bs, include_dollar_suffix=False) if list_bs is not None else None
         item_json['store_id_str'] = str(it.store_id)
         if item_json.get('creation'):
             item_json['creation'] = item_json['creation'].isoformat() if hasattr(item_json['creation'], 'isoformat') else str(item_json['creation'])
@@ -547,6 +616,16 @@ def _build_storefront_context(
         dominant_parent_category=dominant_parent,
     )
 
+    # Coordenadas opcionales del visitante (?lat=&lng=) para pre-calcular ruta al instante
+    req_lat = request.GET.get('lat')
+    req_lng = request.GET.get('lng')
+    user_coords = None
+    if req_lat is not None and req_lng is not None:
+        try:
+            user_coords = (float(req_lat), float(req_lng))
+        except (TypeError, ValueError):
+            user_coords = None
+
     # Sucursales enriquecidas con zona geográfica y coordenadas para el mapa interactivo
     branches_data = []
     for s in stores_list:
@@ -557,6 +636,10 @@ def _build_storefront_context(
             loc['zone_name'] = describe_zone(loc['lat'], loc['lng'])
             if getattr(s.location, 'mall', None):
                 loc['mall_name'] = s.location.mall.name
+            if user_coords:
+                s_json['route_metrics'] = calculate_storefront_route_metrics(
+                    user_coords[0], user_coords[1], loc['lat'], loc['lng']
+                )
         branches_data.append(s_json)
 
     # Video Stories activas de la compañía
@@ -570,6 +653,7 @@ def _build_storefront_context(
     for st in stories_qs:
         if not st.video_file:
             continue
+        assoc_price = float(st.associated_item.get_effective_price()) if st.associated_item else None
         stories_data.append({
             'id': str(st.id),
             'video_url': storage_manager.get_url(st.video_file),
@@ -583,11 +667,8 @@ def _build_storefront_context(
                 if (st.associated_item and st.associated_item.product)
                 else None
             ),
-            'associated_item_price_usd': (
-                float(st.associated_item.get_effective_price())
-                if st.associated_item
-                else None
-            ),
+            'associated_item_price_usd': assoc_price,
+            'associated_item_price_ve': format_ve_currency(assoc_price, include_dollar_suffix=True) if assoc_price is not None else None,
         })
 
     # Reputación, calificaciones y volumen de ventas
@@ -627,6 +708,39 @@ def _build_storefront_context(
     else:
         app_deep_link = f"cartmaker://store/{active_store_id}?company_id={company.id}"
 
+    # Paginación del catálogo (soporta ?page= y ?page_size=, por defecto 12 productos por página)
+    try:
+        page_size = int(request.GET.get('page_size') or 12)
+    except (TypeError, ValueError):
+        page_size = 12
+    page_size = max(4, min(48, page_size))
+
+    total_items = len(serialized_items)
+    total_pages = max(1, math.ceil(total_items / page_size)) if total_items > 0 else 1
+
+    try:
+        current_page = int(request.GET.get('page') or 1)
+    except (TypeError, ValueError):
+        current_page = 1
+    current_page = max(1, min(total_pages, current_page))
+
+    start_idx = (current_page - 1) * page_size
+    end_idx = min(total_items, start_idx + page_size)
+    paginated_items = serialized_items[start_idx:end_idx]
+
+    pagination_meta = {
+        'current_page': current_page,
+        'page_size': page_size,
+        'total_items': total_items,
+        'total_pages': total_pages,
+        'has_previous': current_page > 1,
+        'has_next': current_page < total_pages,
+        'previous_page': current_page - 1 if current_page > 1 else None,
+        'next_page': current_page + 1 if current_page < total_pages else None,
+        'start_index': (start_idx + 1) if total_items > 0 else 0,
+        'end_index': end_idx,
+    }
+
     company_data = company.get_json()
     company_data['id'] = str(company.id)
     company_data['avg_rating'] = avg_rating
@@ -644,6 +758,7 @@ def _build_storefront_context(
         'initial_store_id': str(initial_store_id) if initial_store_id else main_branch['id'],
         'subcategories': list(subcategories_map.values()),
         'items': serialized_items,
+        'pagination': pagination_meta,
         'stories': stories_data,
         'reputation': {
             'avg_rating': avg_rating,
@@ -653,6 +768,7 @@ def _build_storefront_context(
             'total_sales_units': total_sales_units,
         },
         'bcv_rate': bcv_rate,
+        'bcv_rate_ve': bcv_rate_ve,
         'app_deep_link': app_deep_link,
         'highlight_item_id': str(highlight_item_id) if highlight_item_id else None,
         'express_order_draft': express_order_draft,
@@ -667,8 +783,11 @@ def _build_storefront_context(
         'company': company_data,
         'theme': theme,
         'branches': branches_data,
-        'items_count': len(serialized_items),
+        'items_count': total_items,
+        'paginated_items': paginated_items,
+        'pagination': pagination_meta,
         'bcv_rate': bcv_rate,
+        'bcv_rate_ve': bcv_rate_ve,
         'app_deep_link': app_deep_link,
         'mapbox_api_key': mapbox_api_key,
         'mapbox_style_url': mapbox_style_url,
@@ -680,13 +799,23 @@ def public_storefront_view(request, company_id):
     """
     Vitrina Web Pública Interactiva de un Comerciante en CartMaker.
     Diseñada con motor camaleónico de 14 categorías, mapa interactivo con cálculo de ruta,
-    reproductor de Video Stories, filtros en tiempo real y Checkout exclusivo hacia CartMaker App.
+    reproductor de Video Stories, filtros en tiempo real, paginación y Checkout exclusivo hacia CartMaker App.
     """
     context = _build_storefront_context(
         request=request,
         company_or_store_id=company_id,
         highlight_item_id=request.GET.get('item_id'),
     )
+    if request.GET.get('format') == 'json' or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return JsonResponse({
+            'company_id': context['company']['id'],
+            'company_name': context['company']['name'],
+            'bcv_rate': context['bcv_rate'],
+            'bcv_rate_ve': context['bcv_rate_ve'],
+            'pagination': context['pagination'],
+            'items': context['paginated_items'],
+            'branches': context['branches'],
+        })
     return render(request, 'storefront/public_catalog.html', context)
 
 

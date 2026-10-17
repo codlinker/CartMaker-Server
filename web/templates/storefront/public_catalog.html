@@ -122,8 +122,13 @@
            ========================================================= */
         .sf-stage-wrapper {
             position: relative;
-            padding: 14px 0 60px;
+            padding: 14px 0 calc(130px + env(safe-area-inset-bottom, 0px));
             overflow: hidden;
+            transition: padding-bottom 0.25s ease;
+        }
+
+        body.has-floating-cart .sf-stage-wrapper {
+            padding-bottom: calc(200px + env(safe-area-inset-bottom, 0px));
         }
 
         .sf-bg-mesh {
@@ -1384,11 +1389,93 @@
         }
 
         /* =========================================================
+           SISTEMA DE PAGINACIÓN DEL CATÁLOGO + ESPACIADOR ANTI-SOLAPAMIENTO
+           ========================================================= */
+        .sf-pagination-bar {
+            margin-top: 24px;
+            padding: 14px 18px;
+            background: #FFFFFF;
+            border: 1px solid rgba(15, 11, 29, 0.08);
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+            box-shadow: 0 8px 24px rgba(15, 11, 29, 0.04);
+        }
+
+        .sf-pagination-summary {
+            font-size: 0.82rem;
+            font-weight: 700;
+            color: var(--sf-text-secondary);
+        }
+
+        .sf-pagination-summary strong {
+            color: var(--sf-text-primary);
+        }
+
+        .sf-pagination-controls {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+
+        .sf-page-btn {
+            border: 1px solid rgba(15, 11, 29, 0.10);
+            background: var(--sf-bg-primary);
+            color: var(--sf-text-primary);
+            min-width: 38px;
+            height: 38px;
+            padding: 0 12px;
+            border-radius: 12px;
+            font-family: var(--sf-font-heading);
+            font-weight: 800;
+            font-size: 0.82rem;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            transition: all 0.18s ease;
+        }
+
+        .sf-page-btn:hover:not(:disabled) {
+            border-color: var(--cm-primary-purple);
+            color: var(--cm-primary-purple);
+            transform: translateY(-1px);
+        }
+
+        .sf-page-btn.active {
+            background: var(--cm-btn-gradient);
+            color: #FFFFFF;
+            border-color: transparent;
+            box-shadow: 0 6px 16px rgba(109, 73, 242, 0.28);
+        }
+
+        .sf-page-btn:disabled {
+            opacity: 0.42;
+            cursor: not-allowed;
+        }
+
+        .sf-catalog-bottom-spacer {
+            width: 100%;
+            height: 36px;
+            transition: height 0.25s ease;
+            pointer-events: none;
+        }
+
+        body.has-floating-cart .sf-catalog-bottom-spacer {
+            height: calc(130px + env(safe-area-inset-bottom, 0px));
+        }
+
+        /* =========================================================
            BARRA FLOTANTE INFERIOR DE CHECKOUT EXCLUSIVO EN CARTMAKER APP
            ========================================================= */
         .sf-floating-cart-bar {
             position: fixed;
-            bottom: 20px;
+            bottom: calc(18px + env(safe-area-inset-bottom, 0px));
             left: 50%;
             transform: translateX(-50%) translateY(150%);
             width: min(94vw, 900px);
@@ -1621,7 +1708,10 @@
 
         @media (max-width: 640px) {
             .sf-stage-wrapper {
-                padding: 8px 0 90px;
+                padding: 8px 0 calc(150px + env(safe-area-inset-bottom, 0px));
+            }
+            body.has-floating-cart .sf-stage-wrapper {
+                padding-bottom: calc(240px + env(safe-area-inset-bottom, 0px)) !important;
             }
             .sf-container {
                 padding: 0 12px;
@@ -1814,11 +1904,34 @@
                 font-size: 0.75rem;
                 border-radius: 10px;
             }
-            /* Barra flotante de carrito en móvil */
+            .sf-pagination-bar {
+                flex-direction: column;
+                align-items: center;
+                text-align: center;
+                padding: 12px;
+                gap: 10px;
+                border-radius: 16px;
+                margin-top: 16px;
+            }
+            .sf-pagination-controls {
+                justify-content: center;
+                width: 100%;
+            }
+            .sf-page-btn {
+                min-width: 34px;
+                height: 34px;
+                padding: 0 9px;
+                font-size: 0.76rem;
+                border-radius: 10px;
+            }
+            body.has-floating-cart .sf-catalog-bottom-spacer {
+                height: calc(165px + env(safe-area-inset-bottom, 0px));
+            }
+            /* Barra flotante de carrito en móvil (con soporte Safe-Area iPhone 15 Pro Max) */
             .sf-floating-cart-bar {
                 flex-direction: column;
                 align-items: stretch;
-                bottom: 10px;
+                bottom: calc(12px + env(safe-area-inset-bottom, 0px));
                 padding: 12px 14px;
                 gap: 10px;
                 border-radius: 18px;
@@ -1921,7 +2034,7 @@
                     <div class="sf-merchant-identity">
                         <div class="sf-merchant-top-row">
                             <div class="sf-avatar-stage">
-                                <img src="{{ company.image|default:'/static/img/no_image.jpg' }}" alt="{{ company.name }}" class="sf-merchant-avatar" onerror="handleStorefrontImgError(this)">
+                                <img src="{{ company.image|default:'/static/img/no_image.jpg' }}" alt="{{ company.name }}" class="sf-merchant-avatar" fetchpriority="high" decoding="async" onerror="handleStorefrontImgError(this)">
                                 {% if company.is_platinum %}
                                 <span class="sf-platinum-badge">
                                     <span class="material-symbols-rounded icon-filled">workspace_premium</span> PLATINUM
@@ -1951,7 +2064,7 @@
                                     {% if company.gamification_enabled %}
                                     <span class="sf-chip chip-tokens" title="Acumula Tokens en tus compras para canjear descuentos reales">
                                         <span class="cm-token-coin"><span class="material-symbols-rounded icon-filled">star</span></span>
-                                        <span>+{{ company.gamification_tokens_per_dollar }} Tokens/$1 para descuentos</span>
+                                        <span>+{{ company.gamification_tokens_per_dollar }} Tokens por cada 1,00$ para descuentos</span>
                                     </span>
                                     {% endif %}
                                 </div>
@@ -2095,7 +2208,7 @@
                         {% if bcv_rate > 0 %}
                         <div class="sf-bcv-live-badge" title="Tasa Oficial BCV sincronizada automáticamente">
                             <span class="material-symbols-rounded">account_balance</span>
-                            <span>BCV: Bs. {{ bcv_rate|floatformat:2 }} / $1</span>
+                            <span>BCV: Bs. {{ bcv_rate_ve }} / 1,00$</span>
                         </div>
                         {% endif %}
 
@@ -2118,12 +2231,12 @@
                     <div class="sf-filters-top">
                         <div class="sf-search-input-wrap">
                             <span class="material-symbols-rounded sf-search-icon">search</span>
-                            <input type="search" id="catalogSearchInput" class="sf-search-input" placeholder="Buscar producto, marca, talla o modelo en {{ company.name }}..." oninput="applyFilters()">
+                            <input type="search" id="catalogSearchInput" class="sf-search-input" placeholder="Buscar producto, marca, talla o modelo en {{ company.name }}..." oninput="resetAndApplyFilters()">
                         </div>
 
                         <div class="sf-select-wrap">
                             <span class="material-symbols-rounded">tune</span>
-                            <select id="sortSelect" class="sf-select" onchange="applyFilters()" aria-label="Ordenar productos">
+                            <select id="sortSelect" class="sf-select" onchange="resetAndApplyFilters()" aria-label="Ordenar productos">
                                 <option value="featured">Más Destacados</option>
                                 <option value="price_asc">Precio: Menor a Mayor</option>
                                 <option value="price_desc">Precio: Mayor a Menor</option>
@@ -2143,6 +2256,12 @@
 
                 <!-- Grilla de Productos -->
                 <div class="sf-products-grid" id="productsGridContainer"></div>
+
+                <!-- Controles de Paginación del Catálogo -->
+                <div id="catalogPaginationContainer"></div>
+
+                <!-- Espaciador dinámico inferior para evitar que la barra flotante del carrito tape las últimas cards -->
+                <div class="sf-catalog-bottom-spacer" aria-hidden="true"></div>
             </section>
         </main>
     </div>
@@ -2160,7 +2279,7 @@
                     <span id="floatingCartItemsCount">0</span> productos listos en <strong>{{ company.name }}</strong>
                 </div>
                 <div style="font-size:1.15rem;font-weight:800;color:var(--sf-text-primary);">
-                    Total: <span id="floatingCartTotalUsd">$0.00</span>
+                    Total: <span id="floatingCartTotalUsd">0,00$</span>
                     <small id="floatingCartTotalBs" style="font-size:0.8rem;color:#059669;margin-left:6px;font-weight:700;"></small>
                 </div>
             </div>
@@ -2282,6 +2401,8 @@
             searchQuery: '',
             sortBy: 'featured',
             currencyMode: 'BOTH', // 'BOTH' | 'USD'
+            currentPage: Number((STOREFRONT_DATA.pagination && STOREFRONT_DATA.pagination.current_page) || 1),
+            pageSize: Number((STOREFRONT_DATA.pagination && STOREFRONT_DATA.pagination.page_size) || 12),
             cart: [],
             activeModalItem: null,
             activeVariantIdx: 0,
@@ -2292,6 +2413,7 @@
             userMarker: null,
             userLat: null,
             userLng: null,
+            routeCache: {},
         };
 
         /* Auto-recuperación de imágenes subidas cuando el servidor operaba en modo local (/media/) antes de S3 */
@@ -2482,18 +2604,38 @@
         }
 
         /* =========================================================
-           2. FORMATO DE MONEDA (USD + Bs / Solo USD)
+           2. FORMATO DE MONEDA VENEZUELA (1.800,00$ / Bs. 1.800,00)
            ========================================================= */
+        function formatUsdVe(val) {
+            const num = Number(val || 0);
+            if (!Number.isFinite(num)) return '0,00$';
+            const sign = num < 0 ? '-' : '';
+            const abs = Math.abs(num);
+            const [intPart, decPart] = abs.toFixed(2).split('.');
+            const intWithDots = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+            return `${sign}${intWithDots},${decPart}$`;
+        }
+
+        function formatBsVe(val) {
+            const num = Number(val || 0);
+            if (!Number.isFinite(num)) return '0,00';
+            const sign = num < 0 ? '-' : '';
+            const abs = Math.abs(num);
+            const [intPart, decPart] = abs.toFixed(2).split('.');
+            const intWithDots = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+            return `${sign}${intWithDots},${decPart}`;
+        }
+
         function formatPriceHtml(usdVal) {
             const usd = Number(usdVal || 0);
             const bcv = Number(STOREFRONT_DATA.bcv_rate || 0);
             const bs = bcv > 0 ? (usd * bcv) : 0;
 
             if (state.currencyMode === 'USD' || bcv <= 0) {
-                return `<div class="sf-price-main">$${usd.toFixed(2)}</div>`;
+                return `<div class="sf-price-main">${formatUsdVe(usd)}</div>`;
             }
-            return `<div class="sf-price-main">$${usd.toFixed(2)}</div>
-                    <div class="sf-price-bs">Bs. ${bs.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</div>`;
+            return `<div class="sf-price-main">${formatUsdVe(usd)}</div>
+                    <div class="sf-price-bs">Bs. ${formatBsVe(bs)}</div>`;
         }
 
         function setCurrencyMode(mode) {
@@ -2555,10 +2697,20 @@
             const addrEl = document.getElementById('activeBranchAddressLabel');
             const mallBadge = loc.mall_name ? ` · CC ${loc.mall_name}${loc.mall_floor ? ' (Piso ' + loc.mall_floor + ')' : ''}` : '';
             addrEl.innerHTML = `<span class="material-symbols-rounded">location_on</span><span>${loc.zone_name || branch.name}${mallBadge}</span>`;
+
+            if (branch.route_metrics) {
+                renderEtaBadges(
+                    branch.route_metrics.road_km,
+                    branch.route_metrics.car_minutes,
+                    branch.route_metrics.moto_minutes,
+                    branch.route_metrics.walk_minutes
+                );
+            }
         }
 
         function selectBranch(branchId) {
             state.selectedBranchId = branchId;
+            state.currentPage = 1;
             renderBranchesTabs();
             applyFilters();
             const branch = (STOREFRONT_DATA.branches || []).find(b => b.id === branchId) || (STOREFRONT_DATA.branches || [])[0];
@@ -2604,7 +2756,7 @@
                 pinEl.className = 'cm-mapbox-pin';
                 pinEl.innerHTML = `
                     <div class="cm-mapbox-pin-bubble">
-                        <img src="${avatarUrl}" alt="${b.name}" onerror="handleStorefrontImgError(this)">
+                        <img src="${avatarUrl}" alt="${b.name}" loading="lazy" decoding="async" onerror="handleStorefrontImgError(this)">
                     </div>
                     <div class="cm-mapbox-pin-tip"></div>
                 `;
@@ -2684,38 +2836,85 @@
             state.map.fitBounds(bounds, { padding: 38, duration: 900 });
         }
 
+        function renderEtaBadges(roadKm, carMinutes, motoMinutes, walkMinutes) {
+            const distEl = document.getElementById('routeDistanceBadge');
+            if (distEl) {
+                distEl.style.display = 'inline-flex';
+                distEl.textContent = `${Number(roadKm || 0).toFixed(1)} km`;
+            }
+            const carEl = document.getElementById('etaCarVal');
+            const motoEl = document.getElementById('etaMotoVal');
+            const walkEl = document.getElementById('etaWalkVal');
+            if (carEl) carEl.textContent = `${carMinutes} min`;
+            if (motoEl) motoEl.textContent = `${motoMinutes} min`;
+            if (walkEl) walkEl.textContent = `${walkMinutes} min`;
+        }
+
         async function computeEtaToCoords(uLat, uLng, sLat, sLng) {
+            // Fase 1 (Sub-milisegundo < 1ms): Cálculo instantáneo Haversine + renderizado inmediato sin bloquear UI
             const straightKm = haversineKm(uLat, uLng, sLat, sLng);
             let roadKm = straightKm * 1.28;
             let carMinutes = Math.max(2, Math.round((roadKm / 28) * 60));
+            let motoMinutes = Math.max(1, Math.round(carMinutes * 0.68));
+            let walkMinutes = Math.max(3, Math.round((roadKm / 4.8) * 60));
+            renderEtaBadges(roadKm, carMinutes, motoMinutes, walkMinutes);
+
+            // Fase 2: Consulta de Caché de Ruta en Memoria / SessionStorage (0 llamadas de red si ya se calculó)
+            const cacheKey = `cm_route_${Number(uLat).toFixed(4)}_${Number(uLng).toFixed(4)}_${Number(sLat).toFixed(4)}_${Number(sLng).toFixed(4)}`;
+            let cachedRoute = state.routeCache[cacheKey];
+            if (!cachedRoute) {
+                try {
+                    const rawSession = sessionStorage.getItem(cacheKey);
+                    if (rawSession) cachedRoute = JSON.parse(rawSession);
+                } catch (e) {}
+            }
+            if (cachedRoute) {
+                state.routeCache[cacheKey] = cachedRoute;
+                renderEtaBadges(cachedRoute.roadKm, cachedRoute.carMinutes, cachedRoute.motoMinutes, cachedRoute.walkMinutes);
+                if (cachedRoute.geometry) {
+                    drawRouteGeoJsonOnMapbox(cachedRoute.geometry, uLng, uLat, sLng, sLat);
+                }
+                return cachedRoute;
+            }
+
+            // Fase 3: Refinamiento asíncrono con Mapbox Directions API + AbortController (timeout 3.5s)
             const mbToken = STOREFRONT_DATA.mapbox_api_key || '';
+            if (!mbToken) return { roadKm, carMinutes, motoMinutes, walkMinutes };
+
+            const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            const timeoutId = controller ? setTimeout(() => controller.abort(), 3500) : null;
 
             try {
-                const mbUrl = `https://api.mapbox.com/directions/v5/mapbox/driving/${uLng},${uLat};${sLng},${sLat}?geometries=geojson&overview=full&access_token=${mbToken}`;
-                const resp = await fetch(mbUrl);
+                const mbUrl = `https://api.mapbox.com/directions/v5/mapbox/driving/${uLng},${uLat};${sLng},${sLat}?geometries=geojson&overview=simplified&access_token=${mbToken}`;
+                const resp = await fetch(mbUrl, controller ? { signal: controller.signal } : {});
                 if (resp.ok) {
                     const data = await resp.json();
                     if (data.routes && data.routes[0]) {
                         roadKm = data.routes[0].distance / 1000;
                         carMinutes = Math.max(2, Math.round(data.routes[0].duration / 60));
+                        motoMinutes = Math.max(1, Math.round(carMinutes * 0.68));
+                        walkMinutes = Math.max(3, Math.round((roadKm / 4.8) * 60));
+                        const routePayload = {
+                            roadKm,
+                            carMinutes,
+                            motoMinutes,
+                            walkMinutes,
+                            geometry: data.routes[0].geometry,
+                        };
+                        state.routeCache[cacheKey] = routePayload;
+                        try {
+                            sessionStorage.setItem(cacheKey, JSON.stringify(routePayload));
+                        } catch (e) {}
+                        renderEtaBadges(roadKm, carMinutes, motoMinutes, walkMinutes);
                         drawRouteGeoJsonOnMapbox(data.routes[0].geometry, uLng, uLat, sLng, sLat);
                     }
                 }
             } catch (e) {
-                // Fallback si no hay respuesta de red
+                // Mantiene el cálculo Haversine instantáneo si no hay red o expira el timeout
+            } finally {
+                if (timeoutId) clearTimeout(timeoutId);
             }
-
-            const motoMinutes = Math.max(1, Math.round(carMinutes * 0.68));
-            const walkMinutes = Math.max(3, Math.round((roadKm / 4.8) * 60));
-
-            const distEl = document.getElementById('routeDistanceBadge');
-            if (distEl) {
-                distEl.style.display = 'inline-flex';
-                distEl.textContent = `${roadKm.toFixed(1)} km`;
-            }
-            document.getElementById('etaCarVal').textContent = `${carMinutes} min`;
-            document.getElementById('etaMotoVal').textContent = `${motoMinutes} min`;
-            document.getElementById('etaWalkVal').textContent = `${walkMinutes} min`;
+            return { roadKm, carMinutes, motoMinutes, walkMinutes };
         }
 
         function calculateLiveRouteToStore() {
@@ -2768,7 +2967,7 @@
             container.innerHTML = stories.map((st, idx) => `
                 <div class="sf-story-item" onclick="openStoryModal(${idx})">
                     <div class="sf-story-ring">
-                        <img src="${st.thumbnail_url || STOREFRONT_DATA.company.image || '/static/img/no_image.jpg'}" class="sf-story-thumb" alt="Story" onerror="handleStorefrontImgError(this)">
+                        <img src="${st.thumbnail_url || STOREFRONT_DATA.company.image || '/static/img/no_image.jpg'}" class="sf-story-thumb" alt="Story" loading="lazy" decoding="async" onerror="handleStorefrontImgError(this)">
                         <span class="sf-story-play-badge">
                             <span class="material-symbols-rounded icon-filled">play_arrow</span>
                         </span>
@@ -2786,7 +2985,7 @@
             const ctaBtn = st.associated_item_id ? `
                 <button type="button" class="sf-checkout-app-btn" style="width:100%;justify-content:center;margin-top:12px;" onclick="closeStoryModal();openProductModal('${st.associated_item_id}')">
                     <span class="material-symbols-rounded">shopping_bag</span>
-                    <span>Ver '${st.associated_item_name}' ($${Number(st.associated_item_price_usd || 0).toFixed(2)})</span>
+                    <span>Ver '${st.associated_item_name}' (${formatUsdVe(st.associated_item_price_usd || 0)})</span>
                 </button>
             ` : '';
             content.innerHTML = `
@@ -2805,7 +3004,7 @@
         }
 
         /* =========================================================
-           5. FILTROS Y GRILLA DE PRODUCTOS CON DATOS REALES DE GAMIFICACIÓN
+           5. FILTROS, PAGINACIÓN Y GRILLA DE PRODUCTOS CON DATOS REALES DE GAMIFICACIÓN
            ========================================================= */
         function getMaxTokenDiscountPct(productObj) {
             if (!productObj || !productObj.discounts_by_tokens_active) return 0;
@@ -2846,20 +3045,90 @@
 
         function selectSubcategory(subId) {
             state.selectedSubcatId = subId;
+            state.currentPage = 1;
             renderSubcategoryPills();
             applyFilters();
         }
 
         function toggleOffersFilter() {
             state.onlyOffers = !state.onlyOffers;
+            state.currentPage = 1;
             renderSubcategoryPills();
             applyFilters();
         }
 
         function toggleTokensFilter() {
             state.onlyTokens = !state.onlyTokens;
+            state.currentPage = 1;
             renderSubcategoryPills();
             applyFilters();
+        }
+
+        function resetAndApplyFilters() {
+            state.currentPage = 1;
+            applyFilters();
+        }
+
+        function goToCatalogPage(pageNum) {
+            state.currentPage = Math.max(1, Number(pageNum || 1));
+            applyFilters();
+            const catEl = document.getElementById('catalogoSection');
+            if (catEl) {
+                catEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }
+
+        function renderCatalogPagination(totalItems, totalPages, currentPage, startIdx, endIdx) {
+            const pagContainer = document.getElementById('catalogPaginationContainer');
+            if (!pagContainer) return;
+
+            if (totalItems <= 0) {
+                pagContainer.innerHTML = '';
+                return;
+            }
+
+            const startHuman = startIdx + 1;
+            const endHuman = Math.min(totalItems, endIdx);
+
+            // Construir lista de páginas con elipsis inteligente
+            const pageButtons = [];
+            for (let p = 1; p <= totalPages; p++) {
+                if (p === 1 || p === totalPages || (p >= currentPage - 1 && p <= currentPage + 1)) {
+                    pageButtons.push(p);
+                } else if (pageButtons[pageButtons.length - 1] !== '...') {
+                    pageButtons.push('...');
+                }
+            }
+
+            const controlsHtml = totalPages > 1 ? `
+                <div class="sf-pagination-controls" role="navigation" aria-label="Paginación de productos">
+                    <button type="button" class="sf-page-btn" onclick="goToCatalogPage(${currentPage - 1})" ${currentPage <= 1 ? 'disabled' : ''} aria-label="Página anterior">
+                        <span class="material-symbols-rounded" style="font-size:17px;">chevron_left</span>
+                        <span>Anterior</span>
+                    </button>
+                    ${pageButtons.map(p => p === '...'
+                        ? `<span style="padding:0 4px;color:var(--sf-text-secondary);font-weight:700;">…</span>`
+                        : `<button type="button" class="sf-page-btn ${p === currentPage ? 'active' : ''}" onclick="goToCatalogPage(${p})" aria-label="Página ${p}" ${p === currentPage ? 'aria-current="page"' : ''}>${p}</button>`
+                    ).join('')}
+                    <button type="button" class="sf-page-btn" onclick="goToCatalogPage(${currentPage + 1})" ${currentPage >= totalPages ? 'disabled' : ''} aria-label="Página siguiente">
+                        <span>Siguiente</span>
+                        <span class="material-symbols-rounded" style="font-size:17px;">chevron_right</span>
+                    </button>
+                </div>
+            ` : `
+                <div class="sf-pagination-controls">
+                    <span class="sf-page-btn active" aria-current="page">Página 1 de 1</span>
+                </div>
+            `;
+
+            pagContainer.innerHTML = `
+                <div class="sf-pagination-bar">
+                    <div class="sf-pagination-summary">
+                        Mostrando <strong>${startHuman}–${endHuman}</strong> de <strong>${totalItems}</strong> productos · Página <strong>${currentPage}</strong> de <strong>${totalPages}</strong>
+                    </div>
+                    ${controlsHtml}
+                </div>
+            `;
         }
 
         function applyFilters() {
@@ -2901,21 +3170,32 @@
                 items.sort((a, b) => Number(b.avg_rating || 0) - Number(a.avg_rating || 0));
             }
 
-            document.getElementById('visibleProductsCount').textContent = items.length;
+            const totalItems = items.length;
+            document.getElementById('visibleProductsCount').textContent = totalItems;
             const grid = document.getElementById('productsGridContainer');
-            if (!items.length) {
+            if (!totalItems) {
                 grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:52px 20px;background:#FFFFFF;border-radius:24px;border:1px solid rgba(15,11,29,0.08);">
                     <span class="material-symbols-rounded" style="font-size:44px;color:var(--cm-primary-purple);margin-bottom:8px;">search_off</span>
                     <h3 style="margin-bottom:6px;">No encontramos productos con esos filtros</h3>
                     <p style="color:var(--sf-text-secondary);font-size:0.9rem;">Prueba limpiando tu búsqueda o seleccionando Todas las Sedes.</p>
                 </div>`;
+                renderCatalogPagination(0, 1, 1, 0, 0);
                 return;
             }
+
+            const pageSize = Math.max(4, Number(state.pageSize || 12));
+            const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+            if (state.currentPage > totalPages) state.currentPage = totalPages;
+            if (state.currentPage < 1) state.currentPage = 1;
+
+            const startIdx = (state.currentPage - 1) * pageSize;
+            const endIdx = Math.min(totalItems, startIdx + pageSize);
+            const paginatedItems = items.slice(startIdx, endIdx);
 
             const gamificationActive = Boolean(STOREFRONT_DATA.company && STOREFRONT_DATA.company.gamification_enabled);
             const ratePerDollar = Number((STOREFRONT_DATA.company && STOREFRONT_DATA.company.gamification_tokens_per_dollar) || 0);
 
-            grid.innerHTML = items.map(it => {
+            grid.innerHTML = paginatedItems.map((it, idxOnPage) => {
                 const p = it.product || {};
                 const img = (p.images && p.images[0]) ? p.images[0] : '/static/img/no_image.jpg';
                 const hasOffer = Number(it.offer_percentage || 0) > 0;
@@ -2931,10 +3211,14 @@
                     ? `Canjea hasta -${maxTokenPct}%`
                     : `Descuento con Tokens`;
 
+                const imgLoadingAttr = idxOnPage < 4
+                    ? `loading="eager" fetchpriority="high" decoding="async"`
+                    : `loading="lazy" fetchpriority="low" decoding="async"`;
+
                 return `
                 <article class="sf-product-card" onclick="openProductModal('${it.id}')">
                     <div class="sf-product-media">
-                        <img src="${img}" alt="${p.name}" class="sf-product-img" loading="lazy" onerror="handleStorefrontImgError(this)">
+                        <img src="${img}" alt="${p.name}" class="sf-product-img" ${imgLoadingAttr} onerror="handleStorefrontImgError(this)">
                         <div class="sf-card-top-badges">
                             <div>
                                 ${hasOffer ? `<span class="sf-offer-tag"><span class="material-symbols-rounded">bolt</span> -${it.offer_percentage}%</span>` : ''}
@@ -2960,7 +3244,7 @@
                         <div class="sf-price-row">
                             <div>
                                 ${formatPriceHtml(it.effective_price)}
-                                ${hasOffer ? `<div class="sf-price-old">Antes: $${Number(it.list_price).toFixed(2)}</div>` : ''}
+                                ${hasOffer ? `<div class="sf-price-old">Antes: ${formatUsdVe(it.list_price)}</div>` : ''}
                             </div>
                             <button type="button" class="sf-add-btn" onclick="event.stopPropagation();quickAddToCart('${it.id}')">
                                 <span class="material-symbols-rounded">add_shopping_cart</span>
@@ -2970,6 +3254,8 @@
                     </div>
                 </article>`;
             }).join('');
+
+            renderCatalogPagination(totalItems, totalPages, state.currentPage, startIdx, endIdx);
         }
 
         /* =========================================================
@@ -2992,6 +3278,7 @@
             const images = (p.images && p.images.length) ? p.images : ['/static/img/no_image.jpg'];
             const variants = p.variants || [];
             const attrs = Object.entries(p.attributes || {});
+            const hasOffer = Number(item.offer_percentage || 0) > 0;
 
             let unitPrice = Number(item.effective_price);
             if (variants.length && variants[state.activeVariantIdx]?.price) {
@@ -3013,7 +3300,7 @@
                     <div>
                         ${variants.map((v, i) => `
                             <button type="button" class="sf-variant-btn ${i === state.activeVariantIdx ? 'selected' : ''}" onclick="state.activeVariantIdx=${i};renderProductModalContent()">
-                                ${v.name || v.label || ('Opción ' + (i+1))} ${v.price ? '($' + Number(v.price).toFixed(2) + ')' : ''}
+                                ${v.name || v.label || ('Opción ' + (i+1))} ${v.price ? '(' + formatUsdVe(v.price) + ')' : ''}
                             </button>
                         `).join('')}
                     </div>
@@ -3044,7 +3331,7 @@
                             return `
                                 <span style="display:inline-flex;align-items:center;gap:5px;background:#FFFFFF;border:1px solid rgba(245,158,11,0.45);border-radius:10px;padding:4px 9px;font-size:0.74rem;font-weight:700;color:#B45309;">
                                     <span class="cm-token-coin" style="width:15px;height:15px;"><span class="material-symbols-rounded icon-filled" style="font-size:10px !important;">star</span></span>
-                                    <span>${reqTokens} Tokens = <strong>-${pct}%</strong> ($${finalUsd.toFixed(2)})</span>
+                                    <span>${reqTokens} Tokens = <strong>-${pct}%</strong> (${formatUsdVe(finalUsd)})</span>
                                 </span>
                             `;
                         }).join('')}
@@ -3057,7 +3344,7 @@
                     ${tokensEarned > 0 ? `
                         <div style="font-size:0.8rem;color:#B45309;font-weight:700;display:flex;align-items:center;gap:8px;">
                             <span class="cm-token-coin coin-lg"><span class="material-symbols-rounded icon-filled">star</span></span>
-                            <span>Con esta compra acumulas <strong>+${tokensEarned} Tokens</strong> (${ratePerDollar} Tokens por cada $1) <strong>para canjear descuentos</strong> en ${STOREFRONT_DATA.company.name}.</span>
+                            <span>Con esta compra acumulas <strong>+${tokensEarned} Tokens</strong> (${ratePerDollar} Tokens por cada 1,00$) <strong>para canjear descuentos</strong> en ${STOREFRONT_DATA.company.name}.</span>
                         </div>
                     ` : ''}
                     ${tokenTiersHtml}
@@ -3067,10 +3354,10 @@
             document.getElementById('productModalContent').innerHTML = `
                 <div class="sf-detail-grid">
                     <div>
-                        <img src="${images[0]}" id="modalMainImg" alt="${p.name}" class="sf-modal-main-img" onerror="handleStorefrontImgError(this)">
+                        <img src="${images[0]}" id="modalMainImg" alt="${p.name}" class="sf-modal-main-img" decoding="async" onerror="handleStorefrontImgError(this)">
                         ${images.length > 1 ? `
                             <div style="display:flex;gap:8px;margin-top:8px;overflow-x:auto;">
-                                ${images.map(u => `<img src="${u}" onclick="document.getElementById('modalMainImg').src=this.src" onerror="handleStorefrontImgError(this)" style="width:54px;height:54px;border-radius:10px;object-fit:cover;cursor:pointer;border:1px solid rgba(15,11,29,0.12);">`).join('')}
+                                ${images.map(u => `<img src="${u}" loading="lazy" decoding="async" onclick="document.getElementById('modalMainImg').src=this.src" onerror="handleStorefrontImgError(this)" style="width:54px;height:54px;border-radius:10px;object-fit:cover;cursor:pointer;border:1px solid rgba(15,11,29,0.12);">`).join('')}
                             </div>
                         ` : ''}
                     </div>
@@ -3082,6 +3369,7 @@
                         <h2 class="sf-heading" style="font-size:1.38rem;margin:8px 0 6px;">${p.name}</h2>
                         <div style="margin-bottom:8px;">
                             ${formatPriceHtml(unitPrice)}
+                            ${hasOffer ? `<div class="sf-price-old">Antes: ${formatUsdVe(item.list_price)}</div>` : ''}
                             <small style="color:var(--sf-text-secondary);font-weight:600;display:inline-flex;align-items:center;gap:4px;margin-top:4px;">
                                 <span class="material-symbols-rounded" style="font-size:15px;color:#059669;">inventory_2</span>
                                 Stock disponible: ${item.stock} ${p.unit_label || 'und'}
@@ -3100,7 +3388,7 @@
                             </div>
                             <button type="button" class="sf-checkout-app-btn" style="flex:1;min-width:190px;justify-content:center;" onclick="addModalItemToCart()">
                                 <span class="material-symbols-rounded">add_shopping_cart</span>
-                                <span>Agregar ($${lineTotal.toFixed(2)})</span>
+                                <span>Agregar (${formatUsdVe(lineTotal)})</span>
                             </button>
                         </div>
                     </div>
@@ -3170,12 +3458,13 @@
 
             document.getElementById('topCartCounter').textContent = totalItems;
             document.getElementById('floatingCartItemsCount').textContent = totalItems;
-            document.getElementById('floatingCartTotalUsd').textContent = `$${totalUsd.toFixed(2)}`;
+            document.getElementById('floatingCartTotalUsd').textContent = formatUsdVe(totalUsd);
             document.getElementById('floatingCartTotalBs').textContent = bcv > 0
-                ? `(Bs. ${(totalUsd * bcv).toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})})`
+                ? `(Bs. ${formatBsVe(totalUsd * bcv)})`
                 : '';
 
             bar.classList.toggle('visible', totalItems > 0);
+            document.body.classList.toggle('has-floating-cart', totalItems > 0);
         }
 
         function removeCartItem(idx) {
@@ -3216,17 +3505,17 @@
             const rowsHtml = state.cart.map((c, idx) => `
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid rgba(15,11,29,0.08);">
                     <div style="display:flex;align-items:center;gap:12px;">
-                        <img src="${c.image_url}" onerror="handleStorefrontImgError(this)" style="width:52px;height:52px;border-radius:12px;object-fit:cover;border:1px solid rgba(15,11,29,0.08);">
+                        <img src="${c.image_url}" loading="lazy" decoding="async" onerror="handleStorefrontImgError(this)" style="width:52px;height:52px;border-radius:12px;object-fit:cover;border:1px solid rgba(15,11,29,0.08);">
                         <div>
                             <div style="font-weight:700;font-size:0.9rem;">${c.name}</div>
                             <div style="font-size:0.76rem;color:var(--sf-text-secondary);">
-                                ${c.quantity} ${c.unit_label} × $${c.unit_price_usd.toFixed(2)}
+                                ${c.quantity} ${c.unit_label} × ${formatUsdVe(c.unit_price_usd)}
                                 ${c.selected_variant ? ` · (${c.selected_variant.name || ''})` : ''}
                             </div>
                         </div>
                     </div>
                     <div style="display:flex;align-items:center;gap:10px;">
-                        <strong>$${(c.unit_price_usd * c.quantity).toFixed(2)}</strong>
+                        <strong>${formatUsdVe(c.unit_price_usd * c.quantity)}</strong>
                         <button type="button" onclick="removeCartItem(${idx})" style="border:none;background:rgba(239,68,68,0.12);color:#DC2626;border-radius:8px;padding:5px 8px;cursor:pointer;display:inline-flex;align-items:center;">
                             <span class="material-symbols-rounded" style="font-size:16px;">delete</span>
                         </button>
@@ -3245,9 +3534,9 @@
                 <div style="background:var(--sf-bg-primary);padding:14px 16px;border-radius:16px;border:1px solid rgba(15,11,29,0.08);display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
                     <div>
                         <div style="font-size:0.76rem;color:var(--sf-text-secondary);font-weight:600;">Monto Total Estimado</div>
-                        <div style="font-size:1.3rem;font-weight:800;">$${totalUsd.toFixed(2)} USD</div>
+                        <div style="font-size:1.3rem;font-weight:800;">${formatUsdVe(totalUsd)}</div>
                     </div>
-                    ${totalBs > 0 ? `<div style="text-align:right;font-weight:800;color:#059669;">Bs. ${totalBs.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</div>` : ''}
+                    ${totalBs > 0 ? `<div style="text-align:right;font-weight:800;color:#059669;">Bs. ${formatBsVe(totalBs)}</div>` : ''}
                 </div>
 
                 ${totalTokens > 0 ? `
