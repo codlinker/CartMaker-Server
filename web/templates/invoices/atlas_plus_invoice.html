@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Factura Digital {{ inv.invoice_number }} — {{ inv.issuer.trade_name }}</title>
+  <title>{{ inv.document_title|default:"Comprobante Digital de Pago" }} {{ inv.invoice_number }} — {{ inv.issuer.trade_name }}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
@@ -40,14 +40,14 @@
       background: #0f172a;
       color: var(--slate-900);
       min-height: 100vh;
-      padding: 28px 16px 64px;
+      padding: 24px 16px 48px;
       -webkit-font-smoothing: antialiased;
     }
 
     /* Barra de herramientas superior (No se imprime) */
     .invoice-toolbar {
       max-width: 860px;
-      margin: 0 auto 20px;
+      margin: 0 auto 16px;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -136,67 +136,46 @@
     }
 
     .top-accent-bar {
-      height: 8px;
+      height: 6px;
       background: linear-gradient(90deg, var(--cm-purple-900) 0%, var(--cm-purple-700) 50%, #9333ea 100%);
     }
 
     .invoice-inner {
-      padding: 36px 40px 32px;
+      padding: 26px 34px 24px;
     }
 
-    /* Encabezado Fiscal (Emisor + Numeración SENIAT) */
+    /* Encabezado Fiscal (Emisor + Numeración) */
     .invoice-header {
       display: grid;
-      grid-template-columns: 1.45fr 1fr;
-      gap: 24px;
-      padding-bottom: 24px;
+      grid-template-columns: 1.38fr 1fr;
+      gap: 20px;
+      padding-bottom: 18px;
       border-bottom: 2px solid var(--slate-200);
-    }
-
-    .issuer-brand-row {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 10px;
-    }
-
-    .issuer-logo-circle {
-      width: 44px;
-      height: 44px;
-      border-radius: 12px;
-      background: linear-gradient(135deg, var(--cm-purple-800), var(--cm-purple-600));
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #ffffff;
-      font-weight: 800;
-      font-size: 20px;
-      flex-shrink: 0;
     }
 
     .issuer-type-pill {
       display: inline-block;
-      font-size: 10px;
+      font-size: 9.5px;
       font-weight: 800;
       text-transform: uppercase;
-      letter-spacing: 0.9px;
+      letter-spacing: 0.7px;
       color: var(--cm-purple-700);
       background: var(--cm-purple-100);
       padding: 3px 9px;
       border-radius: 6px;
-      margin-bottom: 3px;
+      margin-bottom: 5px;
     }
 
     .issuer-legal-name {
-      font-size: 18px;
+      font-size: 17px;
       font-weight: 800;
       color: var(--slate-900);
-      line-height: 1.25;
+      line-height: 1.22;
       letter-spacing: -0.3px;
     }
 
     .issuer-trade-subtitle {
-      font-size: 12px;
+      font-size: 11.5px;
       font-weight: 600;
       color: var(--slate-600);
       margin-top: 2px;
@@ -206,60 +185,62 @@
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
-      margin: 10px 0;
+      margin: 8px 0;
     }
 
     .fiscal-id-chip {
       background: var(--slate-100);
       border: 1px solid var(--slate-300);
-      border-radius: 8px;
-      padding: 4px 10px;
+      border-radius: 7px;
+      padding: 3px 9px;
       font-family: 'JetBrains Mono', monospace;
-      font-size: 12px;
+      font-size: 11.5px;
       font-weight: 700;
       color: var(--slate-900);
     }
 
     .issuer-address {
-      font-size: 11.5px;
+      font-size: 11px;
       color: var(--slate-600);
-      line-height: 1.5;
-      margin-top: 6px;
+      line-height: 1.42;
+      margin-top: 4px;
     }
 
     .issuer-seniat-meta {
-      font-size: 10.5px;
+      font-size: 10px;
       color: var(--slate-500);
-      margin-top: 4px;
+      margin-top: 3px;
       font-weight: 500;
+      line-height: 1.35;
     }
 
-    /* Caja Derecha: Número de Factura y Número de Control */
+    /* Caja Derecha: Número de Comprobante / Factura y Número de Control */
     .fiscal-box {
       background: var(--slate-50);
       border: 1.5px solid var(--slate-300);
-      border-radius: 14px;
-      padding: 16px 18px;
+      border-radius: 12px;
+      padding: 13px 16px;
       display: flex;
       flex-direction: column;
       justify-content: space-between;
     }
 
     .fiscal-doc-title {
-      font-size: 11px;
+      font-size: 10.5px;
       font-weight: 800;
-      letter-spacing: 1.4px;
+      letter-spacing: 1.1px;
       text-transform: uppercase;
       color: var(--cm-purple-800);
       text-align: right;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }
 
     .fiscal-number-row {
       display: flex;
       justify-content: space-between;
-      align-items: baseline;
-      padding: 5px 0;
+      align-items: center;
+      gap: 14px;
+      padding: 4px 0;
       border-bottom: 1px dashed var(--slate-200);
     }
 
@@ -268,72 +249,83 @@
     }
 
     .fiscal-label {
-      font-size: 11px;
+      font-size: 10.5px;
       font-weight: 700;
       color: var(--slate-500);
       text-transform: uppercase;
+      flex-shrink: 0;
+      white-space: nowrap;
     }
 
     .fiscal-value-primary {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 17px;
+      font-size: 16px;
       font-weight: 800;
       color: #dc2626;
+      text-align: right;
+      white-space: nowrap;
     }
 
     .fiscal-value-control {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 14px;
+      font-size: 13.5px;
       font-weight: 700;
       color: var(--slate-900);
+      text-align: right;
+      white-space: nowrap;
     }
 
     .fiscal-value-std {
-      font-size: 12px;
+      font-size: 11.5px;
       font-weight: 700;
       color: var(--slate-800);
+      text-align: right;
+      line-height: 1.25;
     }
 
     /* Sección de Datos del Adquiriente / Cliente y Condiciones de Operación */
     .parties-grid {
       display: grid;
-      grid-template-columns: 1.3fr 1fr;
-      gap: 18px;
-      margin-top: 22px;
+      grid-template-columns: 1.28fr 1fr;
+      gap: 14px;
+      margin-top: 15px;
     }
 
     .info-card {
       background: var(--slate-50);
       border: 1px solid var(--slate-200);
-      border-radius: 12px;
-      padding: 14px 16px;
+      border-radius: 11px;
+      padding: 11px 14px;
     }
 
     .info-card-title {
-      font-size: 10.5px;
+      font-size: 10px;
       font-weight: 800;
       text-transform: uppercase;
-      letter-spacing: 1px;
+      letter-spacing: 0.9px;
       color: var(--cm-purple-800);
-      margin-bottom: 10px;
+      margin-bottom: 7px;
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 8px;
     }
 
     .info-row {
       display: flex;
       justify-content: space-between;
-      gap: 10px;
-      font-size: 12.5px;
-      padding: 4px 0;
-      line-height: 1.4;
+      align-items: baseline;
+      gap: 12px;
+      font-size: 11.8px;
+      padding: 3px 0;
+      line-height: 1.35;
     }
 
     .info-row .k {
       color: var(--slate-500);
       font-weight: 600;
       flex-shrink: 0;
+      white-space: nowrap;
     }
 
     .info-row .v {
@@ -343,16 +335,23 @@
       word-break: break-word;
     }
 
-    /* Tabla de Conceptos Facturados */
+    .info-row .v.mono-nowrap {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11.5px;
+      white-space: nowrap;
+      word-break: normal;
+    }
+
+    /* Tabla de Conceptos */
     .items-section {
-      margin-top: 24px;
+      margin-top: 15px;
     }
 
     .items-table {
       width: 100%;
       border-collapse: collapse;
       border: 1px solid var(--slate-200);
-      border-radius: 12px;
+      border-radius: 11px;
       overflow: hidden;
     }
 
@@ -362,23 +361,25 @@
     }
 
     .items-table th {
-      font-size: 11px;
+      font-size: 10.5px;
       font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.7px;
-      padding: 11px 14px;
+      letter-spacing: 0.6px;
+      padding: 9px 12px;
       text-align: left;
+      white-space: nowrap;
     }
 
     .items-table th.num,
     .items-table td.num {
       text-align: right;
       font-variant-numeric: tabular-nums;
+      white-space: nowrap;
     }
 
     .items-table td {
-      padding: 14px;
-      font-size: 13px;
+      padding: 11px 12px;
+      font-size: 12.2px;
       color: var(--slate-800);
       border-bottom: 1px solid var(--slate-200);
       vertical-align: top;
@@ -387,51 +388,54 @@
     .item-title {
       font-weight: 700;
       color: var(--slate-900);
-      margin-bottom: 4px;
+      margin-bottom: 3px;
+      line-height: 1.35;
     }
 
     .item-sub {
-      font-size: 11.5px;
+      font-size: 11px;
       color: var(--slate-500);
+      line-height: 1.35;
     }
 
     .exempt-tag {
       display: inline-block;
       font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
+      font-size: 10.5px;
       font-weight: 700;
-      padding: 2px 7px;
+      padding: 2px 6px;
       border-radius: 5px;
       background: var(--cm-purple-100);
       color: var(--cm-purple-800);
+      white-space: nowrap;
     }
 
     /* Resumen Financiero Bimonetario (Bs. + USD BCV) */
     .summary-section {
       display: grid;
       grid-template-columns: 1fr 1.15fr;
-      gap: 24px;
-      margin-top: 24px;
+      gap: 18px;
+      margin-top: 15px;
       align-items: start;
     }
 
     .verification-card {
       background: var(--slate-50);
       border: 1px solid var(--slate-200);
-      border-radius: 12px;
-      padding: 14px 16px;
+      border-radius: 11px;
+      padding: 11px 13px;
       display: flex;
-      gap: 14px;
+      gap: 12px;
       align-items: center;
     }
 
     .qr-box {
-      width: 92px;
-      height: 92px;
-      border-radius: 10px;
+      width: 82px;
+      height: 82px;
+      border-radius: 9px;
       background: #ffffff;
       border: 1px solid var(--slate-200);
-      padding: 6px;
+      padding: 5px;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -445,9 +449,9 @@
     }
 
     .verification-meta {
-      font-size: 11.5px;
+      font-size: 11px;
       color: var(--slate-600);
-      line-height: 1.45;
+      line-height: 1.38;
     }
 
     .verification-meta strong {
@@ -456,19 +460,19 @@
 
     .verification-code-pill {
       display: inline-block;
-      margin-top: 5px;
+      margin-top: 4px;
       font-family: 'JetBrains Mono', monospace;
-      font-size: 11.5px;
+      font-size: 11px;
       font-weight: 700;
       color: var(--cm-purple-800);
       background: var(--cm-purple-100);
-      padding: 3px 8px;
-      border-radius: 6px;
+      padding: 2px 7px;
+      border-radius: 5px;
     }
 
     .totals-box {
       border: 1.5px solid var(--slate-300);
-      border-radius: 14px;
+      border-radius: 12px;
       overflow: hidden;
       background: #ffffff;
     }
@@ -477,8 +481,8 @@
       display: grid;
       grid-template-columns: 1.3fr 1fr 0.9fr;
       background: var(--slate-100);
-      padding: 8px 14px;
-      font-size: 10.5px;
+      padding: 7px 12px;
+      font-size: 10px;
       font-weight: 800;
       text-transform: uppercase;
       color: var(--slate-600);
@@ -489,13 +493,14 @@
     .totals-row span:not(:first-child) {
       text-align: right;
       font-variant-numeric: tabular-nums;
+      white-space: nowrap;
     }
 
     .totals-row {
       display: grid;
       grid-template-columns: 1.3fr 1fr 0.9fr;
-      padding: 8px 14px;
-      font-size: 12.5px;
+      padding: 6px 12px;
+      font-size: 11.8px;
       border-bottom: 1px solid var(--slate-100);
       color: var(--slate-700);
     }
@@ -504,31 +509,31 @@
       background: var(--cm-purple-50);
       border-top: 2px solid var(--cm-purple-700);
       border-bottom: none;
-      padding: 12px 14px;
-      font-size: 14px;
+      padding: 9px 12px;
+      font-size: 13px;
       font-weight: 800;
       color: var(--cm-purple-900);
     }
 
     .bcv-banner {
-      margin-top: 10px;
+      margin-top: 7px;
       background: var(--emerald-100);
       color: var(--emerald-700);
-      border-radius: 8px;
-      padding: 7px 12px;
-      font-size: 11.5px;
+      border-radius: 7px;
+      padding: 6px 10px;
+      font-size: 10.8px;
       font-weight: 700;
       text-align: right;
     }
 
-    /* Pie Legal SENIAT */
+    /* Pie Legal SENIAT / BCV */
     .legal-footer {
-      margin-top: 26px;
-      padding-top: 16px;
+      margin-top: 14px;
+      padding-top: 10px;
       border-top: 1px solid var(--slate-200);
-      font-size: 11px;
+      font-size: 10px;
       color: var(--slate-500);
-      line-height: 1.55;
+      line-height: 1.42;
     }
 
     .legal-footer strong {
@@ -537,7 +542,7 @@
 
     @media (max-width: 720px) {
       .invoice-inner {
-        padding: 22px 18px;
+        padding: 20px 16px;
       }
       .invoice-header,
       .parties-grid,
@@ -552,20 +557,48 @@
     @media print {
       @page {
         size: letter portrait;
-        margin: 10mm;
+        margin: 7mm 9mm;
       }
-      body {
-        background: #ffffff;
-        padding: 0;
+      html, body {
+        background: #ffffff !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        min-height: auto !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
       }
       .invoice-toolbar {
         display: none !important;
       }
       .invoice-sheet {
-        box-shadow: none;
-        border: 1px solid #cbd5e1;
-        border-radius: 8px;
-        max-width: 100%;
+        box-shadow: none !important;
+        border: 1px solid #cbd5e1 !important;
+        border-radius: 10px !important;
+        max-width: 100% !important;
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+      .invoice-inner {
+        padding: 18px 22px 16px !important;
+      }
+      .invoice-header {
+        padding-bottom: 12px !important;
+        gap: 16px !important;
+      }
+      .parties-grid,
+      .items-section,
+      .summary-section {
+        margin-top: 11px !important;
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+      .legal-footer {
+        margin-top: 10px !important;
+        padding-top: 8px !important;
+        font-size: 9.5px !important;
+        line-height: 1.36 !important;
+        page-break-inside: avoid;
+        break-inside: avoid;
       }
     }
   </style>
@@ -575,12 +608,12 @@
   <!-- Barra de Acciones Interactiva -->
   <div class="invoice-toolbar">
     <div class="toolbar-brand">
-      <span>🧾 Comprobante Fiscal Digital · {{ inv.issuer.trade_name }}</span>
+      <span>🧾 {{ inv.document_title|default:"Comprobante Digital de Pago" }} · {{ inv.issuer.trade_name }}</span>
       <span class="toolbar-badge">Pagado y Verificado</span>
     </div>
     <div class="toolbar-actions">
       <button type="button" class="btn-toolbar btn-secondary" onclick="copyInvoiceLink()">
-        <span id="copyBtnText">🔗 Copiar Enlace Fiscal</span>
+        <span id="copyBtnText">🔗 Copiar Enlace</span>
       </button>
       <button type="button" class="btn-toolbar btn-primary" onclick="window.print()">
         🖨️ Imprimir / Guardar PDF
@@ -588,12 +621,12 @@
     </div>
   </div>
 
-  <!-- Documento Legal Imprimible -->
+  <!-- Documento Legal Imprimible (1 Página Carta / A4) -->
   <main class="invoice-sheet">
     <div class="top-accent-bar"></div>
     <div class="invoice-inner">
 
-      <!-- 1. ENCABEZADO DEL EMISOR (DINÁMICO DESDE BD) Y NUMERACIÓN SENIAT -->
+      <!-- 1. ENCABEZADO DEL EMISOR (DINÁMICO DESDE BD) Y NUMERACIÓN -->
       <header class="invoice-header">
         <div>
           <span class="issuer-type-pill">{{ inv.issuer.issuer_type_label }}</span>
@@ -621,13 +654,13 @@
         </div>
 
         <div class="fiscal-box">
-          <div class="fiscal-doc-title">Factura Digital</div>
+          <div class="fiscal-doc-title">{{ inv.document_title|default:"COMPROBANTE DIGITAL DE PAGO" }}</div>
           <div class="fiscal-number-row">
-            <span class="fiscal-label">Factura N°</span>
+            <span class="fiscal-label">{{ inv.document_number_label|default:"Comprobante N°" }}</span>
             <span class="fiscal-value-primary">{{ inv.invoice_number }}</span>
           </div>
           <div class="fiscal-number-row">
-            <span class="fiscal-label">N° de Control</span>
+            <span class="fiscal-label">{{ inv.control_number_label|default:"Control Interno N°" }}</span>
             <span class="fiscal-value-control">{{ inv.control_number }}</span>
           </div>
           <div class="fiscal-number-row">
@@ -658,7 +691,7 @@
           </div>
           <div class="info-row">
             <span class="k">RIF / Cédula de Identidad:</span>
-            <span class="v">{{ inv.buyer.document }}</span>
+            <span class="v mono-nowrap">{{ inv.buyer.document }}</span>
           </div>
           <div class="info-row">
             <span class="k">Correo Electrónico:</span>
@@ -681,15 +714,15 @@
           </div>
           <div class="info-row">
             <span class="k">Referencia Bancaria / ID:</span>
-            <span class="v">{{ inv.payment_details.reference_number }}</span>
+            <span class="v mono-nowrap">{{ inv.payment_details.reference_number }}</span>
           </div>
           <div class="info-row">
             <span class="k">Tasa Oficial BCV Aplicada:</span>
-            <span class="v">{{ inv.payment_details.bcv_rate_formatted }}</span>
+            <span class="v mono-nowrap">{{ inv.payment_details.bcv_rate_formatted }}</span>
           </div>
           <div class="info-row">
             <span class="k">Vigencia del Servicio:</span>
-            <span class="v">{{ inv.period_start }} al {{ inv.period_end }}</span>
+            <span class="v mono-nowrap">{{ inv.period_start }} al {{ inv.period_end }}</span>
           </div>
         </div>
       </section>
@@ -699,9 +732,9 @@
         <table class="items-table">
           <thead>
             <tr>
-              <th style="width: 8%;">Cant.</th>
+              <th style="width: 7%;">Cant.</th>
               <th style="width: 14%;">Unidad</th>
-              <th style="width: 42%;">Descripción del Servicio Tecnológico</th>
+              <th style="width: 43%;">Descripción del Servicio Tecnológico</th>
               <th style="width: 8%;">Alíc.</th>
               <th class="num" style="width: 14%;">Precio Unit. Bs.</th>
               <th class="num" style="width: 14%;">Ref. USD</th>
@@ -740,18 +773,18 @@
             <div class="qr-box">
               <img
                 src="https://api.qrserver.com/v1/create-qr-code/?size=160x160&margin=4&data={{ inv.invoice_url|urlencode }}"
-                alt="QR de Verificación Fiscal"
+                alt="QR de Verificación Digital"
               />
             </div>
             <div class="verification-meta">
               <div><strong>Verificación de Autenticidad Digital</strong></div>
-              <div>Escanea el código QR para validar en línea la integridad de este comprobante en los servidores de CartMaker.</div>
+              <div>Escanea el código QR para validar en línea la integridad de este documento en los servidores de CartMaker.</div>
               <span class="verification-code-pill">{{ inv.verification_code }}</span>
             </div>
           </div>
 
           {% if inv.amounts.wallet_surplus_usd > 0 %}
-          <div class="bcv-banner" style="text-align:left; margin-top:12px;">
+          <div class="bcv-banner" style="text-align:left; margin-top:8px;">
             💡 Monto Total Recibido: {{ inv.amounts.amount_paid_bs_formatted }} ({{ inv.amounts.amount_paid_usd_formatted }}) ·
             Excedente acreditado a tu Billetera CartMaker: {{ inv.amounts.wallet_surplus_bs_formatted }} ({{ inv.amounts.wallet_surplus_usd_formatted }}).
           </div>
@@ -761,7 +794,7 @@
         <div>
           <div class="totals-box">
             <div class="totals-header">
-              <span>Concepto Fiscal</span>
+              <span>Concepto</span>
               <span>Bolívares (Bs.)</span>
               <span>Equiv. USD</span>
             </div>
@@ -786,7 +819,7 @@
               <span>{{ inv.amounts.iva_amount_usd_formatted }}</span>
             </div>
             <div class="totals-row grand-total">
-              <span>TOTAL FACTURADO</span>
+              <span>{{ inv.grand_total_label|default:"TOTAL PAGADO" }}</span>
               <span>{{ inv.amounts.total_bs_formatted }}</span>
               <span>{{ inv.amounts.total_usd_formatted }}</span>
             </div>
@@ -797,9 +830,9 @@
         </div>
       </section>
 
-      <!-- 5. NOTA LEGAL VENEZOLANA (SENIAT / BCV) -->
+      <!-- 5. NOTA LEGAL VENEZOLANA (SENIAT / BCV / LMDyFE) -->
       <footer class="legal-footer">
-        <strong>Observaciones Legales y Tributarias (SENIAT / BCV):</strong>
+        <strong>Marco Legal y Tributario (República Bolivariana de Venezuela):</strong>
         {{ inv.legal_note }}
       </footer>
 

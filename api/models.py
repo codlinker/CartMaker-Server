@@ -2099,19 +2099,57 @@ class AtlasPlusPlanPayment(models.Model):
 
 
 class BillingIssuerType(models.TextChoices):
-    PERSONAL = 'PERSONAL', 'Persona Natural / Servicios Profesionales (RIF V-)'
-    COMPANY = 'COMPANY', 'Persona Jurídica / Empresa Registrada (RIF J-)'
+    PERSONAL = 'PERSONAL', 'Persona Natural / Servicios Profesionales (Comprobante Digital · RIF V-)'
+    COMPANY = 'COMPANY', 'Persona Jurídica / Empresa Registrada (Comprobante Digital · RIF J-)'
+    PERSONAL_SENIAT_IMP = 'PERSONAL_SENIAT_IMP', 'Persona Natural — Facturación Homologada Imprenta Digital SENIAT'
+    COMPANY_SENIAT_IMP = 'COMPANY_SENIAT_IMP', 'Persona Jurídica — Facturación Homologada Imprenta Digital SENIAT'
 
 
 class BillingTaxRegime(models.TextChoices):
-    EXENTO_NO_SUJETO = 'EXENTO_NO_SUJETO', 'Exento / No Sujeto de IVA (Persona Natural / Exonerado)'
-    CONTRIBUYENTE_ORDINARIO = 'CONTRIBUYENTE_ORDINARIO', 'Contribuyente Ordinario de IVA (16%)'
+    EXENTO_NO_SUJETO = 'EXENTO_NO_SUJETO', 'Exento / No Sujeto (0% IVA)'
+    CONTRIBUYENTE_ORDINARIO = 'CONTRIBUYENTE_ORDINARIO', 'Contribuyente Ordinario (16% IVA)'
     CONTRIBUYENTE_ESPECIAL = 'CONTRIBUYENTE_ESPECIAL', 'Contribuyente Especial SENIAT'
+
+
+DEFAULT_COMPROBANTE_LEGAL_NOTE = (
+    "Comprobante Digital de Pago y Recibo Administrativo de Suscripción emitido conforme al Código Civil y de Comercio "
+    "de la República Bolivariana de Venezuela y la Ley sobre Mensajes de Datos y Firmas Electrónicas. "
+    "Actividad de servicios profesionales / tecnológicos No Sujeta o Exenta de IVA (Alícuota 0%). "
+    "Este comprobante acredita la recepción del pago y la activación del servicio digital, no constituye factura fiscal "
+    "a los efectos de crédito fiscal de IVA (Providencias Administrativas SENIAT SNAT/2011/0071 y SNAT/2024/000102). "
+    "Montos expresados en Bolívares (Bs.) como moneda de curso legal y su equivalencia referencial en Dólares (USD) "
+    "según tasa oficial del Banco Central de Venezuela (BCV) vigente a la fecha de la operación (Art. 128 Ley del BCV)."
+)
+
+DEFAULT_SENIAT_FACTURA_LEGAL_NOTE = (
+    "Documento emitido conforme a las Providencias Administrativas SENIAT SNAT/2011/0071 y SNAT/2024/000102. "
+    "La condición de este contribuyente requiere la retención del 100% del impuesto causado, salvo que esté exento, "
+    "no sujeto o demuestre ante el Agente de Retención del IVA que es un contribuyente exonerado (SENIAT). "
+    "Montos expresados en Bolívares (Bs.) como moneda de curso legal y su equivalencia en Dólares (USD) "
+    "según tasa oficial del Banco Central de Venezuela (BCV) vigente a la fecha de la operación (Art. 128 Ley del BCV)."
+)
+
+_PLACEHOLDER_ADDRESS_LABELS = {
+    'mi primera dirección.',
+    'mi primera direccion.',
+    'mi primera dirección',
+    'mi primera direccion',
+    'mi dirección',
+    'mi direccion',
+    'casa',
+    'oficina',
+    'trabajo',
+    'apartamento',
+    'dirección principal',
+    'direccion principal',
+    'ubicación actual',
+    'ubicacion actual',
+}
 
 
 class AtlasPlusInvoice(models.Model):
     """
-    Factura / Comprobante Fiscal Digital inmutable emitido automáticamente al aprobarse
+    Comprobante / Factura Fiscal Digital inmutable emitido automáticamente al aprobarse
     un pago de suscripción de Atlas Plus (transferencia/Pago Móvil o billetera).
     Conserva una fotografía exacta de los datos fiscales del emisor (SystemConfig) y del
     adquiriente al momento de la emisión conforme a la normativa venezolana (SENIAT / BCV).
@@ -2196,6 +2234,47 @@ class AtlasPlusInvoice(models.Model):
         domain = getattr(settings, 'DOMAIN', 'https://www.cartmaker.app').rstrip('/')
         return f"{domain}/facturas/atlas/{self.id}/?token={self.verification_code}"
 
+    @property
+    def is_seniat_homologated(self) -> bool:
+        return self.issuer_type in (
+            BillingIssuerType.PERSONAL_SENIAT_IMP,
+            BillingIssuerType.COMPANY_SENIAT_IMP,
+        )
+
+    @classmethod
+    def _resolve_buyer_address(cls, user: User, company: Optional['Company'] = None) -> str:
+        """
+        Determina el domicilio fiscal o ubicación del adquiriente:
+        1. Si es Persona Jurídica (Company), prioriza la dirección de su sede comercial (CompanyStore).
+        2. Si no tiene tienda con dirección descriptiva, busca en ClientLocation ignorando etiquetas
+           genéricas de marcador de posición (ej. 'Mi primera dirección.', 'Casa', 'Oficina').
+        """
+        if company is None:
+            company = Company.objects.filter(owner=user).first()
+
+        if company:
+            stores = CompanyStore.objects.filter(company=company).select_related('location')
+            for store in stores:
+                loc = getattr(store, 'location', None)
+                if not loc:
+                    continue
+                for candidate in (getattr(loc, 'description', None), getattr(loc, 'name', None)):
+                    if candidate:
+                        cleaned = candidate.strip()
+                        if cleaned and cleaned.lower() not in _PLACEHOLDER_ADDRESS_LABELS:
+                            return cleaned
+
+        client_locs = ClientLocation.objects.filter(user=user)
+        for loc in client_locs:
+            desc = (getattr(loc, 'description', None) or '').strip()
+            if desc and desc.lower() not in _PLACEHOLDER_ADDRESS_LABELS:
+                return desc
+            name = (getattr(loc, 'name', None) or '').strip()
+            if name and name.lower() not in _PLACEHOLDER_ADDRESS_LABELS and len(name) > 12:
+                return name
+
+        return "República Bolivariana de Venezuela"
+
     @classmethod
     def issue_for_payment(
         cls,
@@ -2265,22 +2344,13 @@ class AtlasPlusInvoice(models.Model):
                 else:
                     buyer_document = "V-00000000 (Consumidor Final)"
 
-            buyer_address = "República Bolivariana de Venezuela"
-            first_loc = ClientLocation.objects.filter(user=user).first()
-            if first_loc and (getattr(first_loc, 'description', None) or getattr(first_loc, 'name', None)):
-                buyer_address = (first_loc.description or first_loc.name).strip()
-            elif company:
-                main_store = CompanyStore.objects.filter(company=company).select_related('location').first()
-                if main_store and getattr(main_store, 'location', None):
-                    loc_text = getattr(main_store.location, 'description', None) or getattr(main_store.location, 'name', None)
-                    if loc_text:
-                        buyer_address = loc_text.strip()
+            buyer_address = cls._resolve_buyer_address(user=user, company=company)
 
             bcv_rate = Decimal(str(payment.bcv_taxes_to_day or '1.0000'))
             if bcv_rate <= Decimal('0'):
                 bcv_rate = Decimal('1.0000')
 
-            total_usd = Decimal(str(config.atlas_plus_price_usd or '2.99')).quantize(Decimal('0.01'))
+            total_usd = Decimal(str(config.atlas_plus_price_usd or '3.99')).quantize(Decimal('0.01'))
             total_bs = (total_usd * bcv_rate).quantize(Decimal('0.01'))
 
             iva_pct = Decimal(str(config.billing_iva_percentage or '0.00')).quantize(Decimal('0.01'))
@@ -2321,6 +2391,18 @@ class AtlasPlusInvoice(models.Model):
             now = timezone.now()
             p_start = period_start or now
             p_end = period_end or (payment.plan.valid_until if payment.plan and payment.plan.valid_until else now + timedelta(days=30))
+
+            is_homologated = config.billing_issuer_type in (
+                BillingIssuerType.PERSONAL_SENIAT_IMP,
+                BillingIssuerType.COMPANY_SENIAT_IMP,
+            )
+            raw_legal_note = (config.billing_legal_note or '').strip()
+            if not is_homologated and (not raw_legal_note or 'Agente de Retención del IVA' in raw_legal_note):
+                effective_legal_note = DEFAULT_COMPROBANTE_LEGAL_NOTE
+            elif is_homologated and not raw_legal_note:
+                effective_legal_note = DEFAULT_SENIAT_FACTURA_LEGAL_NOTE
+            else:
+                effective_legal_note = raw_legal_note
 
             return cls.objects.create(
                 payment=payment,
@@ -2365,13 +2447,55 @@ class AtlasPlusInvoice(models.Model):
                 amount_paid_usd=amount_paid_usd,
                 wallet_surplus_usd=surplus_usd_clean,
                 wallet_surplus_bs=surplus_bs_clean,
-                legal_note=config.billing_legal_note,
+                legal_note=effective_legal_note,
             )
 
     def get_json(self) -> dict:
         issued_local = timezone.localtime(self.issued_at) if self.issued_at else timezone.localtime(timezone.now())
-        sys_cfg = SystemConfig.objects.only('atlas_plus_daily_limit').order_by('-creation').first()
+        sys_cfg = SystemConfig.objects.only('id', 'atlas_plus_daily_limit').order_by('-creation').first()
+        if sys_cfg and sys_cfg.atlas_plus_daily_limit == 20:
+            sys_cfg.atlas_plus_daily_limit = 30
+            sys_cfg.save(update_fields=['atlas_plus_daily_limit'])
         daily_limit = int(sys_cfg.atlas_plus_daily_limit) if sys_cfg and sys_cfg.atlas_plus_daily_limit else 30
+
+        is_homologated = self.is_seniat_homologated
+        if is_homologated:
+            document_title = "FACTURA DIGITAL"
+            document_number_label = "Factura N°"
+            control_number_label = "N° de Control"
+            grand_total_label = "TOTAL FACTURADO"
+        else:
+            document_title = "COMPROBANTE DIGITAL DE PAGO"
+            document_number_label = "Comprobante N°"
+            control_number_label = "Control Interno N°"
+            grand_total_label = "TOTAL PAGADO"
+
+        if self.issuer_type in (BillingIssuerType.COMPANY, BillingIssuerType.COMPANY_SENIAT_IMP):
+            issuer_short_label = "Persona Jurídica · Servicios Tecnológicos (RIF J-)"
+        else:
+            issuer_short_label = "Persona Natural · Servicios Profesionales (RIF V-)"
+
+        tax_regime_short = (
+            "Exento / No Sujeto (0% IVA)"
+            if self.tax_regime == BillingTaxRegime.EXENTO_NO_SUJETO or float(self.iva_percentage) <= 0.0
+            else self.get_tax_regime_display()
+        )
+
+        # Auto-saneamiento de dirección si el registro previo guardó un marcador genérico ('Mi primera dirección.')
+        resolved_buyer_address = (self.buyer_address or '').strip()
+        if not resolved_buyer_address or resolved_buyer_address.lower() in _PLACEHOLDER_ADDRESS_LABELS:
+            resolved_buyer_address = self._resolve_buyer_address(user=self.user)
+            if resolved_buyer_address != self.buyer_address:
+                self.buyer_address = resolved_buyer_address
+                AtlasPlusInvoice.objects.filter(pk=self.pk).update(buyer_address=resolved_buyer_address)
+
+        # Auto-saneamiento de nota legal según modo (Comprobante Digital vs Factura Homologada SENIAT)
+        effective_legal_note = (self.legal_note or '').strip()
+        if not is_homologated and (not effective_legal_note or 'Agente de Retención del IVA' in effective_legal_note):
+            effective_legal_note = DEFAULT_COMPROBANTE_LEGAL_NOTE
+        elif is_homologated and not effective_legal_note:
+            effective_legal_note = DEFAULT_SENIAT_FACTURA_LEGAL_NOTE
+
         return {
             'id': str(self.id),
             'payment_id': self.payment_id,
@@ -2379,6 +2503,11 @@ class AtlasPlusInvoice(models.Model):
             'invoice_number': self.invoice_number,
             'control_number': self.control_number,
             'verification_code': self.verification_code,
+            'is_seniat_homologated': is_homologated,
+            'document_title': document_title,
+            'document_number_label': document_number_label,
+            'control_number_label': control_number_label,
+            'grand_total_label': grand_total_label,
             'atlas_plus_daily_limit': daily_limit,
             'issued_at': issued_local.strftime("%d/%m/%Y %H:%M:%S"),
             'issued_date': issued_local.strftime("%d/%m/%Y"),
@@ -2387,7 +2516,7 @@ class AtlasPlusInvoice(models.Model):
             'period_end': timezone.localtime(self.period_end).strftime("%d/%m/%Y") if self.period_end else None,
             'issuer': {
                 'issuer_type': self.issuer_type,
-                'issuer_type_label': self.get_issuer_type_display(),
+                'issuer_type_label': issuer_short_label,
                 'name': self.issuer_name,
                 'trade_name': self.issuer_trade_name,
                 'rif': self.issuer_rif,
@@ -2396,13 +2525,13 @@ class AtlasPlusInvoice(models.Model):
                 'seniat_region': self.issuer_seniat_region,
                 'rif_certificate_number': self.issuer_rif_certificate,
                 'tax_regime': self.tax_regime,
-                'tax_regime_label': self.get_tax_regime_display(),
+                'tax_regime_label': tax_regime_short,
             },
             'buyer': {
                 'name': self.buyer_name,
                 'document': self.buyer_document,
                 'email': self.buyer_email,
-                'address': self.buyer_address,
+                'address': resolved_buyer_address,
                 'is_company': self.buyer_is_company,
             },
             'payment_details': {
@@ -2454,7 +2583,7 @@ class AtlasPlusInvoice(models.Model):
                 'wallet_surplus_bs': float(self.wallet_surplus_bs),
                 'wallet_surplus_bs_formatted': format_ve_amount(self.wallet_surplus_bs, 2, " Bs.", True),
             },
-            'legal_note': self.legal_note,
+            'legal_note': effective_legal_note,
             'invoice_url': self.invoice_url,
         }
 
@@ -2633,19 +2762,20 @@ class SystemConfig(models.Model):
         help_text="Descripción del servicio tecnológico que aparece en el renglón principal de la factura.",
     )
     billing_legal_note = models.TextField(
-        default=(
-            "La condición de este contribuyente requiere la retención del 100% del impuesto causado, salvo que esté exento, "
-            "no sujeto o demuestre ante el Agente de Retención del IVA que es un contribuyente exonerado (SENIAT). "
-            "Montos expresados en Bolívares (Bs.) como moneda de curso legal y su equivalencia en Dólares (USD) "
-            "según tasa oficial del Banco Central de Venezuela (BCV) vigente a la fecha de la operación."
-        ),
+        default=DEFAULT_COMPROBANTE_LEGAL_NOTE,
         blank=True,
     )
 
     def get_billing_issuer_json(self) -> dict:
+        is_homologated = self.billing_issuer_type in (
+            BillingIssuerType.PERSONAL_SENIAT_IMP,
+            BillingIssuerType.COMPANY_SENIAT_IMP,
+        )
         return {
             'issuer_type': self.billing_issuer_type,
             'issuer_type_label': self.get_billing_issuer_type_display(),
+            'is_seniat_homologated': is_homologated,
+            'document_title': 'FACTURA DIGITAL' if is_homologated else 'COMPROBANTE DIGITAL DE PAGO',
             'issuer_name': self.billing_issuer_name,
             'trade_name': self.billing_trade_name,
             'rif': self.billing_issuer_rif,

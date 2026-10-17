@@ -100,26 +100,32 @@ def _deliver_atlas_invoice_email_sync(invoice_id: str) -> bool:
     buyer = inv_data['buyer']
     amounts = inv_data['amounts']
     pay_info = inv_data['payment_details']
+    doc_title = inv_data.get('document_title', 'COMPROBANTE DIGITAL DE PAGO')
+    doc_num_label = inv_data.get('document_number_label', 'Comprobante N°')
+    ctrl_label = inv_data.get('control_number_label', 'Control Interno N°')
+    grand_total_label = inv_data.get('grand_total_label', 'TOTAL PAGADO')
+    legal_note_text = inv_data.get('legal_note') or invoice.legal_note
 
-    subject = f"Factura Digital {invoice.invoice_number} — Plan Atlas Plus ({issuer['trade_name']})"
+    subject = f"{doc_title.title()} {invoice.invoice_number} — Plan Atlas Plus ({issuer['trade_name']})"
     from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@cartmaker.app')
 
     text_content = (
-        f"FACTURA DIGITAL N° {invoice.invoice_number} | N° CONTROL {invoice.control_number}\n"
-        f"Emisor Fiscal: {issuer['name']} — RIF: {issuer['rif']}"
+        f"{doc_title} | {doc_num_label.upper()} {invoice.invoice_number} | {ctrl_label.upper()} {invoice.control_number}\n"
+        f"Emisor: {issuer['name']} — RIF: {issuer['rif']}"
         f"{(' | C.I.: ' + issuer['cedula']) if issuer.get('cedula') else ''}\n"
         f"Domicilio Fiscal: {issuer['fiscal_address']}\n"
         f"------------------------------------------------------------\n"
         f"Cliente / Adquiriente: {buyer['name']}\n"
         f"RIF / C.I.: {buyer['document']}\n"
+        f"Domicilio: {buyer['address']}\n"
         f"Fecha de Emisión: {inv_data['issued_at']}\n"
         f"Concepto: {invoice.concept_description}\n"
         f"Vigencia: {inv_data['period_start']} al {inv_data['period_end']}\n"
         f"Tasa Oficial BCV: {pay_info['bcv_rate_formatted']}\n"
-        f"Total Facturado: {amounts['total_bs_formatted']} (Equivalente: {amounts['total_usd_formatted']})\n"
+        f"{grand_total_label}: {amounts['total_bs_formatted']} (Equivalente: {amounts['total_usd_formatted']})\n"
         f"Método de Pago: {pay_info['payment_method']} (Ref: {pay_info['reference_number']})\n"
         f"------------------------------------------------------------\n"
-        f"Ver y Descargar Factura Digital (PDF / Impresión):\n"
+        f"Ver y Descargar {doc_title.title()} (PDF / Impresión):\n"
         f"{invoice.invoice_url}\n"
     )
 
@@ -128,9 +134,9 @@ def _deliver_atlas_invoice_email_sync(invoice_id: str) -> bool:
     <div style="font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:640px;margin:0 auto;background:#f8fafc;padding:24px;color:#0f172a;">
       <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;box-shadow:0 10px 25px rgba(15,23,42,0.06);">
         <div style="background:linear-gradient(135deg,#4c1d95 0%,#6d28d9 50%,#7c3aed 100%);padding:24px 28px;color:#ffffff;">
-          <div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;opacity:0.85;font-weight:700;">República Bolivariana de Venezuela · Documento Fiscal Digital</div>
-          <h1 style="margin:6px 0 4px;font-size:22px;font-weight:800;">Factura Digital {invoice.invoice_number}</h1>
-          <div style="font-size:13px;opacity:0.92;">N° de Control: <strong>{invoice.control_number}</strong> · Código Verificador: <strong>{invoice.verification_code}</strong></div>
+          <div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;opacity:0.85;font-weight:700;">República Bolivariana de Venezuela · {doc_title}</div>
+          <h1 style="margin:6px 0 4px;font-size:22px;font-weight:800;">{doc_num_label} {invoice.invoice_number}</h1>
+          <div style="font-size:13px;opacity:0.92;">{ctrl_label}: <strong>{invoice.control_number}</strong> · Código Verificador: <strong>{invoice.verification_code}</strong></div>
         </div>
         <div style="padding:24px 28px;">
           <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px 16px;margin-bottom:18px;">
@@ -143,6 +149,7 @@ def _deliver_atlas_invoice_email_sync(invoice_id: str) -> bool:
           <div style="margin-bottom:18px;font-size:13px;color:#334155;line-height:1.6;">
             <div><strong>Adquiriente / Cliente:</strong> {buyer['name']}</div>
             <div><strong>RIF / Cédula:</strong> {buyer['document']}</div>
+            <div><strong>Domicilio / Ubicación:</strong> {buyer['address']}</div>
             <div><strong>Fecha de Emisión:</strong> {inv_data['issued_at']}</div>
             <div><strong>Periodo de Suscripción:</strong> {inv_data['period_start']} al {inv_data['period_end']}</div>
             <div><strong>Método de Pago:</strong> {pay_info['payment_method']} (Ref: {pay_info['reference_number']})</div>
@@ -172,19 +179,19 @@ def _deliver_atlas_invoice_email_sync(invoice_id: str) -> bool:
               <strong>{amounts['exempt_amount_bs_formatted']} ({amounts['exempt_amount_usd_formatted']})</strong>
             </div>
             <div style="display:flex;justify-content:space-between;font-size:16px;color:#3b0764;font-weight:800;margin-top:6px;padding-top:6px;border-top:1px dashed #d8b4fe;">
-              <span>TOTAL FACTURADO:</span>
+              <span>{grand_total_label}:</span>
               <span>{amounts['total_bs_formatted']} / {amounts['total_usd_formatted']}</span>
             </div>
           </div>
 
           <div style="text-align:center;margin:22px 0;">
             <a href="{invoice.invoice_url}" style="display:inline-block;background:#6d28d9;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 24px;border-radius:10px;">
-              Ver / Descargar Factura Legal en PDF
+              Ver / Descargar {doc_title.title()} en PDF
             </a>
           </div>
 
           <p style="font-size:11px;color:#64748b;line-height:1.5;margin-top:18px;border-top:1px solid #e2e8f0;padding-top:12px;">
-            {invoice.legal_note}
+            {legal_note_text}
           </p>
         </div>
       </div>
