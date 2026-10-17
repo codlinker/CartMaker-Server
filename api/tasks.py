@@ -706,3 +706,14 @@ def send_push_notification_task(user_id: str, title: str, body: str, data: dict 
         NotificationManager._send_multicast(user=user, title=title, body=body, data_payload=safe_data)
     except Exception as exc:
         logger.warning(f"⚠️ No se pudo enviar push FCM asíncrono al usuario {user_id}: {exc}")
+
+
+@shared_task(bind=True, ignore_result=True, max_retries=2, default_retry_delay=5)
+def send_atlas_invoice_email_task(self, invoice_id: str):
+    """Despacha el correo con la factura digital legal de Atlas Plus de forma asíncrona."""
+    try:
+        from api.utils import _deliver_atlas_invoice_email_sync
+        _deliver_atlas_invoice_email_sync(invoice_id)
+    except Exception as exc:
+        logger.warning(f"⚠️ Error despachando factura digital {invoice_id}: {exc}")
+        raise self.retry(exc=exc)

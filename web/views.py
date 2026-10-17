@@ -109,7 +109,7 @@ def payments_dashboard_view(request):
             
         elif target_deck == 'atlas':
             atlas_pending = AtlasPlusPlanPayment.objects.filter(status=0).select_related('plan__user').order_by('-creation')
-            atlas_history = AtlasPlusPlanPayment.objects.filter(status__in=[1, 2]).select_related('plan__user').order_by('-verified_at')[:15]
+            atlas_history = AtlasPlusPlanPayment.objects.filter(status__in=[1, 2]).select_related('plan__user', 'invoice').order_by('-verified_at')[:15]
             
             html = render_to_string('support/partials/atlas_deck_content.html', {
                 'atlas_pending': atlas_pending,
@@ -158,10 +158,16 @@ def payments_dashboard_view(request):
                 payment.full_clean()
                 payment.save() # Ejecuta el pre_save de tus signals asincrónicas de billetera y notificaciones
 
-            return JsonResponse({
+            resp_payload = {
                 'success': True,
                 'message': f'El pago fue {"aprobado" if int(new_status) == 1 else "rechazado"} correctamente.'
-            })
+            }
+            if payment_type == 'atlas' and int(new_status) == 1:
+                inv = AtlasPlusInvoice.objects.filter(payment=payment).first()
+                if inv:
+                    resp_payload['invoice_number'] = inv.invoice_number
+                    resp_payload['invoice_url'] = inv.invoice_url
+            return JsonResponse(resp_payload)
 
         except ValidationError as e:
             return JsonResponse({'success': False, 'error': str(e.message_dict)}, status=400)
@@ -186,7 +192,7 @@ def payments_dashboard_view(request):
         .order_by('-verified_at')[:15]
 
     atlas_history = AtlasPlusPlanPayment.objects.filter(status__in=[1, 2]) \
-        .select_related('plan__user') \
+        .select_related('plan__user', 'invoice') \
         .order_by('-verified_at')[:15]
 
     # Reconstrucción limpia de los Enums estructurales para consumo del Front-End sin romper traducciones
@@ -957,4 +963,50 @@ def create_web_cart_handoff_ajax(request, company_id):
         'app_deep_link': f"cartmaker://web-cart?token={token}",
         'web_resume_url': f"{domain}/orden-express/{token}/",
         'cart': payload,
+    })
+
+
+def atlas_invoice_view(request, invoice_id):
+    """
+    Vista Web / Imprimible / PDF de la Factura Digital Legal de Atlas Plus (/facturas/atlas/<uuid:invoice_id>/).
+    Protegida mediante token de verificación criptográfico (?token=CMK-...) o sesión activa del titular/soporte.
+    """
+    import secrets
+    from django.http import HttpResponseForbidden
+
+    invoice = get_object_or_404(
+        AtlasPlusInvoice.objects.select_related('payment', 'user'),
+        id=invoice_id,
+    )
+
+    provided_token = (request.GET.get('token') or '').strip()
+    token_ok = bool(
+        provided_token
+        and invoice.verification_code
+        and secrets.compare_digest(provided_token.upper(), invoice.verification_code.upper())
+    )
+    session_ok = bool(
+        request.user.is_authenticated
+        and (
+            request.user.id == invoice.user_id
+            or request.user.is_staff
+            or request.user.is_superuser
+            or getattr(request.user, 'user_type', None) in (2, 3)
+        )
+    )
+
+    if not (token_ok or session_ok):
+        return HttpResponseForbidden(
+            "Acceso denegado. Se requiere el código de verificación fiscal (?token=...) o iniciar sesión con la cuenta titular."
+        )
+
+    inv_data = invoice.get_json()
+    if request.GET.get('format') == 'json':
+        return JsonResponse({'success': True, 'invoice': inv_data})
+
+    auto_print = str(request.GET.get('print', '0')).lower() in ('1', 'true', 'yes')
+    return render(request, 'invoices/atlas_plus_invoice.html', {
+        'invoice': invoice,
+        'inv': inv_data,
+        'auto_print': auto_print,
     })

@@ -77,6 +77,7 @@
                         <th>Referencia</th>
                         <th>Monto</th>
                         <th>Dictamen</th>
+                        <th>Factura Digital</th>
                         <th>Fecha Cierre</th>
                     </tr>
                 </thead>
@@ -91,6 +92,15 @@
                             <span class="badge-status-pill status-approved-glow">Aprobado</span>
                             {% else %}
                             <span class="badge-status-pill status-rejected-glow" title="{{ payment.get_rejection_reason_display }}">Rechazado</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if payment.status == 1 and payment.invoice %}
+                            <a href="{{ payment.invoice.invoice_url }}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:700;color:#a78bfa;text-decoration:none;background:rgba(139,92,246,0.14);padding:4px 10px;border-radius:6px;border:1px solid rgba(139,92,246,0.3);">
+                                🧾 {{ payment.invoice.invoice_number }}
+                            </a>
+                            {% else %}
+                            <span class="id-sub-text">—</span>
                             {% endif %}
                         </td>
                         <td class="id-sub-text">{{ payment.verified_at|date:"d/m/Y H:i" }}</td>

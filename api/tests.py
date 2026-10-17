@@ -278,4 +278,91 @@ class MerchantGrowthAndAtlasCopilotTests(SimpleTestCase):
         self.assertIn("ACTIVATE_TOKEN_DISCOUNT", action_types)
         self.assertIn("OPEN_SHARE_KIT", action_types)
 
+    def test_format_ve_amount_venezuelan_nomenclature(self):
+        from api.models import format_ve_amount
+
+        self.assertEqual(format_ve_amount(3.99, 2, "$", True), "3,99$")
+        self.assertEqual(format_ve_amount(1800, 2, "$", True), "1.800,00$")
+        self.assertEqual(format_ve_amount(149.45, 2, " Bs.", True), "149,45 Bs.")
+
+    def test_system_config_dynamic_billing_issuer_personal_and_company(self):
+        from api.models import BillingIssuerType, BillingTaxRegime, SystemConfig
+
+        cfg = SystemConfig(
+            billing_issuer_type=BillingIssuerType.PERSONAL,
+            billing_issuer_name="ATREYUS DE JESUS REYES ALVAREZ",
+            billing_trade_name="CartMaker",
+            billing_issuer_rif="V-30222103-7",
+            billing_issuer_cedula="V-30.222.103",
+            billing_fiscal_address=(
+                "CTRA NACIONAL GUATIRE-GUARENAS CASA TOWN HOUSE NRO C-11 "
+                "CONJUNTO RESIDENCIAL EL REFUGIO GUATIRE MIRANDA ZONA POSTAL 1221"
+            ),
+            billing_seniat_region=(
+                "GERENCIA REGIONAL DE TRIBUTOS INTERNOS REGIÓN CAPITAL / "
+                "SECTOR GUARENAS / GUATIRE"
+            ),
+            billing_rif_certificate_number="202401P0000063963955",
+            billing_tax_regime=BillingTaxRegime.EXENTO_NO_SUJETO,
+            billing_iva_percentage=0.0,
+        )
+        personal_json = cfg.get_billing_issuer_json()
+        self.assertEqual(personal_json["issuer_type"], BillingIssuerType.PERSONAL)
+        self.assertEqual(personal_json["rif"], "V-30222103-7")
+        self.assertEqual(personal_json["cedula"], "V-30.222.103")
+        self.assertEqual(personal_json["iva_percentage"], 0.0)
+
+        # Switching dynamically to registered company mode (J-...) with 16% IVA
+        cfg.billing_issuer_type = BillingIssuerType.COMPANY
+        cfg.billing_issuer_name = "CARTMAKER TECHNOLOGIES, C.A."
+        cfg.billing_issuer_rif = "J-50999999-0"
+        cfg.billing_tax_regime = BillingTaxRegime.CONTRIBUYENTE_ORDINARIO
+        cfg.billing_iva_percentage = 16.0
+        company_json = cfg.get_billing_issuer_json()
+        self.assertEqual(company_json["issuer_type"], BillingIssuerType.COMPANY)
+        self.assertEqual(company_json["issuer_name"], "CARTMAKER TECHNOLOGIES, C.A.")
+        self.assertEqual(company_json["rif"], "J-50999999-0")
+        self.assertEqual(company_json["iva_percentage"], 16.0)
+
+    def test_unified_atlas_plus_and_business_daily_budget(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from api.core.atlas_merchant import AtlasMerchantCopilot
+        from api.models import AtlasPlusPlan, AtlasSubscriptionTier, SystemConfig
+
+        today = timezone.localdate()
+        cfg = SystemConfig(
+            atlas_plus_price_usd=3.99,
+            atlas_free_daily_limit=7,
+            atlas_plus_daily_limit=30,
+        )
+
+        # 1. Freemium user with 7 uses consumed today -> exhausted in both Buyer & Business
+        free_plan = AtlasPlusPlan(
+            tier=AtlasSubscriptionTier.FREEMIUM,
+            valid_until=None,
+            daily_usage_date=today,
+            daily_usage_count=7,
+        )
+        dummy_company = SimpleNamespace(id="comp-free", atlas_plan=free_plan, owner=None)
+        access_free = AtlasMerchantCopilot.check_merchant_access(dummy_company, config=cfg)
+        self.assertFalse(access_free["is_premium"])
+        self.assertFalse(access_free["has_quota_available"])
+        self.assertEqual(access_free["daily_limit"], 7)
+        self.assertEqual(access_free["used_today"], 7)
+        self.assertEqual(access_free["free_interactions_left"], 0)
+        self.assertTrue(access_free["requires_atlas_plus"])
+        self.assertEqual(access_free["atlas_plus_price_formatted"], "3,99$")
+
+        # 2. Upgrading to Atlas Plus unlocks 30 daily uses immediately (23 remaining)
+        free_plan.tier = AtlasSubscriptionTier.PREMIUM
+        free_plan.valid_until = timezone.now() + timedelta(days=30)
+        access_plus = AtlasMerchantCopilot.check_merchant_access(dummy_company, config=cfg)
+        self.assertTrue(access_plus["is_premium"])
+        self.assertTrue(access_plus["has_quota_available"])
+        self.assertEqual(access_plus["daily_limit"], 30)
+        self.assertEqual(access_plus["used_today"], 7)
+        self.assertEqual(access_plus["free_interactions_left"], 23)
+        self.assertFalse(access_plus["requires_atlas_plus"])
+
 

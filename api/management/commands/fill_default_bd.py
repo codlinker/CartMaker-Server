@@ -2,17 +2,35 @@ import json
 import os
 from decimal import Decimal
 from django.conf import settings
+from django.core.cache import cache
 from django.core.management.base import BaseCommand
 from django.contrib.gis.geos import Point
-# Importante: Añadimos SubCategory a la importación
-from api.models import Category, SubCategory, MerchantPlan, Announcement, Mall, CompanyCategory
+from api.core.category_schemas import (
+    CATALOGO_ESTRUCTURA,
+    LEGACY_CATEGORY_TO_OFFICIAL_MAP,
+    get_subcategory_schema,
+)
+from api.models import (
+    Announcement,
+    BillingIssuerType,
+    BillingTaxRegime,
+    Category,
+    CompanyCategory,
+    Mall,
+    MerchantPlan,
+    Product,
+    SubCategory,
+    SystemConfig,
+    User,
+)
 
 class Command(BaseCommand):
-    help = "Puebla la base de datos con registros por defecto optimizados con bulk_create sin duplicar datos."
+    help = "Puebla la base de datos con registros por defecto optimizados y sincronizados sin duplicar datos."
 
     def handle(self, *args, **kwargs):
         self.stdout.write(self.style.MIGRATE_HEADING('Iniciando carga de datos por defecto...'))
         
+        self._poblar_system_config()
         self._poblar_categorias()
         self._poblar_planes()
         self._poblar_anuncios()
@@ -20,6 +38,93 @@ class Command(BaseCommand):
         self._poblar_categorias_empresa()
 
         self.stdout.write(self.style.SUCCESS('Carga de datos finalizada exitosamente.'))
+
+    def _poblar_system_config(self):
+        self.stdout.write("Verificando SystemConfig (Tarifas Atlas Plus y Datos Fiscales SENIAT)...")
+        defaults = {
+            'platinum_min_rating_promedy_requirement': Decimal('4.50'),
+            'platinum_min_sells_per_month_requirement': 100,
+            'atlas_plus_price_usd': Decimal('3.99'),
+            'atlas_plus_daily_limit': 30,
+            'atlas_free_daily_limit': 7,
+            'atlas_anonymous_daily_limit': 3,
+            'billing_issuer_type': BillingIssuerType.PERSONAL,
+            'billing_issuer_name': 'ATREYUS DE JESUS REYES ALVAREZ',
+            'billing_trade_name': 'CartMaker',
+            'billing_issuer_rif': 'V-30222103-7',
+            'billing_issuer_cedula': 'V-30.222.103',
+            'billing_fiscal_address': (
+                'CTRA NACIONAL GUATIRE-GUARENAS CASA TOWN HOUSE NRO C-11 '
+                'CONJUNTO RESIDENCIAL EL REFUGIO GUATIRE MIRANDA ZONA POSTAL 1221'
+            ),
+            'billing_seniat_region': (
+                'GERENCIA REGIONAL DE TRIBUTOS INTERNOS REGIÓN CAPITAL / '
+                'SECTOR GUARENAS / GUATIRE'
+            ),
+            'billing_rif_certificate_number': '202401P0000063963955',
+            'billing_tax_regime': BillingTaxRegime.EXENTO_NO_SUJETO,
+            'billing_iva_percentage': Decimal('0.00'),
+            'billing_series_prefix': 'A',
+            'billing_control_prefix': '00',
+            'billing_service_concept': (
+                'Servicios de Programación, Procesamiento de Datos y Suscripción Mensual '
+                'al Asistente de Inteligencia Artificial Atlas Plus (CartMaker)'
+            ),
+        }
+
+        config = SystemConfig.objects.order_by('-creation').first()
+        if not config:
+            config = SystemConfig.objects.create(**defaults)
+            self.stdout.write(
+                self.style.SUCCESS(
+                    '  [+] SystemConfig creado (Atlas Plus: 3,99$ | Límites: 30 Plus / 7 Gratis / 3 Anónimo | RIF: V-30222103-7).'
+                )
+            )
+        else:
+            updated_fields = []
+            # Sincronizar tarifas y límites de Atlas Plus
+            for field in (
+                'atlas_plus_price_usd',
+                'atlas_plus_daily_limit',
+                'atlas_free_daily_limit',
+                'atlas_anonymous_daily_limit',
+            ):
+                if getattr(config, field) != defaults[field]:
+                    setattr(config, field, defaults[field])
+                    updated_fields.append(field)
+
+            # Garantizar datos fiscales SENIAT si estaban vacíos
+            for fiscal_field in (
+                'billing_issuer_type',
+                'billing_issuer_name',
+                'billing_trade_name',
+                'billing_issuer_rif',
+                'billing_issuer_cedula',
+                'billing_fiscal_address',
+                'billing_seniat_region',
+                'billing_rif_certificate_number',
+                'billing_tax_regime',
+                'billing_series_prefix',
+                'billing_control_prefix',
+                'billing_service_concept',
+            ):
+                if not getattr(config, fiscal_field, None):
+                    setattr(config, fiscal_field, defaults[fiscal_field])
+                    updated_fields.append(fiscal_field)
+
+            if updated_fields:
+                config.save(update_fields=updated_fields)
+                self.stdout.write(
+                    self.style.SUCCESS(
+                        f"  [+] SystemConfig actualizado ({', '.join(updated_fields)})."
+                    )
+                )
+            else:
+                self.stdout.write(
+                    self.style.WARNING('  [-] Sin cambios en SystemConfig. Ya tiene los parámetros oficiales.')
+                )
+
+        cache.delete("cartmaker:global:system_config")
 
     def _bulk_create_if_not_exists(self, model, data_list, unique_field):
         """
@@ -91,182 +196,94 @@ class Command(BaseCommand):
         self._bulk_create_if_not_exists(CompanyCategory, company_categories_data, unique_field='name')
 
     def _poblar_categorias(self):
-        self.stdout.write("Verificando Categories y SubCategories de Productos...")
-        
-        # Estructura centralizada con rutas completamente hardcodeadas para fácil edición futura.
-        catalogo_estructura = {
-            'Alimentos y Bebidas (Supermercado)': {
-                'img_url': 'static/img/categories/alimentos_y_bebidas.jpg',
-                'subcategories': [
-                    {'name': 'Despensa y Víveres', 'img_url': 'static/img/categories/sub_categories/despensa_y_viveres.jpg'},
-                    {'name': 'Frescos', 'img_url': 'static/img/categories/sub_categories/frescos.jpg'},
-                    {'name': 'Charcutería y Lácteos', 'img_url': 'static/img/categories/sub_categories/charcuteria_y_lacteos.jpg'},
-                    {'name': 'Bebidas', 'img_url': 'static/img/categories/sub_categories/bebidas.jpg'},
-                    {'name': 'Licores', 'img_url': 'static/img/categories/sub_categories/licores.jpg'},
-                    {'name': 'Snacks y Dulces', 'img_url': 'static/img/categories/sub_categories/snacks_y_dulces.jpg'},
-                    {'name': 'Limpieza del Hogar', 'img_url': 'static/img/categories/sub_categories/limpieza_del_hogar.jpg'},
-                ]
-            },
-            'Tecnología y Electrónica': {
-                'img_url': 'static/img/categories/tecnologia_y_electronica.jpg',
-                'subcategories': [
-                    {'name': 'Celulares y Tablets', 'img_url': 'static/img/categories/sub_categories/celulares_y_tablets.jpg'},
-                    {'name': 'Computación', 'img_url': 'static/img/categories/sub_categories/computacion.jpg'},
-                    {'name': 'Periféricos y Accesorios', 'img_url': 'static/img/categories/sub_categories/perifericos_y_accesorios.jpg'},
-                    {'name': 'TV, Audio y Video', 'img_url': 'static/img/categories/sub_categories/tv_audio_y_video.jpg'},
-                    {'name': 'Videojuegos y Consolas', 'img_url': 'static/img/categories/sub_categories/videojuegos_y_consolas.jpg'},
-                    {'name': 'Wearables', 'img_url': 'static/img/categories/sub_categories/wearables.jpg'},
-                    {'name': 'Cámaras y Fotografía', 'img_url': 'static/img/categories/sub_categories/camaras_y_fotografia.jpg'},
-                ]
-            },
-            'Moda y Accesorios': {
-                'img_url': 'static/img/categories/moda_y_accesorios.jpg',
-                'subcategories': [
-                    {'name': 'Ropa Femenina', 'img_url': 'static/img/categories/sub_categories/ropa_femenina.jpg'},
-                    {'name': 'Ropa Masculina', 'img_url': 'static/img/categories/sub_categories/ropa_masculina.jpg'},
-                    {'name': 'Ropa Infantil', 'img_url': 'static/img/categories/sub_categories/ropa_infantil.jpg'},
-                    {'name': 'Calzado', 'img_url': 'static/img/categories/sub_categories/calzado.jpg'},
-                    {'name': 'Bolsos y Carteras', 'img_url': 'static/img/categories/sub_categories/bolsos_y_carteras.jpg'},
-                    {'name': 'Accesorios y Joyería', 'img_url': 'static/img/categories/sub_categories/accesorios_y_joyeria.jpg'},
-                ]
-            },
-            'Salud y Belleza': {
-                'img_url': 'static/img/categories/salud_y_belleza.jpg',
-                'subcategories': [
-                    {'name': 'Cuidado Personal', 'img_url': 'static/img/categories/sub_categories/cuidado_personal.jpg'},
-                    {'name': 'Skincare y Cuidado Facial', 'img_url': 'static/img/categories/sub_categories/skincare_y_cuidado_facial.jpg'},
-                    {'name': 'Maquillaje', 'img_url': 'static/img/categories/sub_categories/maquillaje.jpg'},
-                    {'name': 'Perfumería', 'img_url': 'static/img/categories/sub_categories/perfumeria.jpg'},
-                    {'name': 'Farmacia y Bienestar', 'img_url': 'static/img/categories/sub_categories/farmacia_y_bienestar.jpg'},
-                ]
-            },
-            'Hogar, Muebles y Jardín': {
-                'img_url': 'static/img/categories/hogar_muebles_y_jardin.jpg',
-                'subcategories': [
-                    {'name': 'Electrodomésticos', 'img_url': 'static/img/categories/sub_categories/electrodomesticos.jpg'},
-                    {'name': 'Muebles', 'img_url': 'static/img/categories/sub_categories/muebles.jpg'},
-                    {'name': 'Dormitorio', 'img_url': 'static/img/categories/sub_categories/dormitorio.jpg'},
-                    {'name': 'Baño', 'img_url': 'static/img/categories/sub_categories/bano.jpg'},
-                    {'name': 'Decoración', 'img_url': 'static/img/categories/sub_categories/decoracion.jpg'},
-                    {'name': 'Jardín y Exteriores', 'img_url': 'static/img/categories/sub_categories/jardin_y_exteriores.jpg'},
-                ]
-            },
-            'Ferretería y Construcción': {
-                'img_url': 'static/img/categories/ferreteria_y_construccion.jpg',
-                'subcategories': [
-                    {'name': 'Herramientas', 'img_url': 'static/img/categories/sub_categories/herramientas.jpg'},
-                    {'name': 'Electricidad e Iluminación', 'img_url': 'static/img/categories/sub_categories/electricidad_e_iluminacion.jpg'},
-                    {'name': 'Plomería', 'img_url': 'static/img/categories/sub_categories/plomeria.jpg'},
-                    {'name': 'Materiales de Construcción', 'img_url': 'static/img/categories/sub_categories/materiales_de_construccion.jpg'},
-                    {'name': 'Seguridad y Domótica', 'img_url': 'static/img/categories/sub_categories/seguridad_y_domotica.jpg'},
-                ]
-            },
-            'Carros, Motos y Otros': {
-                'img_url': 'static/img/categories/carros_motos_y_otros.jpg',
-                'subcategories': [
-                    {'name': 'Venta de Autos', 'img_url': 'static/img/categories/sub_categories/venta_de_autos.jpg'},
-                    {'name': 'Venta de Motos', 'img_url': 'static/img/categories/sub_categories/venta_de_motos.jpg'},
-                    {'name': 'Repuestos para Autos', 'img_url': 'static/img/categories/sub_categories/repuestos_para_autos.jpg'},
-                    {'name': 'Lubricantes y Fluidos', 'img_url': 'static/img/categories/sub_categories/lubricantes_y_fluidos.jpg'},
-                    {'name': 'Neumáticos y Rines', 'img_url': 'static/img/categories/sub_categories/neumaticos_y_rines.jpg'},
-                    {'name': 'Accesorios para Vehículos', 'img_url': 'static/img/categories/sub_categories/accesorios_para_vehiculos.jpg'},
-                    {'name': 'Motos', 'img_url': 'static/img/categories/sub_categories/motos.jpg'},
-                ]
-            },
-            'Deportes y Fitness': {
-                'img_url': 'static/img/categories/deportes_y_fitness.jpg',
-                'subcategories': [
-                    {'name': 'Fitness y Musculación', 'img_url': 'static/img/categories/sub_categories/fitness_y_musculacion.jpg'},
-                    {'name': 'Ropa y Calzado Deportivo', 'img_url': 'static/img/categories/sub_categories/ropa_y_calzado_deportivo.jpg'},
-                    {'name': 'Deportes Específicos', 'img_url': 'static/img/categories/sub_categories/deportes_especificos.jpg'},
-                    {'name': 'Camping y Outdoors', 'img_url': 'static/img/categories/sub_categories/camping_y_outdoors.jpg'},
-                ]
-            },
-            'Bebés y Maternidad': {
-                'img_url': 'static/img/categories/bebes_y_maternidad.jpg',
-                'subcategories': [
-                    {'name': 'Pañales y Toallitas', 'img_url': 'static/img/categories/sub_categories/panales_y_toallitas.jpg'},
-                    {'name': 'Lactancia y Alimentación', 'img_url': 'static/img/categories/sub_categories/lactancia_y_alimentacion.jpg'},
-                    {'name': 'Paseo y Viaje', 'img_url': 'static/img/categories/sub_categories/paseo_y_viaje.jpg'},
-                    {'name': 'Higiene y Cuidado del Bebé', 'img_url': 'static/img/categories/sub_categories/higiene_y_cuidado_del_bebe.jpg'},
-                    {'name': 'Cuarto del Bebé', 'img_url': 'static/img/categories/sub_categories/cuarto_del_bebe.jpg'},
-                ]
-            },
-            'Juegos y Juguetes': {
-                'img_url': 'static/img/categories/juegos_y_juguetes.jpg',
-                'subcategories': [
-                    {'name': 'Juguetes para Bebés', 'img_url': 'static/img/categories/sub_categories/juguetes_para_bebes.jpg'},
-                    {'name': 'Muñecas y Peluches', 'img_url': 'static/img/categories/sub_categories/munecas_y_peluches.jpg'},
-                    {'name': 'Figuras de Acción', 'img_url': 'static/img/categories/sub_categories/figuras_de_accion.jpg'},
-                    {'name': 'Juegos de Mesa y Rompecabezas', 'img_url': 'static/img/categories/sub_categories/juegos_de_mesa_y_rompecabezas.jpg'},
-                    {'name': 'Bloques y Construcción', 'img_url': 'static/img/categories/sub_categories/bloques_y_construccion.jpg'},
-                    {'name': 'Juguetes de Exterior', 'img_url': 'static/img/categories/sub_categories/juguetes_de_exterior.jpg'},
-                ]
-            },
-            'Mascotas': {
-                'img_url': 'static/img/categories/mascotas.jpg',
-                'subcategories': [
-                    {'name': 'Perros', 'img_url': 'static/img/categories/sub_categories/perros.jpg'},
-                    {'name': 'Gatos', 'img_url': 'static/img/categories/sub_categories/gatos.jpg'},
-                    {'name': 'Higiene y Salud Animal', 'img_url': 'static/img/categories/sub_categories/higiene_y_salud_animal.jpg'},
-                ]
-            },
-            'Papelería, Oficina y Libros': {
-                'img_url': 'static/img/categories/papeleria_oficina_y_libros.jpg',
-                'subcategories': [
-                    {'name': 'Útiles Escolares', 'img_url': 'static/img/categories/sub_categories/utiles_escolares.jpg'},
-                    {'name': 'Oficina', 'img_url': 'static/img/categories/sub_categories/oficina.jpg'},
-                    {'name': 'Libros', 'img_url': 'static/img/categories/sub_categories/libros.jpg'},
-                ]
-            },
-            'Instrumentos Musicales': {
-                'img_url': 'static/img/categories/instrumentos_musicales.jpg',
-                'subcategories': [
-                    {'name': 'Guitarras y Bajos', 'img_url': 'static/img/categories/sub_categories/guitarras_y_bajos.jpg'},
-                    {'name': 'Teclados y Pianos', 'img_url': 'static/img/categories/sub_categories/teclados_y_pianos.jpg'},
-                    {'name': 'Baterías y Percusión', 'img_url': 'static/img/categories/sub_categories/baterias_y_percusion.jpg'},
-                    {'name': 'Instrumentos de Viento', 'img_url': 'static/img/categories/sub_categories/instrumentos_de_viento.jpg'},
-                    {'name': 'Instrumentos de Cuerda', 'img_url': 'static/img/categories/sub_categories/instrumentos_de_cuerda.jpg'},
-                    {'name': 'Audio Profesional y DJ', 'img_url': 'static/img/categories/sub_categories/audio_profesional_y_dj.jpg'},
-                    {'name': 'Accesorios Musicales', 'img_url': 'static/img/categories/sub_categories/accesorios_musicales.jpg'},
-                ]
-            },
-            'Otras Categorías (Varios)': {
-        'img_url': 'static/img/categories/otras_categorias.jpg',
-        'subcategories': [
-            {'name': 'Otros', 'img_url': 'static/img/categories/sub_categories/otros.jpg'},
-        ]
-    }
-}
-        # 1. Preparar y crear Categorías Principales
-        categories_data = [
-            {'name': cat_name, 'img_url': cat_info['img_url']} 
-            for cat_name, cat_info in catalogo_estructura.items()
-        ]
-        self._bulk_create_if_not_exists(Category, categories_data, unique_field='name')
+        self.stdout.write("Verificando Categories y SubCategories oficiales desde CATALOGO_ESTRUCTURA...")
 
-        # 2. Extraer instancias de la BD para asociar los ForeignKeys
-        db_categories = {
-            cat.name: cat 
-            for cat in Category.objects.filter(name__in=catalogo_estructura.keys())
-        }
+        # 1. Migrar/fusionar nombres legacy (ej. 'Alimentos y Bebidas (Supermercado)' -> 'Alimentos y Bebidas',
+        #    'Otras Categorías (Varios)' -> 'Otras Categorías') sin perder referencias en SubCategory o User
+        for legacy_name, official_name in LEGACY_CATEGORY_TO_OFFICIAL_MAP.items():
+            if legacy_name == official_name:
+                continue
+            old_cat = Category.objects.filter(name=legacy_name).first()
+            if not old_cat:
+                continue
+            new_cat = Category.objects.filter(name=official_name).first()
+            if not new_cat:
+                old_cat.name = official_name
+                old_cat.save(update_fields=['name'])
+            elif old_cat.id != new_cat.id:
+                SubCategory.objects.filter(parent_category=old_cat).update(parent_category=new_cat)
+                for u in User.objects.filter(preferred_categories=old_cat):
+                    u.preferred_categories.add(new_cat)
+                    u.preferred_categories.remove(old_cat)
+                old_cat.delete()
 
-        # 3. Preparar Subcategorías iterando la estructura
-        subcategories_data = []
-        for cat_name, cat_info in catalogo_estructura.items():
-            parent_instance = db_categories.get(cat_name)
-            
-            if parent_instance:
-                for sub in cat_info['subcategories']:
-                    subcategories_data.append({
-                        'name': sub['name'],
-                        'parent_category': parent_instance,
-                        'img_url': sub['img_url']
-                    })
+        # 2. Sincronizar las 14 Categorías y 68 Subcategorías oficiales con su schema_config e img_url
+        created_cats = 0
+        updated_cats = 0
+        created_subs = 0
+        updated_subs = 0
 
-        # 4. Crear Subcategorías
-        self.stdout.write("Verificando SubCategories...")
-        self._bulk_create_if_not_exists(SubCategory, subcategories_data, unique_field='name')
+        for cat_entry in CATALOGO_ESTRUCTURA:
+            cat_name = cat_entry['categoria']
+            cat_img = cat_entry['imagen']
+
+            cat_obj, cat_created = Category.objects.get_or_create(
+                name=cat_name,
+                defaults={'img_url': cat_img},
+            )
+            if cat_created:
+                created_cats += 1
+            elif cat_obj.img_url != cat_img:
+                cat_obj.img_url = cat_img
+                cat_obj.save(update_fields=['img_url'])
+                updated_cats += 1
+
+            for sub_entry in cat_entry['subcategorias']:
+                sub_name = sub_entry['nombre']
+                sub_img = sub_entry['imagen']
+                schema_cfg = get_subcategory_schema(
+                    subcategory_name=sub_name,
+                    parent_category_name=cat_name,
+                )
+
+                existing_subs = list(SubCategory.objects.filter(name=sub_name).order_by('id'))
+                if existing_subs:
+                    sub_obj = existing_subs[0]
+                    # Si existían duplicados para la misma subcategoría, consolidar productos y borrar duplicados
+                    if len(existing_subs) > 1:
+                        dup_ids = [dup.id for dup in existing_subs[1:]]
+                        Product.objects.filter(category_id__in=dup_ids).update(category=sub_obj)
+                        SubCategory.objects.filter(id__in=dup_ids).delete()
+
+                    changed_fields = []
+                    if sub_obj.parent_category_id != cat_obj.id:
+                        sub_obj.parent_category = cat_obj
+                        changed_fields.append('parent_category')
+                    if sub_obj.img_url != sub_img:
+                        sub_obj.img_url = sub_img
+                        changed_fields.append('img_url')
+                    if sub_obj.schema_config != schema_cfg:
+                        sub_obj.schema_config = schema_cfg
+                        changed_fields.append('schema_config')
+                    if changed_fields:
+                        sub_obj.save(update_fields=changed_fields)
+                        updated_subs += 1
+                else:
+                    SubCategory.objects.create(
+                        name=sub_name,
+                        parent_category=cat_obj,
+                        img_url=sub_img,
+                        schema_config=schema_cfg,
+                    )
+                    created_subs += 1
+
+        cache.delete("cartmaker:global:categories")
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"  [+] Categorías listas (creadas: {created_cats}, actualizadas: {updated_cats}) | "
+                f"SubCategorías listas (creadas: {created_subs}, actualizadas: {updated_subs})."
+            )
+        )
 
     def _poblar_planes(self):
         self.stdout.write("Verificando MerchantPlans...")

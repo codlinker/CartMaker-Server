@@ -1915,22 +1915,94 @@ class AtlasSubscriptionTier(models.IntegerChoices):
     FREEMIUM = 0, 'Freemium'
     PREMIUM = 1, 'Premium'
 
+
+def format_ve_amount(value, decimals: int = 2, symbol: str = "$", symbol_right: bool = True) -> str:
+    """
+    Formatea un monto numérico al estándar venezolano: punto para miles y coma para decimales.
+    Ejemplo USD: 1.800,00$ | Ejemplo Bs: 76.500,00 Bs.
+    """
+    try:
+        num = float(value or 0.0)
+    except (TypeError, ValueError):
+        num = 0.0
+    formatted = f"{num:,.{decimals}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    if not symbol:
+        return formatted
+    return f"{formatted}{symbol}" if symbol_right else f"{symbol}{formatted}"
+
+
 class AtlasPlusPlan(models.Model):
     """
-    Gestión de estado y suscripción para el asistente inteligente Atlas.
-    Todos los usuarios tienen este registro. El tier define sus límites.
+    Gestión de estado, suscripción y presupuesto diario unificado (Comprador + Negocios)
+    para el asistente inteligente Atlas.
+    Todos los usuarios tienen este registro. El tier define sus límites diarios.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='atlas_plan')
     tier = models.IntegerField(choices=AtlasSubscriptionTier.choices, default=AtlasSubscriptionTier.FREEMIUM)
     valid_until = models.DateTimeField(null=True, blank=True)
+    daily_usage_date = models.DateField(null=True, blank=True)
+    daily_usage_count = models.IntegerField(default=0)
 
-    def get_json(self) -> dict:
+    def is_active_premium(self) -> bool:
+        return bool(
+            self.tier == AtlasSubscriptionTier.PREMIUM
+            and self.valid_until
+            and self.valid_until > timezone.now()
+        )
+
+    def get_quota_status(self, config=None) -> dict:
+        if config is None:
+            try:
+                config = SystemConfig.objects.latest('creation')
+            except Exception:
+                config = None
+
+        plus_limit = int(getattr(config, 'atlas_plus_daily_limit', 30) or 30)
+        free_limit = int(getattr(config, 'atlas_free_daily_limit', 7) or 7)
+        price_usd = float(getattr(config, 'atlas_plus_price_usd', Decimal('3.99')) or 3.99)
+
+        is_premium = self.is_active_premium()
+        daily_limit = plus_limit if is_premium else free_limit
+
+        now_local = timezone.localtime(timezone.now())
+        today_local = now_local.date()
+
+        cache_key = f"cartmaker:atlas:daily_usage:{self.user_id}"
+        cached_used = cache.get(cache_key)
+        if cached_used is not None:
+            try:
+                used_today = max(0, int(cached_used))
+            except (TypeError, ValueError):
+                used_today = 0
+        else:
+            db_used = self.daily_usage_count if self.daily_usage_date == today_local else 0
+            msg_used = AtlasMessage.objects.filter(
+                conversation__plan=self,
+                origin=1,
+                creation__date=today_local,
+            ).count()
+            used_today = max(int(db_used or 0), int(msg_used or 0))
+            tomorrow = (now_local + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            timeout = max(1, int((tomorrow - now_local).total_seconds()))
+            cache.set(cache_key, used_today, timeout=timeout)
+
+        free_left = max(0, daily_limit - used_today)
         return {
             'tier': self.get_tier_display(),
-            'is_premium': self.tier == AtlasSubscriptionTier.PREMIUM and self.valid_until and self.valid_until > timezone.now(),
-            'valid_until': self.valid_until.strftime("%d/%m/%Y, %H:%M:%S") if self.valid_until else None
+            'is_premium': is_premium,
+            'valid_until': self.valid_until.strftime("%d/%m/%Y, %H:%M:%S") if self.valid_until else None,
+            'daily_limit': daily_limit,
+            'used_today': used_today,
+            'free_interactions_left': free_left,
+            'requires_atlas_plus': (free_left <= 0 and not is_premium),
+            'atlas_plus_price_usd': price_usd,
+            'atlas_plus_price_formatted': format_ve_amount(price_usd, 2, "$", True),
         }
+
+    def get_json(self) -> dict:
+        return self.get_quota_status()
+
 
 class AtlasPlusPlanPayment(models.Model):
     """
@@ -1940,8 +2012,8 @@ class AtlasPlusPlanPayment(models.Model):
         plan (ForeignKey): Plan al que abona.
         reference_number (str): Número de referencia bancaria.
         payment_proof_url (str): URL del comprobante.
-        amount (Decimal): Monto en divisas.
-        bcv_taxes_to_day (Decimal): Tasa oficial de cambio.
+        amount (Decimal): Monto en Bolívares (Bs.).
+        bcv_taxes_to_day (Decimal): Tasa oficial de cambio BCV.
         status (int): Estado de verificación.
         verified_at (datetime): Fecha de aprobación.
         rejection_reason (int): Solo se utiliza si el pago fue rechazado.
@@ -1992,19 +2064,384 @@ class AtlasPlusPlanPayment(models.Model):
     
     payment_proof_preview.fget.short_description = "Comprobante de Pago"
 
-    def get_json(self)->dict:
+    def get_json(self) -> dict:
+        invoice_obj = getattr(self, 'invoice', None)
+        invoice_data = invoice_obj.get_json() if invoice_obj else None
         return {
-            'id':self.id,
-            'reference_number':self.reference_number,
-            'payment_proof_url':storage_manager.get_url(self.payment_proof_url),
-            'amount':float(self.amount),
-            'bcv_taxes_to_day':float(self.bcv_taxes_to_day),
-            'status':self.status,
-            'verified_at':self.verified_at.strftime("%d/%m/%Y, %H:%M:%S") if self.verified_at else None,
-            'rejection_reason':self.get_rejection_reason_display() if self.rejection_reason else "",
+            'id': self.id,
+            'reference_number': self.reference_number,
+            'payment_proof_url': storage_manager.get_url(self.payment_proof_url) if self.payment_proof_url else "",
+            'amount': float(self.amount),
+            'amount_bs_formatted': format_ve_amount(self.amount, 2, " Bs.", True),
+            'bcv_taxes_to_day': float(self.bcv_taxes_to_day),
+            'status': self.status,
+            'verified_at': self.verified_at.strftime("%d/%m/%Y, %H:%M:%S") if self.verified_at else None,
+            'rejection_reason': self.get_rejection_reason_display() if self.rejection_reason else "",
             'rejection_help': self.get_rejection_help_display() if self.rejection_help else "",
-            'creation':self.creation.strftime("%d/%m/%Y, %H:%M:%S") if self.creation else None
+            'creation': self.creation.strftime("%d/%m/%Y, %H:%M:%S") if self.creation else None,
+            'has_invoice': invoice_data is not None,
+            'invoice_number': invoice_data.get('invoice_number') if invoice_data else None,
+            'control_number': invoice_data.get('control_number') if invoice_data else None,
+            'invoice_url': invoice_data.get('invoice_url') if invoice_data else None,
+            'invoice': invoice_data,
         }
+
+
+class BillingIssuerType(models.TextChoices):
+    PERSONAL = 'PERSONAL', 'Persona Natural / Servicios Profesionales (RIF V-)'
+    COMPANY = 'COMPANY', 'Persona Jurídica / Empresa Registrada (RIF J-)'
+
+
+class BillingTaxRegime(models.TextChoices):
+    EXENTO_NO_SUJETO = 'EXENTO_NO_SUJETO', 'Exento / No Sujeto de IVA (Persona Natural / Exonerado)'
+    CONTRIBUYENTE_ORDINARIO = 'CONTRIBUYENTE_ORDINARIO', 'Contribuyente Ordinario de IVA (16%)'
+    CONTRIBUYENTE_ESPECIAL = 'CONTRIBUYENTE_ESPECIAL', 'Contribuyente Especial SENIAT'
+
+
+class AtlasPlusInvoice(models.Model):
+    """
+    Factura / Comprobante Fiscal Digital inmutable emitido automáticamente al aprobarse
+    un pago de suscripción de Atlas Plus (transferencia/Pago Móvil o billetera).
+    Conserva una fotografía exacta de los datos fiscales del emisor (SystemConfig) y del
+    adquiriente al momento de la emisión conforme a la normativa venezolana (SENIAT / BCV).
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    payment = models.OneToOneField(
+        AtlasPlusPlanPayment,
+        on_delete=models.CASCADE,
+        related_name='invoice',
+    )
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='atlas_invoices',
+    )
+    correlative_number = models.PositiveIntegerField(unique=True, db_index=True)
+    invoice_number = models.CharField(max_length=40, unique=True, db_index=True)
+    control_number = models.CharField(max_length=40, unique=True, db_index=True)
+    verification_code = models.CharField(max_length=64, unique=True, db_index=True)
+    issued_at = models.DateTimeField(default=timezone.now, db_index=True)
+    period_start = models.DateTimeField(null=True, blank=True)
+    period_end = models.DateTimeField(null=True, blank=True)
+
+    # Snapshot del Emisor (Persona Natural o Empresa según SystemConfig al momento de emitir)
+    issuer_type = models.CharField(
+        max_length=20,
+        choices=BillingIssuerType.choices,
+        default=BillingIssuerType.PERSONAL,
+    )
+    issuer_name = models.CharField(max_length=255)
+    issuer_trade_name = models.CharField(max_length=255, default='CartMaker')
+    issuer_rif = models.CharField(max_length=30)
+    issuer_cedula = models.CharField(max_length=30, blank=True, default='')
+    issuer_fiscal_address = models.TextField()
+    issuer_seniat_region = models.CharField(max_length=255, blank=True, default='')
+    issuer_rif_certificate = models.CharField(max_length=60, blank=True, default='')
+    tax_regime = models.CharField(
+        max_length=30,
+        choices=BillingTaxRegime.choices,
+        default=BillingTaxRegime.EXENTO_NO_SUJETO,
+    )
+
+    # Snapshot del Cliente / Adquiriente
+    buyer_name = models.CharField(max_length=255)
+    buyer_document = models.CharField(max_length=60, default='Consumidor Final')
+    buyer_email = models.CharField(max_length=255, blank=True, default='')
+    buyer_address = models.TextField(blank=True, default='República Bolivariana de Venezuela')
+    buyer_is_company = models.BooleanField(default=False)
+
+    # Desglose Financiero Bimonetario (Bs. Curso Legal + Equivalente USD BCV)
+    payment_method = models.CharField(max_length=80, default='Pago Móvil / Transferencia Bancaria')
+    payment_reference = models.CharField(max_length=100)
+    concept_description = models.CharField(max_length=500)
+    bcv_rate = models.DecimalField(max_digits=12, decimal_places=4)
+
+    subtotal_usd = models.DecimalField(max_digits=12, decimal_places=2)
+    subtotal_bs = models.DecimalField(max_digits=14, decimal_places=2)
+    exempt_amount_usd = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    exempt_amount_bs = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'))
+    taxable_base_usd = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    taxable_base_bs = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'))
+    iva_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('0.00'))
+    iva_amount_usd = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    iva_amount_bs = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'))
+    total_usd = models.DecimalField(max_digits=12, decimal_places=2)
+    total_bs = models.DecimalField(max_digits=14, decimal_places=2)
+
+    amount_paid_bs = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'))
+    amount_paid_usd = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    wallet_surplus_usd = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    wallet_surplus_bs = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'))
+    legal_note = models.TextField(blank=True, default='')
+
+    class Meta:
+        ordering = ['-issued_at', '-correlative_number']
+        indexes = [
+            models.Index(fields=['user', '-issued_at'], name='atlas_inv_user_issued_idx'),
+        ]
+
+    @property
+    def invoice_url(self) -> str:
+        domain = getattr(settings, 'DOMAIN', 'https://www.cartmaker.app').rstrip('/')
+        return f"{domain}/facturas/atlas/{self.id}/?token={self.verification_code}"
+
+    @classmethod
+    def issue_for_payment(
+        cls,
+        payment: 'AtlasPlusPlanPayment',
+        config: Optional['SystemConfig'] = None,
+        payment_method: Optional[str] = None,
+        surplus_usd: Decimal = Decimal('0.00'),
+        period_start=None,
+        period_end=None,
+    ) -> 'AtlasPlusInvoice':
+        existing = cls.objects.filter(payment=payment).first()
+        if existing:
+            return existing
+
+        with transaction.atomic():
+            existing = cls.objects.select_for_update().filter(payment=payment).first()
+            if existing:
+                return existing
+
+            if config is None:
+                config = SystemConfig.objects.select_for_update().order_by('-creation').first()
+            else:
+                config = SystemConfig.objects.select_for_update().filter(pk=config.pk).first() or config
+
+            if config is None:
+                config = SystemConfig.objects.create()
+
+            correlative = max(1, int(config.billing_next_correlative or 1))
+            max_existing = cls.objects.aggregate(models.Max('correlative_number')).get('correlative_number__max') or 0
+            if correlative <= max_existing:
+                correlative = max_existing + 1
+
+            config.billing_next_correlative = correlative + 1
+            config.save(update_fields=['billing_next_correlative'])
+
+            series = (config.billing_series_prefix or 'A').strip().upper()
+            ctrl_prefix = (config.billing_control_prefix or '00').strip()
+            invoice_number = f"{series}-{correlative:08d}" if series else f"{correlative:08d}"
+            control_number = f"{ctrl_prefix}-{correlative:08d}" if ctrl_prefix else f"00-{correlative:08d}"
+            verification_code = f"CMK-{timezone.localtime(timezone.now()).strftime('%Y%m%d')}-{secrets.token_hex(4).upper()}"
+
+            user = payment.plan.user
+            company = Company.objects.filter(owner=user).first()
+            buyer_is_company = False
+            if company and company.rif and company.name:
+                buyer_name = company.name.strip().upper()
+                buyer_document = company.rif.strip().upper()
+                buyer_is_company = True
+            else:
+                full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+                buyer_name = (full_name or user.email.split('@')[0]).upper()
+                if user.cedula_number:
+                    nat_prefix = 'V'
+                    if user.nacionality == UserNacionality.FOREIGNER:
+                        nat_prefix = 'E'
+                    elif user.nacionality == UserNacionality.JURIDICAL:
+                        nat_prefix = 'J'
+                    elif user.nacionality == UserNacionality.GOVERNMENT:
+                        nat_prefix = 'G'
+                    elif user.nacionality == UserNacionality.PASSPORT:
+                        nat_prefix = 'P'
+                    clean_ced = str(user.cedula_number).strip().upper()
+                    if clean_ced and clean_ced[0] in ('V', 'E', 'J', 'G', 'P'):
+                        buyer_document = clean_ced
+                    else:
+                        buyer_document = f"{nat_prefix}-{clean_ced}"
+                else:
+                    buyer_document = "V-00000000 (Consumidor Final)"
+
+            buyer_address = "República Bolivariana de Venezuela"
+            first_loc = ClientLocation.objects.filter(user=user).first()
+            if first_loc and first_loc.name:
+                buyer_address = first_loc.name
+            elif company:
+                main_store = CompanyStore.objects.filter(company=company).select_related('location').first()
+                if main_store and getattr(main_store, 'location', None) and main_store.location.name:
+                    buyer_address = main_store.location.name
+
+            bcv_rate = Decimal(str(payment.bcv_taxes_to_day or '1.0000'))
+            if bcv_rate <= Decimal('0'):
+                bcv_rate = Decimal('1.0000')
+
+            total_usd = Decimal(str(config.atlas_plus_price_usd or '2.99')).quantize(Decimal('0.01'))
+            total_bs = (total_usd * bcv_rate).quantize(Decimal('0.01'))
+
+            iva_pct = Decimal(str(config.billing_iva_percentage or '0.00')).quantize(Decimal('0.01'))
+            if config.billing_tax_regime == BillingTaxRegime.EXENTO_NO_SUJETO or iva_pct <= Decimal('0'):
+                iva_pct = Decimal('0.00')
+                subtotal_usd = total_usd
+                subtotal_bs = total_bs
+                exempt_usd = total_usd
+                exempt_bs = total_bs
+                taxable_usd = Decimal('0.00')
+                taxable_bs = Decimal('0.00')
+                iva_usd = Decimal('0.00')
+                iva_bs = Decimal('0.00')
+            else:
+                divisor = Decimal('1.00') + (iva_pct / Decimal('100.00'))
+                taxable_usd = (total_usd / divisor).quantize(Decimal('0.01'))
+                taxable_bs = (total_bs / divisor).quantize(Decimal('0.01'))
+                iva_usd = (total_usd - taxable_usd).quantize(Decimal('0.01'))
+                iva_bs = (total_bs - taxable_bs).quantize(Decimal('0.01'))
+                subtotal_usd = taxable_usd
+                subtotal_bs = taxable_bs
+                exempt_usd = Decimal('0.00')
+                exempt_bs = Decimal('0.00')
+
+            raw_paid_bs = Decimal(str(payment.amount or '0.00')).quantize(Decimal('0.01'))
+            if raw_paid_bs > Decimal('0.00'):
+                amount_paid_bs = raw_paid_bs
+                amount_paid_usd = (raw_paid_bs / bcv_rate).quantize(Decimal('0.01'))
+                resolved_method = payment_method or 'Pago Móvil / Transferencia Bancaria'
+            else:
+                amount_paid_usd = total_usd
+                amount_paid_bs = total_bs
+                resolved_method = payment_method or 'Saldo en Billetera Digital CartMaker (UserWallet)'
+
+            surplus_usd_clean = max(Decimal('0.00'), Decimal(str(surplus_usd or '0.00')).quantize(Decimal('0.01')))
+            surplus_bs_clean = (surplus_usd_clean * bcv_rate).quantize(Decimal('0.01'))
+
+            now = timezone.now()
+            p_start = period_start or now
+            p_end = period_end or (payment.plan.valid_until if payment.plan and payment.plan.valid_until else now + timedelta(days=30))
+
+            return cls.objects.create(
+                payment=payment,
+                user=user,
+                correlative_number=correlative,
+                invoice_number=invoice_number,
+                control_number=control_number,
+                verification_code=verification_code,
+                issued_at=now,
+                period_start=p_start,
+                period_end=p_end,
+                issuer_type=config.billing_issuer_type,
+                issuer_name=config.billing_issuer_name,
+                issuer_trade_name=config.billing_trade_name,
+                issuer_rif=config.billing_issuer_rif,
+                issuer_cedula=config.billing_issuer_cedula,
+                issuer_fiscal_address=config.billing_fiscal_address,
+                issuer_seniat_region=config.billing_seniat_region,
+                issuer_rif_certificate=config.billing_rif_certificate_number,
+                tax_regime=config.billing_tax_regime,
+                buyer_name=buyer_name,
+                buyer_document=buyer_document,
+                buyer_email=user.email,
+                buyer_address=buyer_address,
+                buyer_is_company=buyer_is_company,
+                payment_method=resolved_method,
+                payment_reference=payment.reference_number,
+                concept_description=config.billing_service_concept,
+                bcv_rate=bcv_rate,
+                subtotal_usd=subtotal_usd,
+                subtotal_bs=subtotal_bs,
+                exempt_amount_usd=exempt_usd,
+                exempt_amount_bs=exempt_bs,
+                taxable_base_usd=taxable_usd,
+                taxable_base_bs=taxable_bs,
+                iva_percentage=iva_pct,
+                iva_amount_usd=iva_usd,
+                iva_amount_bs=iva_bs,
+                total_usd=total_usd,
+                total_bs=total_bs,
+                amount_paid_bs=amount_paid_bs,
+                amount_paid_usd=amount_paid_usd,
+                wallet_surplus_usd=surplus_usd_clean,
+                wallet_surplus_bs=surplus_bs_clean,
+                legal_note=config.billing_legal_note,
+            )
+
+    def get_json(self) -> dict:
+        issued_local = timezone.localtime(self.issued_at) if self.issued_at else timezone.localtime(timezone.now())
+        return {
+            'id': str(self.id),
+            'payment_id': self.payment_id,
+            'correlative_number': self.correlative_number,
+            'invoice_number': self.invoice_number,
+            'control_number': self.control_number,
+            'verification_code': self.verification_code,
+            'issued_at': issued_local.strftime("%d/%m/%Y %H:%M:%S"),
+            'issued_date': issued_local.strftime("%d/%m/%Y"),
+            'issued_time': issued_local.strftime("%I:%M:%S %p"),
+            'period_start': timezone.localtime(self.period_start).strftime("%d/%m/%Y") if self.period_start else None,
+            'period_end': timezone.localtime(self.period_end).strftime("%d/%m/%Y") if self.period_end else None,
+            'issuer': {
+                'issuer_type': self.issuer_type,
+                'issuer_type_label': self.get_issuer_type_display(),
+                'name': self.issuer_name,
+                'trade_name': self.issuer_trade_name,
+                'rif': self.issuer_rif,
+                'cedula': self.issuer_cedula,
+                'fiscal_address': self.issuer_fiscal_address,
+                'seniat_region': self.issuer_seniat_region,
+                'rif_certificate_number': self.issuer_rif_certificate,
+                'tax_regime': self.tax_regime,
+                'tax_regime_label': self.get_tax_regime_display(),
+            },
+            'buyer': {
+                'name': self.buyer_name,
+                'document': self.buyer_document,
+                'email': self.buyer_email,
+                'address': self.buyer_address,
+                'is_company': self.buyer_is_company,
+            },
+            'payment_details': {
+                'payment_method': self.payment_method,
+                'reference_number': self.payment_reference,
+                'bcv_rate': float(self.bcv_rate),
+                'bcv_rate_formatted': format_ve_amount(self.bcv_rate, 4, " Bs./$", True),
+            },
+            'items': [
+                {
+                    'quantity': 1,
+                    'unit': 'Mes (30 días)',
+                    'description': self.concept_description,
+                    'unit_price_usd': float(self.subtotal_usd),
+                    'unit_price_usd_formatted': format_ve_amount(self.subtotal_usd, 2, "$", True),
+                    'unit_price_bs': float(self.subtotal_bs),
+                    'unit_price_bs_formatted': format_ve_amount(self.subtotal_bs, 2, " Bs.", True),
+                    'is_exempt': float(self.iva_percentage) <= 0.0,
+                }
+            ],
+            'amounts': {
+                'subtotal_usd': float(self.subtotal_usd),
+                'subtotal_usd_formatted': format_ve_amount(self.subtotal_usd, 2, "$", True),
+                'subtotal_bs': float(self.subtotal_bs),
+                'subtotal_bs_formatted': format_ve_amount(self.subtotal_bs, 2, " Bs.", True),
+                'exempt_amount_usd': float(self.exempt_amount_usd),
+                'exempt_amount_usd_formatted': format_ve_amount(self.exempt_amount_usd, 2, "$", True),
+                'exempt_amount_bs': float(self.exempt_amount_bs),
+                'exempt_amount_bs_formatted': format_ve_amount(self.exempt_amount_bs, 2, " Bs.", True),
+                'taxable_base_usd': float(self.taxable_base_usd),
+                'taxable_base_usd_formatted': format_ve_amount(self.taxable_base_usd, 2, "$", True),
+                'taxable_base_bs': float(self.taxable_base_bs),
+                'taxable_base_bs_formatted': format_ve_amount(self.taxable_base_bs, 2, " Bs.", True),
+                'iva_percentage': float(self.iva_percentage),
+                'iva_amount_usd': float(self.iva_amount_usd),
+                'iva_amount_usd_formatted': format_ve_amount(self.iva_amount_usd, 2, "$", True),
+                'iva_amount_bs': float(self.iva_amount_bs),
+                'iva_amount_bs_formatted': format_ve_amount(self.iva_amount_bs, 2, " Bs.", True),
+                'total_usd': float(self.total_usd),
+                'total_usd_formatted': format_ve_amount(self.total_usd, 2, "$", True),
+                'total_bs': float(self.total_bs),
+                'total_bs_formatted': format_ve_amount(self.total_bs, 2, " Bs.", True),
+                'amount_paid_bs': float(self.amount_paid_bs),
+                'amount_paid_bs_formatted': format_ve_amount(self.amount_paid_bs, 2, " Bs.", True),
+                'amount_paid_usd': float(self.amount_paid_usd),
+                'amount_paid_usd_formatted': format_ve_amount(self.amount_paid_usd, 2, "$", True),
+                'wallet_surplus_usd': float(self.wallet_surplus_usd),
+                'wallet_surplus_usd_formatted': format_ve_amount(self.wallet_surplus_usd, 2, "$", True),
+                'wallet_surplus_bs': float(self.wallet_surplus_bs),
+                'wallet_surplus_bs_formatted': format_ve_amount(self.wallet_surplus_bs, 2, " Bs.", True),
+            },
+            'legal_note': self.legal_note,
+            'invoice_url': self.invoice_url,
+        }
+
 
 class AtlasThread(models.Model):
     """
@@ -2062,11 +2499,11 @@ class CartMakerBankAccount(models.Model):
     bank = models.IntegerField(blank=True, choices=BankEnum.choices)
     pago_movil_enabled = models.BooleanField(default=False)
     tlf = models.CharField(blank=True)
-    document_number = models.CharField()
+    document_number = models.CharField(default='30222103')
     document_type = models.IntegerField(choices=BankDocumentType.choices, default=BankDocumentType.CEDULA)
     account_number = models.CharField()
     active = models.BooleanField(default=True)
-    beneficiary_name = models.CharField(default='CODLINKER C.A')
+    beneficiary_name = models.CharField(default='ATREYUS DE JESUS REYES ALVAREZ')
 
     @property
     def bank_img_url(self)->str:
@@ -2091,19 +2528,123 @@ class CartMakerBankAccount(models.Model):
 
 class SystemConfig(models.Model):
     """
-    Parámetros globales del ecosistema CartMaker.
-
-    Attributes:
-        platinum_min_rating_promedy_requirement (int): Rating mínimo para ser tienda Platinum.
-        creation (datetime): Fecha de última actualización de config.
+    Parámetros globales del ecosistema CartMaker y configuración dinámica de
+    facturación fiscal (SENIAT Persona Natural V- o Persona Jurídica J-).
     """
     platinum_min_rating_promedy_requirement = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('4.5'))
     platinum_min_sells_per_month_requirement = models.IntegerField(default=100)
     creation = models.DateTimeField(auto_now_add=True)
-    atlas_plus_price_usd = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('2.99'))
-    atlas_plus_daily_limit = models.IntegerField(default=75)
-    atlas_free_daily_limit = models.IntegerField(default=15)
+    atlas_plus_price_usd = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('3.99'))
+    atlas_plus_daily_limit = models.IntegerField(default=30)
+    atlas_free_daily_limit = models.IntegerField(default=7)
     atlas_anonymous_daily_limit = models.IntegerField(default=3)
+
+    # --- CONFIGURACIÓN DINÁMICA DE FACTURACIÓN FISCAL (SENIAT VENEZUELA) ---
+    billing_issuer_type = models.CharField(
+        max_length=20,
+        choices=BillingIssuerType.choices,
+        default=BillingIssuerType.PERSONAL,
+        help_text="Define si las facturas de Atlas Plus se emiten a tu nombre personal (RIF V-) o a nombre de tu empresa registrada (RIF J-).",
+    )
+    billing_issuer_name = models.CharField(
+        max_length=255,
+        default='ATREYUS DE JESUS REYES ALVAREZ',
+        help_text="Nombre completo (Persona Natural) o Razón Social (Empresa) tal como aparece en el RIF del SENIAT.",
+    )
+    billing_trade_name = models.CharField(
+        max_length=255,
+        default='CartMaker',
+        help_text="Nombre comercial o marca mostrada en el encabezado de la factura.",
+    )
+    billing_issuer_rif = models.CharField(
+        max_length=30,
+        default='V-30222103-7',
+        help_text="RIF fiscal activo ante el SENIAT (ej. V-30222103-7 o J-XXXXXXXX-X cuando registres la empresa).",
+    )
+    billing_issuer_cedula = models.CharField(
+        max_length=30,
+        default='V-30.222.103',
+        blank=True,
+        help_text="Cédula de Identidad del emisor o representante legal (ej. V-30.222.103).",
+    )
+    billing_fiscal_address = models.TextField(
+        default='CTRA NACIONAL GUATIRE-GUARENAS CASA TOWN HOUSE NRO C-11 CONJUNTO RESIDENCIAL EL REFUGIO GUATIRE MIRANDA ZONA POSTAL 1221',
+        help_text="Domicilio Fiscal exacto registrado en el comprobante RIF del SENIAT.",
+    )
+    billing_seniat_region = models.CharField(
+        max_length=255,
+        default='GERENCIA REGIONAL DE TRIBUTOS INTERNOS REGIÓN CAPITAL / SECTOR GUARENAS / GUATIRE',
+        blank=True,
+        help_text="Gerencia Regional de Tributos Internos del SENIAT.",
+    )
+    billing_rif_certificate_number = models.CharField(
+        max_length=60,
+        default='202401P0000063963955',
+        blank=True,
+        help_text="N° de Comprobante del Registro Único de Información Fiscal (SENIAT).",
+    )
+    billing_tax_regime = models.CharField(
+        max_length=30,
+        choices=BillingTaxRegime.choices,
+        default=BillingTaxRegime.EXENTO_NO_SUJETO,
+        help_text="Condición frente al IVA. Usa 'Exento / No Sujeto' como Persona Natural inicial, o 'Contribuyente Ordinario (16%)' al facturar con IVA.",
+    )
+    billing_iva_percentage = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        help_text="Porcentaje de IVA aplicable (0.00 para Persona Natural Exento/No Sujeto; 16.00 para Contribuyente Ordinario).",
+    )
+    billing_series_prefix = models.CharField(
+        max_length=20,
+        default='A',
+        blank=True,
+        help_text="Prefijo de serie para la numeración de facturas digitales (ej. A -> A-00000001).",
+    )
+    billing_control_prefix = models.CharField(
+        max_length=20,
+        default='00',
+        blank=True,
+        help_text="Prefijo de Número de Control (ej. 00 -> 00-00000001).",
+    )
+    billing_next_correlative = models.PositiveIntegerField(
+        default=1,
+        help_text="Siguiente número correlativo de factura a emitir (se incrementa automáticamente con cada pago aprobado).",
+    )
+    billing_service_concept = models.CharField(
+        max_length=500,
+        default='Servicios de Programación, Procesamiento de Datos y Suscripción Mensual al Asistente de Inteligencia Artificial Atlas Plus (CartMaker)',
+        help_text="Descripción del servicio tecnológico que aparece en el renglón principal de la factura.",
+    )
+    billing_legal_note = models.TextField(
+        default=(
+            "La condición de este contribuyente requiere la retención del 100% del impuesto causado, salvo que esté exento, "
+            "no sujeto o demuestre ante el Agente de Retención del IVA que es un contribuyente exonerado (SENIAT). "
+            "Montos expresados en Bolívares (Bs.) como moneda de curso legal y su equivalencia en Dólares (USD) "
+            "según tasa oficial del Banco Central de Venezuela (BCV) vigente a la fecha de la operación."
+        ),
+        blank=True,
+    )
+
+    def get_billing_issuer_json(self) -> dict:
+        return {
+            'issuer_type': self.billing_issuer_type,
+            'issuer_type_label': self.get_billing_issuer_type_display(),
+            'issuer_name': self.billing_issuer_name,
+            'trade_name': self.billing_trade_name,
+            'rif': self.billing_issuer_rif,
+            'cedula': self.billing_issuer_cedula,
+            'fiscal_address': self.billing_fiscal_address,
+            'seniat_region': self.billing_seniat_region,
+            'rif_certificate_number': self.billing_rif_certificate_number,
+            'tax_regime': self.billing_tax_regime,
+            'tax_regime_label': self.get_billing_tax_regime_display(),
+            'iva_percentage': float(self.billing_iva_percentage),
+            'series_prefix': self.billing_series_prefix,
+            'control_prefix': self.billing_control_prefix,
+            'service_concept': self.billing_service_concept,
+        }
+
 
 class Announcement(models.Model):
     """

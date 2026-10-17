@@ -468,63 +468,62 @@ class AtlasViewSet(viewsets.ViewSet):
         }
 
     def _get_user_plan(self, user):
-        try:
-            return user.atlas_plan
-        except AtlasPlusPlan.DoesNotExist:
-            return None
+        plan, _ = AtlasPlusPlan.objects.get_or_create(user=user)
+        return plan
 
     def _create_thread(self, plan):
         return AtlasThread.objects.create(plan=plan)
 
     # =========================================================================
-    # LÓGICA DE CUOTA CON CACHE-ASIDE (PostgreSQL como fuente de verdad)
+    # LÓGICA DE PRESUPUESTO DIARIO UNIFICADO (Atlas Comprador + Atlas Negocios)
     # =========================================================================
     def _get_daily_limit(self, user) -> int:
-        """Devuelve el límite de interacciones según el Tier del usuario."""
+        """Devuelve el límite diario unificado según el Tier del usuario en AtlasPlusPlan."""
         try:
             config = SystemConfig.objects.latest('creation')
-            plus_limit = config.atlas_plus_daily_limit
-            free_limit = config.atlas_free_daily_limit
+            plus_limit = int(config.atlas_plus_daily_limit or 75)
+            free_limit = int(config.atlas_free_daily_limit or self.DAILY_FREE_LIMIT)
         except SystemConfig.DoesNotExist:
             plus_limit = 75
             free_limit = self.DAILY_FREE_LIMIT
-        try:
-            plan = user.atlas_plan
-            # Si es Premium y el plan no ha vencido
-            if plan.tier == AtlasSubscriptionTier.PREMIUM and plan.valid_until and plan.valid_until >= timezone.now():
-                return plus_limit
-        except AtlasPlusPlan.DoesNotExist:
-            pass
+        plan = self._get_user_plan(user)
+        if plan and plan.is_active_premium():
+            return plus_limit
         return free_limit
 
     def _get_used_today(self, user) -> int:
-        """Obtiene el consumo desde Redis, o lo reconstruye desde BD si se reinició el servidor."""
+        """
+        Obtiene el consumo diario unificado (Comprador + Negocios) desde Redis,
+        o lo reconstruye desde PostgreSQL (AtlasPlusPlan.daily_usage_count + AtlasMessage) si hubo cache miss.
+        """
         cache_key = f"cartmaker:atlas:daily_usage:{user.id}"
         used = cache.get(cache_key)
-        
+        now_local = timezone.localtime(timezone.now())
+        today_local = now_local.date()
+
         if used is None:
-            # 💡 CACHE MISS: Redis se reinició o es el primer mensaje del día.
-            # Vamos a la base de datos a buscar la verdad absoluta.
-            now_local = timezone.localtime(timezone.now())
-            
             try:
-                plan = user.atlas_plan
-                used = AtlasMessage.objects.filter(
+                plan = self._get_user_plan(user)
+                db_used = plan.daily_usage_count if plan.daily_usage_date == today_local else 0
+                msg_used = AtlasMessage.objects.filter(
                     conversation__plan=plan,
-                    origin=1, # Contamos solo los mensajes enviados por el usuario
-                    creation__date=now_local.date()
+                    origin=1,
+                    creation__date=today_local,
                 ).count()
+                used = max(int(db_used or 0), int(msg_used or 0))
+                if plan.daily_usage_date != today_local or plan.daily_usage_count != used:
+                    AtlasPlusPlan.objects.filter(pk=plan.pk).update(
+                        daily_usage_date=today_local,
+                        daily_usage_count=used,
+                    )
             except Exception:
                 used = 0
-                
-            # Calculamos los segundos exactos que faltan para la medianoche local
+
             tomorrow = (now_local + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-            timeout = int((tomorrow - now_local).total_seconds())
-            
-            # Repoblamos Redis
+            timeout = max(1, int((tomorrow - now_local).total_seconds()))
             cache.set(cache_key, used, timeout=timeout)
-            
-        return used
+
+        return max(0, int(used or 0))
 
     def _get_free_interactions_left(self, user) -> int:
         limit = self._get_daily_limit(user)
@@ -534,28 +533,107 @@ class AtlasViewSet(viewsets.ViewSet):
     def _consume_free_interaction(self, user) -> bool:
         limit = self._get_daily_limit(user)
         used = self._get_used_today(user)
-        
+
         if used >= limit:
-            return False 
-            
+            return False
+
+        now_local = timezone.localtime(timezone.now())
+        today_local = now_local.date()
+        tomorrow = (now_local + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        timeout = max(1, int((tomorrow - now_local).total_seconds()))
         cache_key = f"cartmaker:atlas:daily_usage:{user.id}"
-        
-        if used == 0:
-            now_local = timezone.localtime(timezone.now())
-            tomorrow = (now_local + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-            timeout = int((tomorrow - now_local).total_seconds())
-            cache.set(cache_key, 1, timeout=timeout)
+
+        new_used = used + 1
+        if used == 0 or cache.get(cache_key) is None:
+            cache.set(cache_key, new_used, timeout=timeout)
         else:
-            cache.incr(cache_key)
-            
+            try:
+                new_used = int(cache.incr(cache_key))
+            except Exception:
+                cache.set(cache_key, new_used, timeout=timeout)
+
+        try:
+            plan = self._get_user_plan(user)
+            AtlasPlusPlan.objects.filter(pk=plan.pk).update(
+                daily_usage_date=today_local,
+                daily_usage_count=new_used,
+            )
+        except Exception:
+            pass
+
         return True
+
+    def _refund_free_interaction(self, user) -> None:
+        if not user or not getattr(user, 'is_authenticated', False):
+            return
+        cache_key = f"cartmaker:atlas:daily_usage:{user.id}"
+        now_local = timezone.localtime(timezone.now())
+        today_local = now_local.date()
+        try:
+            current = cache.get(cache_key)
+            if current is not None and int(current) > 0:
+                new_val = max(0, int(cache.decr(cache_key)))
+            else:
+                new_val = 0
+        except Exception:
+            new_val = 0
+
+        try:
+            plan = self._get_user_plan(user)
+            if plan.daily_usage_date == today_local and plan.daily_usage_count > 0:
+                AtlasPlusPlan.objects.filter(pk=plan.pk).update(
+                    daily_usage_count=max(0, new_val)
+                )
+        except Exception:
+            pass
+
+    def _build_quota_exceeded_payload(self, user, company=None) -> dict:
+        config = SystemConfig.objects.order_by('-creation').first()
+        plan = self._get_user_plan(user)
+        quota_status = plan.get_quota_status(config=config)
+        is_premium = quota_status['is_premium']
+        daily_limit = quota_status['daily_limit']
+        plus_limit = int(getattr(config, 'atlas_plus_daily_limit', 75) or 75)
+        price_fmt = quota_status['atlas_plus_price_formatted']
+
+        if is_premium:
+            mensaje_error = (
+                f"Has agotado tus {daily_limit} interacciones diarias de Atlas Plus por hoy. "
+                f"Tu cupo se renovará automáticamente a la medianoche."
+            )
+        else:
+            mensaje_error = (
+                f"Has agotado tus {daily_limit} interacciones gratuitas de hoy. "
+                f"Activa Atlas Plus por {price_fmt}/mes para disfrutar de {plus_limit} consultas diarias "
+                f"compartidas entre Atlas Comprador y Atlas Negocios."
+            )
+
+        payload = {
+            'error': mensaje_error,
+            'code': 'ATLAS_DAILY_QUOTA_EXCEEDED',
+            'free_interactions_left': 0,
+            'used_today': quota_status['used_today'],
+            'daily_limit': daily_limit,
+            'atlas_plus_daily_limit': plus_limit,
+            'is_premium': is_premium,
+            'requires_atlas_plus': not is_premium,
+            'atlas_plus_price_usd': quota_status['atlas_plus_price_usd'],
+            'atlas_plus_price_formatted': price_fmt,
+            'login_required': False,
+            'quota_status': quota_status,
+        }
+        if company is not None:
+            from ..core.atlas_merchant import AtlasMerchantCopilot
+            payload['access_status'] = AtlasMerchantCopilot.check_merchant_access(company, user=user)
+        return payload
 
     # ------------------------------------------------------------------------
     # ENDPOINT: POST /api/atlas/scan_image/
     # ------------------------------------------------------------------------
     @action(detail=False, methods=['post'])
     def scan_image(self, request):
-        if not Company.objects.filter(owner=request.user).exists():
+        company = self._resolve_merchant_company(request.user)
+        if not company:
             return Response(
                 {'error': 'Debes poseer un comercio registrado para utilizar el escáner de inventario.'},
                 status=status.HTTP_403_FORBIDDEN
@@ -568,16 +646,29 @@ class AtlasViewSet(viewsets.ViewSet):
             )
         if getattr(image_file, 'size', 0) > 15 * 1024 * 1024:
             return Response({'error': 'La imagen excede el tamaño máximo permitido (15 MB).'}, status=status.HTTP_400_BAD_REQUEST)
-        
+
+        if not self._consume_free_interaction(request.user):
+            return Response(
+                self._build_quota_exceeded_payload(request.user, company=company),
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         image_bytes = image_file.read()
         mime_type = image_file.content_type
-        
+
         atlas_manager = atlas.AtlasManager()
         resultado = async_to_sync(atlas_manager.analyze_image_for_products_async)(image_bytes, mime_type)
-        
+
         if "error" in resultado and not resultado.get("products"):
+            self._refund_free_interaction(request.user)
             return Response(resultado, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
-            
+
+        quota_status = self._get_user_plan(request.user).get_quota_status()
+        resultado['free_interactions_left'] = quota_status['free_interactions_left']
+        resultado['used_today'] = quota_status['used_today']
+        resultado['daily_limit'] = quota_status['daily_limit']
+        resultado['is_premium'] = quota_status['is_premium']
+        resultado['quota_status'] = quota_status
         return Response(resultado, status=status.HTTP_200_OK)
     
     # ------------------------------------------------------------------------
@@ -585,7 +676,8 @@ class AtlasViewSet(viewsets.ViewSet):
     # ------------------------------------------------------------------------
     @action(detail=False, methods=['post'])
     def scan_image_multiple(self, request):
-        if not Company.objects.filter(owner=request.user).exists():
+        company = self._resolve_merchant_company(request.user)
+        if not company:
             return Response(
                 {'error': 'Debes poseer un comercio registrado para utilizar el escáner de inventario.'},
                 status=status.HTTP_403_FORBIDDEN
@@ -598,16 +690,29 @@ class AtlasViewSet(viewsets.ViewSet):
             )
         if getattr(image_file, 'size', 0) > 15 * 1024 * 1024:
             return Response({'error': 'La imagen excede el tamaño máximo permitido (15 MB).'}, status=status.HTTP_400_BAD_REQUEST)
-        
+
+        if not self._consume_free_interaction(request.user):
+            return Response(
+                self._build_quota_exceeded_payload(request.user, company=company),
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         image_bytes = image_file.read()
         mime_type = image_file.content_type
-        
+
         atlas_manager = atlas.AtlasManager()
         resultado = async_to_sync(atlas_manager.analyze_image_for_multiple_products_async)(image_bytes, mime_type)
-        
+
         if "error" in resultado and not resultado.get("products"):
+            self._refund_free_interaction(request.user)
             return Response(resultado, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
-            
+
+        quota_status = self._get_user_plan(request.user).get_quota_status()
+        resultado['free_interactions_left'] = quota_status['free_interactions_left']
+        resultado['used_today'] = quota_status['used_today']
+        resultado['daily_limit'] = quota_status['daily_limit']
+        resultado['is_premium'] = quota_status['is_premium']
+        resultado['quota_status'] = quota_status
         return Response(resultado, status=status.HTTP_200_OK)
 
     # ------------------------------------------------------------------------
@@ -615,7 +720,8 @@ class AtlasViewSet(viewsets.ViewSet):
     # ------------------------------------------------------------------------
     @action(detail=False, methods=['post'])
     def scan_excel_multiple(self, request):
-        if not Company.objects.filter(owner=request.user).exists():
+        company = self._resolve_merchant_company(request.user)
+        if not company:
             return Response(
                 {'error': 'Debes poseer un comercio registrado para utilizar el escáner de inventario.'},
                 status=status.HTTP_403_FORBIDDEN
@@ -653,12 +759,25 @@ class AtlasViewSet(viewsets.ViewSet):
             print(f"[PARSING ERROR]: {e}")
             return Response({'error': 'Error al procesar la estructura del archivo.'}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
 
+        if not self._consume_free_interaction(request.user):
+            return Response(
+                self._build_quota_exceeded_payload(request.user, company=company),
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         atlas_manager = atlas.AtlasManager()
         resultado = async_to_sync(atlas_manager.analyze_processed_json_products_async)(raw_rows)
         
         if "error" in resultado and not resultado.get("products"):
+            self._refund_free_interaction(request.user)
             return Response(resultado, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
-            
+
+        quota_status = self._get_user_plan(request.user).get_quota_status()
+        resultado['free_interactions_left'] = quota_status['free_interactions_left']
+        resultado['used_today'] = quota_status['used_today']
+        resultado['daily_limit'] = quota_status['daily_limit']
+        resultado['is_premium'] = quota_status['is_premium']
+        resultado['quota_status'] = quota_status
         return Response(resultado, status=status.HTTP_200_OK)
 
     # ------------------------------------------------------------------------
@@ -849,16 +968,23 @@ class AtlasViewSet(viewsets.ViewSet):
 
         if request.user.is_authenticated:
             daily_limit = self._get_daily_limit(request.user)
+            used_today = self._get_used_today(request.user)
+            quota_status = self._get_user_plan(request.user).get_quota_status()
             login_required = False
         else:
             daily_limit = self._anonymous_daily_limit()
+            used_today = max(0, daily_limit - free_left)
+            quota_status = None
             login_required = free_left <= 0
 
         return Response({
             'thread_id': latest_thread.id,
             'free_interactions_left': free_left,
+            'used_today': used_today,
             'is_premium': is_premium,
             'daily_limit': daily_limit,
+            'requires_atlas_plus': bool(quota_status.get('requires_atlas_plus')) if quota_status else False,
+            'quota_status': quota_status,
             'login_required': login_required,
             'initial_quick_actions': starter_quick_actions,
             'messages': messages_data
@@ -878,19 +1004,17 @@ class AtlasViewSet(viewsets.ViewSet):
         guest_token = None
         guest_ip = None
         if request.user.is_authenticated:
+            plan = self._get_user_plan(request.user)
             try:
-                thread = AtlasThread.objects.get(pk=pk, plan=request.user.atlas_plan)
+                thread = AtlasThread.objects.get(pk=pk, plan=plan)
             except AtlasThread.DoesNotExist:
                 return Response({'error': 'El hilo no existe.'}, status=status.HTTP_404_NOT_FOUND)
-            plan = request.user.atlas_plan
-            is_premium = plan.tier == AtlasSubscriptionTier.PREMIUM and plan.valid_until and plan.valid_until >= timezone.now()
+            is_premium = plan.is_active_premium()
             if not self._consume_free_interaction(request.user):
-                mensaje_error = 'Has agotado tus interacciones de Atlas Plus por hoy.' if is_premium else 'Has agotado tus interacciones gratuitas por hoy.'
-                return Response({
-                    'error': mensaje_error,
-                    'free_interactions_left': 0,
-                    'login_required': False,
-                }, status=status.HTTP_403_FORBIDDEN)
+                return Response(
+                    self._build_quota_exceeded_payload(request.user),
+                    status=status.HTTP_403_FORBIDDEN,
+                )
             atlas_user = request.user
         else:
             guest_token = self._guest_token_from_request(request)
@@ -930,13 +1054,7 @@ class AtlasViewSet(viewsets.ViewSet):
             if guest_token:
                 self._refund_anon(guest_token, guest_ip)
             else:
-                try:
-                    cache_key = f"cartmaker:atlas:daily_usage:{request.user.id}"
-                    current = cache.get(cache_key)
-                    if current and int(current) > 0:
-                        cache.decr(cache_key)
-                except Exception:
-                    pass
+                self._refund_free_interaction(request.user)
             return Response({'error': resultado.get('error')}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         # 💡 ZERO-RESULTS QUOTA SHIELD: Si el usuario buscó un producto y no había stock en ninguna zona,
@@ -947,21 +1065,19 @@ class AtlasViewSet(viewsets.ViewSet):
             if guest_token:
                 self._refund_anon(guest_token, guest_ip)
             else:
-                try:
-                    cache_key = f"cartmaker:atlas:daily_usage:{request.user.id}"
-                    current = cache.get(cache_key)
-                    if current and int(current) > 0:
-                        cache.decr(cache_key)
-                except Exception:
-                    pass
+                self._refund_free_interaction(request.user)
 
         if guest_token:
             free_left = self._anon_remaining(guest_token, guest_ip)
             daily_limit = self._anonymous_daily_limit()
+            used_today = max(0, daily_limit - free_left)
+            quota_status = None
             login_required = free_left <= 0
         else:
-            free_left = self._get_free_interactions_left(request.user)
-            daily_limit = self._get_daily_limit(request.user)
+            quota_status = self._get_user_plan(request.user).get_quota_status()
+            free_left = quota_status['free_interactions_left']
+            daily_limit = quota_status['daily_limit']
+            used_today = quota_status['used_today']
             login_required = False
             
         print(f"📦 [VIEWS] Comando enviado al Frontend: {resultado.get('action_command')}")
@@ -970,7 +1086,11 @@ class AtlasViewSet(viewsets.ViewSet):
             'response': resultado['response'],
             'message_id': resultado['message_id'],
             'free_interactions_left': free_left,
+            'used_today': used_today,
             'daily_limit': daily_limit,
+            'is_premium': is_premium,
+            'requires_atlas_plus': bool(quota_status.get('requires_atlas_plus')) if quota_status else False,
+            'quota_status': quota_status,
             'login_required': login_required,
             'quota_refunded': quota_refunded,
             'injected_products': resultado.get('injected_products'),
@@ -1143,12 +1263,14 @@ class AtlasViewSet(viewsets.ViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        access_status = AtlasMerchantCopilot.check_merchant_access(company)
+        access_status = AtlasMerchantCopilot.check_merchant_access(company, user=request.user)
         if not access_status.get('allowed'):
             return Response(
                 {'error': access_status.get('reason'), 'access_status': access_status},
                 status=status.HTTP_403_FORBIDDEN,
             )
+
+        quota_status = self._get_user_plan(request.user).get_quota_status()
 
         force_refresh = str(request.query_params.get('refresh', 'false')).lower() == 'true'
         store_id = request.query_params.get('store_id')
@@ -1221,6 +1343,12 @@ class AtlasViewSet(viewsets.ViewSet):
             'selected_store_id': selected_store_id,
             'selected_store_name': selected_store_name,
             'access_status': access_status,
+            'quota_status': quota_status,
+            'free_interactions_left': quota_status['free_interactions_left'],
+            'used_today': quota_status['used_today'],
+            'daily_limit': quota_status['daily_limit'],
+            'is_premium': quota_status['is_premium'],
+            'requires_atlas_plus': quota_status['requires_atlas_plus'],
             'snapshot': snapshot,
             'branches_summary': branches_summary,
             'branches': branches_summary,
@@ -1234,6 +1362,12 @@ class AtlasViewSet(viewsets.ViewSet):
             'selected_store_id': selected_store_id,
             'selected_store_name': selected_store_name,
             'access_status': access_status,
+            'quota_status': quota_status,
+            'free_interactions_left': quota_status['free_interactions_left'],
+            'used_today': quota_status['used_today'],
+            'daily_limit': quota_status['daily_limit'],
+            'is_premium': quota_status['is_premium'],
+            'requires_atlas_plus': quota_status['requires_atlas_plus'],
             'snapshot': snapshot,
             'branches_summary': branches_summary,
             'branches': branches_summary,
@@ -1262,13 +1396,6 @@ class AtlasViewSet(viewsets.ViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        access_status = AtlasMerchantCopilot.check_merchant_access(company)
-        if not access_status.get('allowed'):
-            return Response(
-                {'error': access_status.get('reason'), 'access_status': access_status},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
         prompt = (
             request.data.get('message')
             or request.data.get('prompt')
@@ -1289,13 +1416,39 @@ class AtlasViewSet(viewsets.ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Consumir 1 uso del presupuesto diario unificado (Atlas Comprador + Atlas Negocios)
+        if not self._consume_free_interaction(request.user):
+            return Response(
+                self._build_quota_exceeded_payload(request.user, company=company),
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         copilot = AtlasMerchantCopilot(company=company, user=request.user)
-        result = async_to_sync(copilot.consult_async)(
-            user_prompt=prompt,
-            reset_thread=reset_thread,
-            store_id=store_id,
-            scope=scope,
-        )
+        try:
+            result = async_to_sync(copilot.consult_async)(
+                user_prompt=prompt,
+                reset_thread=reset_thread,
+                store_id=store_id,
+                scope=scope,
+            )
+        except Exception as exc:
+            self._refund_free_interaction(request.user)
+            return Response(
+                {'error': f'Error procesando consulta en Atlas Business: {exc}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        quota_status = self._get_user_plan(request.user).get_quota_status()
+        access_status = AtlasMerchantCopilot.check_merchant_access(company, user=request.user)
+
+        result['access_status'] = access_status
+        result['quota_status'] = quota_status
+        result['free_interactions_left'] = quota_status['free_interactions_left']
+        result['used_today'] = quota_status['used_today']
+        result['daily_limit'] = quota_status['daily_limit']
+        result['is_premium'] = quota_status['is_premium']
+        result['requires_atlas_plus'] = quota_status['requires_atlas_plus']
+
         result['data'] = {
             'scope': result.get('scope'),
             'selected_store_id': result.get('selected_store_id'),
@@ -1306,7 +1459,13 @@ class AtlasViewSet(viewsets.ViewSet):
             'branches_summary': result.get('branches_summary'),
             'action_cards': result.get('action_cards'),
             'snapshot': result.get('snapshot'),
-            'access_status': result.get('access_status'),
+            'access_status': access_status,
+            'quota_status': quota_status,
+            'free_interactions_left': quota_status['free_interactions_left'],
+            'used_today': quota_status['used_today'],
+            'daily_limit': quota_status['daily_limit'],
+            'is_premium': quota_status['is_premium'],
+            'requires_atlas_plus': quota_status['requires_atlas_plus'],
         }
         return Response(result, status=status.HTTP_200_OK)
 
@@ -1348,5 +1507,75 @@ class AtlasViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['post'], url_path='merchant-execute-action')
     def merchant_execute_action_dash(self, request):
         return self._handle_merchant_execute_action(request)
+
+    # ========================================================================
+    # 🧾 FACTURACIÓN DIGITAL VENEZOLANA (SENIAT / BCV) — PLAN ATLAS PLUS
+    # ========================================================================
+    @action(detail=False, methods=['get'], url_path='invoices')
+    def invoices(self, request):
+        """
+        GET /api/v1/atlas/invoices/
+        Lista todas las facturas digitales emitidas al usuario autenticado por sus pagos aprobados de Atlas Plus.
+        """
+        config = SystemConfig.objects.order_by('-creation').first()
+        plan = self._get_user_plan(request.user)
+        approved_payments = (
+            AtlasPlusPlanPayment.objects.filter(plan=plan, status=PaymentStatus.APPROVED)
+            .select_related('invoice')
+            .order_by('-creation')
+        )
+        invoices_list = []
+        for payment in approved_payments:
+            inv = getattr(payment, 'invoice', None)
+            if inv is None:
+                inv = AtlasPlusInvoice.issue_for_payment(payment=payment, config=config)
+            invoices_list.append(inv.get_json())
+
+        return Response({
+            'success': True,
+            'count': len(invoices_list),
+            'billing_issuer': config.get_billing_issuer_json() if config else None,
+            'invoices': invoices_list,
+            'data': invoices_list,
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path=r'invoices/(?P<lookup_id>[^/.]+)')
+    def invoice_detail(self, request, lookup_id=None):
+        """
+        GET /api/v1/atlas/invoices/<payment_id_or_invoice_uuid>/
+        Devuelve el detalle fiscal completo y el link PDF/imprimible de una factura de Atlas Plus.
+        """
+        config = SystemConfig.objects.order_by('-creation').first()
+        invoice = None
+
+        if str(lookup_id).isdigit():
+            payment_qs = AtlasPlusPlanPayment.objects.select_related('plan__user', 'invoice').filter(pk=int(lookup_id))
+            if not (request.user.is_staff or request.user.is_superuser):
+                payment_qs = payment_qs.filter(plan__user=request.user)
+            payment = payment_qs.first()
+            if not payment:
+                return Response({'error': 'No se encontró el pago especificado.'}, status=status.HTTP_404_NOT_FOUND)
+            if payment.status != PaymentStatus.APPROVED:
+                return Response(
+                    {'error': 'La factura digital solo se emite para pagos verificados y aprobados.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            invoice = getattr(payment, 'invoice', None) or AtlasPlusInvoice.issue_for_payment(payment=payment, config=config)
+        else:
+            inv_qs = AtlasPlusInvoice.objects.select_related('payment', 'user').filter(pk=lookup_id)
+            if not (request.user.is_staff or request.user.is_superuser):
+                inv_qs = inv_qs.filter(user=request.user)
+            invoice = inv_qs.first()
+            if not invoice:
+                return Response({'error': 'No se encontró la factura especificada.'}, status=status.HTTP_404_NOT_FOUND)
+
+        inv_json = invoice.get_json()
+        return Response({
+            'success': True,
+            'invoice': inv_json,
+            'invoice_url': invoice.invoice_url,
+            'data': inv_json,
+        }, status=status.HTTP_200_OK)
+
 
 

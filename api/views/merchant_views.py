@@ -383,24 +383,33 @@ class GetAtlasPlusPlanDetails(APIView):
 
     def get(self, request):
         """
-        Devuelve los datos de configuración, límites y costos en tiempo real 
-        (USD y Bs BCV) para el plan Atlas Plus.
+        Devuelve los datos de configuración, límites diarios unificados (Comprador + Negocios),
+        estado de cuota actual, datos fiscales del emisor y costos en tiempo real (USD y Bs BCV)
+        para el plan Atlas Plus.
         """
         config = SystemConfig.objects.latest('creation')
+        atlas_plan, _ = AtlasPlusPlan.objects.get_or_create(user=request.user)
         
         dollar_bcv_tax = _get_cached_bcv_rate(default=1.0)
         bs_price = 0.0
 
         price_usd = float(config.atlas_plus_price_usd)
         if dollar_bcv_tax > 0.0:
-            bs_price = price_usd * dollar_bcv_tax
+            bs_price = round(price_usd * dollar_bcv_tax, 2)
+
+        quota_status = atlas_plan.get_quota_status(config=config)
 
         payload = {
             'atlas_plus_price_usd': price_usd,
+            'atlas_plus_price_formatted': format_ve_amount(price_usd, 2, "$", True),
             'bs_price': bs_price,
+            'bs_price_formatted': format_ve_amount(bs_price, 2, " Bs.", True),
             'dollar_bcv_tax': dollar_bcv_tax,
             'atlas_plus_daily_limit': config.atlas_plus_daily_limit,
             'atlas_free_daily_limit': config.atlas_free_daily_limit,
+            'shared_with_atlas_business': True,
+            'quota_status': quota_status,
+            'billing_issuer': config.get_billing_issuer_json(),
         }
         
         return Response({'data': payload}, status=status.HTTP_200_OK)
@@ -415,10 +424,6 @@ class UploadSubscriptionPayment(APIView):
         para que el flujo pase a validación manual por supervisores sin trancar la app.
         """
         try:
-            # Ejemplo analítico de consumo de webhook/API bancaria
-            # payload = {"ref": reference_number, "amount": float(amount_bs)}
-            # r = requests.post("https://api.tu-banco.com/v1/verify", json=payload, timeout=4)
-            # return r.json().get("matched") == True
             return False  # Simulamos falla/no disponible para forzar validación manual segura
         except Exception as e:
             print(f"⚠️ API Bancaria no disponible: {e}")
@@ -459,6 +464,7 @@ class UploadSubscriptionPayment(APIView):
                 if AtlasPlusPlanPayment.objects.filter(plan=atlas_plan, status=PaymentStatus.PENDING).exists():
                     return Response({'error': "Ya tienes un pago pendiente por verificación para Atlas Plus."}, status=status.HTTP_406_NOT_ACCEPTABLE)
 
+                now = timezone.now()
                 payment = AtlasPlusPlanPayment.objects.create(
                     plan=atlas_plan,
                     reference_number=data['reference_number'],
@@ -466,14 +472,35 @@ class UploadSubscriptionPayment(APIView):
                     amount=monto_enviado_bs,
                     bcv_taxes_to_day=dollar_bcv_tax,
                     status=PaymentStatus.APPROVED if bank_api_available else PaymentStatus.PENDING,
-                    verified_at=timezone.now() if bank_api_available else None
+                    verified_at=now if bank_api_available else None
                 )
+
+                if bank_api_available:
+                    config = SystemConfig.objects.latest('creation')
+                    period_start = (
+                        atlas_plan.valid_until
+                        if (atlas_plan.tier == AtlasSubscriptionTier.PREMIUM and atlas_plan.valid_until and atlas_plan.valid_until > now)
+                        else now
+                    )
+                    atlas_plan.tier = AtlasSubscriptionTier.PREMIUM
+                    atlas_plan.valid_until = period_start + relativedelta(months=1)
+                    atlas_plan.save()
+
+                    invoice = AtlasPlusInvoice.issue_for_payment(
+                        payment=payment,
+                        config=config,
+                        payment_method='Pago Móvil / Transferencia Bancaria',
+                        period_start=period_start,
+                        period_end=atlas_plan.valid_until,
+                    )
+                    inv_id = str(invoice.id)
+                    from api.utils import send_atlas_invoice_email
+                    transaction.on_commit(lambda: send_atlas_invoice_email(inv_id))
 
             if bank_api_available:
                 cache.delete(f"cartmaker:tenant:{request.user.id}:company")
                 cache.delete(f"cartmaker:tenant:{request.user.id}:subscriptions")
 
-            # Si la API del banco lo aprobó instantáneamente, se ejecutan las señales de activación de inmediato
             return Response({'payment_data': payment.get_json(), 'subscription_data': atlas_plan.get_json()}, status=status.HTTP_201_CREATED)
 
         elif subscription_type == 2:
@@ -510,10 +537,11 @@ class FullPaySubscriptionWithWalletView(APIView):
                 config = SystemConfig.objects.latest('creation')
                 atlas_plan = AtlasPlusPlan.objects.select_for_update().get(user=request.user)
                 price_usd = config.atlas_plus_price_usd
+                now = timezone.now()
 
                 # Lógica de prorrateo para Atlas Plus si cambia/renueva antes de vencer
-                if atlas_plan.tier == AtlasSubscriptionTier.PREMIUM and atlas_plan.valid_until and atlas_plan.valid_until > timezone.now():
-                    days_left = (atlas_plan.valid_until - timezone.now()).total_seconds() / 86400.0
+                if atlas_plan.tier == AtlasSubscriptionTier.PREMIUM and atlas_plan.valid_until and atlas_plan.valid_until > now:
+                    days_left = (atlas_plan.valid_until - now).total_seconds() / 86400.0
                     daily_rate = float(price_usd) / 30.0
                     remanent_usd = Decimal(str(round(days_left * daily_rate, 2)))
                     if remanent_usd > 0:
@@ -525,34 +553,72 @@ class FullPaySubscriptionWithWalletView(APIView):
                 wallet.regist_transaction(price_usd, 'atlas', "Pago de suscripción Atlas Plus", 'substract')
 
                 atlas_plan.tier = AtlasSubscriptionTier.PREMIUM
-                atlas_plan.valid_until = timezone.now() + relativedelta(months=1)
+                atlas_plan.valid_until = now + relativedelta(months=1)
                 atlas_plan.save()
 
                 atlas_payment = AtlasPlusPlanPayment.objects.create(
                     plan=atlas_plan,
                     reference_number=f"WALLET-ATLAS-{uuid.uuid4().hex[:6].upper()}",
-                    amount=0,
+                    amount=Decimal(str(price_usd)) * Decimal(str(dollar_bcv_tax)),
                     bcv_taxes_to_day=dollar_bcv_tax,
                     status=PaymentStatus.APPROVED,
-                    verified_at=timezone.now()
+                    verified_at=now
+                )
+
+                invoice = AtlasPlusInvoice.issue_for_payment(
+                    payment=atlas_payment,
+                    config=config,
+                    payment_method='Saldo en Billetera Digital CartMaker (UserWallet)',
+                    surplus_usd=Decimal('0.00'),
+                    period_start=now,
+                    period_end=atlas_plan.valid_until,
                 )
 
                 Notification.objects.create(
                     user=request.user,
                     section=NotificationSection.HOME,
                     title="¡Atlas Plus Activo!",
-                    body="Tu billetera cubrió la activación. Disfruta de tus 75 interacciones diarias.",
+                    body=(
+                        f"Tu billetera cubrió la activación. Disfruta de tus {config.atlas_plus_daily_limit} "
+                        f"interacciones diarias en Atlas Comprador y Atlas Negocios. "
+                        f"Factura digital N° <b>{invoice.invoice_number}</b> emitida."
+                    ),
                     category=NotificationCategory.PAYMENT_APPROVED,
-                    metadata={'payment_id': str(atlas_payment.id)}
+                    metadata={
+                        'payment_id': str(atlas_payment.id),
+                        'type': 'subscription_payment_checked',
+                        'objective': 'atlas',
+                        'status': 'approved',
+                        'invoice_id': str(invoice.id),
+                        'invoice_number': invoice.invoice_number,
+                        'invoice_url': invoice.invoice_url,
+                    }
                 )
 
                 user_id = request.user.id
-                transaction.on_commit(lambda: cache.delete(f"cartmaker:tenant:{user_id}:subscriptions"))
+                inv_id = str(invoice.id)
+
+                def _after_wallet_pay():
+                    cache.delete(f"cartmaker:tenant:{user_id}:subscriptions")
+                    from api.utils import send_atlas_invoice_email
+                    send_atlas_invoice_email(inv_id)
+
+                transaction.on_commit(_after_wallet_pay)
 
                 return Response({
                     'success': True,
-                    'message': '¡Atlas Plus activado usando tu saldo a favor!',
-                    'data': {'new_balance': float(wallet.balance), 'valid_until': atlas_plan.valid_until.strftime("%d/%m/%Y, %H:%M:%S")}
+                    'message': f'¡Atlas Plus activado usando tu saldo a favor! Factura digital {invoice.invoice_number} generada.',
+                    'data': {
+                        'new_balance': float(wallet.balance),
+                        'new_balance_formatted': format_ve_amount(wallet.balance, 2, "$", True),
+                        'valid_until': atlas_plan.valid_until.strftime("%d/%m/%Y, %H:%M:%S"),
+                        'payment_id': atlas_payment.id,
+                        'invoice_number': invoice.invoice_number,
+                        'control_number': invoice.control_number,
+                        'invoice_url': invoice.invoice_url,
+                        'invoice': invoice.get_json(),
+                        'quota_status': atlas_plan.get_quota_status(config=config),
+                    }
                 }, status=status.HTTP_200_OK)
 
         except UserWallet.DoesNotExist:

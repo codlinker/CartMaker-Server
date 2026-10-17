@@ -61,33 +61,67 @@ class NotificationManager:
     # =====================================================================
 
     @classmethod
-    def notify_payment_check(cls, user_id:int, subscription_name:str, approved:bool, payment_id:id, rejection_reason="", surplus_amount:float=0.0) -> None:
+    def notify_payment_check(
+        cls,
+        user_id: int,
+        subscription_name: str,
+        approved: bool,
+        payment_id,
+        rejection_reason: str = "",
+        surplus_amount: float = 0.0,
+        invoice_id: str = "",
+        invoice_number: str = "",
+        invoice_url: str = "",
+    ) -> None:
         """
         Notifica al usuario si su pago ha sido validado o no por un supervisor.
         """
         try:
-            # 💡 Calculamos el objetivo una sola vez arriba para usarlo en la metadata
             objective_type = 'atlas' if 'Atlas' in subscription_name else 'merchant'
             
             if approved:
                 title = '¡Pago Validado!'
-                if surplus_amount > 0:
-                    body = f'Hemos aprobado el pago por la suscripción <b>{subscription_name}</b> y acreditamos tu excedente de <b>{surplus_amount} Bs</b> a tu billetera. Ya puedes configurar tu comercio.'
+                invoice_suffix = (
+                    f" Tu factura digital N° <b>{invoice_number}</b> ya está emitida."
+                    if invoice_number else ""
+                )
+                if objective_type == 'atlas':
+                    if surplus_amount > 0:
+                        body = (
+                            f'Hemos aprobado tu pago por la suscripción <b>{subscription_name}</b> y acreditamos '
+                            f'tu excedente de <b>{surplus_amount} Bs.</b> a tu billetera.{invoice_suffix}'
+                        )
+                    else:
+                        body = (
+                            f'Hemos aprobado tu pago por la suscripción <b>{subscription_name}</b>. '
+                            f'Disfruta de tu límite ampliado en Atlas Comprador y Atlas Negocios.{invoice_suffix}'
+                        )
                 else:
-                    body = f'Hemos aprobado el pago por la suscripción <b>{subscription_name}</b>. Ya puedes registrar tus productos en CartMaker.'
-                    
+                    if surplus_amount > 0:
+                        body = f'Hemos aprobado el pago por la suscripción <b>{subscription_name}</b> y acreditamos tu excedente de <b>{surplus_amount} Bs</b> a tu billetera. Ya puedes configurar tu comercio.'
+                    else:
+                        body = f'Hemos aprobado el pago por la suscripción <b>{subscription_name}</b>. Ya puedes registrar tus productos en CartMaker.'
+
+                meta = {
+                    'payment_id': str(payment_id),
+                    'type': 'subscription_payment_checked',
+                    'objective': objective_type,
+                    'status': 'approved',
+                }
+                if invoice_id:
+                    meta['invoice_id'] = str(invoice_id)
+                if invoice_number:
+                    meta['invoice_number'] = str(invoice_number)
+                if invoice_url:
+                    meta['invoice_url'] = str(invoice_url)
+
                 notification = Notification.objects.create(
                     user_id=user_id,
                     section=NotificationSection.HOME,
                     title=title,
                     body=body,
                     category=NotificationCategory.PAYMENT_APPROVED,
-                    metadata={
-                        'payment_id': str(payment_id),
-                        'type': 'subscription_payment_checked', # 💡 NUEVO
-                        'objective': objective_type,            # 💡 NUEVO
-                        'status': 'approved'                    # 💡 NUEVO
-                    }
+                    metadata=meta,
                 )
             else:
                 title = 'Pago Rechazado'
@@ -101,19 +135,24 @@ class NotificationManager:
                     category=NotificationCategory.PAYMENT_REJECTED,
                     metadata={
                         'payment_id': str(payment_id),
-                        'type': 'subscription_payment_checked', # 💡 NUEVO
-                        'objective': objective_type,            # 💡 NUEVO
-                        'status': 'rejected'                    # 💡 NUEVO
+                        'type': 'subscription_payment_checked',
+                        'objective': objective_type,
+                        'status': 'rejected'
                     }
                 )
             
-            # El payload de Firebase (FCM) ahora enviará lo mismo
             data = {
                 'type': 'subscription_payment_checked',
                 'objective': objective_type,
                 'notification_id': f"{notification.id}",
-                'status': 'approved' if approved else 'rejected'
+                'status': 'approved' if approved else 'rejected',
             }
+            if invoice_id:
+                data['invoice_id'] = str(invoice_id)
+            if invoice_number:
+                data['invoice_number'] = str(invoice_number)
+            if invoice_url:
+                data['invoice_url'] = str(invoice_url)
         except Exception as e:
             print(f"Error armando las notificaciones: {e}")
             raise e

@@ -151,7 +151,51 @@ class PaymentAdmin(ModelAdmin):
 
 @admin.register(AtlasPlusPlan)
 class AtlasPlusPlanAdmin(ModelAdmin):
-    list_display = ("user", "valid_until")
+    list_display = ("user", "tier", "valid_until", "daily_usage_date", "daily_usage_count")
+    list_filter = ("tier",)
+    search_fields = ("user__email", "user__first_name", "user__last_name")
+
+
+@admin.register(AtlasPlusInvoice)
+class AtlasPlusInvoiceAdmin(ModelAdmin):
+    list_display = (
+        "invoice_number",
+        "control_number",
+        "buyer_name",
+        "buyer_document",
+        "total_bs",
+        "total_usd",
+        "issuer_rif",
+        "issued_at",
+        "open_invoice_button",
+    )
+    list_filter = ("issuer_type", "tax_regime", "buyer_is_company")
+    search_fields = (
+        "invoice_number",
+        "control_number",
+        "verification_code",
+        "buyer_name",
+        "buyer_document",
+        "buyer_email",
+        "payment_reference",
+    )
+    readonly_fields = (
+        "correlative_number",
+        "invoice_number",
+        "control_number",
+        "verification_code",
+        "issued_at",
+        "open_invoice_button",
+    )
+
+    @display(description="Documento PDF / Web")
+    def open_invoice_button(self, obj):
+        return mark_safe(
+            f'<a href="{obj.invoice_url}" target="_blank" rel="noopener" '
+            f'style="background:#6d28d9;color:#ffffff;padding:5px 12px;border-radius:6px;'
+            f'font-weight:700;font-size:12px;text-decoration:none;">🧾 Ver / Imprimir Factura</a>'
+        )
+
 
 @admin.register(AtlasThread)
 class AtlasThreadAdmin(ModelAdmin):
@@ -547,12 +591,78 @@ class CartMakerApiKeyAdmin(ModelAdmin):
             django_messages.warning(request, banner_html)
 
 
+@admin.register(SystemConfig)
+class SystemConfigAdmin(ModelAdmin):
+    list_display = (
+        "id",
+        "billing_issuer_type",
+        "billing_issuer_name",
+        "billing_issuer_rif",
+        "billing_issuer_cedula",
+        "atlas_plus_price_usd",
+        "atlas_free_daily_limit",
+        "atlas_plus_daily_limit",
+        "billing_next_correlative",
+    )
+    fieldsets = (
+        (
+            "Emisor Fiscal SENIAT (Dinámico: Persona Natural V- o Empresa J-)",
+            {
+                "fields": (
+                    "billing_issuer_type",
+                    "billing_issuer_name",
+                    "billing_trade_name",
+                    "billing_issuer_rif",
+                    "billing_issuer_cedula",
+                    "billing_fiscal_address",
+                    "billing_seniat_region",
+                    "billing_rif_certificate_number",
+                )
+            },
+        ),
+        (
+            "Régimen de IVA y Numeración de Factura Digital",
+            {
+                "fields": (
+                    "billing_tax_regime",
+                    "billing_iva_percentage",
+                    "billing_series_prefix",
+                    "billing_control_prefix",
+                    "billing_next_correlative",
+                    "billing_service_concept",
+                    "billing_legal_note",
+                )
+            },
+        ),
+        (
+            "Plan Atlas Plus y Presupuesto Diario Unificado (Comprador + Negocios)",
+            {
+                "fields": (
+                    "atlas_plus_price_usd",
+                    "atlas_plus_daily_limit",
+                    "atlas_free_daily_limit",
+                    "atlas_anonymous_daily_limit",
+                )
+            },
+        ),
+        (
+            "Requerimientos de Insignia Platinum",
+            {
+                "fields": (
+                    "platinum_min_rating_promedy_requirement",
+                    "platinum_min_sells_per_month_requirement",
+                )
+            },
+        ),
+    )
+
+
 others = [
     InventoryItemOffer, 
     InventoryItemTransaction, OrderCancellationTopic, 
     TokenWalletTransaction, ProductCalification, 
     MerchantCalification, SupportTicket, AtlasMessage, 
-    SystemConfig, ClientContactMethod
+    ClientContactMethod
 ]
 
 for m in others:

@@ -453,23 +453,31 @@ class SubscriptionsCacheAPI(APIView):
         cache_key = f"cartmaker:tenant:{request.user.id}:subscriptions"
         cached_data = cache.get(cache_key)
 
-        if cached_data is not None:
+        if cached_data is not None and "atlas_invoices" in cached_data:
+            try:
+                atlas_plan = getattr(request.user, 'atlas_plan', None) or AtlasPlusPlan.objects.filter(user=request.user).first()
+                if atlas_plan:
+                    cached_data["atlas_subscription"] = atlas_plan.get_json()
+            except Exception:
+                pass
             return Response(cached_data, status=status.HTTP_200_OK)
 
         # Cache Miss
+        config = SystemConfig.objects.order_by('-creation').first()
         user = User.objects.select_related(
             'subscription__plan',
             'atlas_plan',
             'wallet',
         ).prefetch_related(
             'subscription__payments__subscription__plan',
-            'atlas_plan__payments',
+            'atlas_plan__payments__invoice',
         ).get(id=request.user.id)
 
         merchant_subscription = user.subscription if hasattr(user, 'subscription') else None
         atlas_subscription = user.atlas_plan if hasattr(user, 'atlas_plan') else None
         
         subscriptions_payments = {'atlas': [], 'merchant': []}
+        atlas_invoices = []
         
         pending_rejection_notif = Notification.objects.filter(
             user=request.user,
@@ -480,13 +488,20 @@ class SubscriptionsCacheAPI(APIView):
         wallet_data = user.wallet.get_json()
 
         if atlas_subscription:
-            subscriptions_payments['atlas'] = [atlas_payment.get_json() for atlas_payment in atlas_subscription.payments.all()]
+            payments_qs = sorted(atlas_subscription.payments.all(), key=lambda p: p.creation, reverse=True)
+            for atlas_payment in payments_qs:
+                pay_json = atlas_payment.get_json()
+                subscriptions_payments['atlas'].append(pay_json)
+                if pay_json.get('invoice'):
+                    atlas_invoices.append(pay_json['invoice'])
         if merchant_subscription:
             subscriptions_payments['merchant'] = [merchant_payment.get_json() for merchant_payment in merchant_subscription.payments.all()]
         data = {
             "merchant_subscription": merchant_subscription.get_json() if merchant_subscription else None,
-            "atlas_subscription": atlas_subscription.get_json() if atlas_subscription else None,
+            "atlas_subscription": atlas_subscription.get_quota_status(config=config) if atlas_subscription else None,
             "subscriptions_payments": subscriptions_payments,
+            "atlas_invoices": atlas_invoices,
+            "billing_issuer": config.get_billing_issuer_json() if config else None,
             "wallet": wallet_data,
             "pending_payment_notification_retry_id": pending_rejection_notif.id if pending_rejection_notif else None,
         }
@@ -500,16 +515,19 @@ class SystemConfigCacheAPI(APIView):
 
     def get(self, request):
         """
-        Caché de configuracion.
+        Caché de configuracion global y emisor fiscal SENIAT dinámico.
         """
         config = SystemConfig.objects.latest('creation')
         data = {
             'atlas_plus_price_usd': float(config.atlas_plus_price_usd),
+            'atlas_plus_price_formatted': format_ve_amount(config.atlas_plus_price_usd, 2, "$", True),
             'atlas_plus_daily_limit': config.atlas_plus_daily_limit,
             'atlas_free_daily_limit': config.atlas_free_daily_limit,
             'atlas_anonymous_daily_limit': config.atlas_anonymous_daily_limit,
+            'shared_with_atlas_business': True,
             'platinum_min_rating_promedy_requirement': config.platinum_min_rating_promedy_requirement,
-            'platinum_min_sells_per_month_requirement': config.platinum_min_sells_per_month_requirement
+            'platinum_min_sells_per_month_requirement': config.platinum_min_sells_per_month_requirement,
+            'billing_issuer': config.get_billing_issuer_json(),
         }
         return Response(data, status=status.HTTP_200_OK)
 

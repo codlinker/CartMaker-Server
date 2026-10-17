@@ -24,8 +24,9 @@ urlpatterns = [
     path('support/ticket/<int:ticket_id>/close/', views.close_ticket, name='close_ticket'),
     path('support/close-ticket/<int:ticket_id>/', views.close_ticket, name='close_ticket_alias'),
     
-    # 💳 Zona de Pagos
+    # 💳 Zona de Pagos y Facturación Digital
     path('payments/dashboard/', views.payments_dashboard_view, name='web_payments_dashboard'),
+    path('facturas/atlas/<uuid:invoice_id>/', views.atlas_invoice_view, name='atlas_invoice_view'),
     
     # Utilidades
     path('favicon.ico', RedirectView.as_view(url=settings.STATIC_URL + 'img/favicon.ico')),

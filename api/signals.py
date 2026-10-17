@@ -237,19 +237,45 @@ def on_atlas_payment_status_changed(sender, instance: AtlasPlusPlanPayment, crea
                         "Cobro automático de suscripción Atlas Plus", 'substract'
                     )
 
+                    period_start = (
+                        atlas_plan.valid_until
+                        if (atlas_plan.tier == AtlasSubscriptionTier.PREMIUM and atlas_plan.valid_until and atlas_plan.valid_until > now)
+                        else now
+                    )
                     atlas_plan.tier = AtlasSubscriptionTier.PREMIUM
-                    atlas_plan.valid_until = now + relativedelta(months=1)
+                    atlas_plan.valid_until = period_start + relativedelta(months=1)
                     atlas_plan.save()
 
                     sender.objects.filter(pk=instance.pk).update(verified_at=now)
                     instance.verified_at = now
+                    locked_payment.verified_at = now
+
+                    invoice = AtlasPlusInvoice.issue_for_payment(
+                        payment=locked_payment,
+                        config=config,
+                        payment_method='Pago Móvil / Transferencia Bancaria',
+                        surplus_usd=excedente_usd,
+                        period_start=period_start,
+                        period_end=atlas_plan.valid_until,
+                    )
+                    inv_id = str(invoice.id)
+                    inv_num = invoice.invoice_number
+                    inv_url = invoice.invoice_url
 
                     def finalize_atlas_approval():
                         cache.delete(f"cartmaker:tenant:{user.id}:subscriptions")
                         NotificationManager.notify_payment_check(
-                            user_id=user.id, subscription_name="Atlas Plus AI",
-                            approved=True, payment_id=instance.pk, surplus_amount=float(excedente_bs)
+                            user_id=user.id,
+                            subscription_name="Atlas Plus AI",
+                            approved=True,
+                            payment_id=instance.pk,
+                            surplus_amount=float(excedente_bs),
+                            invoice_id=inv_id,
+                            invoice_number=inv_num,
+                            invoice_url=inv_url,
                         )
+                        from api.utils import send_atlas_invoice_email
+                        send_atlas_invoice_email(inv_id)
                     transaction.on_commit(finalize_atlas_approval)
                 else:
                     sender.objects.filter(pk=instance.pk).update(
@@ -455,3 +481,17 @@ def invalidate_subscriptions_cache(sender, instance, **kwargs):
                 cache.delete(f"cartmaker:tenant:{user_id}:company")
                 
         transaction.on_commit(clear_sub_and_company)
+
+
+@receiver(post_save, sender=AtlasPlusInvoice)
+def invalidate_subscriptions_on_invoice_created(sender, instance: AtlasPlusInvoice, **kwargs):
+    if instance.user_id:
+        transaction.on_commit(lambda: cache.delete(f"cartmaker:tenant:{instance.user_id}:subscriptions"))
+
+
+@receiver(post_save, sender=SystemConfig)
+@receiver(post_delete, sender=SystemConfig)
+@receiver(post_save, sender=CartMakerBankAccount)
+@receiver(post_delete, sender=CartMakerBankAccount)
+def invalidate_system_config_cache(sender, instance, **kwargs):
+    transaction.on_commit(lambda: cache.delete("cartmaker:global:system_config"))

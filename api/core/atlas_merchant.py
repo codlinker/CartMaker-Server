@@ -14,6 +14,7 @@ from openai import AsyncOpenAI
 
 from ..cos import storage_manager
 from ..models import (
+    AtlasPlusPlan,
     Company,
     CompanyStore,
     CompanyVideoStory,
@@ -28,6 +29,7 @@ from ..models import (
     OrderStatus,
     Product,
     ProductViewLog,
+    SystemConfig,
     TokenWallet,
     TokenWalletTransaction,
     TransactionType,
@@ -82,10 +84,11 @@ class AtlasMerchantCopilot:
       - Desglose comparativo sede por sede (`branches_summary`).
       - Ejecución de acciones comerciales en 1 toque identificadas con `store_id` y `store_name`.
 
-    NOTA DE MODELO DE NEGOCIO:
-    Actualmente es 100% gratuito para los comerciantes piloto (`ATLAS_MERCHANT_REQUIRE_SUBSCRIPTION = False`).
-    Cuando se reactive el cobro por planes de comerciante en el futuro, basta con activar el flag
-    `ATLAS_MERCHANT_REQUIRE_SUBSCRIPTION = True` en `settings.py`.
+    NOTA DE PRESUPUESTO DIARIO UNIFICADO:
+    Las consultas conversacionales y escaneos IA de Atlas para Negocios comparten el mismo
+    presupuesto diario (`AtlasPlusPlan`) que el modo comprador:
+      - Freemium: `atlas_free_daily_limit` (15 usos diarios compartidos).
+      - Atlas Plus Premium: `atlas_plus_daily_limit` (75 usos diarios compartidos).
     """
 
     THREAD_CACHE_TTL = 86400 * 14  # 14 días de memoria conversacional por compañía
@@ -146,37 +149,84 @@ class AtlasMerchantCopilot:
         }
 
     # =========================================================================
-    # 🔐 CONTROL DE ACCESO (PILOTO GRATUITO -> FUTURA SUSCRIPCIÓN)
+    # 🔐 CONTROL DE ACCESO Y PRESUPUESTO UNIFICADO CON ATLAS PLUS
     # =========================================================================
     @classmethod
-    def check_merchant_access(cls, company: Company) -> Dict[str, Any]:
+    def check_merchant_access(cls, company: Company, user: Any = None, config: Any = None) -> Dict[str, Any]:
         """
-        Verifica si la compañía tiene acceso a Atlas Business Copilot.
-        Por defecto durante la fase piloto retorna `allowed=True, is_pilot_free=True`.
+        Verifica el acceso y presupuesto diario disponible en Atlas Business Copilot,
+        unificado con el plan `AtlasPlusPlan` del usuario.
         """
-        require_sub = getattr(settings, "ATLAS_MERCHANT_REQUIRE_SUBSCRIPTION", False)
-        if not require_sub:
-            return {
-                "allowed": True,
-                "is_pilot_free": True,
-                "plan_name": "Piloto Fundadores (Acceso Total Gratuito)",
-                "reason": None,
+        target_user = user or getattr(company, "owner", None)
+        atlas_plan = getattr(target_user, "atlas_plan", None) or getattr(company, "atlas_plan", None)
+
+        if config is None:
+            try:
+                config = SystemConfig.objects.order_by("-creation").first()
+            except Exception:
+                config = None
+
+        if atlas_plan is None and target_user is not None and getattr(target_user, "_meta", None) is not None:
+            atlas_plan, _ = AtlasPlusPlan.objects.get_or_create(user=target_user)
+
+        if atlas_plan is not None and hasattr(atlas_plan, "get_quota_status"):
+            quota_status = atlas_plan.get_quota_status(config=config)
+        else:
+            free_limit = int(getattr(config, "atlas_free_daily_limit", 7) or 7)
+            plus_limit = int(getattr(config, "atlas_plus_daily_limit", 30) or 30)
+            quota_status = {
+                "is_premium": False,
+                "tier": "FREEMIUM",
+                "daily_limit": free_limit,
+                "used_today": 0,
+                "free_interactions_left": free_limit,
+                "requires_atlas_plus": False,
+                "atlas_plus_price_usd": 3.99,
+                "atlas_plus_price_formatted": "3,99$",
+                "valid_until": None,
             }
 
-        sub = getattr(company, "subscription", None)
-        if sub and sub.valid_until and sub.valid_until >= timezone.now():
-            return {
-                "allowed": True,
-                "is_pilot_free": False,
-                "plan_name": sub.plan.name if sub.plan else "Plan Activo",
-                "reason": None,
-            }
+        is_premium = quota_status["is_premium"]
+        free_left = quota_status["free_interactions_left"]
+        daily_limit = quota_status["daily_limit"]
+        used_today = quota_status["used_today"]
+        plus_limit = int(getattr(config, "atlas_plus_daily_limit", 30) or 30)
 
         return {
-            "allowed": False,
-            "is_pilot_free": False,
-            "plan_name": None,
-            "reason": "Atlas Business Copilot requiere una suscripción comercial activa.",
+            "allowed": True,
+            "has_quota_available": free_left > 0,
+            "is_pilot_free": not is_premium,
+            "is_premium": is_premium,
+            "tier": quota_status["tier"],
+            "plan_name": (
+                f"Atlas Plus Premium ({daily_limit} consultas/día)"
+                if is_premium
+                else f"Plan Gratuito ({daily_limit} consultas/día compartidas con Atlas)"
+            ),
+            "daily_limit": daily_limit,
+            "atlas_plus_daily_limit": plus_limit,
+            "used_today": used_today,
+            "free_interactions_left": free_left,
+            "requires_atlas_plus": quota_status["requires_atlas_plus"],
+            "atlas_plus_price_usd": quota_status["atlas_plus_price_usd"],
+            "atlas_plus_price_formatted": quota_status["atlas_plus_price_formatted"],
+            "valid_until": quota_status["valid_until"],
+            "reason": (
+                None
+                if free_left > 0
+                else (
+                    f"Has alcanzado tu límite diario de {daily_limit} consultas en Atlas. "
+                    + (
+                        "Tu presupuesto diario se renovará automáticamente mañana a las 12:00 AM."
+                        if is_premium
+                        else (
+                            f"Activa el Plan Atlas Plus por {quota_status['atlas_plus_price_formatted']}/mes "
+                            f"para aumentar tu presupuesto diario a {plus_limit} consultas compartidas entre "
+                            f"Atlas Comprador y Atlas Negocios."
+                        )
+                    )
+                )
+            ),
         }
 
     # =========================================================================
@@ -1166,7 +1216,7 @@ Estás hablando directamente con el dueño/operador de la compañía **{snapshot
             "branches": snapshot["branches_summary"],
             "action_cards": snapshot["recommended_actions"],
             "snapshot": snapshot,
-            "access_status": self.check_merchant_access(self.company),
+            "access_status": await sync_to_async(self.check_merchant_access)(self.company, user=self.user),
         }
 
     def _deterministic_fallback_response(self, user_prompt: str, snapshot: Dict[str, Any]) -> str:
