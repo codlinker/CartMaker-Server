@@ -1151,40 +1151,98 @@ class AtlasViewSet(viewsets.ViewSet):
             )
 
         force_refresh = str(request.query_params.get('refresh', 'false')).lower() == 'true'
+        store_id = request.query_params.get('store_id')
+        scope = request.query_params.get('scope') or ('single_branch' if store_id else 'all_branches')
+
         copilot = AtlasMerchantCopilot(company=company, user=request.user)
-        snapshot = copilot.build_company_intelligence_snapshot(force_refresh=force_refresh)
+        snapshot = copilot.build_company_intelligence_snapshot(
+            force_refresh=force_refresh,
+            store_id=store_id,
+            scope=scope,
+        )
         history = copilot.get_thread_history()
 
-        starter_prompts = [
-            {
-                "id": "mp_unmet_demand",
-                "label": "📍 ¿Qué buscan en mi zona?",
-                "prompt": "¿Qué productos están buscando los clientes cerca de mi tienda que nadie está vendiendo ahorita?",
-            },
-            {
-                "id": "mp_price_check",
-                "label": "⚖️ Analizar mis precios",
-                "prompt": "Compara mis precios contra los comercios de mi zona y dime dónde debo hacer ajustes u ofertas.",
-            },
-            {
-                "id": "mp_rescue_clients",
-                "label": "🎯 Rescatar carritos abandonados",
-                "prompt": "¿Cuántos clientes vieron mis productos o los dejaron en el carrito esta semana y cómo los cierro?",
-            },
-            {
-                "id": "mp_grow_sales",
-                "label": "🚀 Plan para duplicar ventas",
-                "prompt": "Dame un plan de acción concreto para subir mi conversión y fidelizar clientes con Tokens esta semana.",
-            },
-        ]
+        resolved_scope = snapshot.get('scope', 'all_branches')
+        selected_store_id = snapshot.get('selected_store_id')
+        selected_store_name = snapshot.get('selected_store_name', 'Todas las sucursales')
+        branches_summary = snapshot.get('branches_summary', [])
+        action_cards = snapshot.get('recommended_actions', [])
 
-        return Response({
+        if resolved_scope == 'single_branch' and selected_store_id:
+            starter_prompts = [
+                {
+                    "id": "mp_unmet_demand",
+                    "label": f"📍 ¿Qué buscan cerca de {selected_store_name}?",
+                    "prompt": f"¿Qué productos están buscando los clientes cerca de mi sucursal '{selected_store_name}' que nadie está vendiendo ahorita?",
+                },
+                {
+                    "id": "mp_price_check",
+                    "label": "⚖️ Analizar precios de esta sede",
+                    "prompt": f"Compara los precios de mi sucursal '{selected_store_name}' contra los comercios de mi zona y dime dónde debo hacer ajustes u ofertas.",
+                },
+                {
+                    "id": "mp_rescue_clients",
+                    "label": "🎯 Rescatar carritos de esta sede",
+                    "prompt": f"¿Cuántos clientes vieron mis productos o los dejaron en el carrito en '{selected_store_name}' esta semana y cómo los cierro?",
+                },
+                {
+                    "id": "mp_grow_sales",
+                    "label": "🚀 Plan para subir ventas aquí",
+                    "prompt": f"Dame un plan de acción concreto para subir mi conversión y rotación de inventario en '{selected_store_name}' esta semana.",
+                },
+            ]
+        else:
+            starter_prompts = [
+                {
+                    "id": "mp_unmet_demand",
+                    "label": "📍 ¿Qué buscan en mi zona?",
+                    "prompt": "¿Qué productos están buscando los clientes cerca de mis sucursales que nadie está vendiendo ahorita?",
+                },
+                {
+                    "id": "mp_branches_compare",
+                    "label": "🏢 Comparar mis sucursales",
+                    "prompt": "Compara el rendimiento, facturación, conversión e inventario entre todas mis sucursales y dime cuál requiere atención inmediata.",
+                },
+                {
+                    "id": "mp_rescue_clients",
+                    "label": "🎯 Rescatar carritos abandonados",
+                    "prompt": "¿Cuántos clientes vieron mis productos o los dejaron en el carrito esta semana en mis sucursales y cómo los cierro?",
+                },
+                {
+                    "id": "mp_price_check",
+                    "label": "⚖️ Analizar mis precios",
+                    "prompt": "Compara mis precios contra los comercios de mi zona y dime en qué sucursal debo hacer ajustes u ofertas.",
+                },
+            ]
+
+        payload = {
             'success': True,
+            'scope': resolved_scope,
+            'selected_store_id': selected_store_id,
+            'selected_store_name': selected_store_name,
             'access_status': access_status,
             'snapshot': snapshot,
+            'branches_summary': branches_summary,
+            'branches': branches_summary,
+            'action_cards': action_cards,
+            'recommended_actions': action_cards,
             'starter_prompts': starter_prompts,
             'thread_history': history,
-        }, status=status.HTTP_200_OK)
+        }
+        payload['data'] = {
+            'scope': resolved_scope,
+            'selected_store_id': selected_store_id,
+            'selected_store_name': selected_store_name,
+            'access_status': access_status,
+            'snapshot': snapshot,
+            'branches_summary': branches_summary,
+            'branches': branches_summary,
+            'action_cards': action_cards,
+            'recommended_actions': action_cards,
+            'starter_prompts': starter_prompts,
+            'thread_history': history,
+        }
+        return Response(payload, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['get'], url_path='merchant_briefing')
     def merchant_briefing(self, request):
@@ -1211,16 +1269,45 @@ class AtlasViewSet(viewsets.ViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        prompt = (request.data.get('prompt') or request.data.get('text') or '').strip()
+        prompt = (
+            request.data.get('message')
+            or request.data.get('prompt')
+            or request.data.get('text')
+            or ''
+        ).strip()
         reset_thread = bool(request.data.get('reset_thread', False))
+        store_id = request.data.get('store_id') or request.query_params.get('store_id')
+        scope = (
+            request.data.get('scope')
+            or request.query_params.get('scope')
+            or ('single_branch' if store_id else 'all_branches')
+        )
+
         if not prompt:
             return Response(
-                {'error': 'Debes enviar tu consulta en el campo "prompt" o "text".'},
+                {'error': 'Debes enviar tu consulta en el campo "message", "prompt" o "text".'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         copilot = AtlasMerchantCopilot(company=company, user=request.user)
-        result = async_to_sync(copilot.consult_async)(user_prompt=prompt, reset_thread=reset_thread)
+        result = async_to_sync(copilot.consult_async)(
+            user_prompt=prompt,
+            reset_thread=reset_thread,
+            store_id=store_id,
+            scope=scope,
+        )
+        result['data'] = {
+            'scope': result.get('scope'),
+            'selected_store_id': result.get('selected_store_id'),
+            'selected_store_name': result.get('selected_store_name'),
+            'response': result.get('response'),
+            'health_score': result.get('health_score'),
+            'kpis_highlighted': result.get('kpis_highlighted'),
+            'branches_summary': result.get('branches_summary'),
+            'action_cards': result.get('action_cards'),
+            'snapshot': result.get('snapshot'),
+            'access_status': result.get('access_status'),
+        }
         return Response(result, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['post'], url_path='merchant_consult')

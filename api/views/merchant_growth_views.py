@@ -594,8 +594,10 @@ class MerchantGrowthViewSet(viewsets.ViewSet):
         if not company:
             return Response({"error": "Compañía no encontrada."}, status=status.HTTP_404_NOT_FOUND)
 
+        store_id = request.query_params.get("store_id")
+        scope = request.query_params.get("scope") or ("single_branch" if store_id else "all_branches")
         copilot = AtlasMerchantCopilot(company=company, user=request.user)
-        snapshot = copilot.build_company_intelligence_snapshot()
+        snapshot = copilot.build_company_intelligence_snapshot(store_id=store_id, scope=scope)
         opportunities = snapshot.get("rescue_opportunities", [])
 
         for opp in opportunities:
@@ -603,8 +605,12 @@ class MerchantGrowthViewSet(viewsets.ViewSet):
 
         return Response({
             "company_id": str(company.id),
+            "scope": snapshot.get("scope"),
+            "selected_store_id": snapshot.get("selected_store_id"),
+            "selected_store_name": snapshot.get("selected_store_name"),
             "total_undecided_buyers": sum(x["undecided_buyers_count"] for x in opportunities),
             "opportunities": opportunities,
+            "branches_summary": snapshot.get("branches_summary", []),
         }, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["get"], url_path="rescue-opportunities")
@@ -647,13 +653,19 @@ class MerchantGrowthViewSet(viewsets.ViewSet):
         if not company:
             return Response({"error": "Compañía no encontrada."}, status=status.HTTP_404_NOT_FOUND)
 
+        store_id = request.query_params.get("store_id")
+        scope = request.query_params.get("scope") or ("single_branch" if store_id else "all_branches")
         copilot = AtlasMerchantCopilot(company=company, user=request.user)
-        snapshot = copilot.build_company_intelligence_snapshot()
+        snapshot = copilot.build_company_intelligence_snapshot(store_id=store_id, scope=scope)
 
         return Response({
             "company_id": str(company.id),
+            "scope": snapshot.get("scope"),
+            "selected_store_id": snapshot.get("selected_store_id"),
+            "selected_store_name": snapshot.get("selected_store_name"),
             "primary_zone": snapshot["company"]["primary_zone"],
             "health_score": snapshot["health_score"],
+            "branches_summary": snapshot.get("branches_summary", []),
             "unmet_demand_radar": snapshot["unmet_demand_radar"],
             "price_benchmarks": snapshot["price_benchmarks"],
             "customer_lock_in": snapshot["customer_lock_in"],
@@ -664,6 +676,7 @@ class MerchantGrowthViewSet(viewsets.ViewSet):
                 ),
             },
             "recommended_actions": snapshot["recommended_actions"],
+            "action_cards": snapshot["recommended_actions"],
         }, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["get"], url_path="zone-fomo-radar")
