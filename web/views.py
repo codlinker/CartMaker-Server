@@ -303,10 +303,10 @@ def payments_dashboard_view(request):
 
     approved_atlas_qs = AtlasPlusPlanPayment.objects.filter(status=PaymentStatus.APPROVED)
     approved_atlas_count = approved_atlas_qs.count()
-    approved_atlas_bs_sum = float(approved_atlas_qs.aggregate(total=Coalesce(Sum('amount'), 0.0))['total'] or 0.0)
+    approved_atlas_bs_sum = float(approved_atlas_qs.aggregate(total=Sum('amount'))['total'] or 0.0)
 
     invoices_count = AtlasPlusInvoice.objects.count()
-    invoices_usd_sum = float(AtlasPlusInvoice.objects.aggregate(total=Coalesce(Sum('total_usd'), 0.0))['total'] or 0.0)
+    invoices_usd_sum = float(AtlasPlusInvoice.objects.aggregate(total=Sum('total_usd'))['total'] or 0.0)
     if invoices_usd_sum <= 0.0 and approved_atlas_count > 0:
         invoices_usd_sum = round(approved_atlas_count * atlas_target_usd, 2)
 
