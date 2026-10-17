@@ -68,10 +68,13 @@ def on_payment_created(sender, instance: MerchantPlanPayment, created: bool, **k
                 rejection_msg = instance.get_rejection_reason_display()
 
                 def notify_merchant_rejected():
-                    NotificationManager.notify_payment_check(
-                        merchant.id, plan_name, False, instance.pk,
-                        rejection_reason=rejection_msg
-                    )
+                    try:
+                        NotificationManager.notify_payment_check(
+                            merchant.id, plan_name, False, instance.pk,
+                            rejection_reason=rejection_msg
+                        )
+                    except Exception as e:
+                        print(f"[Signals] Error enviando push notify_merchant_rejected: {e}")
                 transaction.on_commit(notify_merchant_rejected)
 
             # --- CASO APROBADO (Con Prorrateo) ---
@@ -133,13 +136,16 @@ def on_payment_created(sender, instance: MerchantPlanPayment, created: bool, **k
                     instance.verified_at = now
 
                     def notify_merchant_approved():
-                        NotificationManager.notify_payment_check(
-                            user_id=merchant.id,
-                            subscription_name=plan_name,
-                            approved=True,
-                            payment_id=instance.pk,
-                            surplus_amount=float(excedente_bs)
-                        )
+                        try:
+                            NotificationManager.notify_payment_check(
+                                user_id=merchant.id,
+                                subscription_name=plan_name,
+                                approved=True,
+                                payment_id=instance.pk,
+                                surplus_amount=float(excedente_bs)
+                            )
+                        except Exception as e:
+                            print(f"[Signals] Error enviando push notify_merchant_approved: {e}")
                     transaction.on_commit(notify_merchant_approved)
                 else:
                     # 4. SI NO ALCANZA EL DINERO A PESAR DEL REINTEGRO
@@ -155,10 +161,13 @@ def on_payment_created(sender, instance: MerchantPlanPayment, created: bool, **k
                     instance.verified_at = now
 
                     def notify_insufficient_funds():
-                        NotificationManager.notify_payment_check(
-                            merchant.id, plan_name, False, instance.pk,
-                            rejection_reason=f"Pago recibido, pero el monto total fue insuficiente para el nuevo plan. {round(float(monto_pagado_usd), 2)}$ fueron acreditados a tu saldo a favor."
-                        )
+                        try:
+                            NotificationManager.notify_payment_check(
+                                merchant.id, plan_name, False, instance.pk,
+                                rejection_reason=f"Pago recibido, pero el monto total fue insuficiente para el nuevo plan. {round(float(monto_pagado_usd), 2)}$ fueron acreditados a tu saldo a favor."
+                            )
+                        except Exception as e:
+                            print(f"[Signals] Error enviando push notify_insufficient_funds: {e}")
                     transaction.on_commit(notify_insufficient_funds)
     except sender.DoesNotExist:
         pass
@@ -208,11 +217,14 @@ def on_atlas_payment_status_changed(sender, instance: AtlasPlusPlanPayment, crea
                 rejection_msg = instance.get_rejection_reason_display()
 
                 def notify_atlas_rejected():
-                    NotificationManager.notify_payment_check(
-                        user_id=user.id, subscription_name="Atlas Plus AI",
-                        approved=False, payment_id=instance.pk,
-                        rejection_reason=rejection_msg
-                    )
+                    try:
+                        NotificationManager.notify_payment_check(
+                            user_id=user.id, subscription_name="Atlas Plus AI",
+                            approved=False, payment_id=instance.pk,
+                            rejection_reason=rejection_msg
+                        )
+                    except Exception as e:
+                        print(f"[Signals] Error enviando push notify_atlas_rejected: {e}")
                 transaction.on_commit(notify_atlas_rejected)
 
             # --- CASO APROBADO ---
@@ -263,19 +275,28 @@ def on_atlas_payment_status_changed(sender, instance: AtlasPlusPlanPayment, crea
                     inv_url = invoice.invoice_url
 
                     def finalize_atlas_approval():
-                        cache.delete(f"cartmaker:tenant:{user.id}:subscriptions")
-                        NotificationManager.notify_payment_check(
-                            user_id=user.id,
-                            subscription_name="Atlas Plus AI",
-                            approved=True,
-                            payment_id=instance.pk,
-                            surplus_amount=float(excedente_bs),
-                            invoice_id=inv_id,
-                            invoice_number=inv_num,
-                            invoice_url=inv_url,
-                        )
-                        from api.utils import send_atlas_invoice_email
-                        send_atlas_invoice_email(inv_id)
+                        try:
+                            cache.delete(f"cartmaker:tenant:{user.id}:subscriptions")
+                        except Exception:
+                            pass
+                        try:
+                            NotificationManager.notify_payment_check(
+                                user_id=user.id,
+                                subscription_name="Atlas Plus AI",
+                                approved=True,
+                                payment_id=instance.pk,
+                                surplus_amount=float(excedente_bs),
+                                invoice_id=inv_id,
+                                invoice_number=inv_num,
+                                invoice_url=inv_url,
+                            )
+                        except Exception as e:
+                            print(f"[Signals] Error enviando push finalize_atlas_approval: {e}")
+                        try:
+                            from api.utils import send_atlas_invoice_email
+                            send_atlas_invoice_email(inv_id)
+                        except Exception as e:
+                            print(f"[Signals] Error enviando email de factura Atlas Plus: {e}")
                     transaction.on_commit(finalize_atlas_approval)
                 else:
                     sender.objects.filter(pk=instance.pk).update(
@@ -290,11 +311,14 @@ def on_atlas_payment_status_changed(sender, instance: AtlasPlusPlanPayment, crea
                     instance.verified_at = now
 
                     def notify_atlas_insufficient():
-                        NotificationManager.notify_payment_check(
-                            user_id=user.id, subscription_name="Atlas Plus AI",
-                            approved=False, payment_id=instance.pk,
-                            rejection_reason=f"Monto insuficiente para Atlas Plus. Los {round(float(monto_pagado_usd), 2)}$ se guardaron en tu monedero."
-                        )
+                        try:
+                            NotificationManager.notify_payment_check(
+                                user_id=user.id, subscription_name="Atlas Plus AI",
+                                approved=False, payment_id=instance.pk,
+                                rejection_reason=f"Monto insuficiente para Atlas Plus. Los {round(float(monto_pagado_usd), 2)}$ se guardaron en tu monedero."
+                            )
+                        except Exception as e:
+                            print(f"[Signals] Error enviando push notify_atlas_insufficient: {e}")
                     transaction.on_commit(notify_atlas_insufficient)
     except sender.DoesNotExist:
         pass

@@ -184,13 +184,13 @@
                             {% endif %}
                         </td>
                         <td>
-                            {% if payment.status == 1 and payment.invoice %}
+                            {% if payment.status == 1 and payment.invoice_obj %}
                             <div class="invoice-actions-group">
-                                <a href="{{ payment.invoice.invoice_url }}" target="_blank" rel="noopener" class="btn-invoice-pill" title="Ver Factura Digital SENIAT">
+                                <a href="{{ payment.invoice_obj.invoice_url }}" target="_blank" rel="noopener" class="btn-invoice-pill" title="Ver Factura Digital SENIAT">
                                     <span class="material-symbols-rounded">receipt_long</span>
-                                    <span>{{ payment.invoice.invoice_number }}</span>
+                                    <span>{{ payment.invoice_obj.invoice_number }}</span>
                                 </a>
-                                <a href="{{ payment.invoice.invoice_url }}&print=1" target="_blank" rel="noopener" class="btn-invoice-print" title="Imprimir / Guardar PDF">
+                                <a href="{{ payment.invoice_obj.invoice_url }}&print=1" target="_blank" rel="noopener" class="btn-invoice-print" title="Imprimir / Guardar PDF">
                                     <span class="material-symbols-rounded">print</span>
                                 </a>
                             </div>

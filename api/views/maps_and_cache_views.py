@@ -485,7 +485,8 @@ class SubscriptionsCacheAPI(APIView):
             is_read=False
         ).first()
 
-        wallet_data = user.wallet.get_json()
+        wallet_obj = user.wallet if hasattr(user, 'wallet') else UserWallet.objects.get_or_create(user=user)[0]
+        wallet_data = wallet_obj.get_json()
 
         if atlas_subscription:
             payments_qs = sorted(atlas_subscription.payments.all(), key=lambda p: p.creation, reverse=True)

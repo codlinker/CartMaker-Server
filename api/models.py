@@ -2068,7 +2068,15 @@ class AtlasPlusPlanPayment(models.Model):
     payment_proof_preview.fget.short_description = "Comprobante de Pago"
 
     def get_json(self) -> dict:
-        invoice_obj = getattr(self, 'invoice', None)
+        try:
+            invoice_obj = getattr(self, 'invoice', None)
+        except Exception:
+            invoice_obj = None
+        if invoice_obj is None and self.status == PaymentStatus.APPROVED:
+            try:
+                invoice_obj = AtlasPlusInvoice.issue_for_payment(payment=self)
+            except Exception:
+                invoice_obj = None
         invoice_data = invoice_obj.get_json() if invoice_obj else None
         return {
             'id': self.id,
@@ -2232,9 +2240,17 @@ class AtlasPlusInvoice(models.Model):
             user = payment.plan.user
             company = Company.objects.filter(owner=user).first()
             buyer_is_company = False
-            if company and company.rif and company.name:
-                buyer_name = company.name.strip().upper()
-                buyer_document = company.rif.strip().upper()
+            company_rif = (getattr(company, 'rif_number', None) or '').strip() if company else ''
+            company_legal_name = (
+                (getattr(company, 'razon_social', None) or getattr(company, 'name', None) or '').strip()
+                if company else ''
+            )
+            if company and company_rif and company_legal_name:
+                buyer_name = company_legal_name.upper()
+                if company_rif[0].upper() in ('J', 'G', 'V', 'E', 'C', 'P'):
+                    buyer_document = company_rif.upper()
+                else:
+                    buyer_document = f"J-{company_rif.upper()}"
                 buyer_is_company = True
             else:
                 full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
@@ -2251,12 +2267,14 @@ class AtlasPlusInvoice(models.Model):
 
             buyer_address = "República Bolivariana de Venezuela"
             first_loc = ClientLocation.objects.filter(user=user).first()
-            if first_loc and first_loc.name:
-                buyer_address = first_loc.name
+            if first_loc and (getattr(first_loc, 'description', None) or getattr(first_loc, 'name', None)):
+                buyer_address = (first_loc.description or first_loc.name).strip()
             elif company:
                 main_store = CompanyStore.objects.filter(company=company).select_related('location').first()
-                if main_store and getattr(main_store, 'location', None) and main_store.location.name:
-                    buyer_address = main_store.location.name
+                if main_store and getattr(main_store, 'location', None):
+                    loc_text = getattr(main_store.location, 'description', None) or getattr(main_store.location, 'name', None)
+                    if loc_text:
+                        buyer_address = loc_text.strip()
 
             bcv_rate = Decimal(str(payment.bcv_taxes_to_day or '1.0000'))
             if bcv_rate <= Decimal('0'):
@@ -2352,6 +2370,8 @@ class AtlasPlusInvoice(models.Model):
 
     def get_json(self) -> dict:
         issued_local = timezone.localtime(self.issued_at) if self.issued_at else timezone.localtime(timezone.now())
+        sys_cfg = SystemConfig.objects.only('atlas_plus_daily_limit').order_by('-creation').first()
+        daily_limit = int(sys_cfg.atlas_plus_daily_limit) if sys_cfg and sys_cfg.atlas_plus_daily_limit else 30
         return {
             'id': str(self.id),
             'payment_id': self.payment_id,
@@ -2359,6 +2379,7 @@ class AtlasPlusInvoice(models.Model):
             'invoice_number': self.invoice_number,
             'control_number': self.control_number,
             'verification_code': self.verification_code,
+            'atlas_plus_daily_limit': daily_limit,
             'issued_at': issued_local.strftime("%d/%m/%Y %H:%M:%S"),
             'issued_date': issued_local.strftime("%d/%m/%Y"),
             'issued_time': issued_local.strftime("%I:%M:%S %p"),

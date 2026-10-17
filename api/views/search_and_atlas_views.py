@@ -391,7 +391,7 @@ class AtlasViewSet(viewsets.ViewSet):
         return [IsAuthenticated()]
 
     # 💡 LÍMITE DIARIO CONFIGURABLE
-    DAILY_FREE_LIMIT = 15
+    DAILY_FREE_LIMIT = 7
 
     def _client_ip(self, request) -> str:
         cf_ip = request.META.get('HTTP_CF_CONNECTING_IP')
@@ -414,7 +414,7 @@ class AtlasViewSet(viewsets.ViewSet):
         try:
             return SystemConfig.objects.latest('creation').atlas_anonymous_daily_limit
         except SystemConfig.DoesNotExist:
-            return 5
+            return 3
 
     def _guest_token_from_request(self, request) -> str:
         return (request.META.get(self.GUEST_HEADER) or '').strip()
@@ -481,10 +481,10 @@ class AtlasViewSet(viewsets.ViewSet):
         """Devuelve el límite diario unificado según el Tier del usuario en AtlasPlusPlan."""
         try:
             config = SystemConfig.objects.latest('creation')
-            plus_limit = int(config.atlas_plus_daily_limit or 75)
+            plus_limit = int(config.atlas_plus_daily_limit or 30)
             free_limit = int(config.atlas_free_daily_limit or self.DAILY_FREE_LIMIT)
         except SystemConfig.DoesNotExist:
-            plus_limit = 75
+            plus_limit = 30
             free_limit = self.DAILY_FREE_LIMIT
         plan = self._get_user_plan(user)
         if plan and plan.is_active_premium():
@@ -593,7 +593,7 @@ class AtlasViewSet(viewsets.ViewSet):
         quota_status = plan.get_quota_status(config=config)
         is_premium = quota_status['is_premium']
         daily_limit = quota_status['daily_limit']
-        plus_limit = int(getattr(config, 'atlas_plus_daily_limit', 75) or 75)
+        plus_limit = int(getattr(config, 'atlas_plus_daily_limit', 30) or 30)
         price_fmt = quota_status['atlas_plus_price_formatted']
 
         if is_premium:
@@ -826,8 +826,8 @@ class AtlasViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['get'])
     def current_thread(self, request):
         if request.user.is_authenticated:
-            plan = request.user.atlas_plan
-            is_premium = plan.tier == AtlasSubscriptionTier.PREMIUM and plan.valid_until and plan.valid_until >= timezone.now()
+            plan = self._get_user_plan(request.user)
+            is_premium = plan.is_active_premium()
             free_left = self._get_free_interactions_left(request.user)
             latest_thread = AtlasThread.objects.filter(plan=plan).order_by('-id').first()
             nombre_usuario = request.user.first_name.strip() if request.user.first_name else ""
@@ -852,7 +852,7 @@ class AtlasViewSet(viewsets.ViewSet):
 
         if not latest_thread:
             if request.user.is_authenticated:
-                latest_thread = AtlasThread.objects.create(plan=request.user.atlas_plan)
+                latest_thread = AtlasThread.objects.create(plan=plan)
             else:
                 latest_thread = AtlasThread.objects.create(guest_key=token, plan=None)
             
@@ -1526,7 +1526,10 @@ class AtlasViewSet(viewsets.ViewSet):
         )
         invoices_list = []
         for payment in approved_payments:
-            inv = getattr(payment, 'invoice', None)
+            try:
+                inv = getattr(payment, 'invoice', None)
+            except Exception:
+                inv = None
             if inv is None:
                 inv = AtlasPlusInvoice.issue_for_payment(payment=payment, config=config)
             invoices_list.append(inv.get_json())
@@ -1560,7 +1563,11 @@ class AtlasViewSet(viewsets.ViewSet):
                     {'error': 'La factura digital solo se emite para pagos verificados y aprobados.'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            invoice = getattr(payment, 'invoice', None) or AtlasPlusInvoice.issue_for_payment(payment=payment, config=config)
+            try:
+                existing_inv = getattr(payment, 'invoice', None)
+            except Exception:
+                existing_inv = None
+            invoice = existing_inv or AtlasPlusInvoice.issue_for_payment(payment=payment, config=config)
         else:
             inv_qs = AtlasPlusInvoice.objects.select_related('payment', 'user').filter(pk=lookup_id)
             if not (request.user.is_staff or request.user.is_superuser):

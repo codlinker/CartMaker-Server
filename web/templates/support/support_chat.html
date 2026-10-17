@@ -40,7 +40,7 @@
                 </div>
 
                 <div class="dossier-badges-row">
-                    {% if ticket.client.id_verification_status == 2 %}
+                    {% if ticket.client.cedula_verified %}
                         <span class="dossier-pill pill-emerald">
                             <span class="material-symbols-rounded">verified_user</span> KYC Verificado
                         </span>
@@ -50,7 +50,7 @@
                         </span>
                     {% endif %}
 
-                    {% if client_atlas and client_atlas.is_active %}
+                    {% if client_atlas and client_atlas.is_active_premium %}
                         <span class="dossier-pill pill-purple">
                             <span class="material-symbols-rounded">auto_awesome</span> Atlas Plus Activo
                         </span>
@@ -80,7 +80,7 @@
                         <span class="material-symbols-rounded">storefront</span>
                         <div>
                             <strong>{{ client_company.name }}</strong>
-                            <span>RIF: {{ client_company.rif|default:"N/A" }}</span>
+                            <span>RIF: {{ client_company.rif_number|default:"Emprendedor (Sin RIF)" }}</span>
                         </div>
                     </div>
                     <a href="/tienda/{{ client_company.id }}/" target="_blank" rel="noopener" class="merchant-storefront-link" title="Ver Vitrina Pública">

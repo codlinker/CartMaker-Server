@@ -54,7 +54,8 @@ class NotificationManager:
                 cls._clean_dead_tokens(failed_tokens)
         except FirebaseError as e:
             print(f"Error de Firebase: {e}")
-            raise e
+        except Exception as e:
+            print(f"Error inesperado enviando FCM multicast: {e}")
 
     # =====================================================================
     # MÉTODOS PÚBLICOS (Los que llamarás desde tus vistas o señales)
@@ -155,13 +156,13 @@ class NotificationManager:
                 data['invoice_url'] = str(invoice_url)
         except Exception as e:
             print(f"Error armando las notificaciones: {e}")
-            raise e
+            return
             
         try:
             user = User.objects.prefetch_related('fcm_tokens').get(id=user_id)
         except User.DoesNotExist:
             print("Error en Notification Manager -> No se encontro el usuario con id: ", user_id)
-            raise
+            return
             
         cls._send_multicast(user=user, title=title, body=body.replace('<b>', '').replace('</b>', ''), data_payload=data)
 

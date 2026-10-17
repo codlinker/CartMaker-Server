@@ -715,7 +715,7 @@
               <td>
                 <div class="item-title">{{ item.description }}</div>
                 <div class="item-sub">
-                  Presupuesto diario unificado (75 consultas/día compartidas entre Atlas Comprador y Atlas Negocios).
+                  Presupuesto diario unificado ({{ inv.atlas_plus_daily_limit|default:30 }} consultas/día compartidas entre Atlas Comprador y Atlas Negocios).
                 </div>
               </td>
               <td>

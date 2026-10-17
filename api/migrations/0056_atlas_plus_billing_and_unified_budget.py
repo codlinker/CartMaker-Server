@@ -66,9 +66,11 @@ def seed_atreyus_fiscal_config_and_backfill_invoices(apps, schema_editor):
         user = payment.plan.user
         company = Company.objects.filter(owner_id=user.id).first()
         buyer_is_company = False
-        if company and getattr(company, "rif", None) and getattr(company, "name", None):
-            buyer_name = company.name.strip().upper()
-            buyer_document = company.rif.strip().upper()
+        company_rif = (getattr(company, "rif_number", None) or "").strip() if company else ""
+        company_legal = (getattr(company, "razon_social", None) or getattr(company, "name", None) or "").strip() if company else ""
+        if company and company_rif and company_legal:
+            buyer_name = company_legal.upper()
+            buyer_document = company_rif.upper()
             buyer_is_company = True
         else:
             full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()

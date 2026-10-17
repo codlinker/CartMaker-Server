@@ -158,7 +158,11 @@ class AtlasMerchantCopilot:
         unificado con el plan `AtlasPlusPlan` del usuario.
         """
         target_user = user or getattr(company, "owner", None)
-        atlas_plan = getattr(target_user, "atlas_plan", None) or getattr(company, "atlas_plan", None)
+        atlas_plan = None
+        try:
+            atlas_plan = getattr(target_user, "atlas_plan", None) or getattr(company, "atlas_plan", None)
+        except Exception:
+            atlas_plan = None
 
         if config is None:
             try:

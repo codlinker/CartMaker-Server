@@ -74,6 +74,19 @@ def _enrich_payment_for_console(payment, payment_type: str, default_target_usd: 
     payment.diff_usd_ve = format_ve_currency(abs(diff_usd), include_dollar_suffix=True)
     raw_proof = getattr(payment, 'payment_proof_url', None)
     payment.proof_full_url = storage_manager.get_url(raw_proof) if raw_proof else None
+    payment.invoice_obj = None
+    if payment_type == 'atlas' and getattr(payment, 'status', 0) == PaymentStatus.APPROVED:
+        try:
+            inv = getattr(payment, 'invoice', None)
+        except Exception:
+            inv = None
+        if inv is None:
+            try:
+                inv = AtlasPlusInvoice.issue_for_payment(payment=payment)
+            except Exception as e:
+                print(f"[PaymentsConsole] Aviso auto-emitiendo factura para pago #{payment.id}: {e}")
+                inv = None
+        payment.invoice_obj = inv
     return payment
 
 
@@ -1132,6 +1145,8 @@ def atlas_invoice_view(request, invoice_id):
             or request.user.is_staff
             or request.user.is_superuser
             or getattr(request.user, 'user_type', None) in (2, 3)
+            or getattr(request.user, 'can_check_payments', False)
+            or getattr(request.user, 'can_check_support', False)
         )
     )
 
