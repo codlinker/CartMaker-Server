@@ -8,7 +8,7 @@
                 </span>
                 <div>
                     <h3>Cola de Verificación · Suscripciones Atlas Plus AI</h3>
-                    <p class="card-panel-subtitle">Valida el número de referencia en tu banco antes de aprobar. Al aprobar, se activa el plan y se emite la Factura Digital SENIAT.</p>
+                    <p class="card-panel-subtitle">Valida el número de referencia en tu banco antes de aprobar. Al aprobar, se activa el plan y se emite el Comprobante Digital (o Factura SENIAT según configuración).</p>
                 </div>
             </div>
             <span class="queue-pill-counter">{{ atlas_pending|length }} pendientes</span>
@@ -23,7 +23,7 @@
                         <th>Nº Referencia</th>
                         <th>Monto Reportado (Bs.)</th>
                         <th>Conversión &amp; Suficiencia USD</th>
-                        <th>Comprobante</th>
+                        <th>Captura Bancaria</th>
                         <th>Acciones de Control</th>
                     </tr>
                 </thead>
@@ -112,7 +112,7 @@
         </div>
     </div>
 
-    <!-- TABLA 2: HISTORIAL RECIENTE Y FACTURAS DIGITALES EMITIDAS -->
+    <!-- TABLA 2: HISTORIAL RECIENTE, COMPROBANTES DIGITALES Y FACTURAS SENIAT -->
     <div class="premium-panel-card historic-panel">
         <div class="card-panel-header">
             <div class="card-panel-title">
@@ -120,8 +120,8 @@
                     <span class="material-symbols-rounded">history</span>
                 </span>
                 <div>
-                    <h3>Historial Reciente &amp; Facturación SENIAT (Atlas Plus)</h3>
-                    <p class="card-panel-subtitle">Registro auditado de los últimos pagos conciliados y sus facturas digitales asociadas.</p>
+                    <h3>Historial Reciente · Comprobantes &amp; Facturación SENIAT (Atlas Plus)</h3>
+                    <p class="card-panel-subtitle">Registro auditado de los últimos pagos conciliados, comprobantes administrativos y facturas fiscales homologadas.</p>
                 </div>
             </div>
 
@@ -140,6 +140,7 @@
                         <th>Referencia</th>
                         <th>Monto Conciliado</th>
                         <th>Dictamen</th>
+                        <th>Comprobante Digital</th>
                         <th>Factura Digital SENIAT</th>
                         <th>Fecha Cierre</th>
                     </tr>
@@ -183,10 +184,11 @@
                             </div>
                             {% endif %}
                         </td>
+                        <!-- COLUMNA 1: COMPROBANTE DIGITAL DE PAGO (Modo actual no homologado) -->
                         <td>
-                            {% if payment.status == 1 and payment.invoice_obj %}
+                            {% if payment.status == 1 and payment.invoice_obj and not payment.invoice_obj.is_seniat_homologated %}
                             <div class="invoice-actions-group">
-                                <a href="{{ payment.invoice_obj.invoice_url }}" target="_blank" rel="noopener" class="btn-invoice-pill" title="Ver Factura Digital SENIAT">
+                                <a href="{{ payment.invoice_obj.invoice_url }}" target="_blank" rel="noopener" class="btn-invoice-pill" title="Ver Comprobante Digital de Pago">
                                     <span class="material-symbols-rounded">receipt_long</span>
                                     <span>{{ payment.invoice_obj.invoice_number }}</span>
                                 </a>
@@ -198,11 +200,27 @@
                             <span class="null-indicator">—</span>
                             {% endif %}
                         </td>
+                        <!-- COLUMNA 2: FACTURA DIGITAL SENIAT (Solo activa al configurar Imprenta Digital Homologada) -->
+                        <td>
+                            {% if payment.status == 1 and payment.invoice_obj and payment.invoice_obj.is_seniat_homologated %}
+                            <div class="invoice-actions-group">
+                                <a href="{{ payment.invoice_obj.invoice_url }}" target="_blank" rel="noopener" class="btn-invoice-pill" title="Ver Factura Digital SENIAT">
+                                    <span class="material-symbols-rounded">verified</span>
+                                    <span>{{ payment.invoice_obj.invoice_number }}</span>
+                                </a>
+                                <a href="{{ payment.invoice_obj.invoice_url }}&print=1" target="_blank" rel="noopener" class="btn-invoice-print" title="Imprimir / Guardar PDF">
+                                    <span class="material-symbols-rounded">print</span>
+                                </a>
+                            </div>
+                            {% else %}
+                            <span class="null-indicator" title="Sin emisión fiscal SENIAT (Configuración actual: Comprobante Digital)">—</span>
+                            {% endif %}
+                        </td>
                         <td class="id-sub-text">{{ payment.verified_at|date:"d/m/Y h:i A"|default:"—" }}</td>
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="6" class="empty-table-notice">
+                        <td colspan="7" class="empty-table-notice">
                             Aún no existen operaciones registradas en el historial de Atlas Plus.
                         </td>
                     </tr>

@@ -69,9 +69,9 @@
                 <span class="material-symbols-rounded">description</span>
             </div>
             <div class="fin-kpi-body">
-                <span class="fin-kpi-label">Facturas SENIAT Emitidas</span>
+                <span class="fin-kpi-label">Comprobantes &amp; Facturas</span>
                 <div class="fin-kpi-value">{{ kpis.invoices_count }}</div>
-                <span class="fin-kpi-sub">Serie correlativa automática</span>
+                <span class="fin-kpi-sub">{{ kpis.comprobantes_count|default:kpis.invoices_count }} Comprobantes · {{ kpis.seniat_invoices_count|default:0 }} SENIAT</span>
             </div>
         </div>
 

@@ -267,10 +267,12 @@ def payments_dashboard_view(request):
                 if payment_type == 'atlas':
                     inv = AtlasPlusInvoice.objects.filter(payment=payment).first()
                     if inv:
+                        doc_label = 'Factura Digital SENIAT' if inv.is_seniat_homologated else 'Comprobante Digital de Pago'
                         resp_payload['invoice_number'] = inv.invoice_number
                         resp_payload['invoice_url'] = inv.invoice_url
+                        resp_payload['document_label'] = doc_label
                         resp_payload['message'] = (
-                            f'Pago validado con éxito. Plan Atlas Plus activado y Factura Digital SENIAT Nº {inv.invoice_number} emitida.'
+                            f'Pago validado con éxito. Plan Atlas Plus activado y {doc_label} Nº {inv.invoice_number} emitido.'
                         )
             else:
                 resp_payload = {
@@ -319,6 +321,10 @@ def payments_dashboard_view(request):
     approved_atlas_bs_sum = float(approved_atlas_qs.aggregate(total=Sum('amount'))['total'] or 0.0)
 
     invoices_count = AtlasPlusInvoice.objects.count()
+    seniat_invoices_count = AtlasPlusInvoice.objects.filter(
+        issuer_type__in=['PERSONAL_SENIAT_IMP', 'COMPANY_SENIAT_IMP']
+    ).count()
+    comprobantes_count = max(0, invoices_count - seniat_invoices_count)
     invoices_usd_sum = float(AtlasPlusInvoice.objects.aggregate(total=Sum('total_usd'))['total'] or 0.0)
     if invoices_usd_sum <= 0.0 and approved_atlas_count > 0:
         invoices_usd_sum = round(approved_atlas_count * atlas_target_usd, 2)
@@ -348,6 +354,8 @@ def payments_dashboard_view(request):
             'approved_atlas_bs_ve': f"{format_ve_currency(approved_atlas_bs_sum, include_dollar_suffix=False)} Bs.",
             'approved_atlas_usd_ve': format_ve_currency(invoices_usd_sum, include_dollar_suffix=True),
             'invoices_count': invoices_count,
+            'comprobantes_count': comprobantes_count,
+            'seniat_invoices_count': seniat_invoices_count,
             'atlas_price_usd_ve': format_ve_currency(atlas_target_usd, include_dollar_suffix=True),
             'bcv_live_rate_ve': f"{format_ve_currency(bcv_live_rate, include_dollar_suffix=False)} Bs./$" if bcv_live_rate > 0 else "Sincronizando",
             'expected_bs_live_ve': f"{format_ve_currency(expected_bs_live, include_dollar_suffix=False)} Bs." if expected_bs_live > 0 else "—",

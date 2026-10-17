@@ -130,7 +130,8 @@ async function executePaymentResolution(type, id, status, reasonId = null) {
             if (data.auto_credited_wallet) {
                 await CartMakerModal.warning('Abono Parcial Acreditado a Billetera', data.message);
             } else if (data.invoice_url && data.invoice_number) {
-                await CartMakerModal.success('¡Pago Conciliado y Facturado!', '', {
+                const docLabel = data.document_label || 'Comprobante Digital';
+                await CartMakerModal.success('¡Pago Conciliado con Éxito!', '', {
                     html: `
                         <p style="font-size:0.94rem;color:#4B4660;line-height:1.55;margin-bottom:16px;">
                             ${data.message}
@@ -139,7 +140,7 @@ async function executePaymentResolution(type, id, status, reasonId = null) {
                             <a href="${data.invoice_url}" target="_blank" rel="noopener"
                                style="display:inline-flex;align-items:center;gap:6px;padding:10px 16px;border-radius:11px;background:rgba(109,73,242,0.10);border:1px solid rgba(109,73,242,0.28);color:#6D49F2;font-weight:800;font-size:0.86rem;text-decoration:none;">
                                 <span class="material-symbols-rounded" style="font-size:18px;">receipt_long</span>
-                                Ver Factura ${data.invoice_number}
+                                Ver ${docLabel} ${data.invoice_number}
                             </a>
                             <a href="${data.invoice_url}&print=1" target="_blank" rel="noopener"
                                style="display:inline-flex;align-items:center;gap:6px;padding:10px 16px;border-radius:11px;background:#F1F5F9;border:1px solid #E2E8F0;color:#0F172A;font-weight:700;font-size:0.86rem;text-decoration:none;">
@@ -232,7 +233,7 @@ async function triggerApprovalWorkflow(type, id, refNumber = '', amountBs = '', 
             <div style="margin-bottom:6px;"><strong>Monto Reportado:</strong> ${amountBs} ${equivUsd ? `(≈ <strong>${equivUsd}</strong>)` : ''}</div>
             ${
                 coversPlan
-                    ? `<div style="color:#047857;font-weight:700;margin-top:8px;">✓ El monto cubre el plan. Se activará la suscripción y se emitirá la Factura Digital SENIAT.</div>`
+                    ? `<div style="color:#047857;font-weight:700;margin-top:8px;">✓ El monto cubre el plan. Se activará la suscripción y se emitirá el Comprobante Digital / Documento Fiscal correspondiente.</div>`
                     : `<div style="color:#B45309;font-weight:700;margin-top:8px;">⚠ El monto es parcial respecto al plan. El sistema acreditará automáticamente ${equivUsd} a la Billetera CartMaker del usuario.</div>`
             }
         </div>
@@ -245,7 +246,7 @@ async function triggerApprovalWorkflow(type, id, refNumber = '', amountBs = '', 
         title: coversPlan ? '¿Validar y Aprobar Pago?' : '¿Procesar Abono Parcial?',
         html: detailHtml,
         showCancelButton: true,
-        confirmButtonText: coversPlan ? 'Sí, Validar y Facturar' : 'Acreditar a Billetera',
+        confirmButtonText: coversPlan ? 'Sí, Validar y Emitir' : 'Acreditar a Billetera',
         cancelButtonText: 'Cancelar',
         reverseButtons: true
     });
