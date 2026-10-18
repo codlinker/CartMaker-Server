@@ -665,7 +665,7 @@ class CategoriesListAPI(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
-        cache_key = "cartmaker:global:categories"
+        cache_key = "cartmaker:global:categories:v2"
         categories = cache.get(cache_key)
 
         if (

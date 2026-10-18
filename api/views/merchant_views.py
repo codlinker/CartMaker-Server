@@ -475,6 +475,13 @@ class UploadSubscriptionPayment(APIView):
                     verified_at=now if bank_api_available else None
                 )
 
+                try:
+                    cfg_at_payment = SystemConfig.objects.order_by('-creation').first()
+                    offered_limit = int(getattr(cfg_at_payment, 'atlas_plus_daily_limit', 30) or 30)
+                    cache.set(f"cartmaker:atlas:pending_payment_limit:{payment.id}", offered_limit, timeout=86400 * 30)
+                except Exception:
+                    pass
+
                 if bank_api_available:
                     config = SystemConfig.objects.latest('creation')
                     period_start = (
@@ -579,9 +586,9 @@ class FullPaySubscriptionWithWalletView(APIView):
                     section=NotificationSection.HOME,
                     title="¡Atlas Plus Activo!",
                     body=(
-                        f"Tu billetera cubrió la activación. Disfruta de tus {config.atlas_plus_daily_limit} "
+                        f"Tu billetera cubrió la activación. Disfruta de tus {invoice.contracted_daily_limit} "
                         f"interacciones diarias en Atlas Comprador y Atlas Negocios. "
-                        f"Factura digital N° <b>{invoice.invoice_number}</b> emitida."
+                        f"Comprobante digital N° <b>{invoice.invoice_number}</b> emitido."
                     ),
                     category=NotificationCategory.PAYMENT_APPROVED,
                     metadata={

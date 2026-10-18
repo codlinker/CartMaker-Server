@@ -1062,11 +1062,48 @@ class SubCategory(models.Model):
     def get_img_url(self) -> str:
         """
         Retorna la URL publica de la imagen de la sub-categoria.
+        Resuelve automáticamente la nueva estructura de subcarpetas por categoría padre
+        (static/img/categories/sub_categories/<categoria>/<archivo>.jpg) sin requerir migración manual.
         """
         if not self.img_url:
             return ""
-        return self.img_url if self.img_url.startswith('http')\
-              else f"{settings.DOMAIN}/{self.img_url.lstrip('/')}"
+        raw_path = self.img_url.strip()
+        if raw_path.startswith('http'):
+            return raw_path
+
+        clean_path = raw_path.lstrip('/')
+        # Si todavía apunta a la ruta plana antigua (static/img/categories/sub_categories/archivo.jpg),
+        # resolvemos la subcarpeta oficial desde CATALOGO_ESTRUCTURA y auto-actualizamos en BD.
+        if clean_path.startswith('static/img/categories/sub_categories/') and clean_path.count('/') == 4:
+            try:
+                from api.core.category_schemas import CATALOGO_ESTRUCTURA
+                filename = clean_path.rsplit('/', 1)[-1].lower()
+                if filename == 'celulares_y_tablets.jpg':
+                    filename = 'telefonos_y_smartphones.jpg'
+                elif filename == 'perifericos_y_accesorios.jpg':
+                    filename = 'accesorios.jpg'
+                sub_name_lower = (self.name or '').strip().lower()
+                resolved_path = None
+                for cat_entry in CATALOGO_ESTRUCTURA:
+                    for sub_entry in cat_entry.get('subcategorias', []):
+                        entry_img = sub_entry.get('imagen', '')
+                        if (
+                            sub_entry.get('nombre', '').strip().lower() == sub_name_lower
+                            or entry_img.lower().endswith(f"/{filename}")
+                        ):
+                            resolved_path = entry_img
+                            break
+                    if resolved_path:
+                        break
+                if resolved_path and resolved_path != clean_path:
+                    clean_path = resolved_path
+                    self.img_url = resolved_path
+                    if self.pk:
+                        SubCategory.objects.filter(pk=self.pk).update(img_url=resolved_path)
+            except Exception:
+                pass
+
+        return f"{settings.DOMAIN}/{clean_path}"
     
     def __str__(self) -> str:
         return f"{self.parent_category.name} - {self.name}"
@@ -1954,6 +1991,81 @@ class AtlasPlusPlan(models.Model):
             and self.valid_until > timezone.now()
         )
 
+    def get_contracted_daily_limit(self, default: int = 0) -> int:
+        """
+        Obtiene el cupo diario contratado por el usuario en su licencia activa (Derechos Adquiridos).
+        Si la configuración global de SystemConfig baja en el futuro (ej. de 30 a 15 usos/día),
+        el usuario conserva el cupo que pagó hasta que venza su periodo de suscripción (`valid_until`).
+        """
+        if not self.is_active_premium():
+            return 0
+
+        cache_key = f"cartmaker:atlas:contracted_limit:{self.user_id}"
+        cached_limit = cache.get(cache_key)
+        if cached_limit is not None:
+            try:
+                val = int(cached_limit)
+                if val > 0:
+                    return val
+            except (TypeError, ValueError):
+                pass
+
+        now = timezone.now()
+        try:
+            active_invoices = list(
+                AtlasPlusInvoice.objects.filter(
+                    user_id=self.user_id,
+                    period_end__gt=now,
+                ).order_by('-issued_at', '-correlative_number')[:5]
+            )
+            if not active_invoices:
+                latest_inv = (
+                    AtlasPlusInvoice.objects.filter(user_id=self.user_id)
+                    .order_by('-issued_at', '-correlative_number')
+                    .first()
+                )
+                if latest_inv:
+                    active_invoices = [latest_inv]
+
+            if active_invoices:
+                current_window_limits = [
+                    inv.contracted_daily_limit
+                    for inv in active_invoices
+                    if (inv.period_start is None or inv.period_start <= now)
+                ]
+                resolved_limit = (
+                    max(current_window_limits)
+                    if current_window_limits
+                    else max(inv.contracted_daily_limit for inv in active_invoices)
+                )
+                if resolved_limit > 0:
+                    ttl = max(60, min(86400, int((self.valid_until - now).total_seconds()))) if self.valid_until else 3600
+                    cache.set(cache_key, resolved_limit, timeout=ttl)
+                    return resolved_limit
+        except Exception:
+            pass
+
+        return default
+
+    def get_effective_plus_daily_limit(self, config=None) -> int:
+        """
+        Calcula el límite diario efectivo para un suscriptor de Atlas Plus:
+        Garantiza como mínimo el cupo que el usuario contrató al pagar su licencia activa,
+        incluso si `SystemConfig.atlas_plus_daily_limit` se reduce posteriormente.
+        """
+        if config is None:
+            try:
+                config = SystemConfig.objects.latest('creation')
+            except Exception:
+                config = None
+
+        config_plus_limit = int(getattr(config, 'atlas_plus_daily_limit', 30) or 30)
+        if not self.is_active_premium():
+            return config_plus_limit
+
+        contracted = self.get_contracted_daily_limit(default=config_plus_limit)
+        return max(contracted, config_plus_limit)
+
     def get_quota_status(self, config=None) -> dict:
         if config is None:
             try:
@@ -1961,12 +2073,13 @@ class AtlasPlusPlan(models.Model):
             except Exception:
                 config = None
 
-        plus_limit = int(getattr(config, 'atlas_plus_daily_limit', 30) or 30)
+        config_plus_limit = int(getattr(config, 'atlas_plus_daily_limit', 30) or 30)
         free_limit = int(getattr(config, 'atlas_free_daily_limit', 7) or 7)
         price_usd = float(getattr(config, 'atlas_plus_price_usd', Decimal('3.99')) or 3.99)
 
         is_premium = self.is_active_premium()
-        daily_limit = plus_limit if is_premium else free_limit
+        effective_plus_limit = self.get_effective_plus_daily_limit(config=config) if is_premium else config_plus_limit
+        daily_limit = effective_plus_limit if is_premium else free_limit
 
         now_local = timezone.localtime(timezone.now())
         today_local = now_local.date()
@@ -1996,6 +2109,8 @@ class AtlasPlusPlan(models.Model):
             'is_premium': is_premium,
             'valid_until': self.valid_until.strftime("%d/%m/%Y, %H:%M:%S") if self.valid_until else None,
             'daily_limit': daily_limit,
+            'contracted_daily_limit': effective_plus_limit if is_premium else None,
+            'new_subscription_daily_limit': config_plus_limit,
             'used_today': used_today,
             'free_interactions_left': free_left,
             'requires_atlas_plus': (free_left <= 0 and not is_premium),
@@ -2241,6 +2356,36 @@ class AtlasPlusInvoice(models.Model):
             BillingIssuerType.COMPANY_SENIAT_IMP,
         )
 
+    @property
+    def contracted_daily_limit(self) -> int:
+        """
+        Extrae el cupo diario contratado y congelado en el momento en que el usuario pagó esta licencia.
+        Si es un comprobante previo sin marcador explícito (como A-00000001), lo auto-sanea a 30/día
+        en la base de datos para garantizar que futuros cambios en SystemConfig no alteren su licencia.
+        """
+        raw = self.concept_description or ''
+        match = re.search(r'\[Cupo:\s*(\d+)\s*/\s*d[ií]a\]', raw, flags=re.IGNORECASE)
+        if match:
+            try:
+                val = int(match.group(1))
+                if val > 0:
+                    return val
+            except (TypeError, ValueError):
+                pass
+
+        default_limit = 30
+        if self.pk:
+            base_text = re.sub(r'\s*\[Cupo:\s*\d+\s*/\s*d[ií]a\]', '', raw).strip()
+            updated_desc = f"{base_text} [Cupo: {default_limit}/día]"[:500]
+            self.concept_description = updated_desc
+            AtlasPlusInvoice.objects.filter(pk=self.pk).update(concept_description=updated_desc)
+        return default_limit
+
+    @property
+    def clean_concept_description(self) -> str:
+        raw = self.concept_description or ''
+        return re.sub(r'\s*\[Cupo:\s*\d+\s*/\s*d[ií]a\]', '', raw, flags=re.IGNORECASE).strip()
+
     @classmethod
     def _resolve_buyer_address(cls, user: User, company: Optional['Company'] = None) -> str:
         """
@@ -2301,6 +2446,10 @@ class AtlasPlusInvoice(models.Model):
 
             if config is None:
                 config = SystemConfig.objects.create()
+
+            if config.atlas_plus_daily_limit == 20:
+                config.atlas_plus_daily_limit = 30
+                config.save(update_fields=['atlas_plus_daily_limit'])
 
             correlative = max(1, int(config.billing_next_correlative or 1))
             max_existing = cls.objects.aggregate(models.Max('correlative_number')).get('correlative_number__max') or 0
@@ -2392,6 +2541,23 @@ class AtlasPlusInvoice(models.Model):
             p_start = period_start or now
             p_end = period_end or (payment.plan.valid_until if payment.plan and payment.plan.valid_until else now + timedelta(days=30))
 
+            config_limit = max(1, int(config.atlas_plus_daily_limit or 30))
+            pending_limit = 0
+            try:
+                cached_pending = cache.get(f"cartmaker:atlas:pending_payment_limit:{payment.id}")
+                if cached_pending is not None:
+                    pending_limit = int(cached_pending)
+            except Exception:
+                pending_limit = 0
+            contracted_limit = max(config_limit, pending_limit)
+            base_concept = re.sub(
+                r'\s*\[Cupo:\s*\d+\s*/\s*d[ií]a\]',
+                '',
+                (config.billing_service_concept or ''),
+                flags=re.IGNORECASE,
+            ).strip()
+            concept_with_quota = f"{base_concept} [Cupo: {contracted_limit}/día]"[:500]
+
             is_homologated = config.billing_issuer_type in (
                 BillingIssuerType.PERSONAL_SENIAT_IMP,
                 BillingIssuerType.COMPANY_SENIAT_IMP,
@@ -2404,7 +2570,7 @@ class AtlasPlusInvoice(models.Model):
             else:
                 effective_legal_note = raw_legal_note
 
-            return cls.objects.create(
+            created_invoice = cls.objects.create(
                 payment=payment,
                 user=user,
                 correlative_number=correlative,
@@ -2430,7 +2596,7 @@ class AtlasPlusInvoice(models.Model):
                 buyer_is_company=buyer_is_company,
                 payment_method=resolved_method,
                 payment_reference=payment.reference_number,
-                concept_description=config.billing_service_concept,
+                concept_description=concept_with_quota,
                 bcv_rate=bcv_rate,
                 subtotal_usd=subtotal_usd,
                 subtotal_bs=subtotal_bs,
@@ -2450,13 +2616,21 @@ class AtlasPlusInvoice(models.Model):
                 legal_note=effective_legal_note,
             )
 
+            try:
+                cache.delete(f"cartmaker:atlas:contracted_limit:{user.id}")
+            except Exception:
+                pass
+
+            return created_invoice
+
     def get_json(self) -> dict:
         issued_local = timezone.localtime(self.issued_at) if self.issued_at else timezone.localtime(timezone.now())
         sys_cfg = SystemConfig.objects.only('id', 'atlas_plus_daily_limit').order_by('-creation').first()
         if sys_cfg and sys_cfg.atlas_plus_daily_limit == 20:
             sys_cfg.atlas_plus_daily_limit = 30
             sys_cfg.save(update_fields=['atlas_plus_daily_limit'])
-        daily_limit = int(sys_cfg.atlas_plus_daily_limit) if sys_cfg and sys_cfg.atlas_plus_daily_limit else 30
+        daily_limit = self.contracted_daily_limit
+        clean_desc = self.clean_concept_description
 
         is_homologated = self.is_seniat_homologated
         if is_homologated:
@@ -2544,7 +2718,7 @@ class AtlasPlusInvoice(models.Model):
                 {
                     'quantity': 1,
                     'unit': 'Mes (30 días)',
-                    'description': self.concept_description,
+                    'description': clean_desc,
                     'unit_price_usd': float(self.subtotal_usd),
                     'unit_price_usd_formatted': format_ve_amount(self.subtotal_usd, 2, "$", True),
                     'unit_price_bs': float(self.subtotal_bs),

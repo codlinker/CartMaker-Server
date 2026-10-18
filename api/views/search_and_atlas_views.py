@@ -478,17 +478,20 @@ class AtlasViewSet(viewsets.ViewSet):
     # LÓGICA DE PRESUPUESTO DIARIO UNIFICADO (Atlas Comprador + Atlas Negocios)
     # =========================================================================
     def _get_daily_limit(self, user) -> int:
-        """Devuelve el límite diario unificado según el Tier del usuario en AtlasPlusPlan."""
+        """
+        Devuelve el límite diario unificado según el Tier del usuario en AtlasPlusPlan.
+        Respeta derechos adquiridos (Grandfathered Subscription Quota) si el usuario
+        contrató su suscripción cuando el límite diario era superior al actual.
+        """
         try:
             config = SystemConfig.objects.latest('creation')
-            plus_limit = int(config.atlas_plus_daily_limit or 30)
             free_limit = int(config.atlas_free_daily_limit or self.DAILY_FREE_LIMIT)
         except SystemConfig.DoesNotExist:
-            plus_limit = 30
+            config = None
             free_limit = self.DAILY_FREE_LIMIT
         plan = self._get_user_plan(user)
         if plan and plan.is_active_premium():
-            return plus_limit
+            return plan.get_effective_plus_daily_limit(config=config)
         return free_limit
 
     def _get_used_today(self, user) -> int:
@@ -593,7 +596,7 @@ class AtlasViewSet(viewsets.ViewSet):
         quota_status = plan.get_quota_status(config=config)
         is_premium = quota_status['is_premium']
         daily_limit = quota_status['daily_limit']
-        plus_limit = int(getattr(config, 'atlas_plus_daily_limit', 30) or 30)
+        plus_limit = int(quota_status.get('atlas_plus_daily_limit') or getattr(config, 'atlas_plus_daily_limit', 30) or 30)
         price_fmt = quota_status['atlas_plus_price_formatted']
 
         if is_premium:

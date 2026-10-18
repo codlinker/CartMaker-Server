@@ -119,7 +119,7 @@ def _deliver_atlas_invoice_email_sync(invoice_id: str) -> bool:
         f"RIF / C.I.: {buyer['document']}\n"
         f"Domicilio: {buyer['address']}\n"
         f"Fecha de Emisión: {inv_data['issued_at']}\n"
-        f"Concepto: {invoice.concept_description}\n"
+        f"Concepto: {invoice.clean_concept_description} ({invoice.contracted_daily_limit} consultas diarias incluidas)\n"
         f"Vigencia: {inv_data['period_start']} al {inv_data['period_end']}\n"
         f"Tasa Oficial BCV: {pay_info['bcv_rate_formatted']}\n"
         f"{grand_total_label}: {amounts['total_bs_formatted']} (Equivalente: {amounts['total_usd_formatted']})\n"
@@ -166,7 +166,7 @@ def _deliver_atlas_invoice_email_sync(invoice_id: str) -> bool:
             </thead>
             <tbody>
               <tr>
-                <td style="padding:12px;border-bottom:1px solid #e2e8f0;color:#0f172a;">{invoice.concept_description}</td>
+                <td style="padding:12px;border-bottom:1px solid #e2e8f0;color:#0f172a;">{invoice.clean_concept_description} ({invoice.contracted_daily_limit} consultas diarias)</td>
                 <td style="padding:12px;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;">{amounts['subtotal_bs_formatted']}</td>
                 <td style="padding:12px;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;">{amounts['subtotal_usd_formatted']}</td>
               </tr>

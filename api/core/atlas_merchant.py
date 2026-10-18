@@ -194,7 +194,7 @@ class AtlasMerchantCopilot:
         free_left = quota_status["free_interactions_left"]
         daily_limit = quota_status["daily_limit"]
         used_today = quota_status["used_today"]
-        plus_limit = int(getattr(config, "atlas_plus_daily_limit", 30) or 30)
+        plus_limit = int(quota_status.get("atlas_plus_daily_limit") or getattr(config, "atlas_plus_daily_limit", 30) or 30)
 
         return {
             "allowed": True,
