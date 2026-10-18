@@ -7,8 +7,6 @@ from django.core.management.base import BaseCommand
 from django.contrib.gis.geos import Point
 from api.core.category_schemas import (
     CATALOGO_ESTRUCTURA,
-    LEGACY_CATEGORY_TO_OFFICIAL_MAP,
-    LEGACY_SUBCATEGORY_TO_OFFICIAL_MAP,
     get_subcategory_schema,
 )
 from api.models import (
@@ -197,69 +195,95 @@ class Command(BaseCommand):
         self._bulk_create_if_not_exists(CompanyCategory, company_categories_data, unique_field='name')
 
     def _poblar_categorias(self):
-        self.stdout.write("Verificando Categories y SubCategories oficiales desde CATALOGO_ESTRUCTURA...")
+        import shutil
+        self.stdout.write("Verificando Categories y SubCategories desde CATALOGO_ESTRUCTURA...")
 
-        # 1. Migrar/fusionar nombres legacy de Categorías sin perder referencias en SubCategory o User
-        for legacy_name, official_name in LEGACY_CATEGORY_TO_OFFICIAL_MAP.items():
-            if legacy_name == official_name:
-                continue
-            old_cat = Category.objects.filter(name=legacy_name).first()
-            if not old_cat:
-                continue
-            new_cat = Category.objects.filter(name=official_name).first()
-            if not new_cat:
-                old_cat.name = official_name
-                old_cat.save(update_fields=['name'])
-            elif old_cat.id != new_cat.id:
-                SubCategory.objects.filter(parent_category=old_cat).update(parent_category=new_cat)
-                for u in User.objects.filter(preferred_categories=old_cat):
-                    u.preferred_categories.add(new_cat)
-                    u.preferred_categories.remove(old_cat)
-                old_cat.delete()
+        # 0. Sincronizar imágenes físicas de api/static/img/categories hacia STATIC_ROOT (staticfiles/img/categories)
+        try:
+            src_cat_img_dir = os.path.join(settings.BASE_DIR, 'api', 'static', 'img', 'categories')
+            static_root = getattr(settings, 'STATIC_ROOT', None)
+            if static_root and os.path.exists(src_cat_img_dir):
+                dst_cat_img_dir = os.path.join(str(static_root), 'img', 'categories')
+                os.makedirs(dst_cat_img_dir, exist_ok=True)
+                shutil.copytree(src_cat_img_dir, dst_cat_img_dir, dirs_exist_ok=True)
+        except Exception as exc:
+            self.stdout.write(self.style.WARNING(f"  [!] No se pudo sincronizar staticfiles/img/categories: {exc}"))
 
-        # 2. Renombrar/fusionar SubCategorías anteriores que cambiaron de nombre (conservando ID y Productos)
-        renamed_subs = 0
-        for old_sub_name, new_sub_name in LEGACY_SUBCATEGORY_TO_OFFICIAL_MAP.items():
-            if old_sub_name == new_sub_name:
-                continue
-            old_sub = SubCategory.objects.filter(name__iexact=old_sub_name).order_by('id').first()
-            if not old_sub:
-                continue
-            new_sub = SubCategory.objects.filter(name__iexact=new_sub_name).order_by('id').first()
-            if not new_sub:
-                old_sub.name = new_sub_name
-                old_sub.save(update_fields=['name'])
-                renamed_subs += 1
-            elif old_sub.id != new_sub.id:
-                Product.objects.filter(category=old_sub).update(category=new_sub)
-                old_sub.delete()
-                renamed_subs += 1
+        official_cat_names_lower = {
+            entry['categoria'].strip().lower() for entry in CATALOGO_ESTRUCTURA
+        }
+        official_sub_names_lower = {
+            sub['nombre'].strip().lower()
+            for entry in CATALOGO_ESTRUCTURA
+            for sub in entry.get('subcategorias', [])
+        }
 
-        # 3. Sincronizar todas las Categorías y Subcategorías oficiales con su schema_config e img_url
         created_cats = 0
+        renamed_cats = 0
         updated_cats = 0
         created_subs = 0
+        renamed_subs = 0
         updated_subs = 0
-        official_categories_by_name = {}
+        official_categories_by_id = set()
+        official_categories_list = []
         official_subcategories_by_id = set()
-        official_subcategories_by_name = {}
+        official_subcategories_list = []
 
+        # 1. Sincronizar todas las Categorías y Subcategorías definidas en CATALOGO_ESTRUCTURA
         for cat_entry in CATALOGO_ESTRUCTURA:
             cat_name = cat_entry['categoria']
             cat_img = cat_entry['imagen']
+            sub_names_in_entry = [s['nombre'] for s in cat_entry.get('subcategorias', [])]
 
-            cat_obj, cat_created = Category.objects.get_or_create(
-                name=cat_name,
-                defaults={'img_url': cat_img},
-            )
-            if cat_created:
+            existing_cats = list(Category.objects.filter(name__iexact=cat_name).order_by('id'))
+            if not existing_cats:
+                # Si la categoría fue renombrada en CATALOGO_ESTRUCTURA, localizarla por img_url o subcategorías hijas
+                candidate_cat = (
+                    Category.objects.exclude(id__in=official_categories_by_id)
+                    .filter(img_url=cat_img)
+                    .order_by('id')
+                    .first()
+                )
+                if not candidate_cat and sub_names_in_entry:
+                    candidate_cat = (
+                        Category.objects.exclude(id__in=official_categories_by_id)
+                        .filter(subcategories__name__in=sub_names_in_entry)
+                        .order_by('id')
+                        .first()
+                    )
+                if candidate_cat and candidate_cat.name.strip().lower() not in official_cat_names_lower:
+                    candidate_cat.name = cat_name
+                    candidate_cat.img_url = cat_img
+                    candidate_cat.save(update_fields=['name', 'img_url'])
+                    existing_cats = [candidate_cat]
+                    renamed_cats += 1
+
+            if existing_cats:
+                cat_obj = existing_cats[0]
+                if len(existing_cats) > 1:
+                    for dup_cat in existing_cats[1:]:
+                        SubCategory.objects.filter(parent_category=dup_cat).update(parent_category=cat_obj)
+                        for u in User.objects.filter(preferred_categories=dup_cat):
+                            u.preferred_categories.add(cat_obj)
+                            u.preferred_categories.remove(dup_cat)
+                        dup_cat.delete()
+
+                cat_changed_fields = []
+                if cat_obj.name != cat_name:
+                    cat_obj.name = cat_name
+                    cat_changed_fields.append('name')
+                if cat_obj.img_url != cat_img:
+                    cat_obj.img_url = cat_img
+                    cat_changed_fields.append('img_url')
+                if cat_changed_fields:
+                    cat_obj.save(update_fields=cat_changed_fields)
+                    updated_cats += 1
+            else:
+                cat_obj = Category.objects.create(name=cat_name, img_url=cat_img)
                 created_cats += 1
-            elif cat_obj.img_url != cat_img:
-                cat_obj.img_url = cat_img
-                cat_obj.save(update_fields=['img_url'])
-                updated_cats += 1
 
-            official_categories_by_name[cat_name] = cat_obj
+            official_categories_by_id.add(cat_obj.id)
+            official_categories_list.append(cat_obj)
 
             for sub_entry in cat_entry['subcategorias']:
                 sub_name = sub_entry['nombre']
@@ -270,9 +294,24 @@ class Command(BaseCommand):
                 )
 
                 existing_subs = list(SubCategory.objects.filter(name__iexact=sub_name).order_by('id'))
+                if not existing_subs:
+                    candidate_sub = (
+                        SubCategory.objects.exclude(id__in=official_subcategories_by_id)
+                        .filter(img_url=sub_img)
+                        .order_by('id')
+                        .first()
+                    )
+                    if candidate_sub and candidate_sub.name.strip().lower() not in official_sub_names_lower:
+                        candidate_sub.name = sub_name
+                        candidate_sub.parent_category = cat_obj
+                        candidate_sub.img_url = sub_img
+                        candidate_sub.schema_config = schema_cfg
+                        candidate_sub.save(update_fields=['name', 'parent_category', 'img_url', 'schema_config'])
+                        existing_subs = [candidate_sub]
+                        renamed_subs += 1
+
                 if existing_subs:
                     sub_obj = existing_subs[0]
-                    # Si existían duplicados para la misma subcategoría, consolidar productos y borrar duplicados
                     if len(existing_subs) > 1:
                         dup_ids = [dup.id for dup in existing_subs[1:]]
                         Product.objects.filter(category_id__in=dup_ids).update(category=sub_obj)
@@ -304,19 +343,17 @@ class Command(BaseCommand):
                     created_subs += 1
 
                 official_subcategories_by_id.add(sub_obj.id)
-                official_subcategories_by_name[sub_name.lower()] = sub_obj
+                official_subcategories_list.append(sub_obj)
 
-        # 4. Limpiar cualquier subcategoría obsoleta que ya no esté en CATALOGO_ESTRUCTURA
-        #    reasignando de forma segura cualquier producto antes de eliminarla.
-        fallback_sub = official_subcategories_by_name.get('otros')
+        # 2. Eliminar cualquier SubCategoría que ya no exista en CATALOGO_ESTRUCTURA
+        fallback_sub = official_subcategories_list[-1] if official_subcategories_list else None
         obsolete_subs = list(
             SubCategory.objects.exclude(id__in=official_subcategories_by_id).select_related('parent_category')
         )
         deleted_subs = 0
         for old_sub in obsolete_subs:
-            mapped_name = LEGACY_SUBCATEGORY_TO_OFFICIAL_MAP.get(old_sub.name, old_sub.name)
-            target_sub = official_subcategories_by_name.get(mapped_name.lower())
-            if target_sub is None and old_sub.parent_category_id:
+            target_sub = None
+            if old_sub.parent_category_id in official_categories_by_id:
                 target_sub = (
                     SubCategory.objects.filter(
                         parent_category_id=old_sub.parent_category_id,
@@ -332,7 +369,20 @@ class Command(BaseCommand):
             old_sub.delete()
             deleted_subs += 1
 
-        # 5. Invalidar todas las llaves de caché de categorías y buscador en Redis
+        # 3. Eliminar cualquier Categoría principal que ya no exista en CATALOGO_ESTRUCTURA
+        fallback_cat = official_categories_list[-1] if official_categories_list else None
+        obsolete_cats = list(Category.objects.exclude(id__in=official_categories_by_id))
+        deleted_cats = 0
+        for old_cat in obsolete_cats:
+            if fallback_cat and fallback_cat.id != old_cat.id:
+                SubCategory.objects.filter(parent_category=old_cat).update(parent_category=fallback_cat)
+                for u in User.objects.filter(preferred_categories=old_cat):
+                    u.preferred_categories.add(fallback_cat)
+                    u.preferred_categories.remove(old_cat)
+            old_cat.delete()
+            deleted_cats += 1
+
+        # 4. Invalidar todas las llaves de caché de categorías y buscador en Redis
         cache.delete_many([
             "cartmaker:global:categories",
             "cartmaker:global:categories:v2",
@@ -340,7 +390,8 @@ class Command(BaseCommand):
         ])
         self.stdout.write(
             self.style.SUCCESS(
-                f"  [+] Categorías listas (creadas: {created_cats}, actualizadas: {updated_cats}) | "
+                f"  [+] Categorías listas (creadas: {created_cats}, renombradas: {renamed_cats}, "
+                f"actualizadas: {updated_cats}, obsoletas eliminadas: {deleted_cats}) | "
                 f"SubCategorías listas (creadas: {created_subs}, renombradas: {renamed_subs}, "
                 f"actualizadas: {updated_subs}, obsoletas eliminadas: {deleted_subs})."
             )

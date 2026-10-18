@@ -1018,12 +1018,44 @@ class Category(models.Model):
     
     def get_img_url(self) -> str:
         """
-        Retorna la URL publica de la imagen de la categoria.
+        Retorna la URL pública de la imagen de la categoría principal.
+        Sincroniza automáticamente con CATALOGO_ESTRUCTURA y agrega ?v=<mtime>
+        para que cualquier cambio de imagen en disco invalide el caché de red en Flutter.
         """
-        if not self.img_url:
-            return ""
-        return self.img_url if self.img_url.startswith('http')\
-              else f"{settings.DOMAIN}/{self.img_url.lstrip('/')}"
+        raw_path = (self.img_url or "").strip()
+        if raw_path.startswith('http'):
+            return raw_path
+
+        clean_path = raw_path.lstrip('/')
+        try:
+            import os
+            from api.core.category_schemas import CATALOGO_ESTRUCTURA
+            cat_name_clean = (self.name or "").strip().lower()
+            for cat_entry in CATALOGO_ESTRUCTURA:
+                if cat_entry.get('categoria', '').strip().lower() == cat_name_clean:
+                    official_img = (cat_entry.get('imagen') or '').strip().lstrip('/')
+                    if official_img and official_img != clean_path:
+                        clean_path = official_img
+                        self.img_url = official_img
+                        if self.pk:
+                            Category.objects.filter(pk=self.pk).update(img_url=official_img)
+                    break
+
+            if not clean_path:
+                return ""
+
+            base_url = f"{settings.DOMAIN}/{clean_path}"
+            local_file = os.path.join(settings.BASE_DIR, 'api', clean_path)
+            if not os.path.exists(local_file):
+                local_file = os.path.join(settings.BASE_DIR, clean_path)
+            if os.path.exists(local_file):
+                mtime = int(os.path.getmtime(local_file))
+                return f"{base_url}?v={mtime}"
+            return base_url
+        except Exception:
+            if not clean_path:
+                return ""
+            return f"{settings.DOMAIN}/{clean_path}"
 
 class SubCategory(models.Model):
     """
@@ -1066,7 +1098,7 @@ class SubCategory(models.Model):
         """
         Retorna la URL publica de la imagen de la sub-categoria.
         Resuelve automáticamente la nueva estructura de subcarpetas por categoría padre
-        (static/img/categories/sub_categories/<categoria>/<archivo>.jpg) sin requerir migración manual.
+        (static/img/categories/sub_categories/<categoria>/<archivo>.jpg) y agrega ?v=<mtime>.
         """
         if not self.img_url:
             return ""
@@ -1075,38 +1107,46 @@ class SubCategory(models.Model):
             return raw_path
 
         clean_path = raw_path.lstrip('/')
-        # Si todavía apunta a la ruta plana antigua (static/img/categories/sub_categories/archivo.jpg),
-        # resolvemos la subcarpeta oficial desde CATALOGO_ESTRUCTURA y auto-actualizamos en BD.
-        if clean_path.startswith('static/img/categories/sub_categories/') and clean_path.count('/') == 4:
-            try:
-                from api.core.category_schemas import CATALOGO_ESTRUCTURA
+        try:
+            import os
+            from api.core.category_schemas import CATALOGO_ESTRUCTURA
+            sub_name_lower = (self.name or '').strip().lower()
+            resolved_path = None
+            for cat_entry in CATALOGO_ESTRUCTURA:
+                for sub_entry in cat_entry.get('subcategorias', []):
+                    if sub_entry.get('nombre', '').strip().lower() == sub_name_lower:
+                        resolved_path = (sub_entry.get('imagen') or '').strip().lstrip('/')
+                        break
+                if resolved_path:
+                    break
+
+            if not resolved_path and clean_path.startswith('static/img/categories/sub_categories/') and clean_path.count('/') == 4:
                 filename = clean_path.rsplit('/', 1)[-1].lower()
-                if filename == 'celulares_y_tablets.jpg':
-                    filename = 'telefonos_y_smartphones.jpg'
-                elif filename == 'perifericos_y_accesorios.jpg':
-                    filename = 'accesorios.jpg'
-                sub_name_lower = (self.name or '').strip().lower()
-                resolved_path = None
                 for cat_entry in CATALOGO_ESTRUCTURA:
                     for sub_entry in cat_entry.get('subcategorias', []):
-                        entry_img = sub_entry.get('imagen', '')
-                        if (
-                            sub_entry.get('nombre', '').strip().lower() == sub_name_lower
-                            or entry_img.lower().endswith(f"/{filename}")
-                        ):
+                        entry_img = (sub_entry.get('imagen') or '').strip().lstrip('/')
+                        if entry_img.lower().endswith(f"/{filename}"):
                             resolved_path = entry_img
                             break
                     if resolved_path:
                         break
-                if resolved_path and resolved_path != clean_path:
-                    clean_path = resolved_path
-                    self.img_url = resolved_path
-                    if self.pk:
-                        SubCategory.objects.filter(pk=self.pk).update(img_url=resolved_path)
-            except Exception:
-                pass
 
-        return f"{settings.DOMAIN}/{clean_path}"
+            if resolved_path and resolved_path != clean_path:
+                clean_path = resolved_path
+                self.img_url = resolved_path
+                if self.pk:
+                    SubCategory.objects.filter(pk=self.pk).update(img_url=resolved_path)
+
+            base_url = f"{settings.DOMAIN}/{clean_path}"
+            local_file = os.path.join(settings.BASE_DIR, 'api', clean_path)
+            if not os.path.exists(local_file):
+                local_file = os.path.join(settings.BASE_DIR, clean_path)
+            if os.path.exists(local_file):
+                mtime = int(os.path.getmtime(local_file))
+                return f"{base_url}?v={mtime}"
+            return base_url
+        except Exception:
+            return f"{settings.DOMAIN}/{clean_path}"
     
     def __str__(self) -> str:
         return f"{self.parent_category.name} - {self.name}"

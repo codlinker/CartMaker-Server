@@ -5,7 +5,7 @@ from django.db import migrations, models
 
 
 def sync_clean_catalogo_estructura(apps, schema_editor):
-    from api.core.category_schemas import CATALOGO_ESTRUCTURA, LEGACY_CATEGORY_TO_OFFICIAL_MAP
+    from api.core.category_schemas import CATALOGO_ESTRUCTURA
 
     Category = apps.get_model("api", "Category")
     SubCategory = apps.get_model("api", "SubCategory")
@@ -16,7 +16,7 @@ def sync_clean_catalogo_estructura(apps, schema_editor):
     official_subcategories_by_id = set()
     official_subcategories_by_name = {}
 
-    # 1. Create or update the 14 official categories and 72 official subcategories
+    # 1. Create or update official categories and subcategories
     for cat_entry in CATALOGO_ESTRUCTURA:
         cat_name = cat_entry["categoria"]
         cat_img = cat_entry["imagen"]
@@ -65,30 +65,15 @@ def sync_clean_catalogo_estructura(apps, schema_editor):
             official_subcategories_by_id.add(sub_obj.id)
             official_subcategories_by_name[sub_name.lower()] = sub_obj
 
-    fallback_cat = official_categories_by_name["Otras Categorías (Varios)"]
-    fallback_sub = official_subcategories_by_name["otros"]
+    fallback_cat = list(official_categories_by_name.values())[-1] if official_categories_by_name else None
+    fallback_sub = list(official_subcategories_by_name.values())[-1] if official_subcategories_by_name else None
 
     # 2. Reassign any Products pointing to legacy/non-official SubCategories
     obsolete_subs = SubCategory.objects.exclude(id__in=official_subcategories_by_id).select_related("parent_category")
     for old_sub in obsolete_subs:
-        target_sub = official_subcategories_by_name.get(old_sub.name.lower())
-        if target_sub is None and old_sub.parent_category_id:
-            old_parent_name = old_sub.parent_category.name
-            mapped_cat_name = LEGACY_CATEGORY_TO_OFFICIAL_MAP.get(old_parent_name, old_parent_name)
-            mapped_cat = official_categories_by_name.get(mapped_cat_name)
-            if mapped_cat:
-                target_sub = (
-                    SubCategory.objects.filter(
-                        parent_category=mapped_cat,
-                        id__in=official_subcategories_by_id,
-                    )
-                    .order_by("id")
-                    .first()
-                )
-        if target_sub is None:
-            target_sub = fallback_sub
-
-        Product.objects.filter(category=old_sub).update(category=target_sub)
+        target_sub = official_subcategories_by_name.get(old_sub.name.lower()) or fallback_sub
+        if target_sub:
+            Product.objects.filter(category=old_sub).update(category=target_sub)
 
     # 3. Delete all non-official SubCategories
     SubCategory.objects.exclude(id__in=official_subcategories_by_id).delete()
@@ -97,11 +82,10 @@ def sync_clean_catalogo_estructura(apps, schema_editor):
     official_category_ids = {c.id for c in official_categories_by_name.values()}
     obsolete_cats = list(Category.objects.exclude(id__in=official_category_ids))
     for old_cat in obsolete_cats:
-        mapped_cat_name = LEGACY_CATEGORY_TO_OFFICIAL_MAP.get(old_cat.name)
-        target_cat = official_categories_by_name.get(mapped_cat_name) or fallback_cat
-        for user in User.objects.filter(preferred_categories=old_cat):
-            user.preferred_categories.add(target_cat)
-            user.preferred_categories.remove(old_cat)
+        if fallback_cat and fallback_cat.id != old_cat.id:
+            for user in User.objects.filter(preferred_categories=old_cat):
+                user.preferred_categories.add(fallback_cat)
+                user.preferred_categories.remove(old_cat)
         old_cat.delete()
 
     # 5. Best-effort cache invalidation

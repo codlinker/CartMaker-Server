@@ -244,52 +244,24 @@ CATALOGO_ESTRUCTURA: List[Dict[str, Any]] = [
         ]
     },
     {
-        "categoria": "Fiestas, Piñatería y Otros",
-        "imagen": "static/img/categories/fiestas_y_otros.jpg",
+        "categoria": "Fiestas y Piñatería",
+        "imagen": "static/img/categories/fiestas_y_pinateria.jpg",
         "subcategorias": [
-            {"nombre": "Piñatas, Cotillones y Globos", "imagen": "static/img/categories/sub_categories/fiestas_y_otros/pinatas_y_cotillones.jpg"},
-            {"nombre": "Descartables, Vasos, Platos y Servilletas", "imagen": "static/img/categories/sub_categories/fiestas_y_otros/descartables_para_fiestas.jpg"},
-            {"nombre": "Embalaje, Cajas y Bolsas Plásticas", "imagen": "static/img/categories/sub_categories/fiestas_y_otros/embalaje_y_bolsas.jpg"},
-            {"nombre": "Maquinarias y Equipos Comerciales", "imagen": "static/img/categories/sub_categories/fiestas_y_otros/equipos_comerciales.jpg"},
-            {"nombre": "Inmuebles y Locales Comerciales", "imagen": "static/img/categories/sub_categories/fiestas_y_otros/inmuebles_y_locales.jpg"}
+            {"nombre": "Piñatas, Cotillones y Globos", "imagen": "static/img/categories/sub_categories/fiestas_y_pinateria/pinatas_y_cotillones.jpg"},
+            {"nombre": "Descartables, Vasos, Platos y Servilletas", "imagen": "static/img/categories/sub_categories/fiestas_y_pinateria/descartables_para_fiestas.jpg"},
+            {"nombre": "Embalaje, Cajas y Bolsas Plásticas", "imagen": "static/img/categories/sub_categories/fiestas_y_pinateria/embalaje_y_bolsas.jpg"},
+            {"nombre": "Maquinarias y Equipos Comerciales", "imagen": "static/img/categories/sub_categories/fiestas_y_pinateria/equipos_comerciales.jpg"},
+            {"nombre": "Inmuebles y Locales Comerciales", "imagen": "static/img/categories/sub_categories/fiestas_y_pinateria/inmuebles_y_locales.jpg"}
+        ]
+    },
+    {
+        "categoria": "Otras Categorías",
+        "imagen": "static/img/categories/otras_categorías.jpg",
+        "subcategorias": [
+            {"nombre": "Otras Categorías", "imagen": "static/img/categories/sub_categories/otras_categorias/otras_categorias.jpg"},
         ]
     }
 ]
-
-# Mapeo de nombres antiguos/legacy a las 14 categorías oficiales
-LEGACY_CATEGORY_TO_OFFICIAL_MAP: Dict[str, str] = {
-    "Alimentos y Bebidas (Supermercado)": "Alimentos y Bebidas",
-    "Alimentos y Bebidas": "Alimentos y Bebidas",
-    "Restaurantes y Comida Preparada": "Alimentos y Bebidas",
-    "Hogar y Electrodomésticos": "Hogar, Muebles y Jardín",
-    "Automotriz y Repuestos": "Carros, Motos y Otros",
-    "Deportes y Aire Libre": "Deportes y Fitness",
-    "Juguetes y Entretenimiento": "Juegos y Juguetes",
-    "Ferretería y Herramientas": "Ferretería y Construcción",
-    "Educación, Libros y Papelería": "Papelería, Oficina y Libros",
-    "Servicios Profesionales": "Otras Categorías",
-    "Otras Categorías (Varios)": "Otras Categorías",
-    "Otros": "Otras Categorías",
-}
-
-# Mapeo de subcategorías anteriores/renombradas a las nuevas subcategorías oficiales
-LEGACY_SUBCATEGORY_TO_OFFICIAL_MAP: Dict[str, str] = {
-    # Alimentos y Bebidas
-    "Despensa y Víveres": "Víveres y Granos",
-    "Frescos": "Frutas, Verduras y Hortalizas",
-    "Charcutería y Lácteos": "Charcutería",
-    "Bebidas": "Bebidas, Refrescos y Maltas",
-    "Snacks y Dulces": "Chucherías, Snacks y Dulces",
-    # Tecnología y Electrónica
-    "Celulares y Tablets": "Teléfonos y Tablets",
-    "Computación": "Computadoras y Laptops",
-    "TV, Audio y Video": "Monitores y Televisores",
-    "Videojuegos y Consolas": "Consolas y Videojuegos",
-    "Wearables": "Smartwatches y Wearables",
-    "Audífonos y Parlantes": "Audífonos y Cornetas",
-    "Periféricos y Accesorios": "Teclados y Mouse",
-    "Accesorios": "Cargadores, Cables y Powerbanks",
-}
 
 
 # ==============================================================================
@@ -2279,65 +2251,118 @@ SUBCATEGORY_SCHEMAS: Dict[str, Dict[str, Any]] = {
     ),
 }
 
-# Registrar esquemas especializados para las nuevas subcategorías de Alimentos y Bebidas y Tecnología y Electrónica
-_NEW_SUBCATEGORY_BASE_MAPPING: Dict[str, str] = {
-    # Alimentos y Bebidas (15 subcategorías)
-    "Víveres y Granos": "Despensa y Víveres",
-    "Frutas, Verduras y Hortalizas": "Frescos",
-    "Carnicería y Aves": "Frescos",
-    "Pescadería y Mariscos": "Frescos",
-    "Charcutería": "Charcutería y Lácteos",
-    "Lácteos y Huevos": "Charcutería y Lácteos",
-    "Panadería y Pastelería": "Snacks y Dulces",
-    "Enlatados y Conservas": "Despensa y Víveres",
-    "Salsas, Condimentos y Aceites": "Despensa y Víveres",
-    "Café, Té e Infusiones": "Despensa y Víveres",
-    "Bebidas, Refrescos y Maltas": "Bebidas",
-    "Chucherías, Snacks y Dulces": "Snacks y Dulces",
-    "Congelados y Pasapalos": "Snacks y Dulces",
-    "Avena y Cereales": "Despensa y Víveres",
-    # Tecnología y Electrónica (17 subcategorías)
-    "Teléfonos y Tablets": "Celulares y Tablets",
-    "Computadoras y Laptops": "Computación",
-    "Componentes de PC y Hardware": "Computación",
-    "Almacenamiento y Memorias": "Computación",
-    "Monitores y Televisores": "TV, Audio y Video",
-    "Impresoras y Escaners": "Computación",
-    "Smartwatches y Wearables": "Wearables",
-    "Audífonos y Cornetas": "Periféricos y Accesorios",
-    "Teclados y Mouse": "Periféricos y Accesorios",
-    "Redes, Routers y Conectividad": "Computación",
-    "Consolas y Videojuegos": "Videojuegos y Consolas",
-    "Cargadores, Cables y Powerbanks": "Periféricos y Accesorios",
-    "Reguladores, Protectores y UPS": "Periféricos y Accesorios",
-    "Smart Home y Domótica": "Seguridad y Domótica",
-    "Seguridad y Cámaras de Vigilancia": "Seguridad y Domótica",
-    "Proyectores y Video Beam": "TV, Audio y Video",
-}
-for _new_sub_name, _base_sub_name in _NEW_SUBCATEGORY_BASE_MAPPING.items():
-    if _new_sub_name not in SUBCATEGORY_SCHEMAS and _base_sub_name in SUBCATEGORY_SCHEMAS:
-        SUBCATEGORY_SCHEMAS[_new_sub_name] = SUBCATEGORY_SCHEMAS[_base_sub_name]
+def _norm_text(value: Optional[str]) -> str:
+    import unicodedata
+    if not value:
+        return ""
+    nfkd = unicodedata.normalize("NFKD", str(value))
+    return "".join(c for c in nfkd if not unicodedata.combining(c)).strip().lower()
 
 
-# Esquemas por defecto a nivel de Categoría Principal (cuando no se especifica subcategoría)
-CATEGORY_DEFAULT_SUBCATEGORY_MAP: Dict[str, str] = {
-    "Alimentos y Bebidas": "Víveres y Granos",
-    "Alimentos y Bebidas (Supermercado)": "Víveres y Granos",
-    "Tecnología y Electrónica": "Teléfonos y Tablets",
-    "Moda y Accesorios": "Ropa Femenina",
-    "Salud y Belleza": "Cuidado Personal",
-    "Hogar, Muebles y Jardín": "Electrodomésticos",
-    "Ferretería y Construcción": "Herramientas",
-    "Carros, Motos y Otros": "Repuestos para Autos",
-    "Deportes y Fitness": "Fitness y Musculación",
-    "Bebés y Maternidad": "Pañales y Toallitas",
-    "Juegos y Juguetes": "Juguetes para Bebés",
-    "Mascotas": "Perros",
-    "Papelería, Oficina y Libros": "Útiles Escolares",
-    "Instrumentos Musicales": "Guitarras y Bajos",
-    "Otras Categorías": "Otros",
-    "Otras Categorías (Varios)": "Otros",
-}
+def _infer_schema_from_keywords(sub_norm: str, cat_norm: str) -> Dict[str, Any]:
+    """
+    Infiere el arquetipo de esquema dinámico a partir de palabras clave semánticas
+    del nombre de la subcategoría o categoría, sin duplicar diccionarios de catálogo.
+    """
+    text = f"{sub_norm} {cat_norm}".strip()
+
+    # Reglas semánticas compactas (palabra clave -> arquetipo en SUBCATEGORY_SCHEMAS)
+    keyword_rules = (
+        # Alimentos y Bebidas
+        (("fruta", "verdura", "hortaliza", "carniceria", "ave", "pescaderia", "marisco"), "Frescos"),
+        (("charcuteria", "lacteo", "queso", "huevo"), "Charcutería y Lácteos"),
+        (("licor", "cerveza", "ron", "whisky", "vino"), "Licores"),
+        (("refresco", "malta", "jugo", "agua"), "Bebidas"),
+        (("panaderia", "pasteleria", "chucheria", "snack", "dulce", "congelado", "pasapalo"), "Snacks y Dulces"),
+        (("vivere", "grano", "enlatado", "conserva", "salsa", "condimento", "aceite", "cafe", "infusion", "avena", "cereal"), "Despensa y Víveres"),
+        # Tecnología y Electrónica
+        (("telefono", "celular", "tablet"), "Celulares y Tablets"),
+        (("smartwatch", "wearable"), "Wearables"),
+        (("consola", "videojuego"), "Videojuegos y Consolas"),
+        (("monitor", "televisor", "proyector", "video beam"), "TV, Audio y Video"),
+        (("camara", "fotografia"), "Cámaras y Fotografía"),
+        (("domotica", "smart home", "vigilancia"), "Seguridad y Domótica"),
+        (("audifono", "corneta", "teclado y mouse", "cargador", "powerbank", "regulador", "ups"), "Periféricos y Accesorios"),
+        (("computadora", "laptop", "hardware", "memoria", "almacenamiento", "impresora", "escaner", "router", "conectividad"), "Computación"),
+        # Ropa y Accesorios
+        (("zapato", "chola", "zandalia", "sandalia", "tacon", "calzado"), "Calzado"),
+        (("bolso", "cartera", "billetera", "monedero", "maleta"), "Bolsos y Carteras"),
+        (("joyeria", "bisuteria", "lente", "reloj", "gorra", "sombrero", "correa"), "Accesorios y Joyería"),
+        (("caballero",), "Ropa Masculina"),
+        (("nino", "nina", "ropa para bebe", "ropa de bebe", "monillo", "bodie"), "Ropa Infantil"),
+        (("dama", "vestido", "falda", "enterizo", "blusa", "lenceria", "pijama", "traje de bano"), "Ropa Femenina"),
+        # Salud y Belleza
+        (("skincare", "facial"), "Skincare y Cuidado Facial"),
+        (("maquillaje", "labio"), "Maquillaje"),
+        (("perfumeria", "splash", "fragancia"), "Perfumería"),
+        (("farmacia", "botiquin", "auxilio", "vitamina", "preservativo", "salud sexual", "tensiometro", "equipo medico"), "Farmacia y Bienestar"),
+        (("capilar", "tinte", "manicura", "pedicura", "desodorante", "afeitado", "bucal", "higiene personal"), "Cuidado Personal"),
+        # Hogar, Muebles y Jardín
+        (("limpieza", "detergente", "mopa"), "Limpieza del Hogar"),
+        (("cama", "colchon", "sabana", "edredon"), "Dormitorio"),
+        (("poceta", "lavamanos"), "Baño"),
+        (("jardineria", "manguera"), "Jardín y Exteriores"),
+        (("cuadro", "espejo", "decoracion"), "Decoración"),
+        (("mueble", "comedor", "sala"), "Muebles"),
+        (("linea blanca", "nevera", "lavadora", "electrodomestico", "aire acondicionado", "ventilador", "planta electrica", "inversor", "olla", "sarten"), "Electrodomésticos"),
+        # Ferretería y Construcción
+        (("plomeria", "tuberia", "griferia", "hidroneumatico", "bomba", "tanque de agua"), "Plomería"),
+        (("electricidad", "breaker", "tomacorriente", "bombillo", "reflector", "iluminacion"), "Electricidad e Iluminación"),
+        (("pintura", "cunete", "brocha", "cemento", "pego", "bloque"), "Materiales de Construcción"),
+        (("herramienta", "taladro", "esmeril", "tornilleria", "clavo", "cerradura", "candado", "seguridad industrial"), "Herramientas"),
+        # Carros, Motos y Otros
+        (("venta de carro", "camioneta"), "Venta de Autos"),
+        (("venta de moto",), "Venta de Motos"),
+        (("caucho", "rin", "neumatico"), "Neumáticos y Rines"),
+        (("aceite de motor", "fluido", "lubricante"), "Lubricantes y Fluidos"),
+        (("casco", "accesorios para moto"), "Motos"),
+        (("freno", "pastilla", "tren delantero", "repuesto", "baterias para carro"), "Repuestos para Autos"),
+        (("luces led", "sonido para carro", "alarma", "trancapalanca", "cuidado automotriz", "cera"), "Accesorios para Vehículos"),
+        # Deportes y Fitness
+        (("pesa", "mancuerna", "gym", "creatina", "suplementos gym"), "Fitness y Musculación"),
+        (("camping", "carpa", "cava", "cooler", "termo"), "Camping y Outdoors"),
+        (("ropa deportiva", "licra"), "Ropa y Calzado Deportivo"),
+        (("beisbol", "softbol", "futbol", "futsal", "basquetbol", "padel", "tenis", "bicicleta", "ciclismo"), "Deportes Específicos"),
+        # Bebés y Maternidad
+        (("panal", "antipanalitis"), "Pañales y Toallitas"),
+        (("tetero", "esterilizador", "chupon", "lactancia", "formula infantil", "papilla"), "Lactancia y Alimentación"),
+        (("coche", "portabebe", "sillas para carro"), "Paseo y Viaje"),
+        (("cuna", "corral", "moises", "monitores de bebe"), "Cuarto del Bebé"),
+        (("banera", "jabones de bebe"), "Higiene y Cuidado del Bebé"),
+        # Juegos y Juguetes
+        (("muneca", "barbie", "peluche"), "Muñecas y Peluches"),
+        (("bloque", "lego", "armable"), "Bloques y Construcción"),
+        (("juegos de mesa", "domino", "cartas"), "Juegos de Mesa y Rompecabezas"),
+        (("patineta", "patin", "monopatin", "piscina", "inflable", "pistola", "dardo"), "Juguetes de Exterior"),
+        (("estimulacion", "juguetes para bebe"), "Juguetes para Bebés"),
+        (("carrito", "control remoto", "figura", "superheroe"), "Figuras de Acción"),
+        # Mascotas
+        (("antipulga", "garrapaticida", "desparasitante", "estetica canina"), "Higiene y Salud Animal"),
+        (("gatarina", "gato", "arenera", "rascador"), "Gatos"),
+        (("perrarina", "perro", "mascota", "pechera", "transportadora"), "Perros"),
+        # Papelería, Oficina y Libros
+        (("libro", "novela", "literatura"), "Libros"),
+        (("resma", "carpeta", "archivador", "calculadora", "grapadora", "sillas de oficina", "escritorio"), "Oficina"),
+        (("cuaderno", "libreta", "lapiz", "boligrafo", "marcador", "morral", "cartuchera", "manualidad", "foami"), "Útiles Escolares"),
+        # Instrumentos Musicales
+        (("cuatro", "maraca", "furruco", "violin", "ukelele"), "Instrumentos de Cuerda"),
+        (("guitarra", "bajo"), "Guitarras y Bajos"),
+        (("teclado", "sintetizador", "piano"), "Teclados y Pianos"),
+        (("bateria", "percusion", "conga", "timbal", "bongo"), "Baterías y Percusión"),
+        (("viento", "flauta", "saxofon"), "Instrumentos de Viento"),
+        (("microfono", "sonido en vivo", "dj", "monitoreo"), "Audio Profesional y DJ"),
+        (("cuerda", "funda", "afinador", "pedal"), "Accesorios Musicales"),
+    )
+
+    for keywords, schema_key in keyword_rules:
+        if any(kw in sub_norm for kw in keywords):
+            return SUBCATEGORY_SCHEMAS[schema_key]
+
+    for keywords, schema_key in keyword_rules:
+        if any(kw in text for kw in keywords):
+            return SUBCATEGORY_SCHEMAS[schema_key]
+
+    return SUBCATEGORY_SCHEMAS["Otros"]
 
 
 def get_subcategory_schema(
@@ -2346,33 +2371,40 @@ def get_subcategory_schema(
     custom_override: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
-    Devuelve el esquema dinámico completo para una subcategoría o categoría.
-    Si el registro SubCategory tiene `schema_config` en BD, hace merge con el esquema base.
+    Devuelve el esquema dinámico completo para una subcategoría o categoría,
+    tomando únicamente `CATALOGO_ESTRUCTURA` como fuente de verdad de categorías.
     """
-    base_schema: Optional[Dict[str, Any]] = None
+    effective_sub = (subcategory_name or "").strip()
+    effective_cat = (parent_category_name or "").strip()
 
-    if subcategory_name:
-        clean_sub = subcategory_name.strip()
-        base_schema = SUBCATEGORY_SCHEMAS.get(clean_sub)
+    # Si solo se indicó la categoría padre, tomar su primera subcategoría desde CATALOGO_ESTRUCTURA
+    if not effective_sub and effective_cat:
+        cat_norm = _norm_text(effective_cat)
+        for cat_entry in CATALOGO_ESTRUCTURA:
+            if _norm_text(cat_entry.get("categoria")) == cat_norm:
+                subs = cat_entry.get("subcategorias") or []
+                if subs:
+                    effective_sub = subs[0].get("nombre", "")
+                break
+
+    base_schema: Optional[Dict[str, Any]] = None
+    if effective_sub:
+        base_schema = SUBCATEGORY_SCHEMAS.get(effective_sub)
         if not base_schema:
+            sub_norm = _norm_text(effective_sub)
             for key, val in SUBCATEGORY_SCHEMAS.items():
-                if key.lower() == clean_sub.lower():
+                if _norm_text(key) == sub_norm:
                     base_schema = val
                     break
 
-    if not base_schema and parent_category_name:
-        clean_cat = parent_category_name.strip()
-        mapped_cat = LEGACY_CATEGORY_TO_OFFICIAL_MAP.get(clean_cat, clean_cat)
-        default_sub = CATEGORY_DEFAULT_SUBCATEGORY_MAP.get(mapped_cat)
-        if default_sub:
-            base_schema = SUBCATEGORY_SCHEMAS.get(default_sub)
-
     if not base_schema:
-        base_schema = SUBCATEGORY_SCHEMAS["Otros"]
+        base_schema = _infer_schema_from_keywords(
+            _norm_text(effective_sub),
+            _norm_text(effective_cat),
+        )
 
     result = json.loads(json.dumps(base_schema))
     if custom_override and isinstance(custom_override, dict):
-        # Solo sobreescribir el esquema oficial en código si el admin marcó explícitamente `is_custom_override: True`
         if custom_override.get("is_custom_override"):
             result.update(custom_override)
 
