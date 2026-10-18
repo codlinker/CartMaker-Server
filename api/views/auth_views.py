@@ -481,9 +481,34 @@ class VerifyUser(APIView):
                 locked_user.biometric_vector = data['biometry']
                 locked_user.birth_date = data['birth_date']
                 locked_user.cedula_verified = True
+
+                consent_raw = str(
+                    request.data.get("biometric_consent_accepted")
+                    or data.get("biometric_consent_accepted")
+                    or ""
+                ).strip().lower()
+                if consent_raw in ("true", "1", "yes"):
+                    locked_user.biometric_consent_accepted_at = timezone.now()
+                    locked_user.biometric_consent_version = (
+                        str(
+                            request.data.get("biometric_consent_version")
+                            or data.get("biometric_consent_version")
+                            or "VE-2026.1"
+                        ).strip()[:32]
+                        or "VE-2026.1"
+                    )
+                locked_user.biometric_suppressed_at = None
                 locked_user.save()
                 return Response(
-                    {"message": "Identidad confirmada. Ahora eres un usuario verificado en CartMaker."},
+                    {
+                        "message": "Identidad confirmada. Ahora eres un usuario verificado en CartMaker.",
+                        "biometric_consent_accepted_at": (
+                            locked_user.biometric_consent_accepted_at.isoformat()
+                            if locked_user.biometric_consent_accepted_at
+                            else None
+                        ),
+                        "biometric_consent_version": locked_user.biometric_consent_version,
+                    },
                     status=status.HTTP_200_OK,
                 )
         except Exception as e:

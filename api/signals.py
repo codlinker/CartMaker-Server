@@ -436,6 +436,7 @@ def invalidate_search_cache(sender, instance, **kwargs):
     def _clear_categories_caches():
         cache.delete("cartmaker:global:search")
         cache.delete("cartmaker:global:categories")
+        cache.delete("cartmaker:global:categories:v2")
     transaction.on_commit(_clear_categories_caches)
 
 # ON CREATED

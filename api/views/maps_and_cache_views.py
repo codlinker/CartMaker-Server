@@ -571,6 +571,17 @@ class UserCacheAPI(APIView):
             "cedula_document_url": user.cedula_document if user.cedula_document else "",
             "cedula_verified": user.cedula_verified,
             "cedula_number": user.cedula_number if user.cedula_number else "",
+            "biometric_consent_accepted_at": (
+                user.biometric_consent_accepted_at.isoformat()
+                if user.biometric_consent_accepted_at
+                else None
+            ),
+            "biometric_consent_version": user.biometric_consent_version,
+            "biometric_suppressed_at": (
+                user.biometric_suppressed_at.isoformat()
+                if user.biometric_suppressed_at
+                else None
+            ),
             "gender": user.gender,
             "locations": locations,
             "is_external_account": user.is_external_account,

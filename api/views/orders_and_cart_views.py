@@ -62,7 +62,7 @@ class OrderViewSet(viewsets.ViewSet):
             # Mandamos la estructura limpia que espera Flutter
             payload = {
                 'id': order.id, 
-                "is_merchant_mode":is_merchant_mode,
+                "is_merchant_mode": is_merchant_mode,
                 'status': order.status,
                 'withdrawal_type': order.withdrawal_type,
                 'store_id': str(order.store_id),
@@ -70,7 +70,7 @@ class OrderViewSet(viewsets.ViewSet):
                 'store_image': store_image_url,
                 'store_lat': store_lat,
                 'store_lng': store_lng,
-                'store_contact_methods':store_contact_methods_dict,
+                'store_contact_methods': store_contact_methods_dict,
                 'store_address': store_address,
                 'store_email': store_email,
                 'cart': order.cart,
@@ -80,11 +80,13 @@ class OrderViewSet(viewsets.ViewSet):
                 'client_address': client_address,
                 "client_image": storage_manager.get_url(order.client.profile_picture) if order.client.profile_picture else None,
                 'client_name': f"{order.client.first_name} {order.client.last_name}",
-                'client_contact_methods':contact_methods_dict,
+                'client_contact_methods': contact_methods_dict,
                 'end_time': timezone.localtime(order.end_time).strftime("%d/%m/%Y %I:%M %p").lower() if order.end_time else creation_str,
-                'client_cedula': order.client.cedula_number,
-                'client_email': order.client.email,
             }
+            # CART-60 (Principio de Proporcionalidad): nunca exponer client_cedula ni documentos de identidad al comerciante
+            if not is_merchant_mode:
+                payload['client_cedula'] = order.client.cedula_number
+                payload['client_email'] = order.client.email
             
             return Response(payload, status=status.HTTP_200_OK)
 

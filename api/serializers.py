@@ -182,11 +182,13 @@ class UserSerializer(serializers.ModelSerializer):
             'id', 'email', 'first_name', 'last_name', 'birth_date', 
             'gender', 'profile_picture', 'user_type', 'cedula_number', 
             'cedula_document', 'cedula_verified', 'email_verified', 
-            'is_external_account', 'creation', 'password' 
+            'is_external_account', 'creation', 'password',
+            'biometric_consent_accepted_at', 'biometric_consent_version', 'biometric_suppressed_at',
         ]
         read_only_fields = [
             'id', 'email', 'user_type', 'cedula_verified', 
-            'email_verified', 'is_external_account', 'creation'
+            'email_verified', 'is_external_account', 'creation',
+            'biometric_consent_accepted_at', 'biometric_consent_version', 'biometric_suppressed_at',
         ]
 
     def validate_first_name(self, value):
@@ -237,6 +239,8 @@ class VerifyUserSerializer(serializers.Serializer):
         max_length=BIOMETRIC_VECTOR_DIMENSIONS,
         required=True
     )
+    biometric_consent_accepted = serializers.CharField(max_length=16, required=False, allow_blank=True, allow_null=True)
+    biometric_consent_version = serializers.CharField(max_length=32, required=False, allow_blank=True, allow_null=True)
 
     def _get_current_user(self):
         req_ctx = self.context.get('request')

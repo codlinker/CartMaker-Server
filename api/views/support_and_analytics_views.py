@@ -42,16 +42,22 @@ class SupportTicketViewSet(viewsets.ViewSet):
         title = request.data.get('title')
         description = request.data.get('description')
 
-        if not topic_str or not title or not description:
+        if topic_str is None or topic_str == '' or not title or not description:
             return Response({'error': 'Faltan campos obligatorios'}, status=status.HTTP_400_BAD_REQUEST)
 
         TOPIC_MAP = {
             'Problema con una Orden': SupportTicket.TicketTopic.ORDER_ISSUE,
             'Reclamo sobre Tienda': SupportTicket.TicketTopic.STORE_COMPLAINT,
             'Problema con mi Cuenta': SupportTicket.TicketTopic.ACCOUNT_ISSUE,
+            'Cuenta y Seguridad': SupportTicket.TicketTopic.ACCOUNT_ISSUE,
+            'Privacidad y Habeas Data': SupportTicket.TicketTopic.PRIVACY_HABEAS_DATA,
             'Otro': SupportTicket.TicketTopic.OTHER,
         }
-        topic_int = TOPIC_MAP.get(topic_str, SupportTicket.TicketTopic.OTHER)
+        if isinstance(topic_str, int) or (isinstance(topic_str, str) and topic_str.isdigit()):
+            valid_int_choices = {choice[0] for choice in SupportTicket.TicketTopic.choices}
+            topic_int = int(topic_str) if int(topic_str) in valid_int_choices else SupportTicket.TicketTopic.OTHER
+        else:
+            topic_int = TOPIC_MAP.get(str(topic_str).strip(), SupportTicket.TicketTopic.OTHER)
 
         # =================================================================
         # 🧠 ALGORITMO DE ASIGNACIÓN INTELIGENTE

@@ -311,6 +311,9 @@ class User(AbstractBaseUser, PermissionsMixin):
     cedula_verified = models.BooleanField(default=False)
     cedula_number = models.CharField(max_length=50, null=True, blank=True)
     biometric_vector = VectorField(dimensions=512, null=True, blank=True)
+    biometric_consent_accepted_at = models.DateTimeField(null=True, blank=True)
+    biometric_consent_version = models.CharField(max_length=32, null=True, blank=True)
+    biometric_suppressed_at = models.DateTimeField(null=True, blank=True)
     gender = models.IntegerField(choices=UserGender.choices, default=UserGender.MALE)
     is_external_account = models.BooleanField(default=False)
     can_check_payments = models.BooleanField(default=False, help_text="Puede ingresar al panel de pagos")
@@ -1555,6 +1558,7 @@ class SupportTicket(models.Model):
         STORE_COMPLAINT = 1, 'Reclamo sobre Tienda'
         ACCOUNT_ISSUE = 2, 'Problema con mi Cuenta'
         OTHER = 3, 'Otro'
+        PRIVACY_HABEAS_DATA = 4, 'Privacidad y Habeas Data'
 
     class CloseReason(models.IntegerChoices):
         SOLVED = 0, 'Resuelto con éxito'

@@ -88,6 +88,8 @@ urlpatterns = [
     # Rutas para la verificacion de usuarios
     path('v1/check-cedula/<str:cedula_number>/', CheckIfCedulaExists.as_view(), name='check-cedula-exists'),
     path('v1/verify-user', VerifyUser.as_view(), name='verify_user'),
+    path('v1/verify-user/', VerifyUser.as_view(), name='verify_user_slash'),
+    path('v1/user/suppress-biometrics', UserViewSet.as_view({'post': 'suppress_biometrics'}), name='suppress_biometrics_no_slash'),
     # CRUD de modelos (viewsets)
     path('v1/', include(router.urls)),
 ]

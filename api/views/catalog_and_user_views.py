@@ -104,6 +104,19 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({'success': False, 'error': {'error': str(e)}}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    def destroy(self, request, *args, **kwargs):
+        item = self.get_object()
+        try:
+            with transaction.atomic():
+                # CART-67: Desvincular explícitamente cualquier video historia asociado antes de eliminar el InventoryItem
+                CompanyVideoStory.objects.filter(associated_item_id=item.id).update(associated_item=None)
+                item_id = item.id
+                item.delete()
+                transaction.on_commit(lambda: cache.delete(f"cartmaker:struct:item:{item_id}"))
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 class ProductViewSet(viewsets.ModelViewSet):
     serializer_class = ProductSerializer
     permission_classes = [IsAuthenticated]
@@ -477,15 +490,30 @@ class ProductViewSet(viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         product = self.get_object()
         try:
-            # Primero borramos las imágenes del storage
-            for img in product.images:
-                try:
-                    storage_manager.delete_file(img)
-                except Exception as e:
-                    print(f"Error borrando imagen al eliminar producto: {e}")
-            
-            # Luego eliminamos el registro de la DB
-            product.delete()
+            with transaction.atomic():
+                affected_item_ids = list(
+                    InventoryItem.objects.filter(product_id=product.id).values_list('id', flat=True)
+                )
+                # CART-67: Desvincular explícitamente los videos asociados antes de eliminar el producto o sus InventoryItem
+                if affected_item_ids:
+                    CompanyVideoStory.objects.filter(associated_item_id__in=affected_item_ids).update(
+                        associated_item=None
+                    )
+
+                # Primero borramos las imágenes del storage
+                for img in product.images:
+                    try:
+                        storage_manager.delete_file(img)
+                    except Exception as e:
+                        print(f"Error borrando imagen al eliminar producto: {e}")
+                
+                # Luego eliminamos el registro de la DB
+                product.delete()
+
+                if affected_item_ids:
+                    transaction.on_commit(
+                        lambda: cache.delete_many([f"cartmaker:struct:item:{iid}" for iid in affected_item_ids])
+                    )
             return Response(status=status.HTTP_204_NO_CONTENT)
             
         except Exception as e:
@@ -495,8 +523,14 @@ class ProductViewSet(viewsets.ModelViewSet):
     def bulk_delete(self, request):
         """
         Recibe una lista de IDs y elimina los productos masivamente.
+        CART-67: Antes de eliminar los productos, desvincula explícitamente los videos asociados.
         """
-        product_ids = request.data.get('product_ids', [])
+        product_ids = request.data.get('product_ids') or request.data.get('ids') or []
+        if isinstance(product_ids, str):
+            try:
+                product_ids = json.loads(product_ids)
+            except Exception:
+                product_ids = []
         if not product_ids or not isinstance(product_ids, list):
             return Response({'error': 'Se requiere una lista de IDs de productos válidos.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -504,6 +538,16 @@ class ProductViewSet(viewsets.ModelViewSet):
             with transaction.atomic():
                 # Filtramos para asegurar que pertenezcan al usuario dueño de la compañía
                 products_to_delete = Product.objects.select_related('company').filter(id__in=product_ids, company__owner=request.user)
+                valid_product_ids = [prod.id for prod in products_to_delete]
+                affected_item_ids = list(
+                    InventoryItem.objects.filter(product_id__in=valid_product_ids).values_list('id', flat=True)
+                ) if valid_product_ids else []
+
+                # CART-67: Desvincular explícitamente los videos asociados para que ningún video quede huérfano ni sea eliminado
+                if affected_item_ids:
+                    CompanyVideoStory.objects.filter(associated_item_id__in=affected_item_ids).update(
+                        associated_item=None
+                    )
                 
                 # Borramos las imágenes del storage iterando la consulta evaluada
                 for product in products_to_delete:
@@ -515,6 +559,11 @@ class ProductViewSet(viewsets.ModelViewSet):
                 
                 # Eliminación masiva a nivel de BD
                 deleted_count, _ = products_to_delete.delete()
+
+                if affected_item_ids:
+                    transaction.on_commit(
+                        lambda: cache.delete_many([f"cartmaker:struct:item:{iid}" for iid in affected_item_ids])
+                    )
 
             return Response({'success': True, 'deleted_count': deleted_count}, status=status.HTTP_200_OK)
 
@@ -712,3 +761,110 @@ class UserViewSet(mixins.RetrieveModelMixin,
             {"preferred_category_ids": valid_ids},
             status=status.HTTP_200_OK,
         )
+
+    @action(
+        detail=False,
+        methods=['post'],
+        url_path='suppress-biometrics',
+        permission_classes=[IsAuthenticated],
+    )
+    def suppress_biometrics(self, request):
+        """
+        CART-60: Derecho de Cancelación y Supresión (Habeas Data - Art. 28 CRBV).
+        1. Elimina físicamente cedula_document y selfie_photo del bucket S3 / storage_manager.
+        2. Anonimiza biometric_vector = None, cedula_number = None y revoca cedula_verified = False.
+        3. Si deactivate_account=True, valida que no existan órdenes activas (como cliente o comerciante) y desactiva la cuenta.
+        """
+        user = request.user
+        raw_confirm = request.data.get("confirm_suppression", False)
+        confirm = (
+            raw_confirm is True
+            or str(raw_confirm).strip().lower() in ("true", "1", "yes")
+        )
+        if not confirm:
+            return Response(
+                {"detail": "Debes confirmar expresamente la solicitud de supresión."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        raw_deactivate = request.data.get("deactivate_account", False)
+        deactivate_account = (
+            raw_deactivate is True
+            or str(raw_deactivate).strip().lower() in ("true", "1", "yes")
+        )
+
+        # Si solicita baja definitiva de cuenta, verificar que no tenga órdenes activas/en tránsito (cliente o comercio)
+        if deactivate_account:
+            active_statuses = [OrderStatus.WAITING, OrderStatus.DELIVERY_SENT, 2]
+            has_active_orders = Order.objects.filter(
+                Q(client=user) | Q(store__company__owner=user),
+                status__in=active_statuses,
+            ).exists()
+            if has_active_orders:
+                return Response(
+                    {
+                        "code": "ACTIVE_ORDERS_BLOCK",
+                        "detail": "Tienes órdenes activas en curso. Finalízalas o cancélalas antes de dar de baja definitiva tu cuenta.",
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+        now = timezone.now()
+        with transaction.atomic():
+            locked_user = User.objects.select_for_update().get(pk=user.pk)
+            old_cedula = locked_user.cedula_number
+
+            # 1. Borrado físico en AWS S3 / storage_manager de las imágenes de cédula y selfie de auditoría
+            paths_to_delete = set()
+            if locked_user.cedula_document:
+                paths_to_delete.add(locked_user.cedula_document)
+            for ext in ("jpg", "jpeg", "png", "webp", "heic"):
+                paths_to_delete.add(f"identity_verifications/cedula_{locked_user.id}.{ext}")
+                paths_to_delete.add(f"identity_verifications/selfie_{locked_user.id}.{ext}")
+
+            for rel_path in paths_to_delete:
+                try:
+                    storage_manager.delete_file(rel_path)
+                except Exception:
+                    pass
+
+            # 2. Borrado / anonimización del vector biométrico facial (512-D) y estado de verificación
+            locked_user.cedula_document = None
+            locked_user.biometric_vector = None
+            locked_user.cedula_verified = False
+            locked_user.cedula_number = None
+            locked_user.nacionality = None
+            locked_user.biometric_suppressed_at = now
+
+            # 3. Baja definitiva opcional
+            if deactivate_account:
+                locked_user.is_active = False
+                DeviceToken.objects.filter(user=locked_user).delete()
+                CompanyStore.objects.filter(company__owner=locked_user).update(is_active=False)
+                InventoryItem.objects.filter(store__company__owner=locked_user).update(paused=True)
+
+            locked_user.save()
+            uid = locked_user.id
+
+            def _clear_user_caches():
+                cache.delete(f"cartmaker:tenant:{uid}:profile")
+                cache.delete(f"cartmaker:tenant:{uid}:subscriptions")
+                cache.delete(f"cartmaker:tenant:{uid}:company")
+                if old_cedula:
+                    digits = "".join(ch for ch in str(old_cedula) if ch.isdigit())
+                    for nac in ("V", "E"):
+                        cache.delete(f"cm:cne_cedula:{nac}:{digits}")
+
+            transaction.on_commit(_clear_user_caches)
+
+        return Response(
+            {
+                "status": "suppressed",
+                "biometric_vector_cleared": True,
+                "s3_identity_files_deleted": True,
+                "account_deactivated": deactivate_account,
+                "suppressed_at": now.isoformat(),
+            },
+            status=status.HTTP_200_OK,
+        )
+
