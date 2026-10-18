@@ -39,7 +39,7 @@ CATALOGO_ESTRUCTURA: List[Dict[str, Any]] = [
             {"nombre": "Almacenamiento y Memorias", "imagen": "static/img/categories/sub_categories/tecnologia_y_electronica/almacenamiento_y_memorias.jpg"},
             {"nombre": "Monitores y Televisores", "imagen": "static/img/categories/sub_categories/tecnologia_y_electronica/monitores_y_televisores.jpg"},
             {"nombre": "Impresoras y Escaners", "imagen": "static/img/categories/sub_categories/tecnologia_y_electronica/impresoras_y_escaners.jpg"},
-            {"nombre": "Smartwatches y Wearables", "imagen": "static/img/categories/sub_categories/tecnologia_y_electronica/smartwaches_y_wearables.jpg"},
+            {"nombre": "Smartwatches y Wearables", "imagen": "static/img/categories/sub_categories/tecnologia_y_electronica/smartwatches_y_wearables.jpg"},
             {"nombre": "Cámaras y Fotografía", "imagen": "static/img/categories/sub_categories/tecnologia_y_electronica/camaras_y_fotografia.jpg"},
             {"nombre": "Audífonos y Cornetas", "imagen": "static/img/categories/sub_categories/tecnologia_y_electronica/audifonos_y_parlantes.jpg"},
             {"nombre": "Teclados y Mouse", "imagen": "static/img/categories/sub_categories/tecnologia_y_electronica/teclados_y_mouse.jpg"},
@@ -199,6 +199,25 @@ LEGACY_CATEGORY_TO_OFFICIAL_MAP: Dict[str, str] = {
     "Servicios Profesionales": "Otras Categorías",
     "Otras Categorías (Varios)": "Otras Categorías",
     "Otros": "Otras Categorías",
+}
+
+# Mapeo de subcategorías anteriores/renombradas a las nuevas subcategorías oficiales
+LEGACY_SUBCATEGORY_TO_OFFICIAL_MAP: Dict[str, str] = {
+    # Alimentos y Bebidas
+    "Despensa y Víveres": "Víveres y Granos",
+    "Frescos": "Frutas, Verduras y Hortalizas",
+    "Charcutería y Lácteos": "Charcutería",
+    "Bebidas": "Bebidas, Refrescos y Maltas",
+    "Snacks y Dulces": "Chucherías, Snacks y Dulces",
+    # Tecnología y Electrónica
+    "Celulares y Tablets": "Teléfonos y Tablets",
+    "Computación": "Computadoras y Laptops",
+    "TV, Audio y Video": "Monitores y Televisores",
+    "Videojuegos y Consolas": "Consolas y Videojuegos",
+    "Wearables": "Smartwatches y Wearables",
+    "Audífonos y Parlantes": "Audífonos y Cornetas",
+    "Periféricos y Accesorios": "Teclados y Mouse",
+    "Accesorios": "Cargadores, Cables y Powerbanks",
 }
 
 
@@ -2189,12 +2208,51 @@ SUBCATEGORY_SCHEMAS: Dict[str, Dict[str, Any]] = {
     ),
 }
 
+# Registrar esquemas especializados para las nuevas subcategorías de Alimentos y Bebidas y Tecnología y Electrónica
+_NEW_SUBCATEGORY_BASE_MAPPING: Dict[str, str] = {
+    # Alimentos y Bebidas (15 subcategorías)
+    "Víveres y Granos": "Despensa y Víveres",
+    "Frutas, Verduras y Hortalizas": "Frescos",
+    "Carnicería y Aves": "Frescos",
+    "Pescadería y Mariscos": "Frescos",
+    "Charcutería": "Charcutería y Lácteos",
+    "Lácteos y Huevos": "Charcutería y Lácteos",
+    "Panadería y Pastelería": "Snacks y Dulces",
+    "Enlatados y Conservas": "Despensa y Víveres",
+    "Salsas, Condimentos y Aceites": "Despensa y Víveres",
+    "Café, Té e Infusiones": "Despensa y Víveres",
+    "Bebidas, Refrescos y Maltas": "Bebidas",
+    "Chucherías, Snacks y Dulces": "Snacks y Dulces",
+    "Congelados y Pasapalos": "Snacks y Dulces",
+    "Avena y Cereales": "Despensa y Víveres",
+    # Tecnología y Electrónica (17 subcategorías)
+    "Teléfonos y Tablets": "Celulares y Tablets",
+    "Computadoras y Laptops": "Computación",
+    "Componentes de PC y Hardware": "Computación",
+    "Almacenamiento y Memorias": "Computación",
+    "Monitores y Televisores": "TV, Audio y Video",
+    "Impresoras y Escaners": "Computación",
+    "Smartwatches y Wearables": "Wearables",
+    "Audífonos y Cornetas": "Periféricos y Accesorios",
+    "Teclados y Mouse": "Periféricos y Accesorios",
+    "Redes, Routers y Conectividad": "Computación",
+    "Consolas y Videojuegos": "Videojuegos y Consolas",
+    "Cargadores, Cables y Powerbanks": "Periféricos y Accesorios",
+    "Reguladores, Protectores y UPS": "Periféricos y Accesorios",
+    "Smart Home y Domótica": "Seguridad y Domótica",
+    "Seguridad y Cámaras de Vigilancia": "Seguridad y Domótica",
+    "Proyectores y Video Beam": "TV, Audio y Video",
+}
+for _new_sub_name, _base_sub_name in _NEW_SUBCATEGORY_BASE_MAPPING.items():
+    if _new_sub_name not in SUBCATEGORY_SCHEMAS and _base_sub_name in SUBCATEGORY_SCHEMAS:
+        SUBCATEGORY_SCHEMAS[_new_sub_name] = SUBCATEGORY_SCHEMAS[_base_sub_name]
+
 
 # Esquemas por defecto a nivel de Categoría Principal (cuando no se especifica subcategoría)
 CATEGORY_DEFAULT_SUBCATEGORY_MAP: Dict[str, str] = {
-    "Alimentos y Bebidas": "Despensa y Víveres",
-    "Alimentos y Bebidas (Supermercado)": "Despensa y Víveres",
-    "Tecnología y Electrónica": "Celulares y Tablets",
+    "Alimentos y Bebidas": "Víveres y Granos",
+    "Alimentos y Bebidas (Supermercado)": "Víveres y Granos",
+    "Tecnología y Electrónica": "Teléfonos y Tablets",
     "Moda y Accesorios": "Ropa Femenina",
     "Salud y Belleza": "Cuidado Personal",
     "Hogar, Muebles y Jardín": "Electrodomésticos",

@@ -8,6 +8,7 @@ from django.contrib.gis.geos import Point
 from api.core.category_schemas import (
     CATALOGO_ESTRUCTURA,
     LEGACY_CATEGORY_TO_OFFICIAL_MAP,
+    LEGACY_SUBCATEGORY_TO_OFFICIAL_MAP,
     get_subcategory_schema,
 )
 from api.models import (
@@ -198,8 +199,7 @@ class Command(BaseCommand):
     def _poblar_categorias(self):
         self.stdout.write("Verificando Categories y SubCategories oficiales desde CATALOGO_ESTRUCTURA...")
 
-        # 1. Migrar/fusionar nombres legacy (ej. 'Alimentos y Bebidas (Supermercado)' -> 'Alimentos y Bebidas',
-        #    'Otras Categorías (Varios)' -> 'Otras Categorías') sin perder referencias en SubCategory o User
+        # 1. Migrar/fusionar nombres legacy de Categorías sin perder referencias en SubCategory o User
         for legacy_name, official_name in LEGACY_CATEGORY_TO_OFFICIAL_MAP.items():
             if legacy_name == official_name:
                 continue
@@ -217,11 +217,32 @@ class Command(BaseCommand):
                     u.preferred_categories.remove(old_cat)
                 old_cat.delete()
 
-        # 2. Sincronizar las 14 Categorías y 68 Subcategorías oficiales con su schema_config e img_url
+        # 2. Renombrar/fusionar SubCategorías anteriores que cambiaron de nombre (conservando ID y Productos)
+        renamed_subs = 0
+        for old_sub_name, new_sub_name in LEGACY_SUBCATEGORY_TO_OFFICIAL_MAP.items():
+            if old_sub_name == new_sub_name:
+                continue
+            old_sub = SubCategory.objects.filter(name__iexact=old_sub_name).order_by('id').first()
+            if not old_sub:
+                continue
+            new_sub = SubCategory.objects.filter(name__iexact=new_sub_name).order_by('id').first()
+            if not new_sub:
+                old_sub.name = new_sub_name
+                old_sub.save(update_fields=['name'])
+                renamed_subs += 1
+            elif old_sub.id != new_sub.id:
+                Product.objects.filter(category=old_sub).update(category=new_sub)
+                old_sub.delete()
+                renamed_subs += 1
+
+        # 3. Sincronizar todas las Categorías y Subcategorías oficiales con su schema_config e img_url
         created_cats = 0
         updated_cats = 0
         created_subs = 0
         updated_subs = 0
+        official_categories_by_name = {}
+        official_subcategories_by_id = set()
+        official_subcategories_by_name = {}
 
         for cat_entry in CATALOGO_ESTRUCTURA:
             cat_name = cat_entry['categoria']
@@ -238,6 +259,8 @@ class Command(BaseCommand):
                 cat_obj.save(update_fields=['img_url'])
                 updated_cats += 1
 
+            official_categories_by_name[cat_name] = cat_obj
+
             for sub_entry in cat_entry['subcategorias']:
                 sub_name = sub_entry['nombre']
                 sub_img = sub_entry['imagen']
@@ -246,7 +269,7 @@ class Command(BaseCommand):
                     parent_category_name=cat_name,
                 )
 
-                existing_subs = list(SubCategory.objects.filter(name=sub_name).order_by('id'))
+                existing_subs = list(SubCategory.objects.filter(name__iexact=sub_name).order_by('id'))
                 if existing_subs:
                     sub_obj = existing_subs[0]
                     # Si existían duplicados para la misma subcategoría, consolidar productos y borrar duplicados
@@ -256,6 +279,9 @@ class Command(BaseCommand):
                         SubCategory.objects.filter(id__in=dup_ids).delete()
 
                     changed_fields = []
+                    if sub_obj.name != sub_name:
+                        sub_obj.name = sub_name
+                        changed_fields.append('name')
                     if sub_obj.parent_category_id != cat_obj.id:
                         sub_obj.parent_category = cat_obj
                         changed_fields.append('parent_category')
@@ -269,7 +295,7 @@ class Command(BaseCommand):
                         sub_obj.save(update_fields=changed_fields)
                         updated_subs += 1
                 else:
-                    SubCategory.objects.create(
+                    sub_obj = SubCategory.objects.create(
                         name=sub_name,
                         parent_category=cat_obj,
                         img_url=sub_img,
@@ -277,11 +303,46 @@ class Command(BaseCommand):
                     )
                     created_subs += 1
 
-        cache.delete("cartmaker:global:categories")
+                official_subcategories_by_id.add(sub_obj.id)
+                official_subcategories_by_name[sub_name.lower()] = sub_obj
+
+        # 4. Limpiar cualquier subcategoría obsoleta que ya no esté en CATALOGO_ESTRUCTURA
+        #    reasignando de forma segura cualquier producto antes de eliminarla.
+        fallback_sub = official_subcategories_by_name.get('otros')
+        obsolete_subs = list(
+            SubCategory.objects.exclude(id__in=official_subcategories_by_id).select_related('parent_category')
+        )
+        deleted_subs = 0
+        for old_sub in obsolete_subs:
+            mapped_name = LEGACY_SUBCATEGORY_TO_OFFICIAL_MAP.get(old_sub.name, old_sub.name)
+            target_sub = official_subcategories_by_name.get(mapped_name.lower())
+            if target_sub is None and old_sub.parent_category_id:
+                target_sub = (
+                    SubCategory.objects.filter(
+                        parent_category_id=old_sub.parent_category_id,
+                        id__in=official_subcategories_by_id,
+                    )
+                    .order_by('id')
+                    .first()
+                )
+            if target_sub is None:
+                target_sub = fallback_sub
+            if target_sub is not None:
+                Product.objects.filter(category=old_sub).update(category=target_sub)
+            old_sub.delete()
+            deleted_subs += 1
+
+        # 5. Invalidar todas las llaves de caché de categorías y buscador en Redis
+        cache.delete_many([
+            "cartmaker:global:categories",
+            "cartmaker:global:categories:v2",
+            "cartmaker:global:search",
+        ])
         self.stdout.write(
             self.style.SUCCESS(
                 f"  [+] Categorías listas (creadas: {created_cats}, actualizadas: {updated_cats}) | "
-                f"SubCategorías listas (creadas: {created_subs}, actualizadas: {updated_subs})."
+                f"SubCategorías listas (creadas: {created_subs}, renombradas: {renamed_subs}, "
+                f"actualizadas: {updated_subs}, obsoletas eliminadas: {deleted_subs})."
             )
         )
 
