@@ -110,9 +110,32 @@ class CartMakerClientGatekeeperMiddleware:
 
                 # Refrescamos la propiedad cacheada request.headers de Django si ya fue leída
                 request.__dict__.pop("headers", None)
+                auth_header = (request.META.get("HTTP_AUTHORIZATION") or "").strip()
+                if self._is_empty_or_null_bearer(auth_header):
+                    request.META.pop("HTTP_AUTHORIZATION", None)
+                    request.__dict__.pop("headers", None)
                 return extracted_key
 
+        # Si el frontend envió "Authorization: Bearer null" / "Bearer undefined" / "Bearer " sin JWT real
+        # (muy común en Modo Invitado), lo limpiamos para que SimpleJWT no lance 401 en endpoints AllowAny
+        if self._is_empty_or_null_bearer(auth_header):
+            request.META.pop("HTTP_AUTHORIZATION", None)
+            request.__dict__.pop("headers", None)
+
         return ""
+
+    @staticmethod
+    def _is_empty_or_null_bearer(auth_header: str) -> bool:
+        if not auth_header:
+            return False
+        parts = auth_header.split()
+        if len(parts) == 1 and parts[0].lower() in ("bearer", "token", "jwt"):
+            return True
+        if len(parts) >= 2 and parts[0].lower() == "bearer":
+            token_candidate = parts[1].strip().strip('"\'')
+            if not token_candidate or token_candidate.lower() in ("null", "undefined", "none", "false"):
+                return True
+        return False
 
     def _is_authenticated_web_staff_bypass(self, request, path: str) -> bool:
         """
@@ -220,6 +243,11 @@ class CartMakerClientGatekeeperMiddleware:
 
             # Si no envió API Key o es inválida/revocada -> Rechazo inmediato
             if not raw_api_key:
+                print(
+                    f"🚫 [GATEKEEPER 401 missing_api_key] Path={path} | "
+                    f"UA={request.headers.get('User-Agent')} | "
+                    f"HasAuth={bool(request.META.get('HTTP_AUTHORIZATION'))}"
+                )
                 return JsonResponse(
                     {
                         "error": "Acceso denegado: Se requiere una CartMaker API Key válida en los headers de autorización.",
@@ -228,6 +256,10 @@ class CartMakerClientGatekeeperMiddleware:
                     status=401,
                 )
 
+            print(
+                f"🚫 [GATEKEEPER 403 invalid_api_key] Path={path} | "
+                f"KeyPrefix={raw_api_key[:20]}... | Scope={required_scope}"
+            )
             return JsonResponse(
                 {
                     "error": "Acceso denegado: La CartMaker API Key proporcionada es inválida, expiró o fue revocada.",

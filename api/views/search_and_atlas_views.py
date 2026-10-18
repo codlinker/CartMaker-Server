@@ -14,7 +14,7 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
 
     def get_permissions(self):
         public_reads = (
-            'category', 'store', 'offers', 'text_search', 'home_feed', 'item_details',
+            'category', 'store', 'offers', 'stores_with_tokens', 'text_search', 'home_feed', 'item_details',
         )
         if self.action in public_reads:
             return [AllowAny()]

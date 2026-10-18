@@ -214,6 +214,7 @@ class ProductImageSerializer(serializers.Serializer):
 
 MAX_IMAGE_SIZE_MB = 10
 MAX_VIDEO_SIZE_MB = 40
+MAX_VIDEO_DURATION_SECONDS = 31.0  # 30.0s + 1.0s de tolerancia por redondeo de keyframes (CART-33)
 
 def validate_image_size(file):
     if file.size > MAX_IMAGE_SIZE_MB * 1024 * 1024:
@@ -224,6 +225,17 @@ def validate_video_size(file):
     if file.size > MAX_VIDEO_SIZE_MB * 1024 * 1024:
         raise serializers.ValidationError(f"El video no puede pesar más de {MAX_VIDEO_SIZE_MB}MB.")
     return file
+
+def validate_video_duration(duration_val):
+    if duration_val is None or duration_val == "":
+        return 0.0
+    try:
+        val = float(duration_val)
+    except (ValueError, TypeError):
+        raise serializers.ValidationError("La duración del video debe ser un número válido.")
+    if val < 0 or val > MAX_VIDEO_DURATION_SECONDS:
+        raise serializers.ValidationError("El video no puede superar los 30 segundos.")
+    return val
 
 class VerifyUserSerializer(serializers.Serializer):
     first_name = serializers.CharField(max_length=150, required=True)
@@ -483,23 +495,31 @@ class ProductSerializer(serializers.ModelSerializer):
 
 class CompanyVideoStorySerializer(serializers.ModelSerializer):
     """
-    Serializer robusto para crear Historias de Video desde Flutter.
+    Serializer robusto para crear y editar Historias de Video desde Flutter.
     """
-    # 💡 Declaramos explícitamente los campos de archivo
-    video_file = serializers.FileField(required=True, validators=[validate_video_size])
-    thumbnail = serializers.ImageField(required=True, validators=[validate_image_size])
+    # 💡 Declaramos explícitamente los campos de archivo (opcionales en PATCH/PUT)
+    video_file = serializers.FileField(required=False, allow_null=True, validators=[validate_video_size])
+    thumbnail = serializers.ImageField(required=False, allow_null=True, validators=[validate_image_size])
     
-    # 💡 Los campos de texto siguen siendo opcionales y tolerantes
+    # 💡 Los campos de texto y metadatos siguen siendo opcionales y tolerantes
+    title = serializers.CharField(max_length=150, required=False, allow_null=True, allow_blank=True)
     associated_item_id = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     description = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    duration_seconds = serializers.FloatField(required=False, validators=[validate_video_duration])
+    metadata = FlexibleJSONField(default_factory=dict, required=False)
+    applied_filter_matrix = FlexibleJSONField(default_factory=list, required=False)
 
     class Meta:
         model = CompanyVideoStory
         fields = [
-            'id', 'video_file', 'thumbnail', 'description', 
-            'associated_item_id', 'creation', 'expires_at', 'views_count'
+            'id', 'title', 'video_file', 'thumbnail', 'description',
+            'duration_seconds', 'metadata', 'applied_filter_matrix',
+            'associated_item_id', 'creation', 'updated_at', 'expires_at', 'views_count'
         ]
-        read_only_fields = ['id', 'creation', 'expires_at', 'views_count']
+        read_only_fields = ['id', 'creation', 'updated_at', 'expires_at', 'views_count']
+
+    def to_representation(self, instance):
+        return instance.get_json()
 
     def create(self, validated_data):
         item_id = validated_data.pop('associated_item_id', None)

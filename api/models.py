@@ -19,6 +19,7 @@ from django.contrib.postgres.indexes import GinIndex
 from django.db.models import UniqueConstraint, Q
 from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from django.contrib.contenttypes.models import ContentType
+import re
 
 # FUNCIONES PARA JSON Fields por default
 
@@ -1608,6 +1609,14 @@ class SupportTicket(models.Model):
 
     client = models.ForeignKey(User, on_delete=models.CASCADE, related_name='support_tickets')
     agent = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_tickets')
+    order = models.ForeignKey(
+        Order,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='support_tickets',
+        help_text='Orden reportada por el usuario o comercio (si aplica).',
+    )
     topic = models.IntegerField(choices=TicketTopic.choices, default=TicketTopic.OTHER)
     title = models.CharField(max_length=200)
     description = models.TextField()
@@ -1633,6 +1642,30 @@ class SupportTicket(models.Model):
             unread_agent = self.messages.filter(status__lt=3).exclude(sender_id=self.agent_id).count() if self.agent_id else self.messages.count()
 
         agent_obj = self.agent if self.agent_id else None
+        order_obj = self.order if self.order_id else None
+        order_summary = None
+        if order_obj is not None:
+            cart_data = order_obj.cart if isinstance(order_obj.cart, dict) else {}
+            try:
+                total_amount = round(float(cart_data.get('total', 0.0) or 0.0), 2)
+            except (ValueError, TypeError):
+                total_amount = 0.0
+            store_name = None
+            if order_obj.store_id and order_obj.store:
+                store_name = (
+                    order_obj.store.company.name
+                    if (order_obj.store.company_id and order_obj.store.company)
+                    else order_obj.store.name
+                )
+            order_summary = {
+                'id': str(order_obj.id),
+                'order_id': str(order_obj.id),
+                'status': order_obj.status,
+                'status_label': order_obj.get_status_display(),
+                'total_amount': f"{total_amount:.2f}",
+                'store_name': store_name,
+                'created_at': order_obj.creation.isoformat() if order_obj.creation else None,
+            }
 
         return {
             'id': self.id,
@@ -1645,6 +1678,9 @@ class SupportTicket(models.Model):
             'topic_id': self.topic,
             'title': self.title,
             'description': self.description,
+            'order': str(self.order_id) if self.order_id else None,
+            'order_id': str(self.order_id) if self.order_id else None,
+            'order_summary': order_summary,
             'closed': self.closed,
             'close_reason': self.get_close_reason_display() if self.close_reason is not None else None,
             'creation': time_str,
@@ -3231,6 +3267,7 @@ class CompanyVideoStory(models.Model):
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='video_stories')
+    title = models.CharField(max_length=150, blank=True, default='')
     video_file = models.CharField(max_length=500, null=True, blank=True)
     duration_seconds = models.FloatField(default=0.0)
     thumbnail = models.CharField(max_length=500, null=True, blank=True)
@@ -3243,9 +3280,11 @@ class CompanyVideoStory(models.Model):
         related_name='linked_stories'
     )
     creation = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
     expires_at = models.DateTimeField(db_index=True)
     views_count = models.PositiveIntegerField(default=0)
     applied_filter_matrix = models.JSONField(null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
     # 💡 ENLACES GENÉRICOS (Borra automáticamente en cascada likes y comentarios de este video al ser eliminado)
     likes = GenericRelation(UniversalLike, related_query_name='company_video_stories')
     comments = GenericRelation(UniversalComment, related_query_name='company_video_stories')
@@ -3284,6 +3323,7 @@ class CompanyVideoStory(models.Model):
         self.save(update_fields=['video_file', 'thumbnail', 'expires_at'])
 
     def get_json(self) -> dict:
+        associated_json = self.associated_item.get_json() if self.associated_item else None
         return {
             'id': str(self.id),
             'company_id': str(self.company_id),
@@ -3291,9 +3331,17 @@ class CompanyVideoStory(models.Model):
             'company_image': storage_manager.get_url(self.company.image) if self.company.image else None,
             'video_url': storage_manager.get_url(self.video_file) if self.video_file else None,
             'thumbnail_url': storage_manager.get_url(self.thumbnail) if self.thumbnail else None,
+            'title': self.title or self.description or '',
             'description': self.description,
-            'associated_item': self.associated_item.get_json() if self.associated_item else None,
+            'duration': self.duration_seconds,
+            'duration_seconds': self.duration_seconds,
+            'metadata': self.metadata or {},
+            'applied_filter_matrix': self.applied_filter_matrix,
+            'associated_item': associated_json,
+            'associated_item_id': str(self.associated_item_id) if self.associated_item_id else None,
+            'tagged_products': [associated_json] if associated_json else [],
             'creation': self.creation.isoformat(),
+            'updated_at': self.updated_at.isoformat() if self.updated_at else self.creation.isoformat(),
             'expires_at': self.expires_at.isoformat(),
             'is_media_available': self.is_media_available,
             'views_count': self.views_count,

@@ -17,13 +17,16 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
         base_qs = CompanyVideoStory.objects.select_related(
             'company',
             'associated_item__product',
+            'associated_item__product__category',
+            'associated_item__product__category__parent_category',
+            'associated_item__product__company',
+            'associated_item__offer',
             'associated_item__store',
+            'associated_item__store__company',
         )
         user = getattr(self.request, 'user', None)
         if not user or not user.is_authenticated:
             return base_qs.none()
-        if self.action in ('update', 'partial_update', 'destroy'):
-            return base_qs.filter(company__owner=user)
         if self.action in ('list', 'retrieve'):
             now = timezone.now()
             return base_qs.filter(
@@ -31,17 +34,259 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
             )
         return base_qs
 
+    @staticmethod
+    def _parse_json_field(raw_val, default=None):
+        if raw_val is None or raw_val == "":
+            return default
+        if isinstance(raw_val, (dict, list)):
+            return raw_val
+        if isinstance(raw_val, str):
+            stripped = raw_val.strip()
+            if not stripped or stripped.lower() in ("null", "none"):
+                return default
+            try:
+                return json.loads(stripped)
+            except Exception:
+                return default
+        return default
+
+    @classmethod
+    def _resolve_story_associated_item(cls, company, data):
+        """
+        Resuelve el InventoryItem vinculado a partir de `associated_item_id` o `tagged_products`.
+        Retorna: (should_update: bool, item: InventoryItem | None, error_msg: str | None)
+        """
+        has_assoc_key = 'associated_item_id' in data
+        has_tagged_key = 'tagged_products' in data
+        if not has_assoc_key and not has_tagged_key:
+            return False, None, None
+
+        candidate_id = None
+        if has_assoc_key:
+            raw_id = data.get('associated_item_id')
+            if raw_id is not None:
+                cleaned = str(raw_id).strip()
+                if cleaned and cleaned.lower() not in ('null', 'none', '[]'):
+                    candidate_id = cleaned
+        elif has_tagged_key:
+            raw_tagged = data.get('tagged_products')
+            if hasattr(data, 'getlist') and len(data.getlist('tagged_products')) > 1:
+                parsed_list = data.getlist('tagged_products')
+            else:
+                parsed_list = cls._parse_json_field(raw_tagged, default=None)
+                if parsed_list is None and isinstance(raw_tagged, str) and raw_tagged.strip():
+                    parsed_list = [x.strip() for x in raw_tagged.split(',') if x.strip()]
+            if isinstance(parsed_list, list) and len(parsed_list) > 0:
+                first_entry = parsed_list[0]
+                if isinstance(first_entry, dict):
+                    candidate_id = str(first_entry.get('id') or first_entry.get('item_id') or '').strip()
+                elif first_entry is not None:
+                    candidate_id = str(first_entry).strip()
+
+        if not candidate_id:
+            return True, None, None
+
+        item = InventoryItem.objects.filter(id=candidate_id, store__company=company).first()
+        if not item:
+            item = InventoryItem.objects.filter(product_id=candidate_id, store__company=company).first()
+        if not item:
+            return False, None, "El producto vinculado no existe o no te pertenece."
+        return True, item, None
+
+    @staticmethod
+    def _invalidate_story_caches(company, item_ids=None):
+        try:
+            if item_ids:
+                for iid in item_ids:
+                    if iid:
+                        cache.delete(f"cartmaker:struct:item:{iid}")
+            for store in company.stores.select_related('location').all():
+                if store.location and store.location.coordinates:
+                    lat_r = round(store.location.coordinates.y, 2)
+                    lng_r = round(store.location.coordinates.x, 2)
+                    cache.delete_pattern(f"cartmaker:struct:home:{lat_r}:{lng_r}:*")
+        except Exception as e:
+            print(f"Nota: No se pudo limpiar el caché por patrón: {e}")
+
+    def _perform_story_update(self, request, instance):
+        if instance.company.owner_id != request.user.id:
+            return Response(
+                {"error": "No tienes permisos para editar esta historia."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        company = instance.company
+        old_item_id = instance.associated_item_id
+        update_fields = set()
+
+        # 1. Validar duración si viene en el payload (CART-33: tolerancia <= 31.0s)
+        if 'duration_seconds' in request.data or 'duration' in request.data:
+            raw_dur = request.data.get('duration_seconds', request.data.get('duration'))
+            if raw_dur is not None and str(raw_dur).strip() != "":
+                try:
+                    dur_val = float(raw_dur)
+                except (ValueError, TypeError):
+                    return Response(
+                        {"error": "La duración del video debe ser un número válido."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                if dur_val < 0 or dur_val > 31.0:
+                    return Response(
+                        {"error": "El video no puede superar los 30 segundos."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                instance.duration_seconds = dur_val
+                update_fields.add('duration_seconds')
+
+        # 2. Título y descripción (sincronizados para retrocompatibilidad total)
+        has_title = 'title' in request.data
+        has_desc = 'description' in request.data
+        if has_title:
+            clean_title = str(request.data.get('title') or '').strip()[:150]
+            instance.title = clean_title
+            update_fields.add('title')
+            if not has_desc:
+                instance.description = clean_title
+                update_fields.add('description')
+        if has_desc:
+            clean_desc = str(request.data.get('description') or '').strip()
+            instance.description = clean_desc
+            update_fields.add('description')
+            if not has_title:
+                instance.title = clean_desc[:150]
+                update_fields.add('title')
+
+        # 3. Metadatos de edición y matriz de color (stickers, textos, trim, filtros)
+        filter_changed = False
+        if 'metadata' in request.data:
+            parsed_meta = self._parse_json_field(request.data.get('metadata'), default={})
+            if not isinstance(parsed_meta, dict):
+                return Response(
+                    {"error": "El campo metadata debe ser un objeto JSON válido."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            instance.metadata = parsed_meta
+            update_fields.add('metadata')
+            matrix_in_meta = parsed_meta.get('applied_filter_matrix') or parsed_meta.get('color_matrix')
+            if isinstance(matrix_in_meta, list) and 'applied_filter_matrix' not in request.data:
+                instance.applied_filter_matrix = matrix_in_meta
+                update_fields.add('applied_filter_matrix')
+                filter_changed = True
+
+        if 'applied_filter_matrix' in request.data:
+            raw_matrix = request.data.get('applied_filter_matrix')
+            parsed_matrix = self._parse_json_field(raw_matrix, default=None)
+            instance.applied_filter_matrix = parsed_matrix
+            update_fields.add('applied_filter_matrix')
+            filter_changed = True
+
+        # 4. Producto etiquetado / vinculado (associated_item_id o tagged_products)
+        should_update_item, resolved_item, item_err = self._resolve_story_associated_item(company, request.data)
+        if item_err:
+            return Response({"error": item_err}, status=status.HTTP_400_BAD_REQUEST)
+        if should_update_item:
+            instance.associated_item = resolved_item
+            update_fields.add('associated_item')
+
+        # 5. Reemplazo opcional de archivos multimedia (video_file y/o thumbnail)
+        video_obj = request.FILES.get('video_file')
+        thumb_obj = request.FILES.get('thumbnail')
+
+        if video_obj:
+            v_ext = video_obj.name.rsplit('.', 1)[-1].lower() if '.' in getattr(video_obj, 'name', '') else ''
+            if v_ext not in ('mp4', 'mov', 'm4v', 'webm'):
+                return Response(
+                    {"error": "Formato de video no permitido. Usa MP4, MOV, M4V o WEBM."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if getattr(video_obj, 'size', 0) > 60 * 1024 * 1024:
+                return Response(
+                    {"error": "El archivo de video excede el tamaño máximo permitido (60 MB)."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        if thumb_obj:
+            t_ext = thumb_obj.name.rsplit('.', 1)[-1].lower() if '.' in getattr(thumb_obj, 'name', '') else ''
+            if t_ext not in ('jpg', 'jpeg', 'png', 'webp'):
+                return Response(
+                    {"error": "Formato de miniatura no permitido. Usa JPG, PNG o WEBP."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if getattr(thumb_obj, 'size', 0) > 10 * 1024 * 1024:
+                return Response(
+                    {"error": "La miniatura excede el tamaño máximo permitido (10 MB)."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        try:
+            with transaction.atomic():
+                dtnow_str = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
+
+                if video_obj:
+                    old_video = instance.video_file
+                    v_ext = video_obj.name.rsplit('.', 1)[-1].lower()
+                    v_name = f"story_video_{company.id}_{dtnow_str}.{v_ext}"
+                    v_path = storage_manager.save_file(video_obj, "stories/videos", v_name)
+                    if not v_path:
+                        raise Exception("Fallo en el storage_manager al guardar el nuevo video.")
+                    if old_video and old_video != v_path:
+                        try:
+                            storage_manager.delete_file(old_video)
+                        except Exception as del_err:
+                            print(f"Aviso: No se pudo eliminar el video anterior {old_video}: {del_err}")
+                    instance.video_file = v_path
+                    update_fields.add('video_file')
+                    if instance.is_media_expired:
+                        instance.expires_at = timezone.now() + timedelta(hours=72)
+                        update_fields.add('expires_at')
+
+                if thumb_obj:
+                    old_thumb = instance.thumbnail
+                    t_ext = thumb_obj.name.rsplit('.', 1)[-1].lower()
+                    t_name = f"story_thumb_{company.id}_{dtnow_str}.{t_ext}"
+                    t_path = storage_manager.save_file(thumb_obj, "stories/thumbnails", t_name)
+                    if not t_path:
+                        raise Exception("Fallo en el storage_manager al guardar la nueva miniatura.")
+                    if old_thumb and old_thumb != t_path:
+                        try:
+                            storage_manager.delete_file(old_thumb)
+                        except Exception as del_err:
+                            print(f"Aviso: No se pudo eliminar la miniatura anterior {old_thumb}: {del_err}")
+                    instance.thumbnail = t_path
+                    update_fields.add('thumbnail')
+
+                update_fields.add('updated_at')
+                instance.save(update_fields=list(update_fields))
+
+                if video_obj or (filter_changed and instance.video_file):
+                    optimize_and_transcode_video_story.delay(instance.id)
+
+                self._invalidate_story_caches(company, item_ids={old_item_id, instance.associated_item_id})
+
+            story_json = instance.get_json()
+            return Response(
+                {
+                    "success": True,
+                    "message": "Historia actualizada con éxito.",
+                    "data": story_json,
+                    **story_json,
+                },
+                status=status.HTTP_200_OK,
+            )
+        except Exception as e:
+            print(f"Error al actualizar la historia {instance.id}: {e}")
+            return Response(
+                {"success": False, "error": f"Error interno al actualizar la historia: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
-        if instance.company.owner != request.user:
-            return Response({"error": "No tienes permiso para modificar este video."}, status=status.HTTP_403_FORBIDDEN)
-        return super().update(request, *args, **kwargs)
+        return self._perform_story_update(request, instance)
 
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
-        if instance.company.owner != request.user:
-            return Response({"error": "No tienes permiso para modificar este video."}, status=status.HTTP_403_FORBIDDEN)
-        return super().partial_update(request, *args, **kwargs)
+        return self._perform_story_update(request, instance)
 
     @action(detail=False, methods=['get'])
     def available_items(self, request):
@@ -215,11 +460,15 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
         if instance.company.owner != request.user:
              return Response({"error": "No tienes permiso para eliminar este video."}, status=status.HTTP_403_FORBIDDEN)
         
+        old_item_id = instance.associated_item_id
+        company = instance.company
+
         # Disparamos la limpieza física de AWS/Storage
         instance.clear_media_files()
         
         # Borramos de la BD (GenericRelation limpiará likes y comments en cascada)
         instance.delete()
+        self._invalidate_story_caches(company, item_ids={old_item_id})
         
         return Response({"success": True, "message": "Video eliminado correctamente."}, status=status.HTTP_200_OK)
 
@@ -239,12 +488,28 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
             # 2. Extraer datos crudos del Request
             video_obj = request.FILES.get('video_file')
             thumb_obj = request.FILES.get('thumbnail')
-            description = request.data.get('description', '')
-            associated_item_id = request.data.get('associated_item_id')
-            duration = float(request.data.get('duration_seconds', 0.0))
+            raw_title = str(request.data.get('title') or '').strip()[:150]
+            raw_desc = request.data.get('description')
+            description = str(raw_desc).strip() if raw_desc is not None else raw_title
+            title = raw_title or (description[:150] if description else '')
 
-            filter_matrix_raw = request.data.get('applied_filter_matrix')
-            filter_matrix = json.loads(filter_matrix_raw) if filter_matrix_raw else None
+            raw_dur = request.data.get('duration_seconds', request.data.get('duration', 0.0))
+            try:
+                duration = float(raw_dur or 0.0)
+            except (ValueError, TypeError):
+                return Response({"error": "La duración del video debe ser un número válido."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # CART-33: Tolerancia de hasta 31.0s por redondeo de keyframes nativos en recortes de 30.0s
+            if duration < 0 or duration > 31.0:
+                return Response({"error": "El video no puede superar los 30 segundos."}, status=status.HTTP_400_BAD_REQUEST)
+
+            metadata_parsed = self._parse_json_field(request.data.get('metadata'), default={})
+            if not isinstance(metadata_parsed, dict):
+                metadata_parsed = {}
+
+            filter_matrix = self._parse_json_field(request.data.get('applied_filter_matrix'), default=None)
+            if filter_matrix is None and isinstance(metadata_parsed.get('color_matrix'), list):
+                filter_matrix = metadata_parsed.get('color_matrix')
 
             if not video_obj or not thumb_obj:
                 return Response({
@@ -262,18 +527,10 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
             if getattr(thumb_obj, 'size', 0) > 10 * 1024 * 1024:
                 return Response({"error": "La miniatura excede el tamaño máximo permitido (10 MB)."}, status=status.HTTP_400_BAD_REQUEST)
 
-            # 3. Validar el producto vinculado (Si aplica)
-            associated_item = None
-            if associated_item_id and str(associated_item_id).strip():
-                try:
-                    associated_item = InventoryItem.objects.get(
-                        id=associated_item_id, 
-                        store__company=company
-                    )
-                except InventoryItem.DoesNotExist:
-                    return Response({
-                        "error": "El producto vinculado no existe o no te pertenece."
-                    }, status=status.HTTP_400_BAD_REQUEST)
+            # 3. Validar el producto vinculado (associated_item_id o tagged_products)
+            _, associated_item, item_err = self._resolve_story_associated_item(company, request.data)
+            if item_err:
+                return Response({"error": item_err}, status=status.HTTP_400_BAD_REQUEST)
 
             # 4. Transacción Atómica y Guardado Físico
             with transaction.atomic():
@@ -299,11 +556,13 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
                 # la BD permite que varios videos apunten al mismo producto sin chocar.
                 story = CompanyVideoStory.objects.create(
                     company=company,
+                    title=title,
                     video_file=v_path,
                     thumbnail=t_path,
                     description=description,
                     associated_item=associated_item,
                     applied_filter_matrix=filter_matrix,
+                    metadata=metadata_parsed,
                     expires_at=expires_at,
                     duration_seconds=duration
                 )
@@ -312,21 +571,14 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
                 optimize_and_transcode_video_story.delay(story.id)
 
                 # 💡 Invalidación dirigida al ítem vinculado y a las cuadrículas geográficas de las tiendas de esta empresa
-                try:
-                    if associated_item:
-                        cache.delete(f"cartmaker:struct:item:{associated_item.id}")
-                    for store in company.stores.select_related('location').all():
-                        if store.location and store.location.coordinates:
-                            lat_r = round(store.location.coordinates.y, 2)
-                            lng_r = round(store.location.coordinates.x, 2)
-                            cache.delete_pattern(f"cartmaker:struct:home:{lat_r}:{lng_r}:*")
-                except Exception as e:
-                    print(f"Nota: No se pudo limpiar el caché por patrón: {e}")
+                self._invalidate_story_caches(company, item_ids={associated_item.id if associated_item else None})
 
+            story_json = story.get_json()
             return Response({
                 "success": True,
                 "message": "Video publicado con éxito",
-                "data": story.get_json()
+                "data": story_json,
+                **story_json,
             }, status=status.HTTP_201_CREATED)
 
         except Exception as e:

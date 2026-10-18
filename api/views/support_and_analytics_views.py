@@ -12,7 +12,12 @@ class SupportTicketViewSet(viewsets.ViewSet):
     def list(self, request):
         tickets = SupportTicket.objects.filter(
             client=request.user
-        ).select_related('agent').annotate(
+        ).select_related(
+            'agent',
+            'order',
+            'order__store',
+            'order__store__company',
+        ).annotate(
             unread_client_count=Count(
                 'messages',
                 filter=Q(messages__status__lt=3) & ~Q(messages__sender_id=F('client_id'))
@@ -59,6 +64,49 @@ class SupportTicketViewSet(viewsets.ViewSet):
         else:
             topic_int = TOPIC_MAP.get(str(topic_str).strip(), SupportTicket.TicketTopic.OTHER)
 
+        # CART-76: Validación y vinculación opcional de la orden reportada (order_id / order)
+        raw_order_id = request.data.get('order_id')
+        if raw_order_id is None or str(raw_order_id).strip() == '':
+            raw_order_id = request.data.get('order')
+
+        linked_order = None
+        if raw_order_id is not None:
+            clean_order_id = str(raw_order_id).strip().lstrip('#').strip()
+            if clean_order_id and clean_order_id.lower() not in ('null', 'none'):
+                if not clean_order_id.isdigit():
+                    return Response(
+                        {
+                            'error': 'El identificador de la orden es inválido.',
+                            'order_id': ['El identificador de la orden es inválido.'],
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                linked_order = Order.objects.select_related(
+                    'store', 'store__company'
+                ).filter(pk=int(clean_order_id)).first()
+                if not linked_order:
+                    return Response(
+                        {
+                            'error': 'La orden seleccionada no existe.',
+                            'order_id': ['La orden seleccionada no existe.'],
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                is_buyer = (linked_order.client_id == request.user.id)
+                is_merchant_owner = bool(
+                    linked_order.store
+                    and linked_order.store.company
+                    and linked_order.store.company.owner_id == request.user.id
+                )
+                if not (is_buyer or is_merchant_owner):
+                    return Response(
+                        {
+                            'error': 'No puedes reportar una orden en la que no participas como comprador ni como comercio.',
+                            'order_id': ['No puedes reportar una orden en la que no participas como comprador ni como comercio.'],
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
         # =================================================================
         # 🧠 ALGORITMO DE ASIGNACIÓN INTELIGENTE
         # =================================================================
@@ -100,6 +148,7 @@ class SupportTicketViewSet(viewsets.ViewSet):
             ticket = SupportTicket.objects.create(
                 client=request.user,
                 agent=best_agent,
+                order=linked_order,
                 topic=topic_int,
                 title=title,
                 description=description
@@ -123,7 +172,7 @@ class SupportTicketViewSet(viewsets.ViewSet):
             except Exception:
                 pass
 
-        return Response({'success': True, 'data': ticket_json}, status=status.HTTP_201_CREATED)
+        return Response({'success': True, 'data': ticket_json, **ticket_json}, status=status.HTTP_201_CREATED)
 
 class AnalyticsViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]

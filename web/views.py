@@ -418,7 +418,7 @@ def dashboard_view(request):
 
     # Querysets Anotados
     active_tickets = agent_tickets.filter(closed=False)\
-        .select_related('client')\
+        .select_related('client', 'order', 'order__store', 'order__store__company')\
         .annotate(
             unread_agent=Count(
                 'messages', 
@@ -431,7 +431,7 @@ def dashboard_view(request):
         .order_by('-creation')
         
     closed_tickets = agent_tickets.filter(closed=True)\
-        .select_related('client')\
+        .select_related('client', 'order', 'order__store', 'order__store__company')\
         .order_by('-close_time')
 
     # Configuración de Paginación
@@ -470,7 +470,13 @@ def dashboard_view(request):
     # ==============================================================
     # 📈 ANALÍTICAS CON .order_by() CORREGIDO
     # ==============================================================
-    topic_map = {0: 'Problema con Orden', 1: 'Reclamo sobre Tienda', 2: 'Problema con Cuenta', 3: 'Otro'}
+    topic_map = {
+        0: 'Problema con Orden',
+        1: 'Reclamo sobre Tienda',
+        2: 'Problema con Cuenta',
+        3: 'Otro',
+        4: 'Privacidad y Habeas Data',
+    }
     reason_map = {0: 'Resuelto con éxito', 1: 'No resuelto', 2: 'Spam / Inválido', 3: 'El cliente no responde'}
 
     topics_data = closed_tickets.order_by().values('topic').annotate(count=Count('id'))
@@ -554,7 +560,10 @@ def close_ticket(request, ticket_id):
 @login_required(login_url='/auth/login/')
 @support_access_required
 def support_agent_chat(request, ticket_id):
-    ticket = get_object_or_404(SupportTicket.objects.select_related('client', 'agent'), id=ticket_id)
+    ticket = get_object_or_404(
+        SupportTicket.objects.select_related('client', 'agent', 'order', 'order__store', 'order__store__company'),
+        id=ticket_id,
+    )
     if ticket.agent and ticket.agent != request.user and not request.user.is_superuser:
         messages.error(request, "No tienes permisos para acceder al chat de otro agente.")
         return redirect('web_dashboard')
