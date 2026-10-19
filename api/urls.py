@@ -29,6 +29,9 @@ router.register(r'gamification', GamificationViewSet, basename="gamification")
 router.register(r'analytics', AnalyticsViewSet, basename='analytics')
 router.register(r'support-tickets', SupportTicketViewSet, basename='support-tickets')
 router.register(r'merchant-growth', MerchantGrowthViewSet, basename='merchant-growth')
+router.register(r'merchant-payment-methods', MerchantPaymentMethodViewSet, basename='merchant-payment-methods')
+router.register(r'company/payment-methods', MerchantPaymentMethodViewSet, basename='company-payment-methods')
+router.register(r'merchant/payment-methods', MerchantPaymentMethodViewSet, basename='merchant-payment-methods-slash')
 
 
 # --- DEFINICIÓN DE RUTAS (URLS) ---

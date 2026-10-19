@@ -79,6 +79,7 @@ class OrderStatus(models.IntegerChoices):
     """
     WAITING = 0, _('Esperando')
     DELIVERY_SENT = 1, _("Delivery en camino")
+    REPORTED = 2, _('Reportada / En revisión')
     CANCELLED = 3, _('Cancelada')
     COMPLETED = 4, _('Completada')
     SOLVED = 5, _('Resuelta')
@@ -716,6 +717,15 @@ class Company(models.Model):
             if (self.mercantil_document_url and str(self.mercantil_document_url).startswith(("http://", "https://")))
             else (storage_manager.get_url(self.mercantil_document_url) if self.mercantil_document_url else None)
         )
+        prefetched = getattr(self, '_prefetched_objects_cache', None)
+        if prefetched and 'payment_methods' in prefetched:
+            pm_list = [pm.get_json() for pm in prefetched['payment_methods']]
+        else:
+            try:
+                pm_list = [pm.get_json() for pm in self.payment_methods.all().order_by('-is_active', 'id')]
+            except Exception:
+                pm_list = []
+
         return {
             'id':self.id,
             'name':self.name,
@@ -741,6 +751,7 @@ class Company(models.Model):
             'kyb_ocr_verified': self.kyb_ocr_verified,
             'kyb_confidence_score': self.kyb_confidence_score,
             'kyb_status': self.kyb_status,
+            'payment_methods': pm_list,
         }
     
     def __str__(self):
@@ -952,6 +963,207 @@ class StoreContactMethod(models.Model):
             'method_type': self.get_method_type_display(),
             'value': self.value
         }
+
+
+class MerchantPaymentMethodType(models.TextChoices):
+    PAGO_MOVIL = 'pago_movil', _('Pago Móvil')
+    TRANSFERENCIA = 'transferencia', _('Transferencia Bancaria')
+    ZELLE = 'zelle', _('Zelle')
+    BINANCE = 'binance', _('Binance Pay')
+    EFECTIVO_USD = 'efectivo_usd', _('Efectivo (USD)')
+    EFECTIVO_BS = 'efectivo_bs', _('Efectivo (Bs.)')
+    PUNTO_VENTA = 'punto_venta', _('Punto de Venta')
+    PAYPAL = 'paypal', _('PayPal')
+    ZINLI = 'zinli', _('Zinli')
+    WALLY = 'wally', _('Wally')
+    OTRO = 'otro', _('Otro Método')
+
+
+VENEZUELAN_BANKS_CATALOG = [
+    {"code": "0102", "name": "Banco de Venezuela", "short_name": "BDV", "icon": "img/bank_icons/banco_de_venezuela.png"},
+    {"code": "0134", "name": "Banesco", "short_name": "Banesco", "icon": "img/bank_icons/banesco.png"},
+    {"code": "0105", "name": "Banco Mercantil", "short_name": "Mercantil", "icon": "img/bank_icons/banco_mercantil.png"},
+    {"code": "0108", "name": "BBVA Provincial", "short_name": "Provincial", "icon": "img/bank_icons/banco_provincial.png"},
+    {"code": "0191", "name": "Banco Nacional de Crédito (BNC)", "short_name": "BNC", "icon": "img/bank_icons/bnc.png"},
+    {"code": "0172", "name": "Bancamiga", "short_name": "Bancamiga", "icon": "img/bank_icons/bancamiga.png"},
+    {"code": "0114", "name": "Bancaribe", "short_name": "Bancaribe", "icon": ""},
+    {"code": "0115", "name": "Banco Exterior", "short_name": "Exterior", "icon": "img/bank_icons/banco_exterior.png"},
+    {"code": "0174", "name": "Banplus", "short_name": "Banplus", "icon": "img/bank_icons/banplus.png"},
+    {"code": "0175", "name": "Banco Digital de los Trabajadores (BDT)", "short_name": "BDT", "icon": "img/bank_icons/banco_digital_de_los_trabajadores.png"},
+    {"code": "0138", "name": "Banco Plaza", "short_name": "Plaza", "icon": "img/bank_icons/banco_plaza.png"},
+    {"code": "0137", "name": "Banco Sofitasa", "short_name": "Sofitasa", "icon": "img/bank_icons/banco_sofitasa.png"},
+    {"code": "0151", "name": "BFC Banco Fondo Común", "short_name": "BFC", "icon": ""},
+    {"code": "0156", "name": "100% Banco", "short_name": "100% Banco", "icon": ""},
+    {"code": "0163", "name": "Banco del Tesoro", "short_name": "Tesoro", "icon": ""},
+    {"code": "0168", "name": "Bancrecer", "short_name": "Bancrecer", "icon": ""},
+    {"code": "0169", "name": "R4 Banco Microfinanciero (Mi Banco)", "short_name": "R4 / Mi Banco", "icon": ""},
+    {"code": "0171", "name": "Banco Activo", "short_name": "Activo", "icon": ""},
+    {"code": "0177", "name": "BANFANB", "short_name": "BANFANB", "icon": ""},
+    {"code": "0178", "name": "N58 Banco Digital", "short_name": "N58", "icon": ""},
+]
+
+
+class MerchantPaymentMethod(models.Model):
+    """
+    Métodos de cobro configurados por el comerciante para sus ventas y para envío
+    en 1 toque dentro del chat de órdenes.
+    """
+    company = models.ForeignKey(
+        Company,
+        on_delete=models.CASCADE,
+        related_name='payment_methods',
+    )
+    method_type = models.CharField(
+        max_length=32,
+        choices=MerchantPaymentMethodType.choices,
+        default=MerchantPaymentMethodType.PAGO_MOVIL,
+        db_index=True,
+    )
+    alias = models.CharField(
+        max_length=120,
+        blank=True,
+        default='',
+        help_text="Etiqueta opcional del método (ej. 'Pago Móvil Banesco Principal').",
+    )
+    bank_name = models.CharField(max_length=120, blank=True, default='')
+    bank_code = models.CharField(max_length=10, blank=True, default='')
+    phone = models.CharField(max_length=40, blank=True, default='')
+    dni = models.CharField(
+        max_length=40,
+        blank=True,
+        default='',
+        help_text="Cédula o RIF asociado a la cuenta (ej. V-12345678 o J-31234567-8).",
+    )
+    document_type = models.CharField(max_length=10, blank=True, default='V')
+    account_number = models.CharField(max_length=60, blank=True, default='')
+    account_type = models.CharField(max_length=30, blank=True, default='')
+    holder_name = models.CharField(max_length=150, blank=True, default='')
+    email = models.CharField(max_length=150, blank=True, default='')
+    wallet_id = models.CharField(max_length=120, blank=True, default='')
+    currency = models.CharField(max_length=12, blank=True, default='Bs')
+    notes = models.TextField(blank=True, default='')
+    is_active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-is_active', 'id']
+        indexes = [
+            models.Index(fields=['company', 'is_active'], name='mpm_company_active_idx'),
+        ]
+
+    def _sync_bank_metadata(self):
+        code = (self.bank_code or '').strip()
+        name = (self.bank_name or '').strip()
+        if code and not name:
+            for b in VENEZUELAN_BANKS_CATALOG:
+                if b['code'] == code:
+                    self.bank_name = b['name']
+                    break
+        elif name and not code:
+            name_lower = name.lower()
+            for b in VENEZUELAN_BANKS_CATALOG:
+                if b['name'].lower() == name_lower or b['short_name'].lower() == name_lower or b['short_name'].lower() in name_lower:
+                    self.bank_code = b['code']
+                    break
+
+    def save(self, *args, **kwargs):
+        self._sync_bank_metadata()
+        if not self.currency:
+            if self.method_type in (
+                MerchantPaymentMethodType.ZELLE,
+                MerchantPaymentMethodType.EFECTIVO_USD,
+                MerchantPaymentMethodType.PAYPAL,
+                MerchantPaymentMethodType.ZINLI,
+                MerchantPaymentMethodType.WALLY,
+            ):
+                self.currency = 'USD'
+            elif self.method_type == MerchantPaymentMethodType.BINANCE:
+                self.currency = 'USDT'
+            else:
+                self.currency = 'Bs'
+        super().save(*args, **kwargs)
+
+    def get_copyable_fields(self) -> list:
+        fields = []
+        if self.bank_name or self.bank_code:
+            bank_val = f"{self.bank_name} ({self.bank_code})".strip() if (self.bank_name and self.bank_code) else (self.bank_name or self.bank_code)
+            fields.append({'key': 'bank', 'label': 'Banco', 'value': bank_val, 'copy_value': self.bank_code or self.bank_name})
+        if self.phone:
+            fields.append({'key': 'phone', 'label': 'Teléfono', 'value': self.phone, 'copy_value': self.phone})
+        if self.dni:
+            fields.append({'key': 'dni', 'label': 'C.I. / RIF', 'value': self.dni, 'copy_value': self.dni})
+        if self.account_number:
+            fields.append({'key': 'account_number', 'label': 'N° de Cuenta', 'value': self.account_number, 'copy_value': self.account_number})
+        if self.holder_name:
+            fields.append({'key': 'holder_name', 'label': 'Titular', 'value': self.holder_name, 'copy_value': self.holder_name})
+        if self.email:
+            fields.append({'key': 'email', 'label': 'Correo', 'value': self.email, 'copy_value': self.email})
+        if self.wallet_id:
+            fields.append({'key': 'wallet_id', 'label': 'ID / Pay ID', 'value': self.wallet_id, 'copy_value': self.wallet_id})
+        return fields
+
+    def format_chat_text(self) -> str:
+        label = self.alias or self.get_method_type_display()
+        lines = [f"💳 {label}"]
+        for f in self.get_copyable_fields():
+            lines.append(f"• {f['label']}: {f['value']}")
+        if self.notes:
+            lines.append(f"📌 Nota: {self.notes}")
+        return "\n".join(lines)
+
+    def get_json(self) -> dict:
+        display_title = self.alias or self.get_method_type_display()
+        return {
+            'id': self.id,
+            'company_id': str(self.company_id),
+            'method_type': self.method_type,
+            'type': self.method_type,
+            'method_type_label': self.get_method_type_display(),
+            'alias': display_title,
+            'label': display_title,
+            'title': display_title,
+            'bank_name': self.bank_name,
+            'bank_code': self.bank_code,
+            'phone': self.phone,
+            'phone_number': self.phone,
+            'dni': self.dni,
+            'identification': self.dni,
+            'document_number': self.dni,
+            'document_type': self.document_type,
+            'account_number': self.account_number,
+            'account_type': self.account_type,
+            'holder_name': self.holder_name,
+            'beneficiary_name': self.holder_name,
+            'email': self.email,
+            'wallet_id': self.wallet_id,
+            'pay_id': self.wallet_id,
+            'currency': self.currency,
+            'notes': self.notes,
+            'instructions': self.notes,
+            'is_active': self.is_active,
+            'details': {
+                'bank_name': self.bank_name,
+                'bank_code': self.bank_code,
+                'phone': self.phone,
+                'phone_number': self.phone,
+                'dni': self.dni,
+                'identification': self.dni,
+                'document_type': self.document_type,
+                'document_number': self.dni,
+                'account_number': self.account_number,
+                'account_type': self.account_type,
+                'holder_name': self.holder_name,
+                'email': self.email,
+                'wallet_id': self.wallet_id,
+                'notes': self.notes,
+            },
+            'copyable_fields': self.get_copyable_fields(),
+            'formatted_text': self.format_chat_text(),
+            'created_at': timezone.localtime(self.created_at).isoformat() if self.created_at else None,
+            'updated_at': timezone.localtime(self.updated_at).isoformat() if self.updated_at else None,
+        }
+
 
 class Employee(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="employment_records")

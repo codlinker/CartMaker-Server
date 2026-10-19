@@ -400,11 +400,13 @@ class CompanyCacheAPI(APIView):
                 cache.delete(cache_key)
             elif "error_status" in cached_data:
                 return Response({'message': cached_data["message"]}, status=cached_data["error_status"])
+            elif "payment_methods" not in cached_data:
+                cache.delete(cache_key)
             else:
                 return Response(cached_data, status=status.HTTP_200_OK)
             
         try:
-            company_obj = Company.objects.select_related('category').get(owner=request.user)
+            company_obj = Company.objects.select_related('category').prefetch_related('payment_methods').get(owner=request.user)
             company = company_obj.get_json()
         except Company.DoesNotExist:
             error_data = {"error_status": status.HTTP_404_NOT_FOUND, "message": "No ha configurado su tienda."}
@@ -436,7 +438,14 @@ class CompanyCacheAPI(APIView):
 
         pending_questions = list(pending_items.values_list('id', flat=True)) + list(pending_videos.values_list('id', flat=True))
 
-        data = {'company': company, 'stores': stores, 'pending_questions': pending_questions}
+        payment_methods = company.get('payment_methods', [])
+        data = {
+            'company': company,
+            'stores': stores,
+            'pending_questions': pending_questions,
+            'payment_methods': payment_methods,
+            'banks_catalog': VENEZUELAN_BANKS_CATALOG,
+        }
         cache.set(cache_key, data, timeout=3600)
         return Response(data, status=status.HTTP_200_OK)
 

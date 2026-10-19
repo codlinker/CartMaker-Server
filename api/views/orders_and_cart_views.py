@@ -10,6 +10,45 @@ class OrderViewSet(viewsets.ViewSet):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'actions'
 
+    @staticmethod
+    def _build_order_report_meta(order) -> dict:
+        cart_dict = order.cart if isinstance(order.cart, dict) else {}
+        tickets = list(order.support_tickets.all()) if 'support_tickets' in getattr(order, '_prefetched_objects_cache', {}) else list(order.support_tickets.order_by('-creation')[:3])
+        open_ticket = next((t for t in tickets if not t.closed), None)
+        latest_ticket = open_ticket or (tickets[0] if tickets else None)
+
+        is_under_review = (
+            order.status == OrderStatus.REPORTED
+            or bool(open_ticket is not None and order.status in (OrderStatus.WAITING, OrderStatus.DELIVERY_SENT, OrderStatus.REPORTED))
+        )
+        is_reported = (
+            is_under_review
+            or bool(cart_dict.get('is_reported', False))
+            or (latest_ticket is not None)
+        )
+        active_ticket_id = (
+            open_ticket.id if open_ticket is not None
+            else cart_dict.get('active_ticket_id') or (latest_ticket.id if latest_ticket else None)
+        )
+        ticket_summary = None
+        if latest_ticket is not None:
+            ticket_summary = {
+                'id': latest_ticket.id,
+                'title': latest_ticket.title,
+                'topic': latest_ticket.get_topic_display(),
+                'closed': latest_ticket.closed,
+                'close_reason': latest_ticket.get_close_reason_display() if latest_ticket.closed and latest_ticket.close_reason else None,
+                'creation': timezone.localtime(latest_ticket.creation).strftime("%d/%m/%Y %I:%M %p").lower() if latest_ticket.creation else None,
+            }
+
+        return {
+            'status_label': order.get_status_display(),
+            'is_reported': bool(is_reported),
+            'under_review': bool(is_under_review),
+            'active_ticket_id': active_ticket_id,
+            'support_ticket': ticket_summary,
+        }
+
     # 💡 NUEVO ENDPOINT PARA RECUPERAR UNA ORDEN INDIVIDUAL
     def retrieve(self, request, pk=None):
         """
@@ -26,7 +65,9 @@ class OrderViewSet(viewsets.ViewSet):
                 'client_location'
             ).prefetch_related(
                 'client__contact_methods',
-                'store__contact_methods'
+                'store__contact_methods',
+                'store__company__payment_methods',
+                'support_tickets',
             ).get(
                 Q(id=pk) & (Q(client=request.user) | Q(store__company__owner=request.user))
             )
@@ -59,18 +100,28 @@ class OrderViewSet(viewsets.ViewSet):
                 for contact in order.store.contact_methods.all()
             }
 
+            active_payment_methods = [
+                pm.get_json()
+                for pm in company.payment_methods.all()
+                if pm.is_active
+            ]
+            report_meta = self._build_order_report_meta(order)
+
             # Mandamos la estructura limpia que espera Flutter
             payload = {
                 'id': order.id, 
                 "is_merchant_mode": is_merchant_mode,
                 'status': order.status,
+                **report_meta,
                 'withdrawal_type': order.withdrawal_type,
                 'store_id': str(order.store_id),
+                'company_id': str(company.id),
                 'store_name': company.name,
                 'store_image': store_image_url,
                 'store_lat': store_lat,
                 'store_lng': store_lng,
                 'store_contact_methods': store_contact_methods_dict,
+                'merchant_payment_methods': active_payment_methods,
                 'store_address': store_address,
                 'store_email': store_email,
                 'cart': order.cart,
@@ -106,7 +157,8 @@ class OrderViewSet(viewsets.ViewSet):
             'client_location'
         ).prefetch_related(
             'store__contact_methods',
-            'client__contact_methods'
+            'client__contact_methods',
+            'support_tickets',
         ).filter(client=request.user).order_by('-creation')
         
         orders_data = []
@@ -153,11 +205,15 @@ class OrderViewSet(viewsets.ViewSet):
                 for contact in order.store.contact_methods.all()
             }
 
+            report_meta = self._build_order_report_meta(order)
+
             orders_data.append({
                 'id': order.id, 
                 'status': order.status,
+                **report_meta,
                 'withdrawal_type': order.withdrawal_type,
                 'store_id': str(order.store.id),
+                'company_id': str(company.id),
                 'store_name': company.name,
                 'store_image': store_image_url,
                 'store_contact_methods': store_contact_methods_dict,
@@ -187,7 +243,8 @@ class OrderViewSet(viewsets.ViewSet):
             'client',
             'client_location'
         ).prefetch_related(
-            'client__contact_methods'
+            'client__contact_methods',
+            'support_tickets',
         ).filter(
             store__company__owner=request.user
         ).order_by('-creation')
@@ -231,14 +288,19 @@ class OrderViewSet(viewsets.ViewSet):
                 client_lng = float(order.client_location.coordinates.x)
                 client_address = order.client_location.description
 
+            report_meta = self._build_order_report_meta(order)
+
             orders_data.append({
                 'id': order.id,
                 'status': order.status,
+                **report_meta,
                 'withdrawal_type': order.withdrawal_type,
                 'client_name': f"{order.client.first_name} {order.client.last_name}",
                 'client_image': client_image_url,
                 'client_contact_methods': contact_methods_dict,
                 'store_name': order.store.name,
+                'store_id': str(order.store_id),
+                'company_id': str(company.id),
                 
                 # Datos estructurados inyectados para MerchantRouteMap
                 'store_image': store_image_url,
@@ -266,7 +328,13 @@ class OrderViewSet(viewsets.ViewSet):
                 )
                 if order.withdrawal_type != WithdrawalType.DELIVERY: # DELIVERY
                     return Response({"error": "Esta orden no requiere despacho a domicilio."}, status=status.HTTP_400_BAD_REQUEST)
-                    
+                
+                if order.status == OrderStatus.REPORTED:
+                    return Response(
+                        {"error": "Esta orden ha sido reportada y se encuentra en revisión por Soporte CartMaker. No puede despacharse hasta que finalice la revisión."},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
                 if order.status != OrderStatus.WAITING: # WAITING
                     return Response({"error": "La orden ya ha cambiado de estado."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -331,6 +399,12 @@ class OrderViewSet(viewsets.ViewSet):
                     .select_related('store__company')
                     .get(id=order_id, client=request.user)
                 )
+
+                if order.status == OrderStatus.REPORTED:
+                    return Response(
+                        {"error": "Esta orden ha sido reportada y se encuentra en revisión por Soporte CartMaker. No puede cancelarse hasta que finalice la revisión."},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
 
                 if order.status != OrderStatus.WAITING: 
                     return Response({"error": "Solo puedes cancelar órdenes pendientes."}, status=status.HTTP_400_BAD_REQUEST)
@@ -452,6 +526,12 @@ class OrderViewSet(viewsets.ViewSet):
 
                 if not is_client and not is_merchant:
                     return Response({"error": "No tienes permisos sobre esta orden."}, status=status.HTTP_403_FORBIDDEN)
+
+                if order.status == OrderStatus.REPORTED:
+                    return Response(
+                        {"error": "Esta orden ha sido reportada y se encuentra en revisión por Soporte CartMaker. No puede completarse hasta que finalice la revisión."},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
 
                 if order.status in (OrderStatus.CANCELLED, OrderStatus.SOLVED):
                     return Response({"error": "No se puede completar una orden cancelada o cerrada."}, status=status.HTTP_400_BAD_REQUEST)
@@ -605,6 +685,117 @@ class OrderViewSet(viewsets.ViewSet):
                     "success": True, 
                     "tokens_earned": round(float(tokens_earned), 2),
                     "message": "Orden completada con éxito."
+                }, status=status.HTTP_200_OK)
+        except Order.DoesNotExist:
+            return Response({"error": "La orden no existe."}, status=status.HTTP_404_NOT_FOUND)
+
+    # =========================================================================
+    # 💡 MARCAR ORDEN COMO REPORTADA / EN REVISIÓN (Soporte / Disputa)
+    # =========================================================================
+    @action(detail=False, methods=['post'], url_path='report_order')
+    def report_order(self, request):
+        """
+        POST /api/v1/orders/report_order/
+        Body: { "order_id": <int>, "ticket_id": <int opcional>, "reason": <str opcional> }
+        Permite marcar explícitamente una orden como Reportada / En revisión (status = 2).
+        Nota: POST /api/v1/support-tickets/ con `order_id` ya hace esta transición automáticamente,
+        pero este endpoint sirve como respaldo explícito o confirmación directa desde la vista de la orden.
+        """
+        raw_order_id = request.data.get('order_id') or request.data.get('id')
+        if not raw_order_id:
+            return Response({"error": "El campo 'order_id' es obligatorio."}, status=status.HTTP_400_BAD_REQUEST)
+        return self._transition_order_to_reported(request, raw_order_id)
+
+    @action(detail=True, methods=['post'], url_path='report')
+    def report(self, request, pk=None):
+        """
+        POST /api/v1/orders/<id>/report/
+        Alias RESTful por ID en URL para marcar una orden como Reportada / En revisión.
+        """
+        return self._transition_order_to_reported(request, pk)
+
+    def _transition_order_to_reported(self, request, raw_order_id):
+        try:
+            order_id = int(str(raw_order_id).strip().lstrip('#'))
+        except (TypeError, ValueError):
+            return Response({"error": "Identificador de orden inválido."}, status=status.HTTP_400_BAD_REQUEST)
+
+        ticket_id = request.data.get('ticket_id')
+        reason = (request.data.get('reason') or request.data.get('description') or '').strip()
+
+        try:
+            with transaction.atomic():
+                order = (
+                    Order.objects.select_for_update(of=('self',))
+                    .select_related('store__company')
+                    .prefetch_related('support_tickets')
+                    .get(id=order_id)
+                )
+                is_buyer = (order.client_id == request.user.id)
+                is_merchant = bool(order.store and order.store.company and order.store.company.owner_id == request.user.id)
+                if not (is_buyer or is_merchant or request.user.is_staff):
+                    return Response({"error": "No tienes permisos para reportar esta orden."}, status=status.HTTP_403_FORBIDDEN)
+
+                was_already_reported = (order.status == OrderStatus.REPORTED)
+                cart_dict = dict(order.cart) if isinstance(order.cart, dict) else {}
+                if not was_already_reported:
+                    cart_dict['previous_status_before_report'] = order.status
+                cart_dict['is_reported'] = True
+                cart_dict['under_review'] = True
+                if ticket_id:
+                    try:
+                        cart_dict['active_ticket_id'] = int(ticket_id)
+                    except (TypeError, ValueError):
+                        pass
+                if reason:
+                    cart_dict['report_reason'] = reason
+                cart_dict['reported_by_user_id'] = request.user.id
+                cart_dict['reported_by_role'] = 'merchant' if is_merchant else 'buyer'
+                cart_dict['reported_at'] = timezone.now().isoformat()
+                order.cart = cart_dict
+
+                if order.status in (OrderStatus.WAITING, OrderStatus.DELIVERY_SENT, OrderStatus.REPORTED):
+                    order.status = OrderStatus.REPORTED
+                    order.save(update_fields=['status', 'cart'])
+                else:
+                    order.save(update_fields=['cart'])
+
+                if not was_already_reported:
+                    oid = order.id
+                    t_str = f" (#{ticket_id})" if ticket_id else ""
+                    company_name = order.store.company.name if order.store and order.store.company else "Comercio"
+                    if is_buyer and order.store and order.store.company:
+                        target_uid = order.store.company.owner_id
+                        transaction.on_commit(
+                            lambda: NotificationManager.notify_order_status_change(
+                                user_id=target_uid,
+                                order_id=oid,
+                                title="Orden Reportada a Soporte",
+                                body=f"El comprador ha reportado la orden N° {oid} a Soporte{t_str}. La orden se encuentra en revisión.",
+                                is_merchant=True,
+                                new_status=OrderStatus.REPORTED,
+                            )
+                        )
+                    elif is_merchant:
+                        target_uid = order.client_id
+                        transaction.on_commit(
+                            lambda: NotificationManager.notify_order_status_change(
+                                user_id=target_uid,
+                                order_id=oid,
+                                title="Orden en Revisión de Soporte",
+                                body=f"{company_name} ha reportado la orden N° {oid} a Soporte{t_str}. La orden se encuentra en revisión.",
+                                is_merchant=False,
+                                new_status=OrderStatus.REPORTED,
+                            )
+                        )
+
+                report_meta = self._build_order_report_meta(order)
+                return Response({
+                    "success": True,
+                    "message": "La orden ha sido marcada como reportada y está bajo revisión de Soporte.",
+                    "order_id": order.id,
+                    "status": order.status,
+                    **report_meta,
                 }, status=status.HTTP_200_OK)
         except Order.DoesNotExist:
             return Response({"error": "La orden no existe."}, status=status.HTTP_404_NOT_FOUND)

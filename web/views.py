@@ -520,7 +520,10 @@ def dashboard_view(request):
 @require_POST
 @support_access_required
 def close_ticket(request, ticket_id):  
-    ticket = get_object_or_404(SupportTicket, id=ticket_id)
+    ticket = get_object_or_404(
+        SupportTicket.objects.select_related('client', 'agent', 'order', 'order__store__company'),
+        id=ticket_id,
+    )
     if ticket.agent and ticket.agent != request.user and not request.user.is_superuser:
         messages.error(request, "No tienes permisos para cerrar un ticket asignado a otro agente.")
         return redirect('web_dashboard')
@@ -532,11 +535,70 @@ def close_ticket(request, ticket_id):
             reason_val = SupportTicket.CloseReason.SOLVED
     except (ValueError, TypeError):
         reason_val = SupportTicket.CloseReason.SOLVED
-    
-    ticket.closed = True
-    ticket.close_time = timezone.now()
-    ticket.close_reason = reason_val
-    ticket.save(update_fields=['closed', 'close_time', 'close_reason'])
+
+    now = timezone.now()
+    with transaction.atomic():
+        ticket.closed = True
+        ticket.close_time = now
+        ticket.close_reason = reason_val
+        ticket.save(update_fields=['closed', 'close_time', 'close_reason'])
+
+        if ticket.order_id:
+            locked_order = (
+                Order.objects.select_for_update(of=('self',))
+                .select_related('store__company')
+                .filter(pk=ticket.order_id)
+                .first()
+            )
+            if locked_order and not SupportTicket.objects.filter(order=locked_order, closed=False).exclude(pk=ticket.pk).exists():
+                cart_dict = dict(locked_order.cart) if isinstance(locked_order.cart, dict) else {}
+                cart_dict['under_review'] = False
+                cart_dict['resolved_by_ticket_id'] = ticket.id
+                cart_dict['resolved_at'] = now.isoformat()
+
+                if locked_order.status == OrderStatus.REPORTED:
+                    if reason_val == SupportTicket.CloseReason.SPAM:
+                        prev_status = cart_dict.get('previous_status_before_report', OrderStatus.WAITING)
+                        if prev_status not in (OrderStatus.WAITING, OrderStatus.DELIVERY_SENT):
+                            prev_status = OrderStatus.WAITING
+                        locked_order.status = prev_status
+                        locked_order.cart = cart_dict
+                        locked_order.save(update_fields=['status', 'cart'])
+                    else:
+                        locked_order.status = OrderStatus.SOLVED
+                        locked_order.end_time = now
+                        locked_order.cart = cart_dict
+                        locked_order.save(update_fields=['status', 'end_time', 'cart'])
+
+                    from api.core.firebase_admin import NotificationManager
+                    oid = locked_order.id
+                    new_st = locked_order.status
+                    buyer_id = locked_order.client_id
+                    merchant_uid = locked_order.store.company.owner_id if locked_order.store and locked_order.store.company else None
+
+                    def _notify_resolution():
+                        NotificationManager.notify_order_status_change(
+                            user_id=buyer_id,
+                            order_id=oid,
+                            title="Revisión de Soporte Finalizada",
+                            body=f"Soporte CartMaker ha cerrado el ticket #{ticket.id} de la orden N° {oid}.",
+                            is_merchant=False,
+                            new_status=new_st,
+                        )
+                        if merchant_uid:
+                            NotificationManager.notify_order_status_change(
+                                user_id=merchant_uid,
+                                order_id=oid,
+                                title="Revisión de Soporte Finalizada",
+                                body=f"Soporte CartMaker ha cerrado el ticket #{ticket.id} de la orden N° {oid}.",
+                                is_merchant=True,
+                                new_status=new_st,
+                            )
+
+                    transaction.on_commit(_notify_resolution)
+                else:
+                    locked_order.cart = cart_dict
+                    locked_order.save(update_fields=['cart'])
     
     # 💡 ALERTAMOS A NODE.JS EN TIEMPO REAL
     try:

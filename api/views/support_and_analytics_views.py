@@ -38,11 +38,6 @@ class SupportTicketViewSet(viewsets.ViewSet):
         return Response({'data': data}, status=status.HTTP_200_OK)
 
     def create(self, request):
-        if SupportTicket.objects.filter(client=request.user, closed=False).exists():
-            return Response(
-                {'error': 'Ya tienes un ticket de soporte en curso. Por favor, espera a que sea resuelto antes de abrir uno nuevo.'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
         topic_str = request.data.get('topic')
         title = request.data.get('title')
         description = request.data.get('description')
@@ -70,6 +65,8 @@ class SupportTicketViewSet(viewsets.ViewSet):
             raw_order_id = request.data.get('order')
 
         linked_order = None
+        is_buyer = False
+        is_merchant_owner = False
         if raw_order_id is not None:
             clean_order_id = str(raw_order_id).strip().lstrip('#').strip()
             if clean_order_id and clean_order_id.lower() not in ('null', 'none'):
@@ -107,6 +104,22 @@ class SupportTicketViewSet(viewsets.ViewSet):
                         status=status.HTTP_400_BAD_REQUEST,
                     )
 
+        # Validación de tickets abiertos:
+        # Si es por una orden específica, validamos que no haya ya un ticket abierto de este usuario para ESA orden.
+        # Si es un ticket general (sin orden), validamos que no tenga otro ticket general abierto.
+        if linked_order is not None:
+            if SupportTicket.objects.filter(client=request.user, order=linked_order, closed=False).exists():
+                return Response(
+                    {'error': f'Ya tienes un ticket de soporte activo para la orden #{linked_order.id}.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        else:
+            if SupportTicket.objects.filter(client=request.user, order__isnull=True, closed=False).exists():
+                return Response(
+                    {'error': 'Ya tienes un ticket de soporte en curso. Por favor, espera a que sea resuelto antes de abrir uno nuevo.'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
         # =================================================================
         # 🧠 ALGORITMO DE ASIGNACIÓN INTELIGENTE
         # =================================================================
@@ -116,7 +129,7 @@ class SupportTicketViewSet(viewsets.ViewSet):
         try:
             resp = requests.get(
                 f"{settings.INTERNAL_WEBSOCKETS_URL}internal/online-users", 
-                headers={'X-Microservice-Token': settings.SECRET_KEY}, # o env_manager.DJANGO_SECRET_KEY
+                headers={'X-Microservice-Token': settings.SECRET_KEY},
                 timeout=2
             )
             if resp.status_code == 200:
@@ -126,11 +139,18 @@ class SupportTicketViewSet(viewsets.ViewSet):
 
         with transaction.atomic():
             User.objects.select_for_update().get(pk=request.user.pk)
-            if SupportTicket.objects.filter(client=request.user, closed=False).exists():
-                return Response(
-                    {'error': 'Ya tienes un ticket de soporte en curso. Por favor, espera a que sea resuelto antes de abrir uno nuevo.'}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+            if linked_order is not None:
+                if SupportTicket.objects.filter(client=request.user, order=linked_order, closed=False).exists():
+                    return Response(
+                        {'error': f'Ya tienes un ticket de soporte activo para la orden #{linked_order.id}.'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            else:
+                if SupportTicket.objects.filter(client=request.user, order__isnull=True, closed=False).exists():
+                    return Response(
+                        {'error': 'Ya tienes un ticket de soporte en curso. Por favor, espera a que sea resuelto antes de abrir uno nuevo.'}, 
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
 
             # 2. Buscamos a los SuperUsers. Filtramos primero a los que están online.
             all_agents = User.objects.filter(is_superuser=True)
@@ -154,7 +174,67 @@ class SupportTicketViewSet(viewsets.ViewSet):
                 description=description
             )
 
+            # 4.b Si el ticket está vinculado a una orden, la pasamos a estado REPORTADA / EN REVISIÓN (OrderStatus.REPORTED = 2)
+            locked_order = None
+            if linked_order is not None:
+                locked_order = (
+                    Order.objects.select_for_update(of=('self',))
+                    .select_related('store__company')
+                    .get(pk=linked_order.pk)
+                )
+                cart_dict = dict(locked_order.cart) if isinstance(locked_order.cart, dict) else {}
+                if locked_order.status != OrderStatus.REPORTED:
+                    cart_dict['previous_status_before_report'] = locked_order.status
+                cart_dict['is_reported'] = True
+                cart_dict['under_review'] = True
+                cart_dict['active_ticket_id'] = ticket.id
+                cart_dict['reported_by_user_id'] = request.user.id
+                cart_dict['reported_by_role'] = 'merchant' if is_merchant_owner else 'buyer'
+                cart_dict['reported_at'] = timezone.now().isoformat()
+                locked_order.cart = cart_dict
+
+                if locked_order.status in (OrderStatus.WAITING, OrderStatus.DELIVERY_SENT, OrderStatus.REPORTED):
+                    locked_order.status = OrderStatus.REPORTED
+                    locked_order.save(update_fields=['status', 'cart'])
+                else:
+                    locked_order.save(update_fields=['cart'])
+
+                ticket.order = locked_order
+
+                # Notificamos a la contraparte de la orden que fue reportada y está en revisión
+                order_id_val = locked_order.id
+                ticket_id_val = ticket.id
+                company_name_val = locked_order.store.company.name if locked_order.store and locked_order.store.company else 'Comercio'
+                if is_buyer and locked_order.store and locked_order.store.company:
+                    target_uid = locked_order.store.company.owner_id
+                    transaction.on_commit(
+                        lambda: NotificationManager.notify_order_status_change(
+                            user_id=target_uid,
+                            order_id=order_id_val,
+                            title="Orden Reportada a Soporte",
+                            body=f"El comprador ha abierto el ticket #{ticket_id_val} por la orden N° {order_id_val}. La orden está en revisión.",
+                            is_merchant=True,
+                            new_status=OrderStatus.REPORTED,
+                        )
+                    )
+                elif is_merchant_owner:
+                    target_uid = locked_order.client_id
+                    transaction.on_commit(
+                        lambda: NotificationManager.notify_order_status_change(
+                            user_id=target_uid,
+                            order_id=order_id_val,
+                            title="Orden en Revisión de Soporte",
+                            body=f"{company_name_val} ha abierto el ticket #{ticket_id_val} por la orden N° {order_id_val}. La orden está en revisión.",
+                            is_merchant=False,
+                            new_status=OrderStatus.REPORTED,
+                        )
+                    )
+
             ticket_json = ticket.get_json()
+            if locked_order is not None:
+                ticket_json['order_status'] = locked_order.status
+                ticket_json['order_status_label'] = locked_order.get_status_display()
+                ticket_json['order_under_review'] = (locked_order.status == OrderStatus.REPORTED)
 
         # 5. Si encontramos agente, disparamos las alertas en tiempo real mediante Node.js
         if best_agent:

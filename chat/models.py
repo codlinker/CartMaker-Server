@@ -8,6 +8,8 @@ class ChatMessage(models.Model):
         TEXT = 'text', 'Texto'
         IMAGE = 'image', 'Imagen'
         AUDIO = 'audio', 'Nota de Voz'
+        PAYMENT_METHODS = 'payment_methods', 'Datos de Pago'
+        PAYMENT_INFO = 'payment_info', 'Datos de Pago'
 
     class DeliveryStatus(models.IntegerChoices):
         PENDING = 0, 'Enviando'
@@ -20,8 +22,9 @@ class ChatMessage(models.Model):
     text = models.TextField(blank=True, null=True) # Opcional si es multimedia
     
     # Nuevos campos estructurales para la modernización
-    message_type = models.CharField(max_length=10, choices=MessageType.choices, default=MessageType.TEXT)
+    message_type = models.CharField(max_length=24, choices=MessageType.choices, default=MessageType.TEXT)
     media_url = models.TextField(null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True, null=True)
     status = models.IntegerField(choices=DeliveryStatus.choices, default=DeliveryStatus.SENT)
     
     created_at = models.DateTimeField(auto_now_add=True)
@@ -41,6 +44,9 @@ class ChatMessage(models.Model):
         if self.media_url:
             absolute_media_url = storage_manager.get_url(self.media_url) or ""
 
+        meta = self.metadata if isinstance(self.metadata, dict) else {}
+        payment_methods_list = meta.get('payment_methods', []) if isinstance(meta.get('payment_methods'), list) else []
+
         payload = {
             'id': self.id,
             'order_id': self.order_id,
@@ -49,6 +55,8 @@ class ChatMessage(models.Model):
             'text': self.text,
             'message_type': self.message_type,
             'media_url': absolute_media_url,
+            'metadata': meta,
+            'payment_methods': payment_methods_list,
             'status': self.status if self.status is not None else 1,
             'is_read': bool(self.status and self.status >= self.DeliveryStatus.READ),
             'is_support': False,

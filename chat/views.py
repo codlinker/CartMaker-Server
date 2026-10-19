@@ -6,7 +6,7 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 
 from api.core.firebase_admin import NotificationManager
 from .models import ChatMessage, PredefinedMessage
-from api.models import Order, SupportMessage, SupportTicket
+from api.models import Order, SupportMessage, SupportTicket, MerchantPaymentMethod, Company
 from .permissions import IsNodeMicroservice
 from django.db import transaction
 from django.utils import timezone
@@ -159,6 +159,35 @@ class ChatViewSet(viewsets.ViewSet):
 
         except Order.DoesNotExist:
             return Response({"error": "La orden no existe."}, status=status.HTTP_404_NOT_FOUND)
+
+    @action(detail=False, methods=['get'], url_path='payment-methods')
+    def payment_methods(self, request):
+        """
+        Devuelve los métodos de pago activos del comercio para que el comerciante
+        pueda seleccionarlos y enviarlos en 1 toque dentro del chat de la orden.
+        """
+        order_id = request.query_params.get('order_id')
+        company = None
+        if order_id:
+            try:
+                order = Order.objects.select_related('store__company').get(id=order_id)
+                if request.user.id not in (order.client_id, order.store.company.owner_id):
+                    return Response({"error": "No tienes acceso a esta orden."}, status=status.HTTP_403_FORBIDDEN)
+                company = order.store.company
+            except Order.DoesNotExist:
+                return Response({"error": "La orden no existe."}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            company = Company.objects.filter(owner=request.user).first()
+
+        if not company:
+            return Response({"data": [], "payment_methods": []}, status=status.HTTP_200_OK)
+
+        active_only = request.query_params.get('active_only', 'true').lower() != 'false'
+        qs = MerchantPaymentMethod.objects.filter(company=company)
+        if active_only:
+            qs = qs.filter(is_active=True)
+        items = [pm.get_json() for pm in qs.order_by('-is_active', 'id')]
+        return Response({"data": items, "payment_methods": items}, status=status.HTTP_200_OK)
         
 class SupportChatViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
@@ -222,11 +251,14 @@ class ChatWebhookViewSet(viewsets.ViewSet):
         order_id = request.data.get('order_id')
         sender_id = request.data.get('sender_id')
         text = request.data.get('text')
-        message_type = request.data.get('message_type', 'text')
+        message_type = request.data.get('message_type', 'text') or 'text'
         raw_media_url = request.data.get('media_url', None)
         clean_media_url = storage_manager.normalize_path(raw_media_url) if raw_media_url else None
         recipient_connected = request.data.get('recipient_connected', False)
         temp_id = request.data.get('temp_id') or request.data.get('client_msg_id')
+        raw_metadata = request.data.get('metadata')
+        raw_payment_methods = request.data.get('payment_methods')
+        raw_payment_method_ids = request.data.get('payment_method_ids')
 
         try:
             order = Order.objects.select_related('store__company').get(id=order_id)
@@ -235,6 +267,51 @@ class ChatWebhookViewSet(viewsets.ViewSet):
 
             if order.status >= 3:
                 return Response({"error": "Orden cerrada"}, status=status.HTTP_403_FORBIDDEN)
+
+            metadata_dict = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
+
+            # Si el comerciante envía datos de pago (por IDs o por lista de métodos o message_type='payment_methods')
+            resolved_pm_list = []
+            if isinstance(raw_payment_methods, list) and raw_payment_methods:
+                resolved_pm_list = raw_payment_methods
+            elif isinstance(metadata_dict.get('payment_methods'), list) and metadata_dict.get('payment_methods'):
+                resolved_pm_list = metadata_dict['payment_methods']
+            elif isinstance(raw_payment_method_ids, list) and raw_payment_method_ids:
+                clean_ids = [int(pid) for pid in raw_payment_method_ids if str(pid).isdigit()]
+                pm_objs = MerchantPaymentMethod.objects.filter(
+                    company=order.store.company,
+                    id__in=clean_ids,
+                )
+                resolved_pm_list = [pm.get_json() for pm in pm_objs]
+
+            if resolved_pm_list:
+                metadata_dict['payment_methods'] = resolved_pm_list
+                if message_type == 'text':
+                    message_type = ChatMessage.MessageType.PAYMENT_METHODS
+                if not text:
+                    formatted_blocks = []
+                    for pm_entry in resolved_pm_list:
+                        if isinstance(pm_entry, dict):
+                            if pm_entry.get('formatted_text'):
+                                formatted_blocks.append(str(pm_entry['formatted_text']))
+                            else:
+                                title = pm_entry.get('alias') or pm_entry.get('method_type_label') or pm_entry.get('method_type') or 'Método de Pago'
+                                lines = [f"💳 {title}"]
+                                for k, label in (
+                                    ('bank_name', 'Banco'),
+                                    ('bank_code', 'Código'),
+                                    ('phone', 'Teléfono'),
+                                    ('dni', 'C.I. / RIF'),
+                                    ('account_number', 'Cuenta'),
+                                    ('holder_name', 'Titular'),
+                                    ('email', 'Correo'),
+                                    ('wallet_id', 'ID'),
+                                    ('notes', 'Nota'),
+                                ):
+                                    if pm_entry.get(k):
+                                        lines.append(f"• {label}: {pm_entry[k]}")
+                                formatted_blocks.append("\n".join(lines))
+                    text = "\n\n".join(formatted_blocks) if formatted_blocks else "💳 Datos de pago enviados"
 
             # Si la contraparte está activa en la sala, el mensaje nace como LEÍDO (3), sino como ENVIADO (1)
             initial_status = ChatMessage.DeliveryStatus.READ if recipient_connected else ChatMessage.DeliveryStatus.SENT
@@ -245,12 +322,18 @@ class ChatWebhookViewSet(viewsets.ViewSet):
                 text=text,
                 message_type=message_type,
                 media_url=clean_media_url,
+                metadata=metadata_dict,
                 status=initial_status
             )
 
             if not recipient_connected:
                 try:
-                    fallback_label = "🎵 Nota de voz" if message_type == 'audio' else "🖼️ Foto"
+                    if message_type in (ChatMessage.MessageType.PAYMENT_METHODS, ChatMessage.MessageType.PAYMENT_INFO):
+                        fallback_label = "💳 Datos de pago recibidos"
+                    elif message_type == 'audio':
+                        fallback_label = "🎵 Nota de voz"
+                    else:
+                        fallback_label = "🖼️ Foto"
                     NotificationManager.notify_new_chat_message(order=order, sender_id=sender_id, text=text or fallback_label)
                 except Exception:
                     pass

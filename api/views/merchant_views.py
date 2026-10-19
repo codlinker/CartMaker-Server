@@ -1785,3 +1785,377 @@ class GamificationViewSet(viewsets.ViewSet):
         except Product.DoesNotExist:
             return Response({'error': 'Producto no encontrado o no tienes permisos.'}, status=status.HTTP_404_NOT_FOUND)
 
+
+class MerchantPaymentMethodViewSet(viewsets.ViewSet):
+    """
+    CRUD completo y catálogo de Métodos de Pago del Comerciante.
+    Rutas registradas:
+    - /api/v1/merchant-payment-methods/
+    - /api/v1/company/payment-methods/
+    """
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'actions'
+
+    _TYPE_ALIASES = {
+        'pago_movil': MerchantPaymentMethodType.PAGO_MOVIL,
+        'pagomovil': MerchantPaymentMethodType.PAGO_MOVIL,
+        'mobile_payment': MerchantPaymentMethodType.PAGO_MOVIL,
+        'transferencia': MerchantPaymentMethodType.TRANSFERENCIA,
+        'bank_transfer': MerchantPaymentMethodType.TRANSFERENCIA,
+        'transfer': MerchantPaymentMethodType.TRANSFERENCIA,
+        'zelle': MerchantPaymentMethodType.ZELLE,
+        'binance': MerchantPaymentMethodType.BINANCE,
+        'binance_pay': MerchantPaymentMethodType.BINANCE,
+        'usdt': MerchantPaymentMethodType.BINANCE,
+        'efectivo_usd': MerchantPaymentMethodType.EFECTIVO_USD,
+        'cash_usd': MerchantPaymentMethodType.EFECTIVO_USD,
+        'efectivo_divisas': MerchantPaymentMethodType.EFECTIVO_USD,
+        'efectivo_bs': MerchantPaymentMethodType.EFECTIVO_BS,
+        'cash_bs': MerchantPaymentMethodType.EFECTIVO_BS,
+        'efectivo_bolivares': MerchantPaymentMethodType.EFECTIVO_BS,
+        'punto_venta': MerchantPaymentMethodType.PUNTO_VENTA,
+        'punto_de_venta': MerchantPaymentMethodType.PUNTO_VENTA,
+        'pos': MerchantPaymentMethodType.PUNTO_VENTA,
+        'paypal': MerchantPaymentMethodType.PAYPAL,
+        'zinli': MerchantPaymentMethodType.ZINLI,
+        'wally': MerchantPaymentMethodType.WALLY,
+        'otro': MerchantPaymentMethodType.OTRO,
+        'other': MerchantPaymentMethodType.OTRO,
+    }
+
+    _DEFAULT_CURRENCY_BY_TYPE = {
+        MerchantPaymentMethodType.PAGO_MOVIL: 'VES',
+        MerchantPaymentMethodType.TRANSFERENCIA: 'VES',
+        MerchantPaymentMethodType.EFECTIVO_BS: 'VES',
+        MerchantPaymentMethodType.BINANCE: 'USDT',
+        MerchantPaymentMethodType.PUNTO_VENTA: 'MIXED',
+        MerchantPaymentMethodType.ZELLE: 'USD',
+        MerchantPaymentMethodType.EFECTIVO_USD: 'USD',
+        MerchantPaymentMethodType.PAYPAL: 'USD',
+        MerchantPaymentMethodType.ZINLI: 'USD',
+        MerchantPaymentMethodType.WALLY: 'USD',
+        MerchantPaymentMethodType.OTRO: 'USD',
+    }
+
+    @classmethod
+    def get_supported_types_catalog(cls):
+        return [
+            {
+                'code': choice.value,
+                'label': str(choice.label),
+                'default_currency': cls._DEFAULT_CURRENCY_BY_TYPE.get(choice.value, 'USD'),
+            }
+            for choice in MerchantPaymentMethodType
+        ]
+
+    @staticmethod
+    def _invalidate_company_cache(user_id):
+        cache.delete(f"cartmaker:tenant:{user_id}:company")
+
+    def _get_user_company(self, request):
+        return Company.objects.filter(owner=request.user).first()
+
+    def _extract_payload(self, data, partial=False, instance=None):
+        """
+        Normaliza tanto payloads planos como payloads con `details: {...}` o `fields: {...}`
+        para máxima compatibilidad con el frontend Flutter.
+        """
+        nested = {}
+        if isinstance(data.get('details'), dict):
+            nested.update(data.get('details'))
+        if isinstance(data.get('fields'), dict):
+            nested.update(data.get('fields'))
+
+        def _pick(*keys, default=None):
+            for k in keys:
+                if k in data and data.get(k) is not None:
+                    return data.get(k)
+                if k in nested and nested.get(k) is not None:
+                    return nested.get(k)
+            return default
+
+        raw_type = _pick('method_type', 'type', 'payment_type')
+        method_type = None
+        if raw_type is not None:
+            norm_key = str(raw_type).strip().lower()
+            method_type = self._TYPE_ALIASES.get(norm_key, norm_key)
+            valid_values = {c.value for c in MerchantPaymentMethodType}
+            if method_type not in valid_values:
+                raise ValueError(f"Tipo de método de pago inválido: '{raw_type}'. Valores permitidos: {', '.join(sorted(valid_values))}")
+        elif not partial and instance is None:
+            raise ValueError("El campo 'method_type' (o 'type') es obligatorio.")
+
+        effective_type = method_type or (instance.method_type if instance else MerchantPaymentMethodType.PAGO_MOVIL)
+
+        bank_code = _pick('bank_code', 'codigo_banco')
+        bank_name = _pick('bank_name', 'banco', 'bank')
+        banks_by_code = {b['code']: b['name'] for b in VENEZUELAN_BANKS_CATALOG}
+        banks_by_name = {b['name'].lower(): b['code'] for b in VENEZUELAN_BANKS_CATALOG}
+
+        if bank_code is not None:
+            bank_code = str(bank_code).strip()
+            if bank_code and not bank_name and bank_code in banks_by_code:
+                bank_name = banks_by_code[bank_code]
+        if bank_name is not None:
+            bank_name = str(bank_name).strip()
+            if bank_name and not bank_code and bank_name.lower() in banks_by_name:
+                bank_code = banks_by_name[bank_name.lower()]
+
+        doc_type = _pick('document_type', 'doc_type', 'tipo_documento')
+        doc_number = _pick('dni', 'document_number', 'identification', 'cedula', 'rif', 'id_number', 'documento')
+        if doc_number is not None:
+            doc_str = str(doc_number).strip().upper()
+            m = re.match(r'^([VEJGP])[-\s]*(.+)$', doc_str)
+            if m:
+                if not doc_type:
+                    doc_type = m.group(1)
+                clean_num = m.group(2).strip()
+                doc_number = f"{doc_type}-{clean_num}"
+            else:
+                eff_doc_type = (str(doc_type).strip().upper()[:2] if doc_type else '') or (instance.document_type if instance else 'V')
+                doc_number = f"{eff_doc_type}-{doc_str}" if (doc_str and eff_doc_type) else doc_str
+        if doc_type is not None:
+            doc_type = str(doc_type).strip().upper()[:2]
+
+        phone_number = _pick('phone', 'phone_number', 'telefono')
+        account_number = _pick('account_number', 'numero_cuenta', 'account')
+        account_type = _pick('account_type', 'tipo_cuenta')
+        holder_name = _pick('holder_name', 'beneficiary_name', 'titular', 'owner_name')
+        email = _pick('email', 'correo')
+        wallet_id = _pick('wallet_id', 'pay_id', 'binance_id', 'username', 'tag')
+        instructions = _pick('notes', 'instructions', 'nota', 'description')
+        label = _pick('alias', 'label', 'title', 'name')
+        currency = _pick('currency', 'moneda')
+        if not currency and not partial and instance is None:
+            currency = self._DEFAULT_CURRENCY_BY_TYPE.get(effective_type, 'USD')
+
+        raw_active = _pick('is_active', 'active', 'enabled')
+        is_active = None
+        if raw_active is not None:
+            if isinstance(raw_active, bool):
+                is_active = raw_active
+            else:
+                is_active = str(raw_active).strip().lower() in ('true', '1', 'yes')
+
+        fields_to_set = {}
+        if method_type is not None:
+            fields_to_set['method_type'] = method_type
+        if label is not None:
+            fields_to_set['alias'] = str(label).strip()
+        if currency is not None:
+            fields_to_set['currency'] = str(currency).strip().upper()
+        if bank_code is not None:
+            fields_to_set['bank_code'] = bank_code
+        if bank_name is not None:
+            fields_to_set['bank_name'] = bank_name
+        if phone_number is not None:
+            fields_to_set['phone'] = str(phone_number).strip()
+        if doc_type is not None:
+            fields_to_set['document_type'] = doc_type
+        if doc_number is not None:
+            fields_to_set['dni'] = doc_number
+        if account_number is not None:
+            fields_to_set['account_number'] = str(account_number).strip()
+        if account_type is not None:
+            fields_to_set['account_type'] = str(account_type).strip().lower()
+        if holder_name is not None:
+            fields_to_set['holder_name'] = str(holder_name).strip()
+        if email is not None:
+            fields_to_set['email'] = str(email).strip()
+        if wallet_id is not None:
+            fields_to_set['wallet_id'] = str(wallet_id).strip()
+        if instructions is not None:
+            fields_to_set['notes'] = str(instructions).strip()
+        if is_active is not None:
+            fields_to_set['is_active'] = is_active
+
+        return fields_to_set
+
+    def list(self, request):
+        """
+        GET /api/v1/merchant-payment-methods/
+        Soporta:
+        - Sin parámetros: devuelve todos los métodos de pago de la Company del comerciante autenticado.
+        - ?company_id=<uuid> o ?store_id=<uuid> o ?order_id=<int>: devuelve los métodos activos de ese comercio
+          (o todos si quien consulta es el dueño).
+        - ?active_only=true: filtra solo métodos con is_active=True.
+        """
+        company_id = request.query_params.get('company_id')
+        store_id = request.query_params.get('store_id')
+        order_id = request.query_params.get('order_id')
+        active_only_param = str(request.query_params.get('active_only', '')).strip().lower() in ('true', '1', 'yes')
+
+        target_company = None
+        if order_id:
+            order = Order.objects.select_related('store__company').filter(id=order_id).first()
+            if not order:
+                return Response({'error': 'Orden no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+            if request.user.id not in (order.client_id, order.store.company.owner_id) and not request.user.is_staff:
+                return Response({'error': 'No tienes permiso para ver los métodos de pago de esta orden.'}, status=status.HTTP_403_FORBIDDEN)
+            target_company = order.store.company
+        elif store_id:
+            store = CompanyStore.objects.select_related('company').filter(id=store_id).first()
+            if not store:
+                return Response({'error': 'Sucursal no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+            target_company = store.company
+        elif company_id:
+            target_company = Company.objects.filter(id=company_id).first()
+            if not target_company:
+                return Response({'error': 'Compañía no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            target_company = self._get_user_company(request)
+            if not target_company:
+                return Response({
+                    'payment_methods': [],
+                    'results': [],
+                    'data': [],
+                    'banks_catalog': VENEZUELAN_BANKS_CATALOG,
+                    'supported_types': self.get_supported_types_catalog(),
+                }, status=status.HTTP_200_OK)
+
+        is_owner = (target_company.owner_id == request.user.id)
+        qs = MerchantPaymentMethod.objects.filter(company=target_company)
+        if not is_owner or active_only_param:
+            qs = qs.filter(is_active=True)
+
+        methods_json = [pm.get_json() for pm in qs.order_by('-is_active', '-updated_at', 'id')]
+        return Response({
+            'company_id': str(target_company.id),
+            'company_name': target_company.name,
+            'payment_methods': methods_json,
+            'results': methods_json,
+            'data': methods_json,
+            'banks_catalog': VENEZUELAN_BANKS_CATALOG,
+            'supported_types': self.get_supported_types_catalog(),
+        }, status=status.HTTP_200_OK)
+
+    def retrieve(self, request, pk=None):
+        company = self._get_user_company(request)
+        if not company:
+            return Response({'error': 'No posees una compañía registrada.'}, status=status.HTTP_404_NOT_FOUND)
+        pm = MerchantPaymentMethod.objects.filter(id=pk, company=company).first()
+        if not pm:
+            return Response({'error': 'Método de pago no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(pm.get_json(), status=status.HTTP_200_OK)
+
+    def create(self, request):
+        """
+        POST /api/v1/merchant-payment-methods/
+        Crea un nuevo método de pago para la Company del comerciante autenticado.
+        """
+        company = self._get_user_company(request)
+        if not company:
+            return Response({'error': 'Debes tener una compañía configurada para registrar métodos de pago.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            fields = self._extract_payload(request.data, partial=False)
+        except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            pm = MerchantPaymentMethod.objects.create(company=company, **fields)
+            uid = request.user.id
+            transaction.on_commit(lambda: self._invalidate_company_cache(uid))
+
+        pm_json = pm.get_json()
+        return Response({
+            'success': True,
+            'message': 'Método de pago registrado exitosamente.',
+            'payment_method': pm_json,
+            'data': pm_json,
+        }, status=status.HTTP_201_CREATED)
+
+    def update(self, request, pk=None):
+        return self._update_method(request, pk=pk, partial=False)
+
+    def partial_update(self, request, pk=None):
+        return self._update_method(request, pk=pk, partial=True)
+
+    def _update_method(self, request, pk=None, partial=True):
+        company = self._get_user_company(request)
+        if not company:
+            return Response({'error': 'No posees una compañía registrada.'}, status=status.HTTP_404_NOT_FOUND)
+
+        pm = MerchantPaymentMethod.objects.filter(id=pk, company=company).first()
+        if not pm:
+            return Response({'error': 'Método de pago no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            fields = self._extract_payload(request.data, partial=partial, instance=pm)
+        except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            for attr, val in fields.items():
+                setattr(pm, attr, val)
+            pm.save()
+            uid = request.user.id
+            transaction.on_commit(lambda: self._invalidate_company_cache(uid))
+
+        pm_json = pm.get_json()
+        return Response({
+            'success': True,
+            'message': 'Método de pago actualizado exitosamente.',
+            'payment_method': pm_json,
+            'data': pm_json,
+        }, status=status.HTTP_200_OK)
+
+    def destroy(self, request, pk=None):
+        company = self._get_user_company(request)
+        if not company:
+            return Response({'error': 'No posees una compañía registrada.'}, status=status.HTTP_404_NOT_FOUND)
+
+        pm = MerchantPaymentMethod.objects.filter(id=pk, company=company).first()
+        if not pm:
+            return Response({'error': 'Método de pago no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+
+        with transaction.atomic():
+            pm.delete()
+            uid = request.user.id
+            transaction.on_commit(lambda: self._invalidate_company_cache(uid))
+
+        return Response({'success': True, 'message': 'Método de pago eliminado.'}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post', 'patch'], url_path='toggle')
+    def toggle(self, request, pk=None):
+        """
+        POST o PATCH /api/v1/merchant-payment-methods/<id>/toggle/
+        Activa o desactiva rápidamente un método de pago.
+        """
+        company = self._get_user_company(request)
+        if not company:
+            return Response({'error': 'No posees una compañía registrada.'}, status=status.HTTP_404_NOT_FOUND)
+
+        pm = MerchantPaymentMethod.objects.filter(id=pk, company=company).first()
+        if not pm:
+            return Response({'error': 'Método de pago no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+
+        raw_active = request.data.get('is_active', request.data.get('active'))
+        if raw_active is not None:
+            pm.is_active = bool(raw_active) if isinstance(raw_active, bool) else str(raw_active).strip().lower() in ('true', '1', 'yes')
+        else:
+            pm.is_active = not pm.is_active
+
+        pm.save(update_fields=['is_active', 'updated_at'])
+        self._invalidate_company_cache(request.user.id)
+        pm_json = pm.get_json()
+        return Response({
+            'success': True,
+            'is_active': pm.is_active,
+            'payment_method': pm_json,
+            'data': pm_json,
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='catalog')
+    def catalog(self, request):
+        """
+        GET /api/v1/merchant-payment-methods/catalog/
+        Devuelve el catálogo oficial de bancos venezolanos (código SUDEBAN + nombre)
+        y los tipos de métodos de pago soportados.
+        """
+        return Response({
+            'banks_catalog': VENEZUELAN_BANKS_CATALOG,
+            'supported_types': self.get_supported_types_catalog(),
+        }, status=status.HTTP_200_OK)
+

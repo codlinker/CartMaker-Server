@@ -299,7 +299,16 @@ io.on('connection', (socket) => {
   });
 
   socket.on('send_message', async (data, callback) => {
-    const { order_id, text, message_type, media_url, temp_id } = data || {};
+    const {
+      order_id,
+      text,
+      message_type,
+      media_url,
+      temp_id,
+      metadata,
+      payment_methods,
+      payment_method_ids
+    } = data || {};
     const roomName = `order_${order_id}`;
     const isRecipientConnected = hasCounterpartyInRoom(roomName, socket.user_id);
 
@@ -310,6 +319,9 @@ io.on('connection', (socket) => {
         text: text,
         message_type: message_type || 'text',
         media_url: media_url || null,
+        metadata: metadata || null,
+        payment_methods: payment_methods || null,
+        payment_method_ids: payment_method_ids || null,
         recipient_connected: isRecipientConnected,
         temp_id: temp_id || null
       }, { headers: { 'X-Microservice-Token': INTERNAL_SECRET }, timeout: AXIOS_WEBHOOK_TIMEOUT_MS });

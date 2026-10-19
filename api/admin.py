@@ -99,6 +99,8 @@ class OrderAdmin(ModelAdmin):
 
     @display(description="Estado", label={
         OrderStatus.WAITING: "info",
+        OrderStatus.DELIVERY_SENT: "info",
+        OrderStatus.REPORTED: "warning",
         OrderStatus.COMPLETED: "success",
         OrderStatus.CANCELLED: "danger",
         OrderStatus.SOLVED: "warning",
@@ -662,7 +664,7 @@ others = [
     InventoryItemTransaction, OrderCancellationTopic, 
     TokenWalletTransaction, ProductCalification, 
     MerchantCalification, SupportTicket, AtlasMessage, 
-    ClientContactMethod
+    ClientContactMethod, MerchantPaymentMethod,
 ]
 
 for m in others:
