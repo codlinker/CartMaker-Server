@@ -10,6 +10,33 @@ class COS:
     Local (Carpeta Media) o AWS S3.
     """
 
+    EXPLICIT_CONTENT_TYPES = {
+        '.m4a': 'audio/mp4',
+        '.aac': 'audio/aac',
+        '.mp3': 'audio/mpeg',
+        '.wav': 'audio/wav',
+        '.ogg': 'audio/ogg',
+        '.webm': 'audio/webm',
+        '.mp4': 'video/mp4',
+        '.mov': 'video/quicktime',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.webp': 'image/webp',
+        '.gif': 'image/gif',
+        '.pdf': 'application/pdf',
+    }
+
+    KNOWN_STORAGE_FOLDERS = (
+        'chat_media/',
+        'support_media/',
+        'profiles/',
+        'stories/',
+        'products/',
+        'payments/',
+        'documents/',
+    )
+
     def __init__(self):
         self.storage_type = getattr(settings, 'STORAGE_TYPE', 'local')
         self._verified_local_to_s3 = set()
@@ -23,13 +50,58 @@ class COS:
             )
             self.bucket_name = settings.AWS_STORAGE_BUCKET_NAME
 
+    @classmethod
+    def _guess_content_type(cls, file_name: str):
+        if not file_name:
+            return None
+        ext = os.path.splitext(str(file_name))[1].lower()
+        if ext in cls.EXPLICIT_CONTENT_TYPES:
+            return cls.EXPLICIT_CONTENT_TYPES[ext]
+        content_type, _ = mimetypes.guess_type(str(file_name))
+        return content_type
+
+    def normalize_path(self, raw_path: str) -> str:
+        """
+        Normaliza cualquier valor de media_url (sea ruta relativa 'chat_media/...'
+        o una URL completa corrupta/absoluta como 'https://www.cartmaker.app/chat_media/...'
+        o 'https://.../media/chat_media/...') a la clave relativa limpia en el storage.
+        """
+        if not raw_path:
+            return ""
+
+        clean = str(raw_path).strip().replace("\\", "/")
+        if not clean:
+            return ""
+
+        # Si contiene una carpeta conocida (ej. chat_media/ o support_media/), extraemos desde ahí
+        for folder_prefix in self.KNOWN_STORAGE_FOLDERS:
+            idx = clean.find(folder_prefix)
+            if idx != -1:
+                return clean[idx:].split('?', 1)[0].lstrip('/')
+
+        # Si es una URL con /media/, extraemos la ruta relativa posterior a /media/
+        media_marker = '/media/'
+        media_idx = clean.find(media_marker)
+        if media_idx != -1:
+            return clean[media_idx + len(media_marker):].split('?', 1)[0].lstrip('/')
+
+        # Si empieza con el dominio propio sin /media/, removemos el dominio
+        domain = getattr(settings, 'DOMAIN', '') or ''
+        if domain and clean.startswith(domain):
+            return clean[len(domain):].split('?', 1)[0].lstrip('/')
+
+        if clean.startswith('http://') or clean.startswith('https://'):
+            return clean
+
+        return clean.lstrip('/')
+
     def save_file(self, file_obj, folder_path, file_name):
         full_path = os.path.join(folder_path, file_name).replace("\\", "/")
 
         if self.storage_type == 'aws':
             try:
-                # Detectamos el MIME type dinámicamente para que el navegador/app lo visualice bien
-                content_type, _ = mimetypes.guess_type(file_name)
+                # Detectamos el MIME type dinámicamente con mapa explícito para notas de voz (.m4a, .aac, etc.)
+                content_type = self._guess_content_type(file_name)
                 extra_args = {}
                 if content_type:
                     extra_args['ContentType'] = content_type
@@ -72,11 +144,16 @@ class COS:
         if not relative_path:
             return None
 
-        # Si ya es una URL absoluta, la devolvemos tal cual
-        if relative_path.startswith('http://') or relative_path.startswith('https://'):
-            return relative_path
+        # Auto-reparación de rutas que fueron guardadas como URL completa (ej. https://www.cartmaker.app/chat_media/...)
+        normalized = self.normalize_path(relative_path)
+        if not normalized:
+            return None
 
-        clean_path = relative_path.lstrip('/')
+        # Si tras normalizar sigue siendo una URL externa genuina (no perteneciente a carpetas internas), la devolvemos tal cual
+        if normalized.startswith('http://') or normalized.startswith('https://'):
+            return normalized
+
+        clean_path = normalized.lstrip('/')
 
         if self.storage_type == 'aws':
             # Auto-curación (Self-Healing): si el archivo fue guardado en MEDIA_ROOT cuando
@@ -86,7 +163,7 @@ class COS:
                 local_full_path = os.path.join(settings.MEDIA_ROOT, clean_path)
                 if os.path.isfile(local_full_path):
                     try:
-                        content_type, _ = mimetypes.guess_type(local_full_path)
+                        content_type = self._guess_content_type(local_full_path)
                         extra_args = {'ContentType': content_type} if content_type else {}
                         with open(local_full_path, 'rb') as local_f:
                             self.s3_client.upload_fileobj(
@@ -116,7 +193,7 @@ class COS:
         if not relative_path:
             return False
 
-        clean_path = relative_path.lstrip('/')
+        clean_path = self.normalize_path(relative_path).lstrip('/')
 
         if self.storage_type == 'aws':
             try:

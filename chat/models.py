@@ -33,25 +33,30 @@ class ChatMessage(models.Model):
             models.Index(fields=['order', 'status'], name='chat_msg_order_status_idx'),
         ]
 
-    def get_json(self) -> dict:
+    def get_json(self, temp_id: str = None) -> dict:
         time_str = timezone.localtime(self.created_at).strftime("%d/%m/%Y %I:%M %p").lower()
         
         # Si contiene multimedia, resolvemos la URL absoluta usando tu storage_manager
         absolute_media_url = ""
         if self.media_url:
-            absolute_media_url = storage_manager.get_url(self.media_url)
+            absolute_media_url = storage_manager.get_url(self.media_url) or ""
 
-        return {
+        payload = {
             'id': self.id,
             'order_id': self.order_id,
             'sender_id': str(self.sender_id),
-            'sender_name': f"{self.sender.first_name} {self.sender.last_name}",
+            'sender_name': f"{self.sender.first_name} {self.sender.last_name}".strip(),
             'text': self.text,
             'message_type': self.message_type,
             'media_url': absolute_media_url,
-            'status': self.status,
+            'status': self.status if self.status is not None else 1,
+            'is_read': bool(self.status and self.status >= self.DeliveryStatus.READ),
+            'is_support': False,
             'created_at': time_str,
         }
+        if temp_id:
+            payload['temp_id'] = str(temp_id)
+        return payload
 
 class PredefinedMessage(models.Model):
     company = models.ForeignKey('api.Company', on_delete=models.CASCADE, related_name='predefined_messages')

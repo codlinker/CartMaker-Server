@@ -178,12 +178,12 @@ btnMic.addEventListener('click', async () => {
 
                     const json = await response.json();
 
-                    if (response.ok && json.url) {
+                    if (response.ok && (json.path || json.url)) {
                         socket.emit('send_support_message', {
                             ticket_id: TICKET_ID,
                             text: '',
                             message_type: 'audio',
-                            media_url: json.url
+                            media_url: json.path || json.url
                         });
                     } else {
                         CartMakerModal.error("Error de subida", "No se pudo subir la nota de voz. Verifica tu conexión.");
@@ -260,12 +260,12 @@ mediaInput.addEventListener('change', async (e) => {
 
         const json = await response.json();
 
-        if (response.ok && json.url) {
+        if (response.ok && (json.path || json.url)) {
             socket.emit('send_support_message', {
                 ticket_id: TICKET_ID,
                 text: '',
                 message_type: 'image',
-                media_url: json.url
+                media_url: json.path || json.url
             });
         } else {
             CartMakerModal.error("Error de subida", "No se pudo subir la imagen. Verifica el formato o tamaño.");

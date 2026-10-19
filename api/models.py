@@ -1717,20 +1717,26 @@ class SupportMessage(models.Model):
             models.Index(fields=['ticket', 'status'], name='supp_msg_ticket_status_idx'),
         ]
 
-    def get_json(self) -> dict:
+    def get_json(self, temp_id: str = None) -> dict:
         time_str = timezone.localtime(self.created_at).strftime("%d/%m/%Y %I:%M %p").lower()
-        absolute_media_url = storage_manager.get_url(self.media_url) if self.media_url else ""
-        return {
+        absolute_media_url = (storage_manager.get_url(self.media_url) or "") if self.media_url else ""
+        resolved_status = self.status if self.status is not None else 1
+        payload = {
             'id': self.id,
             'ticket_id': self.ticket_id,
             'sender_id': str(self.sender_id),
-            'sender_name': f"{self.sender.first_name} {self.sender.last_name}",
+            'sender_name': f"{self.sender.first_name} {self.sender.last_name}".strip(),
             'text': self.text,
             'message_type': self.message_type,
             'media_url': absolute_media_url,
-            'status': self.status,
+            'status': resolved_status,
+            'is_read': bool(resolved_status >= self.DeliveryStatus.READ),
+            'is_support': True,
             'created_at': time_str,
         }
+        if temp_id:
+            payload['temp_id'] = str(temp_id)
+        return payload
 
 
 # ==========================================

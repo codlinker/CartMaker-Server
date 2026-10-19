@@ -1,3 +1,4 @@
+import uuid
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
@@ -89,19 +90,24 @@ class ChatViewSet(viewsets.ViewSet):
         if error_response:
             return error_response
         
-        file_name = f"chat_{request.user.id}_{timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')}.{extension}"
+        ts_str = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
+        short_uuid = uuid.uuid4().hex[:6]
+        file_name = f"chat_{request.user.id}_{ts_str}_{short_uuid}.{extension}"
         folder = "chat_media"
         
         # Usamos tu storage_manager para guardarlo en local o S3
         relative_path = storage_manager.save_file(file_obj, folder, file_name)
         
         if relative_path:
+            full_url = storage_manager.get_url(relative_path)
             return Response({
                 "message": "Archivo subido",
-                "url": relative_path
+                "path": relative_path,
+                "url": full_url,
+                "full_url": full_url,
             }, status=status.HTTP_200_OK)
             
-        return Response({"error": "Error al guardar el archivo en el storage"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({"error": "No se pudo almacenar el archivo"}, status=status.HTTP_502_BAD_GATEWAY)
         
     
     @action(detail=False, methods=['get', 'post', 'delete'], url_path='predefined-messages')
@@ -185,7 +191,9 @@ class SupportChatViewSet(viewsets.ViewSet):
             return error_response
         
         # Le ponemos "support_" al inicio para identificarlo rápido en el Storage
-        file_name = f"support_{request.user.id}_{timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')}.{extension}"
+        ts_str = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
+        short_uuid = uuid.uuid4().hex[:6]
+        file_name = f"support_{request.user.id}_{ts_str}_{short_uuid}.{extension}"
         
         # 💡 Guardamos en una carpeta dedicada
         folder = "support_media" 
@@ -193,12 +201,15 @@ class SupportChatViewSet(viewsets.ViewSet):
         relative_path = storage_manager.save_file(file_obj, folder, file_name)
         
         if relative_path:
+            full_url = storage_manager.get_url(relative_path)
             return Response({
                 "message": "Archivo de soporte subido",
-                "url": relative_path
+                "path": relative_path,
+                "url": full_url,
+                "full_url": full_url,
             }, status=status.HTTP_200_OK)
             
-        return Response({"error": "Error al guardar el archivo en el storage"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({"error": "No se pudo almacenar el archivo"}, status=status.HTTP_502_BAD_GATEWAY)
 
 # =========================================================================
 # 2. ENDPOINT PARA NODE.JS (Webhook)
@@ -212,8 +223,10 @@ class ChatWebhookViewSet(viewsets.ViewSet):
         sender_id = request.data.get('sender_id')
         text = request.data.get('text')
         message_type = request.data.get('message_type', 'text')
-        media_url = request.data.get('media_url', None)
+        raw_media_url = request.data.get('media_url', None)
+        clean_media_url = storage_manager.normalize_path(raw_media_url) if raw_media_url else None
         recipient_connected = request.data.get('recipient_connected', False)
+        temp_id = request.data.get('temp_id') or request.data.get('client_msg_id')
 
         try:
             order = Order.objects.select_related('store__company').get(id=order_id)
@@ -231,17 +244,18 @@ class ChatWebhookViewSet(viewsets.ViewSet):
                 sender_id=sender_id,
                 text=text,
                 message_type=message_type,
-                media_url=media_url,
+                media_url=clean_media_url,
                 status=initial_status
             )
 
             if not recipient_connected:
                 try:
-                    NotificationManager.notify_new_chat_message(order=order, sender_id=sender_id, text=text or "🖼️ Foto")
+                    fallback_label = "🎵 Nota de voz" if message_type == 'audio' else "🖼️ Foto"
+                    NotificationManager.notify_new_chat_message(order=order, sender_id=sender_id, text=text or fallback_label)
                 except Exception:
                     pass
 
-            return Response({"success": True, "data": msg.get_json()}, status=status.HTTP_200_OK)
+            return Response({"success": True, "data": msg.get_json(temp_id=temp_id)}, status=status.HTTP_200_OK)
         except Order.DoesNotExist:
             return Response({"error": "Orden no encontrada"}, status=status.HTTP_404_NOT_FOUND)
 
@@ -271,6 +285,10 @@ class ChatWebhookViewSet(viewsets.ViewSet):
         ticket_id = request.data.get('ticket_id')
         sender_id = request.data.get('sender_id')
         recipient_connected = request.data.get('recipient_connected', False)
+        temp_id = request.data.get('temp_id') or request.data.get('client_msg_id')
+        message_type = request.data.get('message_type', 'text')
+        raw_media_url = request.data.get('media_url', None)
+        clean_media_url = storage_manager.normalize_path(raw_media_url) if raw_media_url else None
         
         try:
             ticket = SupportTicket.objects.get(id=ticket_id)
@@ -290,8 +308,8 @@ class ChatWebhookViewSet(viewsets.ViewSet):
                 ticket=ticket, 
                 sender_id=sender_id, 
                 text=request.data.get('text'),
-                message_type=request.data.get('message_type', 'text'), 
-                media_url=request.data.get('media_url'),
+                message_type=message_type, 
+                media_url=clean_media_url,
                 status=msg_status
             )
             
@@ -301,17 +319,18 @@ class ChatWebhookViewSet(viewsets.ViewSet):
 
             if not recipient_connected:
                 try:
+                    fallback_label = "🎵 Nota de voz" if message_type == 'audio' else "🖼️ Archivo"
                     NotificationManager.notify_new_support_message(
                         ticket=ticket,
                         sender_id=sender_id,
-                        text=request.data.get('text') or "🖼️ Archivo"
+                        text=request.data.get('text') or fallback_label
                     )
                 except Exception as e:
                     print(f"⚠️ Error enviando push de soporte: {e}")
             
             return Response({
                 "success": True, 
-                "data": msg.get_json(), 
+                "data": msg.get_json(temp_id=temp_id), 
                 # 💡 ESTO ES LO QUE NODE.JS ESTÁ ESPERANDO DESESPERADAMENTE
                 "recipient_id": recipient_id 
             }, status=status.HTTP_200_OK)

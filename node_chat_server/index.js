@@ -210,11 +210,46 @@ io.on('connection', (socket) => {
   }
   onlineUsers.get(String(socket.user_id)).add(socket.id);
 
+  // Permite refrescar la identidad del socket en caliente si el cliente rota su JWT sin reconectar TCP
+  socket.on('refresh_auth', (data, callback) => {
+    try {
+      const token = data && data.token;
+      if (!token) throw new Error('token_missing');
+      const decoded = jwt.verify(token, JWT_SECRET);
+      const oldUserId = String(socket.user_id);
+      const newUserId = String(decoded.user_id);
+
+      if (oldUserId !== newUserId) {
+        socket.leave(`user_${oldUserId}`);
+        if (onlineUsers.has(oldUserId)) {
+          onlineUsers.get(oldUserId).delete(socket.id);
+          if (onlineUsers.get(oldUserId).size === 0) {
+            onlineUsers.delete(oldUserId);
+          }
+        }
+        socket.user_id = decoded.user_id;
+        socket.join(`user_${newUserId}`);
+        if (!onlineUsers.has(newUserId)) {
+          onlineUsers.set(newUserId, new Set());
+        }
+        onlineUsers.get(newUserId).add(socket.id);
+      }
+
+      if (typeof callback === 'function') {
+        callback({ status: 'ok', user_id: String(socket.user_id) });
+      }
+    } catch (err) {
+      if (typeof callback === 'function') {
+        callback({ status: 'error', message: err.message });
+      }
+    }
+  });
+
   // =========================================================================
   // 📦 FLUJO DE ÓRDENES COMERCIALES
   // =========================================================================
   socket.on('join_chat', async (data) => {
-    const orderId = String(data.order_id);
+    const orderId = data && data.order_id != null ? String(data.order_id) : '';
     if (!orderId) return;
 
     const roomName = `order_${orderId}`;
@@ -231,18 +266,27 @@ io.on('connection', (socket) => {
 
       console.log(`✅ Usuario [ID: ${socket.user_id}] entró a la sala de la orden: ${orderId}`);
 
-      socket.to(roomName).emit('presence_change', { user_id: socket.user_id, status: 'online' });
+      socket.to(roomName).emit('presence_change', {
+        order_id: orderId,
+        is_support: false,
+        user_id: String(socket.user_id),
+        status: 'online'
+      });
 
       if (hasCounterpartyInRoom(roomName, socket.user_id)) {
-        socket.emit('presence_change', { status: 'online' });
+        socket.emit('presence_change', { order_id: orderId, is_support: false, status: 'online' });
       } else {
-        socket.emit('presence_change', { status: 'offline' });
+        socket.emit('presence_change', { order_id: orderId, is_support: false, status: 'offline' });
       }
 
-      socket.to(roomName).emit('room_read_receipt', { order_id: orderId });
+      socket.to(roomName).emit('room_read_receipt', {
+        order_id: orderId,
+        is_support: false,
+        reader_id: String(socket.user_id)
+      });
     } catch (err) {
       if (err.response && (err.response.status === 403 || err.response.status === 404)) {
-        socket.emit('chat_error', { message: "No tienes acceso a esta sala." });
+        socket.emit('chat_error', { order_id: orderId, message: "No tienes acceso a esta sala." });
         return;
       }
       console.error("❌ Error sincronizando lecturas de orden:", err.message);
@@ -254,8 +298,8 @@ io.on('connection', (socket) => {
     console.log(`🛡️ Agente [ID: ${socket.user_id}] monitoreando su dashboard`);
   });
 
-  socket.on('send_message', async (data) => {
-    const { order_id, text, message_type, media_url } = data;
+  socket.on('send_message', async (data, callback) => {
+    const { order_id, text, message_type, media_url, temp_id } = data || {};
     const roomName = `order_${order_id}`;
     const isRecipientConnected = hasCounterpartyInRoom(roomName, socket.user_id);
 
@@ -266,23 +310,54 @@ io.on('connection', (socket) => {
         text: text,
         message_type: message_type || 'text',
         media_url: media_url || null,
-        recipient_connected: isRecipientConnected
+        recipient_connected: isRecipientConnected,
+        temp_id: temp_id || null
       }, { headers: { 'X-Microservice-Token': INTERNAL_SECRET }, timeout: AXIOS_WEBHOOK_TIMEOUT_MS });
 
-      if (response.data.success) {
-        io.to(roomName).emit('new_message', response.data.data);
+      if (response.data && response.data.success) {
+        const msgPayload = {
+          ...response.data.data,
+          order_id: response.data.data.order_id ?? order_id,
+          is_support: false
+        };
+        if (temp_id && !msgPayload.temp_id) {
+          msgPayload.temp_id = String(temp_id);
+        }
+
+        io.to(roomName).emit('new_message', msgPayload);
+
+        if (typeof callback === 'function') {
+          callback({ status: 'ok', data: msgPayload });
+        }
+      } else {
+        const errMsg = (response.data && response.data.error) || "No se pudo procesar el mensaje.";
+        socket.emit('chat_error', { message: errMsg, order_id, temp_id: temp_id || null });
+        if (typeof callback === 'function') {
+          callback({ status: 'error', message: errMsg, temp_id: temp_id || null });
+        }
       }
     } catch (error) {
-      socket.emit('chat_error', { message: "No se pudo procesar el mensaje." });
+      const errMsg = (error.response && error.response.data && error.response.data.error) || "No se pudo procesar el mensaje.";
+      socket.emit('chat_error', { message: errMsg, order_id, temp_id: temp_id || null });
+      if (typeof callback === 'function') {
+        callback({ status: 'error', message: errMsg, temp_id: temp_id || null });
+      }
     }
   });
 
   socket.on('leave_chat', (data) => {
-    const roomName = `order_${data.order_id}`;
+    const orderId = data && data.order_id != null ? String(data.order_id) : '';
+    if (!orderId) return;
+    const roomName = `order_${orderId}`;
     socket.leave(roomName);
     removeActiveRoom(socket.id, roomName);
     if (!hasOtherUserSocketInRoom(roomName, socket.user_id, socket.id)) {
-      io.to(roomName).emit('presence_change', { user_id: socket.user_id, status: 'offline' });
+      io.to(roomName).emit('presence_change', {
+        order_id: orderId,
+        is_support: false,
+        user_id: String(socket.user_id),
+        status: 'offline'
+      });
     }
   });
 
@@ -290,7 +365,7 @@ io.on('connection', (socket) => {
   // 🛠️ NUEVO: FLUJO DE TICKETS DE SOPORTE
   // =========================================================================
   socket.on('join_support_chat', async (data) => {
-    const ticketId = String(data.ticket_id);
+    const ticketId = data && data.ticket_id != null ? String(data.ticket_id) : '';
     if (!ticketId) return;
 
     const roomName = `support_${ticketId}`;
@@ -307,26 +382,35 @@ io.on('connection', (socket) => {
 
       console.log(`✅ Usuario [ID: ${socket.user_id}] entró al ticket de soporte: ${ticketId}`);
 
-      socket.to(roomName).emit('support_presence_change', { user_id: socket.user_id, status: 'online' });
+      socket.to(roomName).emit('support_presence_change', {
+        ticket_id: ticketId,
+        is_support: true,
+        user_id: String(socket.user_id),
+        status: 'online'
+      });
 
       if (hasCounterpartyInRoom(roomName, socket.user_id)) {
-        socket.emit('support_presence_change', { status: 'online' });
+        socket.emit('support_presence_change', { ticket_id: ticketId, is_support: true, status: 'online' });
       } else {
-        socket.emit('support_presence_change', { status: 'offline' });
+        socket.emit('support_presence_change', { ticket_id: ticketId, is_support: true, status: 'offline' });
       }
 
-      socket.to(roomName).emit('support_room_read_receipt', { ticket_id: ticketId });
+      socket.to(roomName).emit('support_room_read_receipt', {
+        ticket_id: ticketId,
+        is_support: true,
+        reader_id: String(socket.user_id)
+      });
     } catch (err) {
       if (err.response && (err.response.status === 403 || err.response.status === 404)) {
-        socket.emit('chat_error', { message: "No tienes acceso a este ticket de soporte." });
+        socket.emit('chat_error', { ticket_id: ticketId, is_support: true, message: "No tienes acceso a este ticket de soporte." });
         return;
       }
       console.error("❌ Error sincronizando lecturas de soporte:", err.message);
     }
   });
 
-  socket.on('send_support_message', async (data) => {
-    const { ticket_id, text, message_type, media_url } = data;
+  socket.on('send_support_message', async (data, callback) => {
+    const { ticket_id, text, message_type, media_url, temp_id } = data || {};
     const roomName = `support_${ticket_id}`;
     const isRecipientConnected = hasCounterpartyInRoom(roomName, socket.user_id);
 
@@ -337,26 +421,57 @@ io.on('connection', (socket) => {
         text: text,
         message_type: message_type || 'text',
         media_url: media_url || null,
-        recipient_connected: isRecipientConnected
+        recipient_connected: isRecipientConnected,
+        temp_id: temp_id || null
       }, { headers: { 'X-Microservice-Token': INTERNAL_SECRET }, timeout: AXIOS_WEBHOOK_TIMEOUT_MS });
 
-      if (response.data.success) {
-        io.to(roomName).emit('new_support_message', response.data.data);
+      if (response.data && response.data.success) {
+        const msgPayload = {
+          ...response.data.data,
+          ticket_id: response.data.data.ticket_id ?? ticket_id,
+          is_support: true
+        };
+        if (temp_id && !msgPayload.temp_id) {
+          msgPayload.temp_id = String(temp_id);
+        }
+
+        io.to(roomName).emit('new_support_message', msgPayload);
         if (response.data.recipient_id) {
-            io.to(`user_${response.data.recipient_id}`).emit('global_new_support_message', response.data.data);
+          io.to(`user_${response.data.recipient_id}`).emit('global_new_support_message', msgPayload);
+        }
+
+        if (typeof callback === 'function') {
+          callback({ status: 'ok', data: msgPayload });
+        }
+      } else {
+        const errMsg = (response.data && response.data.error) || "No se pudo procesar el mensaje de soporte.";
+        socket.emit('chat_error', { message: errMsg, ticket_id, is_support: true, temp_id: temp_id || null });
+        if (typeof callback === 'function') {
+          callback({ status: 'error', message: errMsg, temp_id: temp_id || null });
         }
       }
     } catch (error) {
-      socket.emit('chat_error', { message: "No se pudo procesar el mensaje de soporte." });
+      const errMsg = (error.response && error.response.data && error.response.data.error) || "No se pudo procesar el mensaje de soporte.";
+      socket.emit('chat_error', { message: errMsg, ticket_id, is_support: true, temp_id: temp_id || null });
+      if (typeof callback === 'function') {
+        callback({ status: 'error', message: errMsg, temp_id: temp_id || null });
+      }
     }
   });
 
   socket.on('leave_support_chat', (data) => {
-    const roomName = `support_${data.ticket_id}`;
+    const ticketId = data && data.ticket_id != null ? String(data.ticket_id) : '';
+    if (!ticketId) return;
+    const roomName = `support_${ticketId}`;
     socket.leave(roomName);
     removeActiveRoom(socket.id, roomName);
     if (!hasOtherUserSocketInRoom(roomName, socket.user_id, socket.id)) {
-      io.to(roomName).emit('support_presence_change', { user_id: socket.user_id, status: 'offline' });
+      io.to(roomName).emit('support_presence_change', {
+        ticket_id: ticketId,
+        is_support: true,
+        user_id: String(socket.user_id),
+        status: 'offline'
+      });
     }
   });
 
@@ -366,13 +481,23 @@ io.on('connection', (socket) => {
   
   // 💡 El evento 'typing' soporta sala explícita o todas las salas activas del socket.
   socket.on('typing', (data) => {
-    const explicitRoom = data && data.order_id
-      ? `order_${data.order_id}`
-      : (data && data.ticket_id ? `support_${data.ticket_id}` : null);
+    if (data && data.order_id != null) {
+      const orderId = String(data.order_id);
+      socket.to(`order_${orderId}`).emit('typing_status', {
+        order_id: orderId,
+        is_support: false,
+        user_id: String(socket.user_id),
+        isTyping: Boolean(data.isTyping)
+      });
+      return;
+    }
 
-    if (explicitRoom) {
-      socket.to(explicitRoom).emit('typing_status', {
-        user_id: socket.user_id,
+    if (data && data.ticket_id != null) {
+      const ticketId = String(data.ticket_id);
+      socket.to(`support_${ticketId}`).emit('typing_status', {
+        ticket_id: ticketId,
+        is_support: true,
+        user_id: String(socket.user_id),
         isTyping: Boolean(data.isTyping)
       });
       return;
@@ -381,10 +506,23 @@ io.on('connection', (socket) => {
     const rooms = activeChats.get(socket.id);
     if (rooms) {
       for (const roomName of rooms) {
-        socket.to(roomName).emit('typing_status', {
-          user_id: socket.user_id,
-          isTyping: Boolean(data && data.isTyping)
-        });
+        if (roomName.startsWith('order_')) {
+          const orderId = roomName.slice(6);
+          socket.to(roomName).emit('typing_status', {
+            order_id: orderId,
+            is_support: false,
+            user_id: String(socket.user_id),
+            isTyping: Boolean(data && data.isTyping)
+          });
+        } else if (roomName.startsWith('support_')) {
+          const ticketId = roomName.slice(8);
+          socket.to(roomName).emit('typing_status', {
+            ticket_id: ticketId,
+            is_support: true,
+            user_id: String(socket.user_id),
+            isTyping: Boolean(data && data.isTyping)
+          });
+        }
       }
     }
   });
@@ -395,9 +533,21 @@ io.on('connection', (socket) => {
       for (const roomName of rooms) {
         if (!hasOtherUserSocketInRoom(roomName, socket.user_id, socket.id)) {
           if (roomName.startsWith('order_')) {
-            io.to(roomName).emit('presence_change', { user_id: socket.user_id, status: 'offline' });
+            const orderId = roomName.slice(6);
+            io.to(roomName).emit('presence_change', {
+              order_id: orderId,
+              is_support: false,
+              user_id: String(socket.user_id),
+              status: 'offline'
+            });
           } else if (roomName.startsWith('support_')) {
-            io.to(roomName).emit('support_presence_change', { user_id: socket.user_id, status: 'offline' });
+            const ticketId = roomName.slice(8);
+            io.to(roomName).emit('support_presence_change', {
+              ticket_id: ticketId,
+              is_support: true,
+              user_id: String(socket.user_id),
+              status: 'offline'
+            });
           }
         }
       }
