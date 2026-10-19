@@ -173,32 +173,128 @@ app.get('/internal/online-users', (req, res) => {
 // 2. Django ordena: "Notifica esta asignación"
 app.post('/internal/emit-assignment', (req, res) => {
   if (!isValidMicroserviceToken(req.headers['x-microservice-token'])) return res.status(403).send('Forbidden');
-  const { ticket, agent_id, client_id } = req.body;
+  const { ticket, agent_id, client_id, participant_ids } = req.body;
 
   // A) Avisar al Agente en su Dashboard Web
-  io.to(`user_${agent_id}`).emit('new_ticket_assigned', ticket);
+  if (agent_id) {
+    io.to(`user_${agent_id}`).emit('new_ticket_assigned', ticket);
+  }
   
-  // B) Avisar al Cliente en su App Flutter para que actualice la lista
-  io.to(`user_${client_id}`).emit('ticket_updated', ticket);
+  // B) Avisar al Cliente y Comerciante (participantes) en su App Flutter para que actualicen la lista
+  const targets = new Set();
+  if (client_id) targets.add(String(client_id));
+  if (Array.isArray(participant_ids)) {
+    participant_ids.forEach((pid) => {
+      if (pid) targets.add(String(pid));
+    });
+  }
+  targets.forEach((uid) => {
+    io.to(`user_${uid}`).emit('ticket_updated', ticket);
+  });
   
-  // C) Avisar a la sala del chat (por si el cliente lo tiene abierto)
-  io.to(`support_${ticket.id}`).emit('agent_assigned', ticket);
+  // C) Avisar a la sala del chat (por si el cliente o comerciante lo tiene abierto)
+  if (ticket && ticket.id != null) {
+    io.to(`support_${ticket.id}`).emit('agent_assigned', ticket);
+    io.to(`support_${ticket.id}`).emit('ticket_updated', ticket);
+  }
 
   res.json({ success: true });
 });
 
-// 3. Django ordena: "Cierra el ticket y bloquea a todos"
+// 3. Django ordena: "Cierra el ticket y bloquea a todos con su dictamen/conclusión"
 app.post('/internal/emit-ticket-closed', (req, res) => {
   if (!isValidMicroserviceToken(req.headers['x-microservice-token'])) return res.status(403).send('Forbidden');
-  const { ticket_id, reason, client_id, agent_id } = req.body;
+  const {
+    ticket_id,
+    reason,
+    close_reason,
+    resolution_note,
+    client_id,
+    agent_id,
+    participant_ids,
+    ticket
+  } = req.body;
 
-  // Cerrar el chat
-  io.to(`support_${ticket_id}`).emit('ticket_closed', { ticket_id, reason });
+  const resolvedReason = close_reason || reason || 'Resuelto por Soporte';
+  const closeEventPayload = {
+    ticket_id,
+    id: ticket_id,
+    closed: true,
+    status: 'CLOSED',
+    reason: resolvedReason,
+    close_reason: resolvedReason,
+    resolution_outcome: resolvedReason,
+    resolution_note: resolution_note || null,
+    muted_client: false,
+    muted_merchant: false,
+    ...(ticket && typeof ticket === 'object' ? ticket : {})
+  };
+
+  // Cerrar el chat en vivo para todos en la sala
+  io.to(`support_${ticket_id}`).emit('ticket_closed', closeEventPayload);
+  io.to(`support_${ticket_id}`).emit('support_ticket_closed', closeEventPayload);
+  io.to(`support_${ticket_id}`).emit('ticket_updated', closeEventPayload);
   
-  // Actualizar las listas globales de ambos
-  const payload = { id: ticket_id, closed: true, close_reason: reason };
-  io.to(`user_${client_id}`).emit('ticket_updated', payload);
-  io.to(`user_${agent_id}`).emit('ticket_updated', payload);
+  // Actualizar las listas globales de comprador, comerciante y agente
+  const targets = new Set();
+  if (client_id) targets.add(String(client_id));
+  if (agent_id) targets.add(String(agent_id));
+  if (Array.isArray(participant_ids)) {
+    participant_ids.forEach((pid) => {
+      if (pid) targets.add(String(pid));
+    });
+  }
+  targets.forEach((uid) => {
+    io.to(`user_${uid}`).emit('ticket_updated', closeEventPayload);
+    io.to(`user_${uid}`).emit('ticket_closed', closeEventPayload);
+  });
+
+  res.json({ success: true });
+});
+
+// 4. Django ordena: "Silencia o reactiva a un participante del ticket tripartito"
+app.post('/internal/emit-support-mute', (req, res) => {
+  if (!isValidMicroserviceToken(req.headers['x-microservice-token'])) return res.status(403).send('Forbidden');
+  const {
+    ticket_id,
+    ticket,
+    muted_client,
+    muted_merchant,
+    mute_reason,
+    muted_user_ids,
+    participant_ids,
+    system_message
+  } = req.body;
+
+  const mutePayload = {
+    ticket_id,
+    id: ticket_id,
+    muted_client: Boolean(muted_client),
+    muted_merchant: Boolean(muted_merchant),
+    mute_reason: mute_reason || null,
+    muted_user_ids: Array.isArray(muted_user_ids) ? muted_user_ids : [],
+    ticket: ticket || null
+  };
+
+  const roomName = `support_${ticket_id}`;
+  io.to(roomName).emit('support_mute_status', mutePayload);
+  io.to(roomName).emit('participant_muted', mutePayload);
+  if (ticket) {
+    io.to(roomName).emit('ticket_updated', ticket);
+  }
+  if (system_message) {
+    io.to(roomName).emit('new_support_message', system_message);
+  }
+
+  if (Array.isArray(participant_ids)) {
+    participant_ids.forEach((uid) => {
+      if (!uid) return;
+      io.to(`user_${uid}`).emit('support_mute_status', mutePayload);
+      if (ticket) {
+        io.to(`user_${uid}`).emit('ticket_updated', ticket);
+      }
+    });
+  }
 
   res.json({ success: true });
 });
@@ -441,32 +537,74 @@ io.on('connection', (socket) => {
         const msgPayload = {
           ...response.data.data,
           ticket_id: response.data.data.ticket_id ?? ticket_id,
-          is_support: true
+          is_support: Boolean(response.data.data.is_support),
+          is_support_room: true
         };
         if (temp_id && !msgPayload.temp_id) {
           msgPayload.temp_id = String(temp_id);
         }
 
         io.to(roomName).emit('new_support_message', msgPayload);
+        const recipientTargets = new Set();
         if (response.data.recipient_id) {
-          io.to(`user_${response.data.recipient_id}`).emit('global_new_support_message', msgPayload);
+          recipientTargets.add(String(response.data.recipient_id));
         }
+        if (Array.isArray(response.data.recipient_ids)) {
+          response.data.recipient_ids.forEach((rid) => {
+            if (rid) recipientTargets.add(String(rid));
+          });
+        }
+        recipientTargets.forEach((rid) => {
+          io.to(`user_${rid}`).emit('global_new_support_message', msgPayload);
+        });
 
         if (typeof callback === 'function') {
           callback({ status: 'ok', data: msgPayload });
         }
       } else {
-        const errMsg = (response.data && response.data.error) || "No se pudo procesar el mensaje de soporte.";
-        socket.emit('chat_error', { message: errMsg, ticket_id, is_support: true, temp_id: temp_id || null });
+        const errData = response.data || {};
+        const errMsg = errData.error || "No se pudo procesar el mensaje de soporte.";
+        socket.emit('chat_error', {
+          message: errMsg,
+          code: errData.code || null,
+          is_muted: Boolean(errData.is_muted),
+          mute_reason: errData.mute_reason || null,
+          ticket_id,
+          is_support: true,
+          temp_id: temp_id || null
+        });
         if (typeof callback === 'function') {
-          callback({ status: 'error', message: errMsg, temp_id: temp_id || null });
+          callback({
+            status: 'error',
+            message: errMsg,
+            code: errData.code || null,
+            is_muted: Boolean(errData.is_muted),
+            mute_reason: errData.mute_reason || null,
+            temp_id: temp_id || null
+          });
         }
       }
     } catch (error) {
-      const errMsg = (error.response && error.response.data && error.response.data.error) || "No se pudo procesar el mensaje de soporte.";
-      socket.emit('chat_error', { message: errMsg, ticket_id, is_support: true, temp_id: temp_id || null });
+      const errData = (error.response && error.response.data) || {};
+      const errMsg = errData.error || "No se pudo procesar el mensaje de soporte.";
+      socket.emit('chat_error', {
+        message: errMsg,
+        code: errData.code || null,
+        is_muted: Boolean(errData.is_muted),
+        mute_reason: errData.mute_reason || null,
+        ticket_id,
+        is_support: true,
+        temp_id: temp_id || null
+      });
       if (typeof callback === 'function') {
-        callback({ status: 'error', message: errMsg, temp_id: temp_id || null });
+        callback({
+          status: 'error',
+          message: errMsg,
+          code: errData.code || null,
+          is_muted: Boolean(errData.is_muted),
+          mute_reason: errData.mute_reason || null,
+          temp_id: temp_id || null
+        });
       }
     }
   });

@@ -521,7 +521,9 @@ def dashboard_view(request):
 @support_access_required
 def close_ticket(request, ticket_id):  
     ticket = get_object_or_404(
-        SupportTicket.objects.select_related('client', 'agent', 'order', 'order__store__company'),
+        SupportTicket.objects.select_related(
+            'client', 'agent', 'order', 'order__client', 'order__store__company', 'order__store__company__owner'
+        ),
         id=ticket_id,
     )
     if ticket.agent and ticket.agent != request.user and not request.user.is_superuser:
@@ -536,12 +538,23 @@ def close_ticket(request, ticket_id):
     except (ValueError, TypeError):
         reason_val = SupportTicket.CloseReason.SOLVED
 
+    resolution_note = (
+        request.POST.get('resolution_note')
+        or request.POST.get('conclusion')
+        or ''
+    ).strip()
+
     now = timezone.now()
     with transaction.atomic():
         ticket.closed = True
         ticket.close_time = now
         ticket.close_reason = reason_val
-        ticket.save(update_fields=['closed', 'close_time', 'close_reason'])
+        ticket.resolution_note = resolution_note
+        ticket.muted_client = False
+        ticket.muted_merchant = False
+        ticket.save(update_fields=[
+            'closed', 'close_time', 'close_reason', 'resolution_note', 'muted_client', 'muted_merchant'
+        ])
 
         if ticket.order_id:
             locked_order = (
@@ -553,8 +566,13 @@ def close_ticket(request, ticket_id):
             if locked_order and not SupportTicket.objects.filter(order=locked_order, closed=False).exclude(pk=ticket.pk).exists():
                 cart_dict = dict(locked_order.cart) if isinstance(locked_order.cart, dict) else {}
                 cart_dict['under_review'] = False
+                cart_dict['resolved_by_support'] = True
                 cart_dict['resolved_by_ticket_id'] = ticket.id
+                cart_dict['support_close_reason'] = ticket.get_close_reason_display()
+                if resolution_note:
+                    cart_dict['support_resolution_note'] = resolution_note
                 cart_dict['resolved_at'] = now.isoformat()
+                cart_dict['support_closed_at'] = now.isoformat()
 
                 if locked_order.status == OrderStatus.REPORTED:
                     if reason_val == SupportTicket.CloseReason.SPAM:
@@ -575,13 +593,14 @@ def close_ticket(request, ticket_id):
                     new_st = locked_order.status
                     buyer_id = locked_order.client_id
                     merchant_uid = locked_order.store.company.owner_id if locked_order.store and locked_order.store.company else None
+                    note_suffix = f" Dictamen: {resolution_note}" if resolution_note else ""
 
                     def _notify_resolution():
                         NotificationManager.notify_order_status_change(
                             user_id=buyer_id,
                             order_id=oid,
                             title="Revisión de Soporte Finalizada",
-                            body=f"Soporte CartMaker ha cerrado el ticket #{ticket.id} de la orden N° {oid}.",
+                            body=f"Soporte CartMaker ha cerrado el ticket #{ticket.id} de la orden N° {oid} ({ticket.get_close_reason_display()}).{note_suffix}",
                             is_merchant=False,
                             new_status=new_st,
                         )
@@ -590,7 +609,7 @@ def close_ticket(request, ticket_id):
                                 user_id=merchant_uid,
                                 order_id=oid,
                                 title="Revisión de Soporte Finalizada",
-                                body=f"Soporte CartMaker ha cerrado el ticket #{ticket.id} de la orden N° {oid}.",
+                                body=f"Soporte CartMaker ha cerrado el ticket #{ticket.id} de la orden N° {oid} ({ticket.get_close_reason_display()}).{note_suffix}",
                                 is_merchant=True,
                                 new_status=new_st,
                             )
@@ -599,16 +618,23 @@ def close_ticket(request, ticket_id):
                 else:
                     locked_order.cart = cart_dict
                     locked_order.save(update_fields=['cart'])
-    
+
+    ticket_json = ticket.get_json(current_user=request.user)
+    participant_ids = ticket.get_all_participant_ids()
+
     # 💡 ALERTAMOS A NODE.JS EN TIEMPO REAL
     try:
         requests.post(
             f"{settings.INTERNAL_WEBSOCKETS_URL}internal/emit-ticket-closed",
             json={
-                'ticket_id': str(ticket.id), 
+                'ticket_id': ticket.id,
                 'reason': ticket.get_close_reason_display(),
+                'close_reason': ticket.get_close_reason_display(),
+                'resolution_note': resolution_note or None,
                 'client_id': str(ticket.client.id),
-                'agent_id': str(ticket.agent.id) if ticket.agent else None
+                'agent_id': str(ticket.agent.id) if ticket.agent else None,
+                'participant_ids': participant_ids,
+                'ticket': ticket_json,
             },
             headers={'X-Microservice-Token': settings.SECRET_KEY},
             timeout=2
@@ -619,11 +645,113 @@ def close_ticket(request, ticket_id):
     messages.success(request, f"El ticket #{ticket.id} fue cerrado correctamente.")
     return redirect('web_dashboard')
 
+
+@require_POST
+@support_access_required
+def mute_ticket_participant(request, ticket_id):
+    import json
+    from api.models import SupportMessage
+    ticket = get_object_or_404(
+        SupportTicket.objects.select_related(
+            'client', 'agent', 'order', 'order__client', 'order__store__company', 'order__store__company__owner'
+        ),
+        id=ticket_id,
+    )
+    if ticket.agent and ticket.agent != request.user and not request.user.is_superuser:
+        return JsonResponse({'error': 'No tienes permisos sobre este ticket.'}, status=403)
+
+    try:
+        body_data = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except Exception:
+        body_data = request.POST.dict()
+
+    target_role = str(body_data.get('target_role') or body_data.get('role') or '').strip().lower()
+    raw_muted = body_data.get('muted') if 'muted' in body_data else body_data.get('is_muted')
+    reason = str(body_data.get('reason') or body_data.get('mute_reason') or '').strip()
+
+    with transaction.atomic():
+        locked_ticket = (
+            SupportTicket.objects.select_for_update()
+            .select_related('client', 'agent', 'order__client', 'order__store__company__owner')
+            .get(pk=ticket.pk)
+        )
+        changed_roles = []
+        if target_role in ('client', 'buyer'):
+            new_val = (not locked_ticket.muted_client) if raw_muted is None else bool(raw_muted)
+            locked_ticket.muted_client = new_val
+            changed_roles.append(('client', new_val))
+        elif target_role in ('merchant', 'seller'):
+            new_val = (not locked_ticket.muted_merchant) if raw_muted is None else bool(raw_muted)
+            locked_ticket.muted_merchant = new_val
+            changed_roles.append(('merchant', new_val))
+        else:
+            return JsonResponse({'error': "Rol inválido. Usa 'client' o 'merchant'."}, status=400)
+
+        if reason or (not locked_ticket.muted_client and not locked_ticket.muted_merchant):
+            locked_ticket.mute_reason = reason if (locked_ticket.muted_client or locked_ticket.muted_merchant) else ''
+
+        locked_ticket.save(update_fields=['muted_client', 'muted_merchant', 'mute_reason'])
+
+        role_labels = {'client': 'comprador', 'merchant': 'comerciante'}
+        parts = []
+        for r_code, is_m in changed_roles:
+            lbl = role_labels.get(r_code, r_code)
+            if is_m:
+                parts.append(f"🔇 El agente de soporte ha silenciado temporalmente al {lbl}.")
+            else:
+                parts.append(f"🔊 El agente de soporte ha reactivado la participación del {lbl}.")
+        sys_text = " ".join(parts)
+        if reason and any(is_m for _, is_m in changed_roles):
+            sys_text += f" Motivo: {reason}"
+
+        sys_msg = SupportMessage.objects.create(
+            ticket=locked_ticket,
+            sender=request.user,
+            text=sys_text,
+            message_type=SupportMessage.MessageType.SYSTEM,
+            status=SupportMessage.DeliveryStatus.SENT,
+        )
+        sys_msg_payload = sys_msg.get_json()
+        ticket_json = locked_ticket.get_json(current_user=request.user)
+
+    try:
+        requests.post(
+            f"{settings.INTERNAL_WEBSOCKETS_URL}internal/emit-support-mute",
+            json={
+                'ticket_id': locked_ticket.id,
+                'ticket': ticket_json,
+                'muted_client': locked_ticket.muted_client,
+                'muted_merchant': locked_ticket.muted_merchant,
+                'mute_reason': locked_ticket.mute_reason or None,
+                'muted_user_ids': locked_ticket.get_muted_user_ids(),
+                'participant_ids': locked_ticket.get_all_participant_ids(),
+                'system_message': sys_msg_payload,
+            },
+            headers={'X-Microservice-Token': settings.SECRET_KEY},
+            timeout=2,
+        )
+    except Exception:
+        pass
+
+    return JsonResponse({
+        'success': True,
+        'ticket_id': locked_ticket.id,
+        'muted_client': locked_ticket.muted_client,
+        'muted_merchant': locked_ticket.muted_merchant,
+        'mute_reason': locked_ticket.mute_reason or None,
+        'muted_user_ids': locked_ticket.get_muted_user_ids(),
+        'system_message': sys_msg_payload,
+        'ticket': ticket_json,
+    })
+
+
 @login_required(login_url='/auth/login/')
 @support_access_required
 def support_agent_chat(request, ticket_id):
     ticket = get_object_or_404(
-        SupportTicket.objects.select_related('client', 'agent', 'order', 'order__store', 'order__store__company'),
+        SupportTicket.objects.select_related(
+            'client', 'agent', 'order', 'order__client', 'order__store', 'order__store__company', 'order__store__company__owner'
+        ),
         id=ticket_id,
     )
     if ticket.agent and ticket.agent != request.user and not request.user.is_superuser:
@@ -641,6 +769,11 @@ def support_agent_chat(request, ticket_id):
     client_orders_count = Order.objects.filter(client=client).count() if client else 0
     client_tickets_count = SupportTicket.objects.filter(client=client).count() if client else 0
 
+    buyer_user = ticket.get_buyer_user()
+    merchant_user = ticket.get_merchant_user()
+    merchant_company = ticket.get_merchant_company()
+    reporter_info = ticket.get_reporter_info()
+
     refresh = RefreshToken.for_user(request.user)
     return render(request, 'support/support_chat.html', {
         'ticket': ticket,
@@ -651,6 +784,11 @@ def support_agent_chat(request, ticket_id):
         'wallet_balance_ve': wallet_balance_ve,
         'client_orders_count': client_orders_count,
         'client_tickets_count': client_tickets_count,
+        'buyer_user': buyer_user,
+        'merchant_user': merchant_user,
+        'merchant_company': merchant_company,
+        'reported_by_role': reporter_info['reported_by_role'],
+        'reported_by_name': reporter_info['reported_by_name'],
     })
 
 # ==============================================================

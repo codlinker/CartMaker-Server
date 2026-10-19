@@ -308,9 +308,32 @@ function escapeHtml(str) {
 }
 
 function renderMessage(msg) {
+    if (msg.message_type === 'system' || msg.sender_role === 'system') {
+        const sysDiv = document.createElement('div');
+        sysDiv.style.cssText = 'align-self: center; background: #F1F5F9; color: #475569; border: 1px solid #CBD5E1; border-radius: 999px; padding: 5px 14px; font-size: 0.76rem; font-weight: 700; margin: 6px auto; text-align: center; max-width: 88%;';
+        sysDiv.textContent = msg.text || '';
+        messagesContainer.appendChild(sysDiv);
+        return;
+    }
+
     const div = document.createElement('div');
-    const isAgent = msg.sender_id === AGENT_ID;
+    const isAgent = (msg.sender_id === AGENT_ID) || (msg.sender_role === 'support');
     div.className = `message ${isAgent ? 'agent' : 'client'}`;
+
+    let roleBadgeHtml = '';
+    if (!isAgent) {
+        const isMerchantSender = msg.sender_role === 'merchant';
+        const roleLabel = isMerchantSender ? '🏪 Comerciante' : '🛒 Comprador';
+        const roleBg = isMerchantSender ? '#FEF3C7' : '#DBEAFE';
+        const roleColor = isMerchantSender ? '#92400E' : '#1E40AF';
+        const senderNameSafe = escapeHtml(msg.sender_name || '');
+        roleBadgeHtml = `
+            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px; font-size: 0.72rem;">
+                <span style="background: ${roleBg}; color: ${roleColor}; padding: 2px 7px; border-radius: 6px; font-weight: 800;">${roleLabel}</span>
+                <strong style="color: #334155;">${senderNameSafe}</strong>
+            </div>
+        `;
+    }
 
     let content = escapeHtml(msg.text);
     const safeMediaUrl = escapeHtml(msg.media_url);
@@ -328,6 +351,7 @@ function renderMessage(msg) {
 
     const safeTime = escapeHtml((msg.created_at || '').split(' ').slice(1).join(' '));
     div.innerHTML = `
+        ${roleBadgeHtml}
         ${content}
         <div class="message-time">
             ${safeTime}
@@ -343,7 +367,80 @@ function scrollToBottom() {
 }
 
 // =========================================================================
-// 🔒 LÓGICA DE CIERRE DE TICKET CON MODAL UNIFICADO CARTMAKER
+// 🔇 CONTROL DE SILENCIAMIENTO TRIPARTITO (COMPRADOR / COMERCIANTE)
+// =========================================================================
+function updateMuteButtonUI(role, isMuted) {
+    const btn = document.getElementById(`btn-mute-${role}`);
+    const icon = document.getElementById(`icon-mute-${role}`);
+    const label = document.getElementById(`label-mute-${role}`);
+    if (!btn) return;
+    btn.setAttribute('data-muted', isMuted ? 'true' : 'false');
+    btn.style.borderColor = isMuted ? '#EF4444' : '#CBD5E1';
+    btn.style.background = isMuted ? '#FEF2F2' : '#FFFFFF';
+    btn.style.color = isMuted ? '#DC2626' : '#334155';
+    if (icon) icon.textContent = isMuted ? 'volume_off' : 'volume_up';
+    if (label) {
+        if (role === 'client') {
+            label.textContent = isMuted ? 'Comprador Silenciado' : 'Silenciar Comprador';
+        } else {
+            label.textContent = isMuted ? 'Comercio Silenciado' : 'Silenciar Comercio';
+        }
+    }
+}
+
+async function toggleParticipantMute(role) {
+    const btn = document.getElementById(`btn-mute-${role}`);
+    if (!btn) return;
+    const currentlyMuted = btn.getAttribute('data-muted') === 'true';
+    const nextMuted = !currentlyMuted;
+    const csrfTokenEl = document.getElementById('csrf_token');
+    const csrfToken = csrfTokenEl ? csrfTokenEl.value : '';
+
+    btn.disabled = true;
+    try {
+        const resp = await fetch(`/support/ticket/${TICKET_ID}/mute/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken,
+            },
+            body: JSON.stringify({
+                target_role: role,
+                muted: nextMuted,
+            }),
+        });
+        const data = await resp.json();
+        if (resp.ok && data.success) {
+            updateMuteButtonUI('client', Boolean(data.muted_client));
+            updateMuteButtonUI('merchant', Boolean(data.muted_merchant));
+        } else {
+            CartMakerModal.error('Error', data.error || 'No se pudo actualizar el estado de silenciamiento.');
+        }
+    } catch (e) {
+        CartMakerModal.error('Error de red', 'No se pudo conectar con el servidor.');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+const btnMuteClient = document.getElementById('btn-mute-client');
+if (btnMuteClient) {
+    btnMuteClient.addEventListener('click', () => toggleParticipantMute('client'));
+}
+const btnMuteMerchant = document.getElementById('btn-mute-merchant');
+if (btnMuteMerchant) {
+    btnMuteMerchant.addEventListener('click', () => toggleParticipantMute('merchant'));
+}
+
+socket.on('support_mute_status', (data) => {
+    if (data && String(data.ticket_id) === String(TICKET_ID)) {
+        updateMuteButtonUI('client', Boolean(data.muted_client));
+        updateMuteButtonUI('merchant', Boolean(data.muted_merchant));
+    }
+});
+
+// =========================================================================
+// 🔒 LÓGICA DE CIERRE DE TICKET CON MODAL UNIFICADO CARTMAKER + CONCLUSIÓN
 // =========================================================================
 const btnTriggerClose = document.getElementById('btn-trigger-close');
 
@@ -352,26 +449,37 @@ if (btnTriggerClose) {
         const result = await CartMakerModal.form({
             title: 'Resolver y Cerrar Ticket',
             html: `
-                <div style="text-align: left; margin-top: 8px;">
-                    <label style="font-size: 0.78rem; color: #475569; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; display: block;">
-                        Selecciona el dictamen de resolución:
-                    </label>
-                    <select id="swal-close-reason" class="cm-modal-select">
-                        <option value="0">Resuelto con éxito</option>
-                        <option value="1">No se pudo resolver</option>
-                        <option value="2">Spam / Solicitud inválida</option>
-                        <option value="3">El cliente no responde</option>
-                    </select>
+                <div style="text-align: left; margin-top: 8px; display: flex; flex-direction: column; gap: 12px;">
+                    <div>
+                        <label style="font-size: 0.78rem; color: #475569; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; display: block;">
+                            Selecciona el dictamen de resolución:
+                        </label>
+                        <select id="swal-close-reason" class="cm-modal-select">
+                            <option value="0">Resuelto con éxito</option>
+                            <option value="1">No se pudo resolver</option>
+                            <option value="2">Spam / Solicitud inválida</option>
+                            <option value="3">El cliente no responde</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="font-size: 0.78rem; color: #475569; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; display: block;">
+                            Conclusión / Dictamen para las partes (visible en la orden y ticket):
+                        </label>
+                        <textarea id="swal-resolution-note" rows="3" placeholder="Ej: Se verificó el comprobante bancario y se acordó la entrega inmediata del pedido..." style="width: 100%; border: 1px solid #CBD5E1; border-radius: 10px; padding: 10px; font-size: 0.88rem; font-family: inherit; resize: vertical;"></textarea>
+                    </div>
                 </div>
             `,
             confirmText: 'Confirmar Cierre',
             preConfirm: () => {
-                return document.getElementById('swal-close-reason').value;
+                return {
+                    reasonId: document.getElementById('swal-close-reason').value,
+                    resolutionNote: (document.getElementById('swal-resolution-note').value || '').trim(),
+                };
             }
         });
 
-        if (result.isConfirmed) {
-            const reasonId = result.value;
+        if (result.isConfirmed && result.value) {
+            const { reasonId, resolutionNote } = result.value;
             const csrfToken = document.getElementById('csrf_token').value;
 
             const form = document.createElement('form');
@@ -388,8 +496,14 @@ if (btnTriggerClose) {
             reasonInput.name = 'close_reason';
             reasonInput.value = reasonId;
 
+            const noteInput = document.createElement('input');
+            noteInput.type = 'hidden';
+            noteInput.name = 'resolution_note';
+            noteInput.value = resolutionNote;
+
             form.appendChild(csrfInput);
             form.appendChild(reasonInput);
+            form.appendChild(noteInput);
             document.body.appendChild(form);
 
             Swal.showLoading();

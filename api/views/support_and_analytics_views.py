@@ -9,14 +9,15 @@ from .base import _get_cached_bcv_rate, _extract_and_validate_category_ids
 class SupportTicketViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
 
-    def list(self, request):
-        tickets = SupportTicket.objects.filter(
-            client=request.user
-        ).select_related(
+    def _get_base_queryset(self):
+        return SupportTicket.objects.select_related(
+            'client',
             'agent',
             'order',
+            'order__client',
             'order__store',
             'order__store__company',
+            'order__store__company__owner',
         ).annotate(
             unread_client_count=Count(
                 'messages',
@@ -33,9 +34,65 @@ class SupportTicketViewSet(viewsets.ViewSet):
                 default=Count('messages'),
                 output_field=IntegerField()
             )
-        ).order_by('-creation')
-        data = [ticket.get_json() for ticket in tickets]
+        )
+
+    def _get_accessible_ticket(self, request, pk):
+        qs = self._get_base_queryset()
+        ticket = qs.filter(pk=pk).first()
+        if not ticket:
+            return None, Response({'error': 'Ticket de soporte no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        if not ticket.is_user_participant(request.user):
+            return None, Response({'error': 'No tienes permiso para acceder a este ticket de soporte.'}, status=status.HTTP_403_FORBIDDEN)
+        return ticket, None
+
+    def list(self, request):
+        user = request.user
+        participant_filter = (
+            Q(client=user)
+            | Q(order__client=user)
+            | Q(order__store__company__owner=user)
+        )
+        if user.is_superuser or user.is_staff:
+            participant_filter = participant_filter | Q(agent=user)
+
+        tickets = (
+            self._get_base_queryset()
+            .filter(participant_filter)
+            .distinct()
+            .order_by('-creation')
+        )
+        order_id_param = request.query_params.get('order_id') or request.query_params.get('order')
+        if order_id_param and str(order_id_param).strip().lstrip('#').isdigit():
+            tickets = tickets.filter(order_id=int(str(order_id_param).strip().lstrip('#')))
+
+        data = [ticket.get_json(current_user=user) for ticket in tickets]
         return Response({'data': data}, status=status.HTTP_200_OK)
+
+    def retrieve(self, request, pk=None):
+        ticket, err_resp = self._get_accessible_ticket(request, pk)
+        if err_resp:
+            return err_resp
+        ticket_json = ticket.get_json(current_user=request.user)
+        return Response({'success': True, 'data': ticket_json, **ticket_json}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['get'], url_path='messages')
+    def messages(self, request, pk=None):
+        ticket, err_resp = self._get_accessible_ticket(request, pk)
+        if err_resp:
+            return err_resp
+        msgs = (
+            SupportMessage.objects.filter(ticket=ticket)
+            .select_related('sender', 'ticket', 'ticket__order__store__company')
+            .order_by('created_at')
+        )
+        msg_list = [m.get_json() for m in msgs]
+        ticket_json = ticket.get_json(current_user=request.user)
+        return Response({
+            'success': True,
+            'data': msg_list,
+            'messages': msg_list,
+            'ticket': ticket_json,
+        }, status=status.HTTP_200_OK)
 
     def create(self, request):
         topic_str = request.data.get('topic')
@@ -79,7 +136,7 @@ class SupportTicketViewSet(viewsets.ViewSet):
                         status=status.HTTP_400_BAD_REQUEST,
                     )
                 linked_order = Order.objects.select_related(
-                    'store', 'store__company'
+                    'client', 'store', 'store__company', 'store__company__owner'
                 ).filter(pk=int(clean_order_id)).first()
                 if not linked_order:
                     return Response(
@@ -105,12 +162,17 @@ class SupportTicketViewSet(viewsets.ViewSet):
                     )
 
         # Validación de tickets abiertos:
-        # Si es por una orden específica, validamos que no haya ya un ticket abierto de este usuario para ESA orden.
+        # Si es por una orden específica, validamos que no haya ya un ticket abierto para ESA orden.
         # Si es un ticket general (sin orden), validamos que no tenga otro ticket general abierto.
         if linked_order is not None:
-            if SupportTicket.objects.filter(client=request.user, order=linked_order, closed=False).exists():
+            existing_order_ticket = SupportTicket.objects.filter(order=linked_order, closed=False).first()
+            if existing_order_ticket:
                 return Response(
-                    {'error': f'Ya tienes un ticket de soporte activo para la orden #{linked_order.id}.'},
+                    {
+                        'error': f'Ya existe un ticket de soporte activo (#{existing_order_ticket.id}) para la orden #{linked_order.id}.',
+                        'active_ticket_id': existing_order_ticket.id,
+                        'support_ticket_id': existing_order_ticket.id,
+                    },
                     status=status.HTTP_400_BAD_REQUEST
                 )
         else:
@@ -140,9 +202,14 @@ class SupportTicketViewSet(viewsets.ViewSet):
         with transaction.atomic():
             User.objects.select_for_update().get(pk=request.user.pk)
             if linked_order is not None:
-                if SupportTicket.objects.filter(client=request.user, order=linked_order, closed=False).exists():
+                existing_order_ticket = SupportTicket.objects.filter(order=linked_order, closed=False).first()
+                if existing_order_ticket:
                     return Response(
-                        {'error': f'Ya tienes un ticket de soporte activo para la orden #{linked_order.id}.'},
+                        {
+                            'error': f'Ya existe un ticket de soporte activo (#{existing_order_ticket.id}) para la orden #{linked_order.id}.',
+                            'active_ticket_id': existing_order_ticket.id,
+                            'support_ticket_id': existing_order_ticket.id,
+                        },
                         status=status.HTTP_400_BAD_REQUEST
                     )
             else:
@@ -179,7 +246,7 @@ class SupportTicketViewSet(viewsets.ViewSet):
             if linked_order is not None:
                 locked_order = (
                     Order.objects.select_for_update(of=('self',))
-                    .select_related('store__company')
+                    .select_related('client', 'store__company', 'store__company__owner')
                     .get(pk=linked_order.pk)
                 )
                 cart_dict = dict(locked_order.cart) if isinstance(locked_order.cart, dict) else {}
@@ -189,7 +256,7 @@ class SupportTicketViewSet(viewsets.ViewSet):
                 cart_dict['under_review'] = True
                 cart_dict['active_ticket_id'] = ticket.id
                 cart_dict['reported_by_user_id'] = str(request.user.id)
-                cart_dict['reported_by_role'] = 'merchant' if is_merchant_owner else 'buyer'
+                cart_dict['reported_by_role'] = 'merchant' if is_merchant_owner else 'client'
                 cart_dict['reported_at'] = timezone.now().isoformat()
                 locked_order.cart = cart_dict
 
@@ -230,7 +297,7 @@ class SupportTicketViewSet(viewsets.ViewSet):
                         )
                     )
 
-            ticket_json = ticket.get_json()
+            ticket_json = ticket.get_json(current_user=request.user)
             if locked_order is not None:
                 ticket_json['order_status'] = locked_order.status
                 ticket_json['order_status_label'] = locked_order.get_status_display()
@@ -244,7 +311,8 @@ class SupportTicketViewSet(viewsets.ViewSet):
                     json={
                         'ticket': ticket_json, 
                         'agent_id': str(best_agent.id),
-                        'client_id': str(request.user.id)
+                        'client_id': str(request.user.id),
+                        'participant_ids': ticket.get_all_participant_ids(),
                     },
                     headers={'X-Microservice-Token': settings.SECRET_KEY},
                     timeout=2
@@ -253,6 +321,273 @@ class SupportTicketViewSet(viewsets.ViewSet):
                 pass
 
         return Response({'success': True, 'data': ticket_json, **ticket_json}, status=status.HTTP_201_CREATED)
+
+    # =========================================================================
+    # 🔇 SILENCIAR / REACTIVAR PARTICIPANTE EN MEDIACIÓN TRIPARTITA
+    # =========================================================================
+    @action(detail=True, methods=['post', 'patch'], url_path='mute_participant')
+    def mute_participant(self, request, pk=None):
+        return self._handle_mute_participant(request, pk)
+
+    @action(detail=True, methods=['post', 'patch'], url_path='mute')
+    def mute(self, request, pk=None):
+        return self._handle_mute_participant(request, pk)
+
+    def _handle_mute_participant(self, request, pk):
+        ticket = (
+            self._get_base_queryset()
+            .filter(pk=pk)
+            .first()
+        )
+        if not ticket:
+            return Response({'error': 'Ticket no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+
+        is_authorized_agent = bool(
+            request.user.is_superuser
+            or request.user.is_staff
+            or (ticket.agent_id and ticket.agent_id == request.user.id)
+        )
+        if not is_authorized_agent:
+            return Response(
+                {'error': 'Solo el agente de soporte asignado puede silenciar o reactivar participantes.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        data = request.data or {}
+        target_role = str(data.get('target_role') or data.get('role') or '').strip().lower()
+        target_user_id = data.get('user_id') or data.get('target_user_id')
+        raw_muted = data.get('muted') if 'muted' in data else data.get('is_muted')
+        reason = str(data.get('reason') or data.get('mute_reason') or '').strip()
+
+        with transaction.atomic():
+            locked_ticket = (
+                SupportTicket.objects.select_for_update()
+                .select_related('client', 'agent', 'order__client', 'order__store__company__owner')
+                .get(pk=ticket.pk)
+            )
+
+            # Soportamos actualización explícita por campos booleanos o por rol/user_id
+            changed_roles = []
+            if 'muted_client' in data or 'muted_merchant' in data:
+                if 'muted_client' in data:
+                    new_val = bool(data.get('muted_client'))
+                    if locked_ticket.muted_client != new_val:
+                        changed_roles.append(('client', new_val))
+                    locked_ticket.muted_client = new_val
+                if 'muted_merchant' in data:
+                    new_val = bool(data.get('muted_merchant'))
+                    if locked_ticket.muted_merchant != new_val:
+                        changed_roles.append(('merchant', new_val))
+                    locked_ticket.muted_merchant = new_val
+            else:
+                if not target_role and target_user_id:
+                    target_role = locked_ticket.get_participant_role(target_user_id)
+
+                if target_role in ('client', 'buyer', 'comprador'):
+                    new_val = (not locked_ticket.muted_client) if raw_muted is None else bool(raw_muted)
+                    locked_ticket.muted_client = new_val
+                    changed_roles.append(('client', new_val))
+                elif target_role in ('merchant', 'seller', 'comerciante', 'store', 'company'):
+                    new_val = (not locked_ticket.muted_merchant) if raw_muted is None else bool(raw_muted)
+                    locked_ticket.muted_merchant = new_val
+                    changed_roles.append(('merchant', new_val))
+                elif target_role in ('both', 'all', 'ambos'):
+                    new_val = True if raw_muted is None else bool(raw_muted)
+                    locked_ticket.muted_client = new_val
+                    locked_ticket.muted_merchant = new_val
+                    changed_roles.append(('client', new_val))
+                    changed_roles.append(('merchant', new_val))
+                else:
+                    return Response(
+                        {'error': "Debes especificar 'target_role' ('client' o 'merchant') o 'user_id'."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            if reason or (not locked_ticket.muted_client and not locked_ticket.muted_merchant):
+                locked_ticket.mute_reason = reason if (locked_ticket.muted_client or locked_ticket.muted_merchant) else ''
+
+            locked_ticket.save(update_fields=['muted_client', 'muted_merchant', 'mute_reason'])
+
+            system_msg_payload = None
+            if changed_roles:
+                role_labels = {'client': 'comprador', 'merchant': 'comerciante'}
+                parts = []
+                for r_code, is_m in changed_roles:
+                    lbl = role_labels.get(r_code, r_code)
+                    if is_m:
+                        parts.append(f"🔇 El agente de soporte ha silenciado temporalmente al {lbl}.")
+                    else:
+                        parts.append(f"🔊 El agente de soporte ha reactivado la participación del {lbl}.")
+                sys_text = " ".join(parts)
+                if reason and any(is_m for _, is_m in changed_roles):
+                    sys_text += f" Motivo: {reason}"
+                sys_msg = SupportMessage.objects.create(
+                    ticket=locked_ticket,
+                    sender=request.user,
+                    text=sys_text,
+                    message_type=SupportMessage.MessageType.SYSTEM,
+                    status=SupportMessage.DeliveryStatus.SENT,
+                )
+                system_msg_payload = sys_msg.get_json()
+
+            ticket_json = locked_ticket.get_json(current_user=request.user)
+
+        try:
+            requests.post(
+                f"{settings.INTERNAL_WEBSOCKETS_URL}internal/emit-support-mute",
+                json={
+                    'ticket_id': locked_ticket.id,
+                    'ticket': ticket_json,
+                    'muted_client': locked_ticket.muted_client,
+                    'muted_merchant': locked_ticket.muted_merchant,
+                    'mute_reason': locked_ticket.mute_reason or None,
+                    'muted_user_ids': locked_ticket.get_muted_user_ids(),
+                    'participant_ids': locked_ticket.get_all_participant_ids(),
+                    'system_message': system_msg_payload,
+                },
+                headers={'X-Microservice-Token': settings.SECRET_KEY},
+                timeout=2,
+            )
+        except Exception:
+            pass
+
+        return Response({
+            'success': True,
+            'ticket_id': locked_ticket.id,
+            'muted_client': locked_ticket.muted_client,
+            'muted_merchant': locked_ticket.muted_merchant,
+            'mute_reason': locked_ticket.mute_reason or None,
+            'muted_user_ids': locked_ticket.get_muted_user_ids(),
+            'system_message': system_msg_payload,
+            'ticket': ticket_json,
+        }, status=status.HTTP_200_OK)
+
+    # =========================================================================
+    # 🔒 CERRAR TICKET CON DICTAMEN / CONCLUSIÓN DE SOPORTE
+    # =========================================================================
+    @action(detail=True, methods=['post'], url_path='close_ticket')
+    def close_ticket(self, request, pk=None):
+        return self._handle_close_ticket(request, pk)
+
+    @action(detail=True, methods=['post'], url_path='close')
+    def close(self, request, pk=None):
+        return self._handle_close_ticket(request, pk)
+
+    def _handle_close_ticket(self, request, pk):
+        ticket = self._get_base_queryset().filter(pk=pk).first()
+        if not ticket:
+            return Response({'error': 'Ticket no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+
+        is_authorized_agent = bool(
+            request.user.is_superuser
+            or request.user.is_staff
+            or (ticket.agent_id and ticket.agent_id == request.user.id)
+        )
+        if not is_authorized_agent:
+            return Response(
+                {'error': 'Solo un agente de soporte puede cerrar y dictaminar un ticket.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        data = request.data or {}
+        raw_reason = data.get('close_reason', SupportTicket.CloseReason.SOLVED)
+        try:
+            reason_int = int(raw_reason)
+        except (TypeError, ValueError):
+            reason_int = SupportTicket.CloseReason.SOLVED
+
+        resolution_note = str(
+            data.get('resolution_note')
+            or data.get('conclusion')
+            or data.get('support_resolution_note')
+            or ''
+        ).strip()
+
+        with transaction.atomic():
+            locked_ticket = (
+                SupportTicket.objects.select_for_update()
+                .select_related('client', 'agent', 'order__client', 'order__store__company__owner')
+                .get(pk=ticket.pk)
+            )
+            locked_ticket.closed = True
+            locked_ticket.close_reason = reason_int
+            locked_ticket.resolution_note = resolution_note
+            locked_ticket.close_time = timezone.now()
+            locked_ticket.muted_client = False
+            locked_ticket.muted_merchant = False
+            locked_ticket.save(update_fields=[
+                'closed', 'close_reason', 'resolution_note', 'close_time', 'muted_client', 'muted_merchant'
+            ])
+
+            if locked_ticket.order_id:
+                try:
+                    locked_order = (
+                        Order.objects.select_for_update(of=('self',))
+                        .select_related('store__company')
+                        .get(pk=locked_ticket.order_id)
+                    )
+                    cart_dict = dict(locked_order.cart) if isinstance(locked_order.cart, dict) else {}
+                    cart_dict['under_review'] = False
+                    cart_dict['resolved_by_support'] = True
+                    cart_dict['support_close_reason'] = locked_ticket.get_close_reason_display()
+                    if resolution_note:
+                        cart_dict['support_resolution_note'] = resolution_note
+                    cart_dict['support_closed_at'] = timezone.now().isoformat()
+
+                    if locked_order.status == OrderStatus.REPORTED:
+                        if reason_int == SupportTicket.CloseReason.SOLVED:
+                            locked_order.status = OrderStatus.SOLVED
+                            if not locked_order.end_time:
+                                locked_order.end_time = timezone.now()
+                        else:
+                            prev_st = cart_dict.get('previous_status_before_report', OrderStatus.WAITING)
+                            locked_order.status = prev_st if prev_st in (OrderStatus.WAITING, OrderStatus.DELIVERY_SENT) else OrderStatus.SOLVED
+                        locked_order.cart = cart_dict
+                        locked_order.save(update_fields=['status', 'cart', 'end_time'])
+                    else:
+                        locked_order.cart = cart_dict
+                        locked_order.save(update_fields=['cart'])
+
+                    locked_ticket.order = locked_order
+                except Order.DoesNotExist:
+                    pass
+
+            ticket_json = locked_ticket.get_json(current_user=request.user)
+            participant_ids = locked_ticket.get_all_participant_ids()
+            close_reason_display = locked_ticket.get_close_reason_display()
+
+            for p_uid in participant_ids:
+                if str(p_uid) == str(request.user.id):
+                    continue
+                body_txt = f"Tu ticket '{locked_ticket.title}' ha sido cerrado ({close_reason_display})."
+                if resolution_note:
+                    body_txt += f" Conclusión: {resolution_note}"
+                NotificationManager.notify_ticket_closed(
+                    user_id=p_uid,
+                    ticket_id=locked_ticket.id,
+                    reason_str=close_reason_display,
+                )
+
+        try:
+            requests.post(
+                f"{settings.INTERNAL_WEBSOCKETS_URL}internal/emit-ticket-closed",
+                json={
+                    'ticket_id': locked_ticket.id,
+                    'client_id': str(locked_ticket.client_id),
+                    'agent_id': str(locked_ticket.agent_id) if locked_ticket.agent_id else None,
+                    'participant_ids': participant_ids,
+                    'reason': close_reason_display,
+                    'close_reason': close_reason_display,
+                    'resolution_note': resolution_note or None,
+                    'ticket': ticket_json,
+                },
+                headers={'X-Microservice-Token': settings.SECRET_KEY},
+                timeout=2,
+            )
+        except Exception:
+            pass
+
+        return Response({'success': True, 'data': ticket_json, **ticket_json}, status=status.HTTP_200_OK)
 
 class AnalyticsViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]

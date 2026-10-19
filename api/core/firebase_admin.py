@@ -345,19 +345,66 @@ class NotificationManager:
 
     @classmethod
     def notify_new_support_message(cls, ticket, sender_id: int, text: str) -> None:
-        is_client_sender = (str(ticket.client.id) == str(sender_id))
-        if is_client_sender: return
-        receiver = ticket.client
-        title = "Nuevo mensaje de Soporte CartMaker"
-        body = text if len(text) <= 45 else text[:45] + '...'
-        existing_notif = Notification.objects.filter(user_id=receiver.id, category=NotificationCategory.NEW_CHAT_MESSAGE, is_read=False, metadata__ticket_id=str(ticket.id)).first()
-        if existing_notif:
-            existing_notif.body = body
-            existing_notif.created_at = timezone.now()
-            existing_notif.save(update_fields=['body', 'created_at'])
-            notification = existing_notif
+        sender_id_str = str(sender_id)
+        sender_role = ticket.get_participant_role(sender_id) if hasattr(ticket, 'get_participant_role') else 'support'
+        if sender_role == 'support':
+            title = f"Soporte CartMaker (Ticket #{ticket.id})"
+        elif sender_role == 'merchant':
+            company = ticket.get_merchant_company() if hasattr(ticket, 'get_merchant_company') else None
+            m_name = company.name if (company and company.name) else "Comercio"
+            title = f"{m_name} en Soporte (Ticket #{ticket.id})"
         else:
-            notification = Notification.objects.create(user_id=receiver.id, section=NotificationSection.HELP, title=title, body=body, category=NotificationCategory.NEW_CHAT_MESSAGE, metadata={'type': 'new_support_message', 'ticket_id': str(ticket.id)})
-        data = {'type': 'new_support_message', 'ticket_id': str(ticket.id), 'notification_id': str(notification.id)}
-        user_obj = User.objects.prefetch_related('fcm_tokens').get(id=receiver.id)
-        cls._send_multicast(user=user_obj, title=title, body=body, data_payload=data)
+            buyer = ticket.get_buyer_user() if hasattr(ticket, 'get_buyer_user') else ticket.client
+            b_name = f"{buyer.first_name} {buyer.last_name}".strip() if buyer else "Comprador"
+            title = f"{b_name} en Soporte (Ticket #{ticket.id})"
+
+        body = text if len(text) <= 60 else text[:60] + '...'
+
+        target_users = []
+        if ticket.client_id and str(ticket.client_id) != sender_id_str:
+            target_users.append(ticket.client_id)
+        if ticket.order_id and ticket.order:
+            if ticket.order.client_id and str(ticket.order.client_id) != sender_id_str and ticket.order.client_id not in target_users:
+                target_users.append(ticket.order.client_id)
+            company = ticket.get_merchant_company() if hasattr(ticket, 'get_merchant_company') else None
+            if company and company.owner_id and str(company.owner_id) != sender_id_str and company.owner_id not in target_users:
+                target_users.append(company.owner_id)
+
+        for target_uid in target_users:
+            try:
+                existing_notif = Notification.objects.filter(
+                    user_id=target_uid,
+                    category=NotificationCategory.NEW_CHAT_MESSAGE,
+                    is_read=False,
+                    metadata__ticket_id=str(ticket.id),
+                ).first()
+                if existing_notif:
+                    existing_notif.title = title
+                    existing_notif.body = body
+                    existing_notif.created_at = timezone.now()
+                    existing_notif.save(update_fields=['title', 'body', 'created_at'])
+                    notification = existing_notif
+                else:
+                    notification = Notification.objects.create(
+                        user_id=target_uid,
+                        section=NotificationSection.HELP,
+                        title=title,
+                        body=body,
+                        category=NotificationCategory.NEW_CHAT_MESSAGE,
+                        metadata={
+                            'type': 'new_support_message',
+                            'ticket_id': str(ticket.id),
+                            'order_id': str(ticket.order_id) if ticket.order_id else None,
+                        },
+                    )
+                data = {
+                    'type': 'new_support_message',
+                    'ticket_id': str(ticket.id),
+                    'notification_id': str(notification.id),
+                }
+                if ticket.order_id:
+                    data['order_id'] = str(ticket.order_id)
+                user_obj = User.objects.prefetch_related('fcm_tokens').get(id=target_uid)
+                cls._send_multicast(user=user_obj, title=title, body=body, data_payload=data)
+            except Exception as e:
+                logger.error(f"Fallo al notificar mensaje de soporte a {target_uid}: {e}")

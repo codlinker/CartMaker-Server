@@ -90,6 +90,52 @@
                 {% endif %}
             </div>
 
+            {% if ticket.order %}
+            <!-- Tarjeta Mediación Tripartita de Orden -->
+            <div class="dossier-card" style="margin-top: 12px; border: 1px solid #E2E8F0; background: #F8FAFC;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                    <span class="dossier-pill pill-purple" style="font-weight: 800;">
+                        <span class="material-symbols-rounded" style="font-size: 15px;">groups</span>
+                        Mediación Tripartita · Orden #{{ ticket.order.id }}
+                    </span>
+                    <span class="dossier-pill pill-slate" style="font-size: 0.72rem;">
+                        {{ ticket.order.get_status_display }}
+                    </span>
+                </div>
+                <div style="font-size: 0.8rem; color: #334155; display: flex; flex-direction: column; gap: 4px;">
+                    <div><strong>Reportado por:</strong> {{ reported_by_name }} ({% if reported_by_role == 'merchant' %}Comercio{% else %}Comprador{% endif %})</div>
+                    {% if buyer_user %}
+                    <div><strong>🛒 Comprador:</strong> {{ buyer_user.first_name }} {{ buyer_user.last_name }}</div>
+                    {% endif %}
+                    {% if merchant_company %}
+                    <div><strong>🏪 Comercio:</strong> {{ merchant_company.name }}</div>
+                    {% endif %}
+                </div>
+
+                {% if not ticket.closed %}
+                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed #CBD5E1;">
+                    <span style="display: block; font-size: 0.7rem; font-weight: 800; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">
+                        Control de Sala (Silenciar / Reactivar)
+                    </span>
+                    <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                        <button type="button" id="btn-mute-client" data-role="client" data-muted="{{ ticket.muted_client|yesno:'true,false' }}"
+                            style="flex: 1; min-width: 120px; padding: 6px 10px; border-radius: 8px; font-size: 0.75rem; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 4px; border: 1px solid {% if ticket.muted_client %}#EF4444{% else %}#CBD5E1{% endif %}; background: {% if ticket.muted_client %}#FEF2F2{% else %}#FFFFFF{% endif %}; color: {% if ticket.muted_client %}#DC2626{% else %}#334155{% endif %};">
+                            <span class="material-symbols-rounded" style="font-size: 16px;" id="icon-mute-client">{% if ticket.muted_client %}volume_off{% else %}volume_up{% endif %}</span>
+                            <span id="label-mute-client">{% if ticket.muted_client %}Comprador Silenciado{% else %}Silenciar Comprador{% endif %}</span>
+                        </button>
+                        {% if merchant_user %}
+                        <button type="button" id="btn-mute-merchant" data-role="merchant" data-muted="{{ ticket.muted_merchant|yesno:'true,false' }}"
+                            style="flex: 1; min-width: 120px; padding: 6px 10px; border-radius: 8px; font-size: 0.75rem; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 4px; border: 1px solid {% if ticket.muted_merchant %}#EF4444{% else %}#CBD5E1{% endif %}; background: {% if ticket.muted_merchant %}#FEF2F2{% else %}#FFFFFF{% endif %}; color: {% if ticket.muted_merchant %}#DC2626{% else %}#334155{% endif %};">
+                            <span class="material-symbols-rounded" style="font-size: 16px;" id="icon-mute-merchant">{% if ticket.muted_merchant %}volume_off{% else %}volume_up{% endif %}</span>
+                            <span id="label-mute-merchant">{% if ticket.muted_merchant %}Comercio Silenciado{% else %}Silenciar Comercio{% endif %}</span>
+                        </button>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
+
             <!-- Tarjeta 2: Detalles del Caso -->
             <div class="info-group">
                 <label>Categoría del Caso</label>
@@ -104,7 +150,7 @@
             </div>
 
             <div class="info-group">
-                <label>Descripción Original del Cliente</label>
+                <label>Descripción Original del Reporte</label>
                 <div class="info-value description">{{ ticket.description }}</div>
             </div>
 
@@ -115,18 +161,21 @@
         </div>
 
         <div class="sidebar-actions">
+            <input type="hidden" id="csrf_token" value="{{ csrf_token }}">
             {% if not ticket.closed %}
                 <button type="button" id="btn-trigger-close" class="btn-action close-ticket">
                     <span class="material-symbols-rounded">task_alt</span>
                     Resolver / Cerrar Ticket
                 </button>
-                <input type="hidden" id="csrf_token" value="{{ csrf_token }}">
             {% else %}
                 <div class="closed-notice">
                     <span class="material-symbols-rounded">lock</span>
                     <div>
                         <strong>Ticket Finalizado</strong>
                         <span>Dictamen: {{ ticket.get_close_reason_display }}</span>
+                        {% if ticket.resolution_note %}
+                        <p style="margin: 6px 0 0; font-size: 0.78rem; color: #334155;"><strong>Conclusión:</strong> {{ ticket.resolution_note }}</p>
+                        {% endif %}
                     </div>
                 </div>
             {% endif %}

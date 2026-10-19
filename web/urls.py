@@ -23,6 +23,7 @@ urlpatterns = [
     path('support/ticket/<int:ticket_id>/', views.support_agent_chat, name='support_agent_chat'),
     path('support/ticket/<int:ticket_id>/close/', views.close_ticket, name='close_ticket'),
     path('support/close-ticket/<int:ticket_id>/', views.close_ticket, name='close_ticket_alias'),
+    path('support/ticket/<int:ticket_id>/mute/', views.mute_ticket_participant, name='mute_ticket_participant'),
     
     # 💳 Zona de Pagos y Facturación Digital
     path('payments/dashboard/', views.payments_dashboard_view, name='web_payments_dashboard'),

@@ -13,7 +13,11 @@ class OrderViewSet(viewsets.ViewSet):
     @staticmethod
     def _build_order_report_meta(order) -> dict:
         cart_dict = order.cart if isinstance(order.cart, dict) else {}
-        tickets = list(order.support_tickets.all()) if 'support_tickets' in getattr(order, '_prefetched_objects_cache', {}) else list(order.support_tickets.order_by('-creation')[:3])
+        if 'support_tickets' in getattr(order, '_prefetched_objects_cache', {}):
+            tickets = sorted(list(order.support_tickets.all()), key=lambda t: t.id, reverse=True)
+        else:
+            tickets = list(order.support_tickets.order_by('-creation', '-id')[:3])
+
         open_ticket = next((t for t in tickets if not t.closed), None)
         latest_ticket = open_ticket or (tickets[0] if tickets else None)
 
@@ -23,29 +27,97 @@ class OrderViewSet(viewsets.ViewSet):
         )
         is_reported = (
             is_under_review
+            or order.status == OrderStatus.SOLVED
             or bool(cart_dict.get('is_reported', False))
             or (latest_ticket is not None)
         )
-        active_ticket_id = (
+        support_ticket_id = (
             open_ticket.id if open_ticket is not None
-            else cart_dict.get('active_ticket_id') or (latest_ticket.id if latest_ticket else None)
+            else (latest_ticket.id if latest_ticket is not None else cart_dict.get('active_ticket_id'))
         )
+        active_ticket_id = support_ticket_id
+
+        company = order.store.company if (order.store_id and order.store and order.store.company_id) else None
+        merchant_owner_id = company.owner_id if company else None
+        buyer_name = f"{order.client.first_name} {order.client.last_name}".strip() if order.client_id and order.client else "Comprador"
+        merchant_name = company.name if (company and company.name) else "Comercio"
+
+        reported_by_role = None
+        reported_by_user_id = None
+        reported_by_name = None
+
+        if latest_ticket is not None:
+            if merchant_owner_id and latest_ticket.client_id == merchant_owner_id and latest_ticket.client_id != order.client_id:
+                reported_by_role = 'merchant'
+                reported_by_user_id = str(latest_ticket.client_id)
+                reported_by_name = merchant_name
+            elif latest_ticket.client_id == order.client_id:
+                reported_by_role = 'client'
+                reported_by_user_id = str(order.client_id)
+                reported_by_name = buyer_name
+            else:
+                raw_role = str(cart_dict.get('reported_by_role') or '').strip().lower()
+                reported_by_role = 'merchant' if raw_role == 'merchant' else 'client'
+                reported_by_user_id = str(latest_ticket.client_id) if latest_ticket.client_id else None
+                reported_by_name = merchant_name if reported_by_role == 'merchant' else buyer_name
+        elif cart_dict.get('reported_by_role') or cart_dict.get('reported_by_user_id'):
+            raw_role = str(cart_dict.get('reported_by_role') or '').strip().lower()
+            reported_by_role = 'merchant' if raw_role == 'merchant' else 'client'
+            raw_uid = cart_dict.get('reported_by_user_id')
+            reported_by_user_id = str(raw_uid) if raw_uid else (str(merchant_owner_id) if reported_by_role == 'merchant' and merchant_owner_id else str(order.client_id))
+            reported_by_name = merchant_name if reported_by_role == 'merchant' else buyer_name
+
+        close_reason_str = (
+            latest_ticket.get_close_reason_display()
+            if (latest_ticket is not None and latest_ticket.closed and latest_ticket.close_reason is not None)
+            else None
+        )
+        resolution_note_str = None
+        if latest_ticket is not None and getattr(latest_ticket, 'resolution_note', None):
+            resolution_note_str = latest_ticket.resolution_note.strip() or None
+        if not resolution_note_str and cart_dict.get('support_resolution_note'):
+            resolution_note_str = str(cart_dict.get('support_resolution_note')).strip() or None
+
+        support_resolution_note = resolution_note_str or close_reason_str
+
         ticket_summary = None
         if latest_ticket is not None:
+            ticket_status_str = 'CLOSED' if latest_ticket.closed else ('IN_PROGRESS' if latest_ticket.agent_id else 'OPEN')
+            closed_at_str = (
+                timezone.localtime(latest_ticket.close_time).strftime("%d/%m/%Y %I:%M %p").lower()
+                if latest_ticket.close_time
+                else None
+            )
             ticket_summary = {
                 'id': latest_ticket.id,
                 'title': latest_ticket.title,
                 'topic': latest_ticket.get_topic_display(),
+                'status': ticket_status_str,
                 'closed': latest_ticket.closed,
-                'close_reason': latest_ticket.get_close_reason_display() if latest_ticket.closed and latest_ticket.close_reason else None,
+                'close_reason': close_reason_str,
+                'resolution_outcome': close_reason_str,
+                'resolution_note': resolution_note_str,
+                'reported_by_role': reported_by_role,
+                'reported_by_user_id': reported_by_user_id,
+                'reported_by_name': reported_by_name,
+                'is_tripartite': True,
+                'muted_client': bool(getattr(latest_ticket, 'muted_client', False)),
+                'muted_merchant': bool(getattr(latest_ticket, 'muted_merchant', False)),
+                'mute_reason': (getattr(latest_ticket, 'mute_reason', '') or '').strip() or None,
                 'creation': timezone.localtime(latest_ticket.creation).strftime("%d/%m/%Y %I:%M %p").lower() if latest_ticket.creation else None,
+                'closed_at': closed_at_str,
             }
 
         return {
             'status_label': order.get_status_display(),
             'is_reported': bool(is_reported),
             'under_review': bool(is_under_review),
+            'support_ticket_id': support_ticket_id,
             'active_ticket_id': active_ticket_id,
+            'reported_by_role': reported_by_role,
+            'reported_by_user_id': reported_by_user_id,
+            'reported_by_name': reported_by_name,
+            'support_resolution_note': support_resolution_note,
             'support_ticket': ticket_summary,
         }
 
@@ -727,7 +799,7 @@ class OrderViewSet(viewsets.ViewSet):
             with transaction.atomic():
                 order = (
                     Order.objects.select_for_update(of=('self',))
-                    .select_related('store__company')
+                    .select_related('client', 'store__company')
                     .prefetch_related('support_tickets')
                     .get(id=order_id)
                 )
@@ -750,7 +822,7 @@ class OrderViewSet(viewsets.ViewSet):
                 if reason:
                     cart_dict['report_reason'] = reason
                 cart_dict['reported_by_user_id'] = str(request.user.id)
-                cart_dict['reported_by_role'] = 'merchant' if is_merchant else 'buyer'
+                cart_dict['reported_by_role'] = 'merchant' if is_merchant else 'client'
                 cart_dict['reported_at'] = timezone.now().isoformat()
                 order.cart = cart_dict
 

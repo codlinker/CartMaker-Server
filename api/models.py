@@ -1067,8 +1067,28 @@ class MerchantPaymentMethod(models.Model):
                     self.bank_code = b['code']
                     break
 
+    @staticmethod
+    def clean_dni_parts(document_type: str = 'V', dni: str = '') -> tuple:
+        """
+        Retorna (doc_type, clean_dni_digits, dni_formatted) garantizando que jamás se duplique
+        el prefijo (ej. evita 'V-V-30222103').
+        """
+        raw_dni = str(dni or '').strip()
+        raw_doc_type = str(document_type or '').strip().upper()
+        prefix_match = re.match(r'^([VEJGP])[-\s]*', raw_dni, flags=re.IGNORECASE)
+        if prefix_match and not raw_doc_type:
+            raw_doc_type = prefix_match.group(1).upper()
+        clean_type = (raw_doc_type[:1] if raw_doc_type and raw_doc_type[0] in 'VEJGP' else 'V')
+        clean_digits = re.sub(r'^([VEJGP][-\s]*)+', '', raw_dni, flags=re.IGNORECASE).strip()
+        formatted = f"{clean_type}-{clean_digits}" if clean_digits else ""
+        return clean_type, clean_digits, formatted
+
     def save(self, *args, **kwargs):
         self._sync_bank_metadata()
+        if self.dni or self.document_type:
+            clean_type, clean_digits, _ = self.clean_dni_parts(self.document_type, self.dni)
+            self.document_type = clean_type
+            self.dni = clean_digits
         if not self.currency:
             if self.method_type in (
                 MerchantPaymentMethodType.ZELLE,
@@ -1091,8 +1111,9 @@ class MerchantPaymentMethod(models.Model):
             fields.append({'key': 'bank', 'label': 'Banco', 'value': bank_val, 'copy_value': self.bank_code or self.bank_name})
         if self.phone:
             fields.append({'key': 'phone', 'label': 'Teléfono', 'value': self.phone, 'copy_value': self.phone})
-        if self.dni:
-            fields.append({'key': 'dni', 'label': 'C.I. / RIF', 'value': self.dni, 'copy_value': self.dni})
+        _, clean_digits, dni_formatted = self.clean_dni_parts(self.document_type, self.dni)
+        if clean_digits:
+            fields.append({'key': 'dni', 'label': 'C.I. / RIF', 'value': dni_formatted, 'copy_value': dni_formatted})
         if self.account_number:
             fields.append({'key': 'account_number', 'label': 'N° de Cuenta', 'value': self.account_number, 'copy_value': self.account_number})
         if self.holder_name:
@@ -1114,6 +1135,7 @@ class MerchantPaymentMethod(models.Model):
 
     def get_json(self) -> dict:
         display_title = self.alias or self.get_method_type_display()
+        clean_type, clean_digits, dni_formatted = self.clean_dni_parts(self.document_type, self.dni)
         return {
             'id': self.id,
             'company_id': str(self.company_id),
@@ -1127,10 +1149,11 @@ class MerchantPaymentMethod(models.Model):
             'bank_code': self.bank_code,
             'phone': self.phone,
             'phone_number': self.phone,
-            'dni': self.dni,
-            'identification': self.dni,
-            'document_number': self.dni,
-            'document_type': self.document_type,
+            'dni': clean_digits,
+            'dni_formatted': dni_formatted,
+            'identification': clean_digits,
+            'document_number': clean_digits,
+            'document_type': clean_type,
             'account_number': self.account_number,
             'account_type': self.account_type,
             'holder_name': self.holder_name,
@@ -1147,10 +1170,11 @@ class MerchantPaymentMethod(models.Model):
                 'bank_code': self.bank_code,
                 'phone': self.phone,
                 'phone_number': self.phone,
-                'dni': self.dni,
-                'identification': self.dni,
-                'document_type': self.document_type,
-                'document_number': self.dni,
+                'dni': clean_digits,
+                'dni_formatted': dni_formatted,
+                'identification': clean_digits,
+                'document_type': clean_type,
+                'document_number': clean_digits,
                 'account_number': self.account_number,
                 'account_type': self.account_type,
                 'holder_name': self.holder_name,
@@ -1834,6 +1858,25 @@ class SupportTicket(models.Model):
     description = models.TextField()
     closed = models.BooleanField(default=False)
     close_reason = models.IntegerField(choices=CloseReason.choices, null=True, blank=True)
+    resolution_note = models.TextField(
+        blank=True,
+        default='',
+        help_text='Conclusión o dictamen detallado escrito por el agente de soporte al cerrar el ticket.',
+    )
+    muted_client = models.BooleanField(
+        default=False,
+        help_text='Si es True, el comprador está silenciado temporalmente en este ticket.',
+    )
+    muted_merchant = models.BooleanField(
+        default=False,
+        help_text='Si es True, el comerciante está silenciado temporalmente en este ticket.',
+    )
+    mute_reason = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+        help_text='Motivo opcional del silenciamiento temporal.',
+    )
     creation = models.DateTimeField(auto_now_add=True)
     close_time = models.DateTimeField(null=True, blank=True)
     waiting_for_client_reply = models.BooleanField(default=False)
@@ -1844,7 +1887,138 @@ class SupportTicket(models.Model):
             models.Index(fields=['closed', '-creation'], name='ticket_closed_creation_idx'),
         ]
 
-    def get_json(self) -> dict:
+    def get_buyer_user(self):
+        if self.order_id and self.order and self.order.client_id:
+            return self.order.client
+        return self.client
+
+    def get_merchant_company(self):
+        if self.order_id and self.order and self.order.store_id and self.order.store and self.order.store.company_id:
+            return self.order.store.company
+        return None
+
+    def get_merchant_user(self):
+        company = self.get_merchant_company()
+        if company and company.owner_id:
+            return company.owner
+        return None
+
+    def get_reporter_info(self) -> dict:
+        reporter_user = self.client if self.client_id else None
+        reporter_uid_str = str(self.client_id) if self.client_id else None
+        order_obj = self.order if self.order_id else None
+        company = self.get_merchant_company()
+
+        if order_obj is not None:
+            merchant_owner_id = company.owner_id if company else None
+            if merchant_owner_id and self.client_id == merchant_owner_id and self.client_id != order_obj.client_id:
+                role = 'merchant'
+            elif self.client_id == order_obj.client_id:
+                role = 'client'
+            else:
+                cart_data = order_obj.cart if isinstance(order_obj.cart, dict) else {}
+                raw_role = str(cart_data.get('reported_by_role') or '').strip().lower()
+                role = 'merchant' if raw_role == 'merchant' else 'client'
+
+            if role == 'merchant':
+                reporter_name = (
+                    company.name
+                    if company and company.name
+                    else (f"{reporter_user.first_name} {reporter_user.last_name}".strip() if reporter_user else 'Comercio')
+                )
+            else:
+                buyer_u = order_obj.client if order_obj.client_id else reporter_user
+                reporter_name = f"{buyer_u.first_name} {buyer_u.last_name}".strip() if buyer_u else 'Comprador'
+        else:
+            role = 'client'
+            reporter_name = f"{reporter_user.first_name} {reporter_user.last_name}".strip() if reporter_user else 'Cliente'
+
+        return {
+            'reported_by_role': role,
+            'reported_by_user_id': reporter_uid_str,
+            'reported_by_name': reporter_name,
+        }
+
+    def get_participant_role(self, user_id) -> str:
+        if not user_id:
+            return 'client'
+        uid_str = str(user_id)
+        if self.agent_id and uid_str == str(self.agent_id):
+            return 'support'
+        if self.order_id and self.order:
+            company = self.get_merchant_company()
+            if company and company.owner_id and uid_str == str(company.owner_id) and uid_str != str(self.order.client_id):
+                return 'merchant'
+            if self.order.client_id and uid_str == str(self.order.client_id):
+                return 'client'
+            if company and company.owner_id and uid_str == str(company.owner_id):
+                return 'merchant'
+        if self.client_id and uid_str == str(self.client_id):
+            return 'client'
+        return 'support'
+
+    def is_user_participant(self, user_or_id) -> bool:
+        if user_or_id is None:
+            return False
+        if hasattr(user_or_id, 'id'):
+            if getattr(user_or_id, 'is_superuser', False) or getattr(user_or_id, 'is_staff', False):
+                return True
+            uid_str = str(user_or_id.id)
+        else:
+            uid_str = str(user_or_id)
+
+        allowed = set()
+        if self.client_id:
+            allowed.add(str(self.client_id))
+        if self.agent_id:
+            allowed.add(str(self.agent_id))
+        if self.order_id and self.order:
+            if self.order.client_id:
+                allowed.add(str(self.order.client_id))
+            company = self.get_merchant_company()
+            if company and company.owner_id:
+                allowed.add(str(company.owner_id))
+        return uid_str in allowed
+
+    def get_all_participant_ids(self) -> list:
+        ids = []
+        for candidate in (
+            self.client_id,
+            self.agent_id,
+            self.order.client_id if (self.order_id and self.order) else None,
+            self.get_merchant_company().owner_id if self.get_merchant_company() else None,
+        ):
+            if candidate:
+                s = str(candidate)
+                if s not in ids:
+                    ids.append(s)
+        return ids
+
+    def is_user_muted(self, user_id) -> bool:
+        if not user_id:
+            return False
+        role = self.get_participant_role(user_id)
+        if role == 'client':
+            return bool(self.muted_client)
+        if role == 'merchant':
+            return bool(self.muted_merchant)
+        return False
+
+    def get_muted_user_ids(self) -> list:
+        muted_ids = []
+        buyer_user = self.get_buyer_user()
+        merchant_user = self.get_merchant_user()
+        if self.muted_client and buyer_user:
+            s = str(buyer_user.id)
+            if s not in muted_ids:
+                muted_ids.append(s)
+        if self.muted_merchant and merchant_user:
+            s = str(merchant_user.id)
+            if s not in muted_ids:
+                muted_ids.append(s)
+        return muted_ids
+
+    def get_json(self, current_user=None) -> dict:
         time_str = timezone.localtime(self.creation).strftime("%d/%m/%Y %I:%M %p").lower()
         unread_client = getattr(self, 'unread_client_count', None)
         if unread_client is None:
@@ -1854,7 +2028,16 @@ class SupportTicket(models.Model):
             unread_agent = self.messages.filter(status__lt=3).exclude(sender_id=self.agent_id).count() if self.agent_id else self.messages.count()
 
         agent_obj = self.agent if self.agent_id else None
+        agent_full_name = f"{agent_obj.first_name} {agent_obj.last_name}".strip() if agent_obj else None
+        if not agent_full_name:
+            agent_full_name = None
+
         order_obj = self.order if self.order_id else None
+        buyer_user = self.get_buyer_user()
+        merchant_user = self.get_merchant_user()
+        company = self.get_merchant_company()
+        reporter_info = self.get_reporter_info()
+
         order_summary = None
         if order_obj is not None:
             cart_data = order_obj.cart if isinstance(order_obj.cart, dict) else {}
@@ -1865,8 +2048,8 @@ class SupportTicket(models.Model):
             store_name = None
             if order_obj.store_id and order_obj.store:
                 store_name = (
-                    order_obj.store.company.name
-                    if (order_obj.store.company_id and order_obj.store.company)
+                    company.name
+                    if company
                     else order_obj.store.name
                 )
             order_summary = {
@@ -1879,11 +2062,34 @@ class SupportTicket(models.Model):
                 'created_at': order_obj.creation.isoformat() if order_obj.creation else None,
             }
 
+        status_str = 'CLOSED' if self.closed else ('IN_PROGRESS' if self.agent_id else 'OPEN')
+        close_reason_label = self.get_close_reason_display() if self.close_reason is not None else None
+        resolution_note_clean = (self.resolution_note or '').strip() or None
+        closed_at_str = timezone.localtime(self.close_time).strftime("%d/%m/%Y %I:%M %p").lower() if self.close_time else None
+
+        is_current_muted = False
+        if current_user is not None and getattr(current_user, 'is_authenticated', False):
+            is_current_muted = self.is_user_muted(current_user.id)
+
+        client_display_name = f"{buyer_user.first_name} {buyer_user.last_name}".strip() if buyer_user else None
+        merchant_display_name = (
+            company.name
+            if company and company.name
+            else (f"{merchant_user.first_name} {merchant_user.last_name}".strip() if merchant_user else None)
+        )
+
         return {
             'id': self.id,
+            'status': status_str,
             'client_id': str(self.client_id) if self.client_id else None,
+            'client_user_id': str(buyer_user.id) if buyer_user else (str(self.client_id) if self.client_id else None),
+            'client_name': client_display_name,
+            'merchant_user_id': str(merchant_user.id) if merchant_user else None,
+            'merchant_name': merchant_display_name,
             'agent_id': str(self.agent_id) if self.agent_id else None,
-            'agent_name': f"{agent_obj.first_name} {agent_obj.last_name}" if agent_obj else None,
+            'assigned_to_id': str(self.agent_id) if self.agent_id else None,
+            'agent_name': agent_full_name,
+            'assigned_to_name': agent_full_name,
             # 💡 1. ENVIAMOS LA FOTO DE PERFIL DEL AGENTE
             'agent_image': agent_obj.get_profile_picture_url() if agent_obj and agent_obj.profile_picture else None,
             'topic': self.get_topic_display(), 
@@ -1893,8 +2099,19 @@ class SupportTicket(models.Model):
             'order': str(self.order_id) if self.order_id else None,
             'order_id': str(self.order_id) if self.order_id else None,
             'order_summary': order_summary,
+            'is_tripartite': bool(self.order_id is not None),
+            **reporter_info,
+            'muted_client': bool(self.muted_client),
+            'muted_merchant': bool(self.muted_merchant),
+            'mute_reason': (self.mute_reason or '').strip() or None,
+            'muted_user_ids': self.get_muted_user_ids(),
+            'is_current_user_muted': is_current_muted,
             'closed': self.closed,
-            'close_reason': self.get_close_reason_display() if self.close_reason is not None else None,
+            'close_reason': close_reason_label,
+            'close_reason_id': self.close_reason,
+            'resolution_outcome': close_reason_label,
+            'resolution_note': resolution_note_clean,
+            'closed_at': closed_at_str,
             'creation': time_str,
             'waiting_for_client_reply': self.waiting_for_client_reply,
             # 💡 2. ENVIAMOS LOS BADGES
@@ -1907,6 +2124,7 @@ class SupportMessage(models.Model):
         TEXT = 'text', 'Texto'
         IMAGE = 'image', 'Imagen'
         AUDIO = 'audio', 'Nota de Voz'
+        SYSTEM = 'system', 'Sistema'
 
     class DeliveryStatus(models.IntegerChoices):
         PENDING = 0, 'Enviando'
@@ -1933,18 +2151,34 @@ class SupportMessage(models.Model):
         time_str = timezone.localtime(self.created_at).strftime("%d/%m/%Y %I:%M %p").lower()
         absolute_media_url = (storage_manager.get_url(self.media_url) or "") if self.media_url else ""
         resolved_status = self.status if self.status is not None else 1
+
+        if self.message_type == self.MessageType.SYSTEM:
+            sender_role = 'system'
+        elif self.ticket_id and self.ticket:
+            sender_role = self.ticket.get_participant_role(self.sender_id)
+        else:
+            sender_role = 'support' if (getattr(self.sender, 'is_superuser', False) or getattr(self.sender, 'is_staff', False)) else 'client'
+
+        sender_full_name = f"{self.sender.first_name} {self.sender.last_name}".strip()
+        if sender_role == 'merchant' and self.ticket_id and self.ticket:
+            company = self.ticket.get_merchant_company()
+            if company and company.name:
+                sender_full_name = f"{company.name} ({sender_full_name})" if sender_full_name else company.name
+
         payload = {
             'id': self.id,
             'ticket_id': self.ticket_id,
             'sender_id': str(self.sender_id),
-            'sender_name': f"{self.sender.first_name} {self.sender.last_name}".strip(),
+            'sender_name': sender_full_name,
+            'sender_role': sender_role,
             'text': self.text,
             'message_type': self.message_type,
             'media_url': absolute_media_url,
             'status': resolved_status,
             'is_read': bool(resolved_status >= self.DeliveryStatus.READ),
-            'is_support': True,
+            'is_support': (sender_role == 'support'),
             'created_at': time_str,
+            'timestamp': self.created_at.isoformat() if self.created_at else None,
         }
         if temp_id:
             payload['temp_id'] = str(temp_id)

@@ -198,17 +198,35 @@ class SupportChatViewSet(viewsets.ViewSet):
         offset, limit = _parse_pagination(request)
         
         try:
-            ticket = SupportTicket.objects.get(id=ticket_id)
-            is_client = (ticket.client_id == request.user.id)
-            is_agent = (ticket.agent_id == request.user.id)
-            is_staff_support = request.user.is_superuser or getattr(request.user, 'can_check_support', False)
+            ticket = SupportTicket.objects.select_related(
+                'client',
+                'agent',
+                'order',
+                'order__client',
+                'order__store',
+                'order__store__company',
+                'order__store__company__owner',
+            ).get(id=ticket_id)
+            is_staff_support = (
+                request.user.is_superuser
+                or request.user.is_staff
+                or getattr(request.user, 'can_check_support', False)
+            )
 
-            if not (is_client or is_agent or is_staff_support):
+            if not (ticket.is_user_participant(request.user) or is_staff_support):
                 return Response({"error": "No tienes acceso a este ticket."}, status=status.HTTP_403_FORBIDDEN)
 
-            messages = SupportMessage.objects.filter(ticket=ticket).select_related('sender').order_by('-created_at')[offset:offset+limit]
+            messages = (
+                SupportMessage.objects.filter(ticket=ticket)
+                .select_related('sender', 'ticket', 'ticket__order__store__company')
+                .order_by('-created_at')[offset:offset+limit]
+            )
             data = [msg.get_json() for msg in messages][::-1]
-            return Response({'data': data, 'next_offset': offset + limit if len(data) == limit else None}, status=status.HTTP_200_OK)
+            return Response({
+                'data': data,
+                'ticket': ticket.get_json(current_user=request.user),
+                'next_offset': offset + limit if len(data) == limit else None,
+            }, status=status.HTTP_200_OK)
         except SupportTicket.DoesNotExist:
             return Response({"error": "No existe"}, status=status.HTTP_404_NOT_FOUND)
         
@@ -301,15 +319,18 @@ class ChatWebhookViewSet(viewsets.ViewSet):
                                     ('bank_name', 'Banco'),
                                     ('bank_code', 'Código'),
                                     ('phone', 'Teléfono'),
-                                    ('dni', 'C.I. / RIF'),
+                                    ('dni_formatted', 'C.I. / RIF'),
                                     ('account_number', 'Cuenta'),
                                     ('holder_name', 'Titular'),
                                     ('email', 'Correo'),
                                     ('wallet_id', 'ID'),
                                     ('notes', 'Nota'),
                                 ):
-                                    if pm_entry.get(k):
-                                        lines.append(f"• {label}: {pm_entry[k]}")
+                                    val = pm_entry.get(k)
+                                    if not val and k == 'dni_formatted' and pm_entry.get('dni'):
+                                        _, _, val = MerchantPaymentMethod.clean_dni_parts(pm_entry.get('document_type', 'V'), pm_entry.get('dni'))
+                                    if val:
+                                        lines.append(f"• {label}: {val}")
                                 formatted_blocks.append("\n".join(lines))
                     text = "\n\n".join(formatted_blocks) if formatted_blocks else "💳 Datos de pago enviados"
 
@@ -365,6 +386,7 @@ class ChatWebhookViewSet(viewsets.ViewSet):
     
     @action(detail=False, methods=['post'], url_path='process_support_message')
     def process_support_message(self, request):
+        from api.models import User
         ticket_id = request.data.get('ticket_id')
         sender_id = request.data.get('sender_id')
         recipient_connected = request.data.get('recipient_connected', False)
@@ -374,15 +396,39 @@ class ChatWebhookViewSet(viewsets.ViewSet):
         clean_media_url = storage_manager.normalize_path(raw_media_url) if raw_media_url else None
         
         try:
-            ticket = SupportTicket.objects.get(id=ticket_id)
+            ticket = SupportTicket.objects.select_related(
+                'client',
+                'agent',
+                'order',
+                'order__client',
+                'order__store',
+                'order__store__company',
+                'order__store__company__owner',
+            ).get(id=ticket_id)
             if ticket.closed:
                 return Response({"error": "Ticket cerrado"}, status=status.HTTP_403_FORBIDDEN)
 
-            allowed_senders = {str(ticket.client_id)}
-            if ticket.agent_id:
-                allowed_senders.add(str(ticket.agent_id))
-            if str(sender_id) not in allowed_senders:
+            sender_user = User.objects.filter(id=sender_id).first()
+            is_staff_support = bool(
+                sender_user
+                and (sender_user.is_superuser or sender_user.is_staff or getattr(sender_user, 'can_check_support', False))
+            )
+            if not (ticket.is_user_participant(sender_id) or is_staff_support):
                 return Response({"error": "No tienes acceso a este ticket"}, status=status.HTTP_403_FORBIDDEN)
+
+            if ticket.is_user_muted(sender_id):
+                mute_msg = "Has sido silenciado temporalmente por el agente de soporte."
+                if ticket.mute_reason:
+                    mute_msg += f" ({ticket.mute_reason})"
+                return Response(
+                    {
+                        "error": mute_msg,
+                        "code": "participant_muted",
+                        "is_muted": True,
+                        "mute_reason": ticket.mute_reason or None,
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
             
             # Determinamos si se marca como LEÍDO o ENVIADO dependiendo de si la otra persona está en el chat
             msg_status = SupportMessage.DeliveryStatus.READ if recipient_connected else SupportMessage.DeliveryStatus.SENT
@@ -395,10 +441,19 @@ class ChatWebhookViewSet(viewsets.ViewSet):
                 media_url=clean_media_url,
                 status=msg_status
             )
+            if sender_user:
+                msg.sender = sender_user
+            msg.ticket = ticket
             
-            # 💡 EL FIX: Calculamos exactamente quién es el que debe recibir la notificación global
+            # Calculamos todos los destinatarios en la sala tripartita (Comprador, Comerciante y Agente) excepto quien envía
+            all_participants = ticket.get_all_participant_ids()
+            recipient_ids = [uid for uid in all_participants if str(uid) != str(sender_id)]
             is_client = (str(sender_id) == str(ticket.client_id))
-            recipient_id = str(ticket.agent_id) if (is_client and ticket.agent_id) else str(ticket.client_id)
+            primary_recipient_id = (
+                str(ticket.agent_id)
+                if (is_client and ticket.agent_id)
+                else (recipient_ids[0] if recipient_ids else str(ticket.client_id))
+            )
 
             if not recipient_connected:
                 try:
@@ -414,8 +469,8 @@ class ChatWebhookViewSet(viewsets.ViewSet):
             return Response({
                 "success": True, 
                 "data": msg.get_json(temp_id=temp_id), 
-                # 💡 ESTO ES LO QUE NODE.JS ESTÁ ESPERANDO DESESPERADAMENTE
-                "recipient_id": recipient_id 
+                "recipient_id": primary_recipient_id,
+                "recipient_ids": recipient_ids,
             }, status=status.HTTP_200_OK)
             
         except SupportTicket.DoesNotExist:
@@ -423,14 +478,19 @@ class ChatWebhookViewSet(viewsets.ViewSet):
     
     @action(detail=False, methods=['post'], url_path='mark_support_room_as_read')
     def mark_support_room_as_read(self, request):
+        from api.models import User
         ticket_id = request.data.get('ticket_id')
         user_id = request.data.get('user_id')
         try:
-            ticket = SupportTicket.objects.get(id=ticket_id)
-            allowed_users = {str(ticket.client_id)}
-            if ticket.agent_id:
-                allowed_users.add(str(ticket.agent_id))
-            if str(user_id) not in allowed_users:
+            ticket = SupportTicket.objects.select_related(
+                'order', 'order__store__company'
+            ).get(id=ticket_id)
+            reader_user = User.objects.filter(id=user_id).first()
+            is_staff_support = bool(
+                reader_user
+                and (reader_user.is_superuser or reader_user.is_staff or getattr(reader_user, 'can_check_support', False))
+            )
+            if not (ticket.is_user_participant(user_id) or is_staff_support):
                 return Response({"error": "No tienes acceso a este ticket"}, status=status.HTTP_403_FORBIDDEN)
 
             with transaction.atomic():

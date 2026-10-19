@@ -1904,19 +1904,14 @@ class MerchantPaymentMethodViewSet(viewsets.ViewSet):
 
         doc_type = _pick('document_type', 'doc_type', 'tipo_documento')
         doc_number = _pick('dni', 'document_number', 'identification', 'cedula', 'rif', 'id_number', 'documento')
-        if doc_number is not None:
-            doc_str = str(doc_number).strip().upper()
-            m = re.match(r'^([VEJGP])[-\s]*(.+)$', doc_str)
-            if m:
-                if not doc_type:
-                    doc_type = m.group(1)
-                clean_num = m.group(2).strip()
-                doc_number = f"{doc_type}-{clean_num}"
-            else:
-                eff_doc_type = (str(doc_type).strip().upper()[:2] if doc_type else '') or (instance.document_type if instance else 'V')
-                doc_number = f"{eff_doc_type}-{doc_str}" if (doc_str and eff_doc_type) else doc_str
-        if doc_type is not None:
-            doc_type = str(doc_type).strip().upper()[:2]
+        if doc_number is not None or doc_type is not None:
+            fallback_doc_type = doc_type if doc_type is not None else (instance.document_type if instance else 'V')
+            fallback_doc_num = doc_number if doc_number is not None else (instance.dni if instance else '')
+            clean_type, clean_digits, _ = MerchantPaymentMethod.clean_dni_parts(fallback_doc_type, fallback_doc_num)
+            if doc_type is not None or doc_number is not None:
+                doc_type = clean_type
+            if doc_number is not None:
+                doc_number = clean_digits
 
         phone_number = _pick('phone', 'phone_number', 'telefono')
         account_number = _pick('account_number', 'numero_cuenta', 'account')
