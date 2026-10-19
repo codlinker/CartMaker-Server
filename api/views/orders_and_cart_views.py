@@ -749,7 +749,7 @@ class OrderViewSet(viewsets.ViewSet):
                         pass
                 if reason:
                     cart_dict['report_reason'] = reason
-                cart_dict['reported_by_user_id'] = request.user.id
+                cart_dict['reported_by_user_id'] = str(request.user.id)
                 cart_dict['reported_by_role'] = 'merchant' if is_merchant else 'buyer'
                 cart_dict['reported_at'] = timezone.now().isoformat()
                 order.cart = cart_dict

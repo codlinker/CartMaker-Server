@@ -188,7 +188,7 @@ class SupportTicketViewSet(viewsets.ViewSet):
                 cart_dict['is_reported'] = True
                 cart_dict['under_review'] = True
                 cart_dict['active_ticket_id'] = ticket.id
-                cart_dict['reported_by_user_id'] = request.user.id
+                cart_dict['reported_by_user_id'] = str(request.user.id)
                 cart_dict['reported_by_role'] = 'merchant' if is_merchant_owner else 'buyer'
                 cart_dict['reported_at'] = timezone.now().isoformat()
                 locked_order.cart = cart_dict
