@@ -361,7 +361,7 @@ class SupportTicketViewSet(viewsets.ViewSet):
 
         with transaction.atomic():
             locked_ticket = (
-                SupportTicket.objects.select_for_update()
+                SupportTicket.objects.select_for_update(of=('self',))
                 .select_related('client', 'agent', 'order__client', 'order__store__company__owner')
                 .get(pk=ticket.pk)
             )
@@ -505,7 +505,7 @@ class SupportTicketViewSet(viewsets.ViewSet):
 
         with transaction.atomic():
             locked_ticket = (
-                SupportTicket.objects.select_for_update()
+                SupportTicket.objects.select_for_update(of=('self',))
                 .select_related('client', 'agent', 'order__client', 'order__store__company__owner')
                 .get(pk=ticket.pk)
             )
