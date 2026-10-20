@@ -539,6 +539,18 @@
     cursor: zoom-in;
 }
 
+.autoplay-loop-video {
+    width: 100%;
+    height: auto;
+    display: block;
+    object-fit: cover;
+    background: #0F0B1D;
+}
+
+.autoplay-loop-video::-webkit-media-controls {
+    display: none !important;
+}
+
 /* ==========================================================================
    2. EL PROBLEMA DEL COMERCIO TRADICIONAL (FRICTION BENTO GRID)
    ========================================================================== */

@@ -759,3 +759,55 @@ def cleanup_expired_delivery_traces_task():
         cleanup_expired_traces()
     except Exception as exc:
         logger.warning(f"⚠️ Error limpiando trazas vencidas de delivery: {exc}")
+
+
+@shared_task(ignore_result=True)
+def cleanup_old_notifications():
+    """
+    Mantenimiento nocturno de la tabla `Notification`:
+    1. Elimina notificaciones leídas (`is_read=True`) con más de 30 días de antigüedad.
+    2. Elimina notificaciones no leídas (`is_read=False`) abandonadas con más de 90 días.
+    3. Recorta el exceso de notificaciones leídas para usuarios que superen las 30 más recientes.
+    """
+    try:
+        now = timezone.now()
+        read_cutoff = now - timedelta(days=30)
+        unread_cutoff = now - timedelta(days=90)
+
+        deleted_old_read, _ = Notification.objects.filter(
+            is_read=True,
+            created_at__lt=read_cutoff,
+        ).delete()
+
+        deleted_stale_unread, _ = Notification.objects.filter(
+            is_read=False,
+            created_at__lt=unread_cutoff,
+        ).delete()
+
+        # Recorte por usuario para quienes acumulen >30 notificaciones leídas
+        from django.db.models import Count
+        heavy_user_ids = list(
+            Notification.objects.filter(is_read=True)
+            .values('user_id')
+            .annotate(read_count=Count('id'))
+            .filter(read_count__gt=30)
+            .values_list('user_id', flat=True)[:500]
+        )
+        deleted_overflow = 0
+        for uid in heavy_user_ids:
+            overflow_ids = list(
+                Notification.objects.filter(user_id=uid, is_read=True)
+                .order_by('-created_at')
+                .values_list('id', flat=True)[30:]
+            )
+            if overflow_ids:
+                cnt, _ = Notification.objects.filter(id__in=overflow_ids).delete()
+                deleted_overflow += cnt
+
+        if deleted_old_read or deleted_stale_unread or deleted_overflow:
+            logger.info(
+                f"🧹 [Cleanup Notifications] Eliminadas: {deleted_old_read} leídas (>30d), "
+                f"{deleted_overflow} leídas excedentes (>30/usuario), {deleted_stale_unread} no leídas (>90d)."
+            )
+    except Exception as exc:
+        logger.warning(f"⚠️ Error en cleanup_old_notifications: {exc}")

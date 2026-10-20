@@ -4,7 +4,8 @@
 {% block title %}CartMaker — Todo el comercio de tu zona en tiempo real{% endblock %}
 
 {% block extra_head %}
-    <link rel="stylesheet" href="{% static 'css/home.css' %}?v=20261016_cart_img">
+    <link rel="stylesheet" href="{% static 'css/home.css' %}?v=20261020_feed_video">
+    <link rel="preload" as="image" href="{% static 'img/screenshots_app/card_feed_social_poster.jpg' %}">
 {% endblock %}
 
 {% block content %}
@@ -155,12 +156,21 @@
                         </div>
                     </div>
 
-                    <!-- Dispositivo Móvil: Solo muestra lo que se ve en el capture real -->
+                    <!-- Dispositivo Móvil: Muestra la grabación real del Feed en bucle -->
                     <div class="phone-device-frame">
                         <div class="phone-screen-pure">
-                            <img src="{% static 'img/screenshots_app/card_feed_social.jpg' %}"
-                                 alt="Pantalla de Inicio CartMaker — Ofertas en tu zona y Atlas IA"
-                                 class="phone-pure-screenshot zoomable-img">
+                            <video src="{% static 'video/card_feed_social.mp4' %}"
+                                   poster="{% static 'img/screenshots_app/card_feed_social_poster.jpg' %}"
+                                   data-video-src="{% static 'video/card_feed_social.mp4' %}"
+                                   autoplay
+                                   loop
+                                   muted
+                                   playsinline
+                                   webkit-playsinline
+                                   preload="auto"
+                                   disablePictureInPicture
+                                   aria-label="Pantalla de Inicio CartMaker — Ofertas en tu zona y Atlas IA"
+                                   class="phone-pure-screenshot zoomable-img autoplay-loop-video"></video>
                         </div>
                     </div>
                 </div>
@@ -400,8 +410,19 @@
                     <div class="media-duo-showcase">
                         <div class="media-card primary-media">
                             <span class="media-card-label">Feed de Tu Zona</span>
-                            <img src="{% static 'img/screenshots_app/card_feed_social.jpg' %}" alt="Feed Principal CartMaker en tu zona" class="zoomable-img">
-                            <button type="button" class="btn-zoom-preview" data-img="{% static 'img/screenshots_app/card_feed_social.jpg' %}" aria-label="Ampliar imagen">
+                            <video src="{% static 'video/card_feed_social.mp4' %}"
+                                   poster="{% static 'img/screenshots_app/card_feed_social_poster.jpg' %}"
+                                   data-video-src="{% static 'video/card_feed_social.mp4' %}"
+                                   autoplay
+                                   loop
+                                   muted
+                                   playsinline
+                                   webkit-playsinline
+                                   preload="metadata"
+                                   disablePictureInPicture
+                                   aria-label="Feed Principal CartMaker en tu zona"
+                                   class="zoomable-img autoplay-loop-video"></video>
+                            <button type="button" class="btn-zoom-preview" data-img="{% static 'video/card_feed_social.mp4' %}" aria-label="Ampliar vista del feed">
                                 <span class="material-symbols-rounded">open_in_full</span>
                             </button>
                         </div>
@@ -1146,17 +1167,18 @@
     </a>
 </div>
 
-<!-- Modal Lightbox para Ampliar Capturas de la App -->
+<!-- Modal Lightbox para Ampliar Capturas y Videos de la App -->
 <div class="image-modal-backdrop" id="imageModal" role="dialog" aria-modal="true" aria-label="Vista ampliada de la aplicación">
     <button type="button" class="modal-close-btn" id="modalClose" aria-label="Cerrar vista previa">
         <span class="material-symbols-rounded">close</span>
     </button>
     <img src="" alt="Vista previa de CartMaker App" class="modal-preview-img" id="modalImg">
+    <video src="" class="modal-preview-img modal-preview-video" id="modalVideo" loop muted playsinline webkit-playsinline disablePictureInPicture hidden></video>
 </div>
 
 </div>
 {% endblock %}
 
 {% block extra_scripts %}
-    <script src="{% static 'js/home.js' %}?v=20261016_cart_img"></script>
+    <script src="{% static 'js/home.js' %}?v=20261020_feed_video"></script>
 {% endblock %}

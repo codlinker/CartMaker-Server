@@ -213,6 +213,7 @@ class NotificationSerializer(serializers.ModelSerializer):
             'category', 
             'title', 
             'body', 
+            'is_read',
             'metadata',
             'created_at'
         ]

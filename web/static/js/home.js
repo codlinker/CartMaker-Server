@@ -265,26 +265,82 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     /* ==========================================================================
-       7. MODAL LIGHTBOX PARA CAPTURAS DE LA APP
+       7. MODAL LIGHTBOX PARA CAPTURAS Y VIDEOS EN BUCLE DE LA APP
        ========================================================================== */
     const modal = document.getElementById('imageModal');
     const modalImg = document.getElementById('modalImg');
+    const modalVideo = document.getElementById('modalVideo');
     const modalClose = document.getElementById('modalClose');
     const zoomBtns = document.querySelectorAll('.btn-zoom-preview');
     const zoomableImgs = document.querySelectorAll('.zoomable-img');
+    const loopVideos = document.querySelectorAll('.autoplay-loop-video');
+
+    // Garantizar reproducción fluida en bucle en todos los navegadores (iOS/Android/Desktop)
+    const ensureLoopVideoPlaying = (vid) => {
+        if (!vid) return;
+        vid.muted = true;
+        vid.defaultMuted = true;
+        vid.playsInline = true;
+        const p = vid.play();
+        if (p && typeof p.catch === 'function') {
+            p.catch(() => {});
+        }
+    };
+
+    loopVideos.forEach(vid => {
+        ensureLoopVideoPlaying(vid);
+    });
+
+    if ('IntersectionObserver' in window && loopVideos.length) {
+        const videoObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                const vid = entry.target;
+                if (entry.isIntersecting) {
+                    ensureLoopVideoPlaying(vid);
+                } else {
+                    vid.pause();
+                }
+            });
+        }, { threshold: 0.15 });
+        loopVideos.forEach(vid => videoObserver.observe(vid));
+    }
+
+    const isVideoSource = (src) => /\.(mp4|webm|mov)(\?.*)?$/i.test(src || '');
 
     const openLightbox = (src) => {
-        if (!modal || !modalImg || !src) return;
-        modalImg.src = src;
+        if (!modal || !src) return;
+        if (isVideoSource(src) && modalVideo) {
+            if (modalImg) {
+                modalImg.hidden = true;
+                modalImg.src = '';
+            }
+            modalVideo.hidden = false;
+            modalVideo.src = src;
+            ensureLoopVideoPlaying(modalVideo);
+        } else if (modalImg) {
+            if (modalVideo) {
+                modalVideo.pause();
+                modalVideo.hidden = true;
+                modalVideo.src = '';
+            }
+            modalImg.hidden = false;
+            modalImg.src = src;
+        }
         modal.classList.add('active');
         document.body.style.overflow = 'hidden';
     };
 
     const closeLightbox = () => {
-        if (!modal || !modalImg) return;
+        if (!modal) return;
         modal.classList.remove('active');
         document.body.style.overflow = '';
-        setTimeout(() => { modalImg.src = ''; }, 250);
+        if (modalVideo) {
+            modalVideo.pause();
+        }
+        setTimeout(() => {
+            if (modalImg) modalImg.src = '';
+            if (modalVideo) modalVideo.src = '';
+        }, 250);
     };
 
     zoomBtns.forEach(btn => {
@@ -294,8 +350,11 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 
-    zoomableImgs.forEach(img => {
-        img.addEventListener('click', () => openLightbox(img.src));
+    zoomableImgs.forEach(el => {
+        el.addEventListener('click', () => {
+            const mediaSrc = el.dataset.videoSrc || el.currentSrc || el.src;
+            openLightbox(mediaSrc);
+        });
     });
 
     if (modalClose) {

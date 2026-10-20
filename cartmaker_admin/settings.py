@@ -482,6 +482,12 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'api.tasks.cleanup_expired_delivery_traces_task',
         'schedule': crontab(minute=30, hour=3),
     },
+
+    # Tarea 9: Notificaciones. Poda notificaciones leídas (>30 días o >30 por usuario) y huérfanas (>90 días). 3:45 AM
+    'cleanup-old-notifications-nightly': {
+        'task': 'api.tasks.cleanup_old_notifications',
+        'schedule': crontab(minute=45, hour=3),
+    },
 }
 
 # CORREO

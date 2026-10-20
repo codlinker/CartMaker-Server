@@ -874,9 +874,64 @@ class NotificationViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
     serializer_class = NotificationSerializer
     permission_classes = [IsAuthenticated]
 
+    # Topes de retención y respuesta para proteger rendimiento en backend y app móvil:
+    # - Todas las notificaciones NO leídas se entregan siempre (hasta un tope de seguridad de 100).
+    # - De las notificaciones YA LEÍDAS (`is_read=True`), solo se conservan y devuelven las últimas 30
+    #   globalmente (y máximo 15 leídas por sección en `all-grouped`), con antigüedad máxima de 30 días.
+    MAX_READ_NOTIFICATIONS_TOTAL = 30
+    MAX_READ_NOTIFICATIONS_PER_SECTION = 15
+    MAX_UNREAD_NOTIFICATIONS_SAFETY_CAP = 100
+    READ_RETENTION_DAYS = 30
+
     def get_queryset(self):
-        # IMPORTANTE: Ordenamos para que las más nuevas salgan primero
+        # IMPORTANTE: Ordenamos para que las más nuevas salgan primero.
+        # No aplicamos slice aquí porque `mark_section_as_read` y `clear_section` encadenan `.filter()` / `.update()`.
         return Notification.objects.filter(user=self.request.user).order_by('-created_at')
+
+    def _prune_excess_read_notifications(self, user) -> int:
+        """
+        Poda automáticamente de PostgreSQL las notificaciones ya leídas (`is_read=True`)
+        que tengan más de 30 días o que excedan las 30 más recientes del usuario.
+        Las notificaciones no leídas (`is_read=False`) nunca se tocan aquí.
+        """
+        try:
+            cutoff = timezone.now() - timedelta(days=self.READ_RETENTION_DAYS)
+            deleted_old, _ = Notification.objects.filter(
+                user=user,
+                is_read=True,
+                created_at__lt=cutoff,
+            ).delete()
+
+            overflow_ids = list(
+                Notification.objects.filter(user=user, is_read=True)
+                .order_by('-created_at')
+                .values_list('id', flat=True)[self.MAX_READ_NOTIFICATIONS_TOTAL:]
+            )
+            deleted_overflow = 0
+            if overflow_ids:
+                deleted_overflow, _ = Notification.objects.filter(id__in=overflow_ids).delete()
+            return deleted_old + deleted_overflow
+        except Exception:
+            return 0
+
+    def _get_capped_notifications(self, user):
+        """
+        Devuelve la lista combinada de notificaciones activas para el usuario:
+        todas las no leídas (hasta `MAX_UNREAD_NOTIFICATIONS_SAFETY_CAP`) +
+        únicamente las últimas `MAX_READ_NOTIFICATIONS_TOTAL` leídas, ordenadas de más reciente a más antigua.
+        """
+        self._prune_excess_read_notifications(user)
+        base_qs = self.get_queryset()
+        unread_list = list(base_qs.filter(is_read=False)[:self.MAX_UNREAD_NOTIFICATIONS_SAFETY_CAP])
+        read_list = list(base_qs.filter(is_read=True)[:self.MAX_READ_NOTIFICATIONS_TOTAL])
+        combined = unread_list + read_list
+        combined.sort(key=lambda n: n.created_at, reverse=True)
+        return combined
+
+    def list(self, request, *args, **kwargs):
+        notifications = self._get_capped_notifications(request.user)
+        serializer = self.get_serializer(notifications, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['post'], url_path="mark-section-as-read")
     def mark_section_as_read(self, request):
@@ -886,6 +941,8 @@ class NotificationViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
             
         # 💡 Bulk update: Actualiza todas las no leídas de esta sección a True
         updated_count = self.get_queryset().filter(section=section, is_read=False).update(is_read=True)
+        if updated_count > 0:
+            self._prune_excess_read_notifications(request.user)
         
         return Response({"updated_count": updated_count, "detail": "Sección marcada como leída."}, status=status.HTTP_200_OK)
 
@@ -895,15 +952,22 @@ class NotificationViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
     @action(detail=False, methods=['get'], url_path="all-grouped")
     def all_grouped(self, request):
         """
-        Devuelve todas las notificaciones del usuario en un diccionario:
+        Devuelve las notificaciones relevantes del usuario agrupadas por sección:
         { "0": [{...}, {...}], "1": [{...}] }
-        Ideal para llenar el Provider en una sola petición al inicio.
+        Incluye todas las NO leídas + máximo las últimas 30 leídas (con tope de 15 leídas por sección).
         """
-        notifications = self.get_queryset()
+        notifications = self._get_capped_notifications(request.user)
         
         grouped_data = {}
+        read_counts_per_section = {}
         for notif in notifications:
             sec_str = str(notif.section)
+            if notif.is_read:
+                current_sec_read = read_counts_per_section.get(sec_str, 0)
+                if current_sec_read >= self.MAX_READ_NOTIFICATIONS_PER_SECTION:
+                    continue
+                read_counts_per_section[sec_str] = current_sec_read + 1
+
             if sec_str not in grouped_data:
                 grouped_data[sec_str] = []
             
@@ -918,8 +982,10 @@ class NotificationViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
     @action(detail=True, methods=['post'], url_path="mark-as-read")
     def mark_as_read(self, request, pk=None):
         notification = self.get_object()
-        notification.is_read = True
-        notification.save(update_fields=['is_read'])
+        if not notification.is_read:
+            notification.is_read = True
+            notification.save(update_fields=['is_read'])
+            self._prune_excess_read_notifications(request.user)
         return Response({"detail": "Notificación marcada como leída.", "id": notification.id}, status=status.HTTP_200_OK)
 
     # -------------------------------------------------------------------------
