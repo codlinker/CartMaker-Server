@@ -490,14 +490,29 @@ class CompanyCacheAPI(APIView):
         pending_questions = list(pending_items.values_list('id', flat=True)) + list(pending_videos.values_list('id', flat=True))
 
         payment_methods = company.get('payment_methods', [])
+        if emp is not None:
+            perms_dict = dict(emp.get_permissions_dict())
+            perms_dict['can_delete_catalog'] = False
+        else:
+            perms_dict = {
+                'can_edit_products': True,
+                'can_edit_inventory': True,
+                'can_confirm_payments': True,
+                'can_manage_orders': True,
+                'can_view_sales': True,
+                'can_delete_catalog': True,
+            }
         data = {
             'company': company,
             'stores': stores,
             'pending_questions': pending_questions,
             'payment_methods': payment_methods,
             'banks_catalog': VENEZUELAN_BANKS_CATALOG,
+            'is_worker': bool(emp is not None),
+            'employee_id': emp.id if emp is not None else None,
+            'worker_permissions': perms_dict,
         }
-        cache.set(cache_key, data, timeout=180 if is_worker else 3600)
+        cache.set(cache_key, data, timeout=60 if is_worker else 3600)
         return Response(data, status=status.HTTP_200_OK)
 
 class SubscriptionsCacheAPI(APIView):

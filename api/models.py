@@ -1344,8 +1344,58 @@ class Employee(models.Model):
             for a in assignments
         ]
 
+    def get_permissions_dict(self) -> dict:
+        """
+        Retorna el mapa de permisos efectivos del empleado.
+        - `can_create_products` y `can_restock_inventory` siempre son True para asistentes activos.
+        - `can_delete_catalog` siempre es False (Regla de Cero Destrucción para empleados).
+        - `can_edit_products` / `can_edit_inventory`: permite editar productos/lotes existentes (sujeto al Cortafuegos Anti-Sabotaje).
+        - `can_confirm_payments`: permite confirmar pagos bancarios/Pago Móvil y finalizar órdenes manualmente sin PIN.
+        - `can_manage_orders`: permite atender pedidos, responder chats/preguntas y asignar repartidores.
+        """
+        is_assistant = (self.role == EmployeeRole.ASSISTANT)
+        perm_obj = None
+        if 'permissions' in getattr(self, '_state', None).fields_cache if hasattr(self, '_state') else False:
+            perm_obj = self._state.fields_cache.get('permissions')
+        if perm_obj is None:
+            try:
+                perm_obj = self.permissions
+            except Exception:
+                perm_obj = None
+
+        can_edit = bool(perm_obj.can_edit_inventory) if perm_obj is not None else False
+        can_confirm = bool(perm_obj.can_confirm_payments) if perm_obj is not None else False
+        can_orders = bool(perm_obj.can_manage_orders) if perm_obj is not None else True
+        can_sales = bool(perm_obj.can_view_sales) if perm_obj is not None else False
+
+        if not is_assistant:
+            return {
+                'can_create_products': False,
+                'can_restock_inventory': False,
+                'can_edit_products': False,
+                'can_edit_inventory': False,
+                'can_confirm_payments': False,
+                'can_manage_orders': False,
+                'can_view_sales': False,
+                'can_delete_catalog': False,
+                'max_price_drop_percent': 30,
+            }
+
+        return {
+            'can_create_products': True,
+            'can_restock_inventory': True,
+            'can_edit_products': can_edit,
+            'can_edit_inventory': can_edit,
+            'can_confirm_payments': can_confirm,
+            'can_manage_orders': can_orders,
+            'can_view_sales': can_sales,
+            'can_delete_catalog': False,
+            'max_price_drop_percent': 30,
+        }
+
     def get_json(self, include_company: bool = False) -> dict:
         user = self.user
+        perms = self.get_permissions_dict()
         data = {
             'id': self.id,
             'user': {
@@ -1368,6 +1418,11 @@ class Employee(models.Model):
             'hired_at': timezone.localtime(self.hired_at).isoformat() if self.hired_at else None,
             'last_seen_at': timezone.localtime(self.last_seen_at).isoformat() if self.last_seen_at else None,
             'stores': self.get_store_list(),
+            'permissions': perms,
+            'can_edit_products': perms['can_edit_products'],
+            'can_edit_inventory': perms['can_edit_inventory'],
+            'can_confirm_payments': perms['can_confirm_payments'],
+            'can_manage_orders': perms['can_manage_orders'],
         }
         if include_company:
             company = self.company
@@ -1388,6 +1443,10 @@ class EmployeePermission(models.Model):
     can_edit_inventory = models.BooleanField(default=False)
     can_view_sales = models.BooleanField(default=False)
     can_manage_orders = models.BooleanField(default=True)
+    can_confirm_payments = models.BooleanField(default=False)
+
+    def get_json(self) -> dict:
+        return self.employee.get_permissions_dict()
 
 class EmployeeStoreAssignment(models.Model):
     employee = models.ForeignKey(Employee, on_delete=models.CASCADE)
@@ -1441,6 +1500,9 @@ class EmployeeInvitation(models.Model):
         User, on_delete=models.CASCADE, null=True, blank=True,
         related_name='received_employee_invitations'
     )
+    can_edit_inventory = models.BooleanField(default=False)
+    can_confirm_payments = models.BooleanField(default=False)
+    can_manage_orders = models.BooleanField(default=True)
     token_hash = models.CharField(max_length=64, unique=True)
     short_code = models.CharField(max_length=INVITATION_SHORT_CODE_LENGTH, unique=True)
     status = models.IntegerField(choices=InvitationStatus.choices, default=InvitationStatus.PENDING)
@@ -1484,7 +1546,9 @@ class EmployeeInvitation(models.Model):
 
     @classmethod
     def create_with_token(cls, *, company, invited_by, role, channel, target_email=None,
-                          target_user=None, stores=None, ttl_hours: int = INVITATION_DEFAULT_TTL_HOURS):
+                          target_user=None, stores=None, ttl_hours: int = INVITATION_DEFAULT_TTL_HOURS,
+                          can_edit_inventory: bool = False, can_confirm_payments: bool = False,
+                          can_manage_orders: bool = True):
         """
         Crea la invitación con un token nuevo (`secrets.token_urlsafe(32)`).
 
@@ -1499,6 +1563,9 @@ class EmployeeInvitation(models.Model):
             channel=channel,
             target_email=(target_email or '').strip().lower() or None,
             target_user=target_user,
+            can_edit_inventory=bool(can_edit_inventory),
+            can_confirm_payments=bool(can_confirm_payments),
+            can_manage_orders=bool(can_manage_orders),
             token_hash=cls.hash_token(raw_token),
             short_code=cls.generate_short_code(),
             expires_at=timezone.now() + timedelta(hours=ttl_hours),
@@ -1520,6 +1587,32 @@ class EmployeeInvitation(models.Model):
     @property
     def role_slug(self) -> str:
         return EMPLOYEE_ROLE_SLUGS.get(self.role, 'assistant')
+
+    def get_permissions_dict(self) -> dict:
+        is_assistant = (self.role == EmployeeRole.ASSISTANT)
+        if not is_assistant:
+            return {
+                'can_create_products': False,
+                'can_restock_inventory': False,
+                'can_edit_products': False,
+                'can_edit_inventory': False,
+                'can_confirm_payments': False,
+                'can_manage_orders': False,
+                'can_view_sales': False,
+                'can_delete_catalog': False,
+                'max_price_drop_percent': 30,
+            }
+        return {
+            'can_create_products': True,
+            'can_restock_inventory': True,
+            'can_edit_products': bool(self.can_edit_inventory),
+            'can_edit_inventory': bool(self.can_edit_inventory),
+            'can_confirm_payments': bool(self.can_confirm_payments),
+            'can_manage_orders': bool(self.can_manage_orders),
+            'can_view_sales': False,
+            'can_delete_catalog': False,
+            'max_price_drop_percent': 30,
+        }
 
     def get_json(self, include_company: bool = True) -> dict:
         """ Representación pública de la invitación. Nunca incluye `token_hash`. """
@@ -1547,6 +1640,7 @@ class EmployeeInvitation(models.Model):
                 'address': addr,
             })
 
+        perms = self.get_permissions_dict()
         data = {
             'id': self.id,
             'company_id': str(company.id) if company else '',
@@ -1584,6 +1678,11 @@ class EmployeeInvitation(models.Model):
                 'last_name': (accepted_by.last_name or '').strip(),
             } if accepted_by else None,
             'stores': stores_payload,
+            'permissions': perms,
+            'can_edit_products': perms['can_edit_products'],
+            'can_edit_inventory': perms['can_edit_inventory'],
+            'can_confirm_payments': perms['can_confirm_payments'],
+            'can_manage_orders': perms['can_manage_orders'],
             'expires_at': timezone.localtime(self.expires_at).isoformat() if self.expires_at else None,
             'accepted_at': timezone.localtime(self.accepted_at).isoformat() if self.accepted_at else None,
             'created_at': timezone.localtime(self.created_at).isoformat() if self.created_at else None,
@@ -1596,6 +1695,70 @@ class EmployeeInvitation(models.Model):
             } if company else None,
         }
         return data
+
+
+class EmployeeAuditLog(models.Model):
+    """
+    Bitácora de auditoría y máquina del tiempo (Time-Machine) por empleado.
+    Registra cada modificación sobre productos, inventario, historias de video y órdenes
+    realizada por un trabajador (`emp_id`), almacenando `before_snapshot` y `after_snapshot`
+    para permitir al dueño revertir en 1 toque cualquier cambio no deseado o sabotaje.
+    """
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='employee_audit_logs')
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='audit_logs')
+    user = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='employee_audit_logs'
+    )
+    action_type = models.CharField(max_length=40, db_index=True)
+    target_type = models.CharField(max_length=32, db_index=True)
+    target_id = models.CharField(max_length=64, db_index=True)
+    target_label = models.CharField(max_length=255, blank=True, default='')
+    summary = models.CharField(max_length=255, blank=True, default='')
+    before_snapshot = models.JSONField(default=dict, blank=True)
+    after_snapshot = models.JSONField(default=dict, blank=True)
+    is_reversible = models.BooleanField(default=False, db_index=True)
+    reverted_at = models.DateTimeField(null=True, blank=True)
+    reverted_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='reverted_employee_audit_logs'
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['company', 'employee', '-created_at'], name='empaudit_comp_emp_created_idx'),
+            models.Index(fields=['employee', 'is_reversible', 'reverted_at'], name='empaudit_emp_rev_state_idx'),
+        ]
+
+    def __str__(self):
+        return f"[{self.action_type}] {self.target_label} por emp#{self.employee_id}"
+
+    def get_json(self) -> dict:
+        emp_user = self.user or (self.employee.user if self.employee_id else None)
+        emp_name = (
+            f"{(emp_user.first_name or '').strip()} {(emp_user.last_name or '').strip()}".strip()
+            or emp_user.email
+        ) if emp_user else ''
+        return {
+            'id': self.id,
+            'company_id': str(self.company_id),
+            'employee_id': self.employee_id,
+            'employee_name': emp_name,
+            'action_type': self.action_type,
+            'target_type': self.target_type,
+            'target_id': self.target_id,
+            'target_label': self.target_label,
+            'summary': self.summary,
+            'before_snapshot': self.before_snapshot,
+            'after_snapshot': self.after_snapshot,
+            'is_reversible': bool(self.is_reversible),
+            'is_reverted': self.reverted_at is not None,
+            'reverted_at': timezone.localtime(self.reverted_at).isoformat() if self.reverted_at else None,
+            'reverted_by_id': str(self.reverted_by_id) if self.reverted_by_id else None,
+            'created_at': timezone.localtime(self.created_at).isoformat() if self.created_at else None,
+        }
 
 
 # ==========================================

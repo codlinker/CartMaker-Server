@@ -880,17 +880,17 @@ def employee_assigned_to_store(employee, store) -> bool:
 
 
 def user_can_manage_store_deliveries(user, store) -> bool:
-    """ Dueño de la compañía o asistente ACTIVO asignado a la sucursal. """
+    """ Dueño de la compañía o asistente ACTIVO asignado a la sucursal con `can_manage_orders=True`. """
     if not user or not getattr(user, 'is_authenticated', False) or store is None:
         return False
     if store.company.owner_id == user.id:
         return True
-    from .workforce import get_employee_allowed_store_ids
-    emps = Employee.objects.filter(
+    from .workforce import get_employee_allowed_store_ids, check_employee_permission
+    emps = Employee.objects.select_related('permissions').filter(
         user=user, company_id=store.company_id, status=EmployeeStatus.ACTIVE, role=EmployeeRole.ASSISTANT,
     )
     for emp in emps:
-        if store.id in get_employee_allowed_store_ids(emp):
+        if store.id in get_employee_allowed_store_ids(emp) and check_employee_permission(emp, 'can_manage_orders'):
             return True
     return False
 
@@ -2103,12 +2103,33 @@ def finalize_delivery_for_closed_order(order, reason: str = 'order_completed') -
 
 def confirm_delivery_by_manager(actor_user, delivery_id) -> dict:
     """
-    El comercio (dueño o asistente) confirma la entrega cuando el PIN quedó bloqueado o el cliente no puede
-    dictarlo. Completa la orden igual que el PIN (DELIVERED + COMPLETED).
+    El comercio (dueño o asistente con `can_confirm_payments`) confirma la entrega cuando el PIN quedó
+    bloqueado o el cliente no puede dictarlo. Completa la orden igual que el PIN (DELIVERED + COMPLETED).
     """
     delivery = get_delivery(delivery_id)
     if not user_can_manage_store_deliveries(actor_user, delivery.store):
         raise DeliveryError("No tienes permisos sobre esta entrega.", status_code=403, code='forbidden')
+
+    acting_emp = None
+    if delivery.store.company.owner_id != actor_user.id:
+        from .workforce import get_employee_allowed_store_ids, check_employee_permission, record_employee_audit_log
+        emps = Employee.objects.select_related('permissions').filter(
+            user=actor_user,
+            company_id=delivery.store.company_id,
+            status=EmployeeStatus.ACTIVE,
+            role=EmployeeRole.ASSISTANT,
+        )
+        for emp in emps:
+            if delivery.store_id in get_employee_allowed_store_ids(emp):
+                acting_emp = emp
+                break
+        if acting_emp is None or not check_employee_permission(acting_emp, 'can_confirm_payments'):
+            raise DeliveryError(
+                "Tu rol de Asistente no tiene permiso para confirmar pagos o finalizar entregas manualmente sin el PIN del cliente. Solicita este permiso al dueño del comercio.",
+                status_code=403,
+                code='worker_permission_denied',
+            )
+
     tokens_earned = 0.0
     with transaction.atomic():
         order = _lock_order(delivery.order_id)
@@ -2129,6 +2150,18 @@ def confirm_delivery_by_manager(actor_user, delivery_id) -> dict:
         locked.delivered_at = timezone.now()
         locked.failure_reason = 'confirmed_by_merchant'
         locked.save(update_fields=['status', 'delivered_at', 'failure_reason'])
+        if acting_emp is not None:
+            from .workforce import record_employee_audit_log
+            record_employee_audit_log(
+                acting_emp,
+                action='order_completed',
+                target_type='order',
+                target_id=order.id,
+                target_label=f"Orden #{order.id} (confirmación manual de entrega)",
+                before_snapshot={'delivery_status': int(delivery.status)},
+                after_snapshot={'delivery_status': int(DeliveryStatus.DELIVERED), 'order_status': int(OrderStatus.COMPLETED)},
+                is_reversible=False,
+            )
         delivery_ref = locked
         store_id = locked.store_id
         status_payload = build_status_payload(locked, {'reason': 'confirmed_by_merchant'})

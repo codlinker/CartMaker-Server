@@ -12,8 +12,25 @@ from ..core.delivery import (
     reassign_delivery,
     unassign_delivery,
 )
-from ..core.workforce import resolve_merchant_actor, user_can_manage_store
+from ..core.workforce import (
+    WorkforceError,
+    resolve_merchant_actor,
+    user_can_manage_store,
+    require_employee_permission,
+    record_employee_audit_log,
+)
 from ..permissions import IsPersonalContext, get_request_ctx
+
+
+def _order_workforce_error_response(err: WorkforceError) -> Response:
+    payload = {
+        'success': False,
+        'error': err.message,
+        'detail': err.message,
+    }
+    if err.code:
+        payload['code'] = err.code
+    return Response(payload, status=err.status_code)
 
 class OrderViewSet(viewsets.ViewSet):
     """
@@ -460,6 +477,16 @@ class OrderViewSet(viewsets.ViewSet):
                     {"error": "La orden no existe o no tienes permisos sobre esta sucursal."},
                     status=status.HTTP_404_NOT_FOUND,
                 )
+            try:
+                _comp, emp, _allowed = resolve_merchant_actor(
+                    request,
+                    target_company_id=assignment.order.store.company_id,
+                    target_store_id=assignment.order.store,
+                )
+                if emp is not None:
+                    require_employee_permission(emp, 'can_manage_orders')
+            except WorkforceError as e:
+                return _order_workforce_error_response(e)
             if int(assignment.status) not in DELIVERY_TERMINAL_STATUSES:
                 if int(assignment.status) in (DeliveryStatus.ACCEPTED, DeliveryStatus.AT_STORE):
                     try:
@@ -469,6 +496,17 @@ class OrderViewSet(viewsets.ViewSet):
                         if e.code:
                             payload['code'] = e.code
                         return Response(payload, status=e.status_code)
+                    if emp is not None:
+                        record_employee_audit_log(
+                            emp,
+                            action='order_shipped',
+                            target_type='order',
+                            target_id=assignment.order_id,
+                            target_label=f"Orden #{assignment.order_id}",
+                            before_snapshot={'status': int(OrderStatus.WAITING)},
+                            after_snapshot={'status': int(OrderStatus.DELIVERY_SENT)},
+                            is_reversible=False,
+                        )
                     return Response({
                         "success": True,
                         "message": "Pedido entregado al repartidor. El cliente ya puede verlo en el mapa.",
@@ -492,9 +530,29 @@ class OrderViewSet(viewsets.ViewSet):
                 )
                 if not user_can_manage_store(request, order.store):
                     raise Order.DoesNotExist
+                _comp, emp, _allowed = resolve_merchant_actor(
+                    request,
+                    target_company_id=order.store.company_id,
+                    target_store_id=order.store,
+                )
+                if emp is not None:
+                    require_employee_permission(emp, 'can_manage_orders')
                 # La lógica de despacho vive en api/core/order_services.py (reutilizada por el flujo de delivery)
                 ship_order_service(order, request.user)
+                if emp is not None:
+                    record_employee_audit_log(
+                        emp,
+                        action='order_shipped',
+                        target_type='order',
+                        target_id=order.id,
+                        target_label=f"Orden #{order.id}",
+                        before_snapshot={'status': int(OrderStatus.WAITING)},
+                        after_snapshot={'status': int(OrderStatus.DELIVERY_SENT)},
+                        is_reversible=False,
+                    )
             return Response({"success": True, "message": "Orden marcada como enviada."}, status=status.HTTP_200_OK)
+        except WorkforceError as e:
+            return _order_workforce_error_response(e)
         except OrderServiceError as e:
             return Response({"error": e.message}, status=e.status_code)
         except Order.DoesNotExist:
@@ -671,11 +729,21 @@ class OrderViewSet(viewsets.ViewSet):
                 # Bloqueamos únicamente la fila de la orden (of=('self',)) para evitar bloqueos innecesarios en tablas relacionadas
                 order = Order.objects.select_for_update(of=('self',)).select_related('store__company').get(id=order_id)
                 actor_role = None
-                if get_request_ctx(request) == 'worker':
+                acting_emp = None
+                is_worker_session = (get_request_ctx(request) == 'worker')
+                if is_worker_session or (order.client_id != request.user.id and order.store.company.owner_id != request.user.id):
                     if user_can_manage_store(request, order.store):
                         actor_role = 'merchant'
+                        _comp, acting_emp, _allowed = resolve_merchant_actor(
+                            request,
+                            target_company_id=order.store.company_id,
+                            target_store_id=order.store,
+                        )
+                        if acting_emp is not None:
+                            require_employee_permission(acting_emp, 'can_confirm_payments')
                     else:
                         raise OrderServiceError("No tienes permisos sobre esta orden.", status_code=403)
+                prev_status = int(order.status)
                 # La lógica de finalización (stock, tokens, atribución, calificación y notificaciones cruzadas)
                 # vive en api/core/order_services.py para reutilizarla en el flujo de delivery con PIN.
                 result = complete_order_service(
@@ -685,6 +753,17 @@ class OrderViewSet(viewsets.ViewSet):
                     product_ratings=product_ratings,
                     actor_role=actor_role,
                 )
+                if acting_emp is not None and not result.get('already_completed'):
+                    record_employee_audit_log(
+                        acting_emp,
+                        action='order_completed',
+                        target_type='order',
+                        target_id=order.id,
+                        target_label=f"Orden #{order.id}",
+                        before_snapshot={'status': prev_status},
+                        after_snapshot={'status': int(OrderStatus.COMPLETED)},
+                        is_reversible=False,
+                    )
                 # Si la orden tenía una entrega activa, se cierra para liberar al repartidor
                 if not result.get('already_completed'):
                     finalize_delivery_for_closed_order(order, reason=f"completed_by_{result.get('actor_role')}")
@@ -693,6 +772,8 @@ class OrderViewSet(viewsets.ViewSet):
                     "tokens_earned": result['tokens_earned'],
                     "message": "Orden completada con éxito."
                 }, status=status.HTTP_200_OK)
+        except WorkforceError as e:
+            return _order_workforce_error_response(e)
         except OrderServiceError as e:
             return Response({"error": e.message}, status=e.status_code)
         except Order.DoesNotExist:

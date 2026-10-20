@@ -11,7 +11,10 @@ Contiene las reglas de negocio de:
 Las vistas (`api/views/workforce_views.py`) solo traducen HTTP <-> estas funciones.
 """
 import logging
+import time
 import uuid
+from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 import requests
@@ -22,6 +25,7 @@ from django.core.validators import validate_email
 from django.db import IntegrityError, transaction
 from django.db.models import Prefetch, Q
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from ..cos import storage_manager
@@ -33,6 +37,7 @@ from ..models import (
     EmployeePermission,
     EmployeeStoreAssignment,
     EmployeeInvitation,
+    EmployeeAuditLog,
     EmployeeRole,
     EmployeeStatus,
     VehicleType,
@@ -40,6 +45,11 @@ from ..models import (
     InvitationStatus,
     NotificationCategory,
     NotificationSection,
+    Product,
+    SubCategory,
+    InventoryItem,
+    InventoryItemOffer,
+    CompanyVideoStory,
     EMPLOYEE_ROLE_SLUGS,
     INVITATION_SHORT_CODE_LENGTH,
 )
@@ -229,7 +239,7 @@ def resolve_merchant_actor(request_or_user, target_company_id=None, target_store
             return None, None, None
 
         emp = (
-            Employee.objects.select_related('company', 'company__category')
+            Employee.objects.select_related('company', 'company__category', 'permissions')
             .filter(
                 id=emp_id,
                 user=user,
@@ -264,7 +274,7 @@ def resolve_merchant_actor(request_or_user, target_company_id=None, target_store
 
     # 3. Respaldo: usuario con rol de Asistente activo en el comercio consultado
     emp_qs = (
-        Employee.objects.select_related('company', 'company__category')
+        Employee.objects.select_related('company', 'company__category', 'permissions')
         .filter(
             user=user,
             status=EmployeeStatus.ACTIVE,
@@ -322,12 +332,12 @@ def emp_active_cache_key(emp_id) -> str:
 
 def _load_employee_state_from_db(emp_id) -> dict:
     emp = (
-        Employee.objects.select_related('user', 'company')
+        Employee.objects.select_related('user', 'company', 'permissions')
         .filter(id=emp_id)
         .first()
     )
     if emp is None:
-        return {'active': False, 'role': None, 'user_id': None, 'company_id': None}
+        return {'active': False, 'role': None, 'user_id': None, 'company_id': None, 'permissions': {}}
     is_active = (
         emp.status == EmployeeStatus.ACTIVE
         and bool(emp.user.is_active)
@@ -338,6 +348,7 @@ def _load_employee_state_from_db(emp_id) -> dict:
         'role': EMPLOYEE_ROLE_SLUGS.get(emp.role, 'assistant'),
         'user_id': str(emp.user_id),
         'company_id': str(emp.company_id),
+        'permissions': emp.get_permissions_dict(),
     }
 
 
@@ -481,6 +492,7 @@ def build_personal_workspace(user) -> dict:
 
 def build_worker_workspace(employee: Employee) -> dict:
     company = employee.company
+    perms = employee.get_permissions_dict()
     return {
         'type': CTX_WORKER,
         'label': f"Trabajador en {company.name}",
@@ -494,6 +506,12 @@ def build_worker_workspace(employee: Employee) -> dict:
         'vehicle_type': int(employee.vehicle_type) if employee.vehicle_type is not None else None,
         'display_alias': employee.display_alias or '',
         'stores': employee.get_store_list(),
+        'permissions': perms,
+        'can_edit_products': perms['can_edit_products'],
+        'can_edit_inventory': perms['can_edit_inventory'],
+        'can_confirm_payments': perms['can_confirm_payments'],
+        'can_manage_orders': perms['can_manage_orders'],
+        'can_delete_catalog': False,
         # Si es True y el usuario no ha verificado su cédula, select_workspace responderá 403 cedula_not_verified
         'requires_cedula_verified': employee.role == EmployeeRole.DELIVERY,
         'can_select': not (employee.role == EmployeeRole.DELIVERY and not getattr(employee.user, 'cedula_verified', False)),
@@ -503,7 +521,7 @@ def build_worker_workspace(employee: Employee) -> dict:
 def get_active_employments(user):
     """ Empleos ACTIVOS del usuario (excluye cualquier registro en su propio comercio). """
     return (
-        Employee.objects.select_related('company', 'user')
+        Employee.objects.select_related('company', 'user', 'permissions')
         .prefetch_related('employeestoreassignment_set__store')
         .filter(user=user, status=EmployeeStatus.ACTIVE)
         .exclude(company__owner=user)
@@ -568,7 +586,7 @@ def select_workspace(user, workspace_type: str, employee_id=None) -> dict:
 
     emp_id = _parse_int(employee_id, 'employee_id')
     employee = (
-        Employee.objects.select_related('company')
+        Employee.objects.select_related('company', 'permissions')
         .filter(id=emp_id, user=user)
         .first()
     )
@@ -704,19 +722,138 @@ def _resolve_company_stores(company: Company, store_ids, default_all: bool) -> l
     return stores
 
 
-def _sync_employee_stores(employee: Employee, stores: list) -> None:
-    """ Sincroniza EmployeeStoreAssignment y EmployeePermission.allowed_stores con `stores`. """
-    store_ids = {s.id for s in stores}
-    EmployeeStoreAssignment.objects.filter(employee=employee).exclude(store_id__in=store_ids).delete()
-    existing_ids = set(
-        EmployeeStoreAssignment.objects.filter(employee=employee).values_list('store_id', flat=True)
+PERMISSION_PRESET_SLUGS = {
+    'warehouse': {'can_edit_inventory': False, 'can_confirm_payments': False, 'can_manage_orders': True},
+    'catalog': {'can_edit_inventory': False, 'can_confirm_payments': False, 'can_manage_orders': True},
+    'almacen': {'can_edit_inventory': False, 'can_confirm_payments': False, 'can_manage_orders': True},
+    'default': {'can_edit_inventory': False, 'can_confirm_payments': False, 'can_manage_orders': True},
+    'dispatch': {'can_edit_inventory': False, 'can_confirm_payments': False, 'can_manage_orders': True},
+    'customer_care': {'can_edit_inventory': False, 'can_confirm_payments': False, 'can_manage_orders': True},
+    'atencion': {'can_edit_inventory': False, 'can_confirm_payments': False, 'can_manage_orders': True},
+    'editor': {'can_edit_inventory': True, 'can_confirm_payments': False, 'can_manage_orders': True},
+    'catalog_editor': {'can_edit_inventory': True, 'can_confirm_payments': False, 'can_manage_orders': True},
+    'cashier': {'can_edit_inventory': False, 'can_confirm_payments': True, 'can_manage_orders': True},
+    'payments': {'can_edit_inventory': False, 'can_confirm_payments': True, 'can_manage_orders': True},
+    'trusted_manager': {'can_edit_inventory': True, 'can_confirm_payments': True, 'can_manage_orders': True},
+    'manager': {'can_edit_inventory': True, 'can_confirm_payments': True, 'can_manage_orders': True},
+    'encargado': {'can_edit_inventory': True, 'can_confirm_payments': True, 'can_manage_orders': True},
+}
+
+
+def _parse_bool_flag(raw) -> Optional[bool]:
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)):
+        return bool(raw)
+    clean = str(raw).strip().lower()
+    if clean in ('1', 'true', 'yes', 'si', 'sí'):
+        return True
+    if clean in ('0', 'false', 'no'):
+        return False
+    return None
+
+
+def parse_employee_permissions_input(data: dict, defaults: Optional[dict] = None) -> tuple:
+    """
+    Extrae los permisos granulares del trabajador desde `data` (raíz o bloque `permissions`)
+    y/o desde un `permission_preset` ('warehouse' | 'customer_care' | 'editor' | 'cashier' | 'trusted_manager').
+
+    Retorna `(perms_dict, has_any_permission_key)`:
+    `perms_dict` contiene `can_edit_inventory`, `can_confirm_payments`, `can_manage_orders`, `can_view_sales`.
+    """
+    data = data or {}
+    nested = data.get('permissions') if isinstance(data.get('permissions'), dict) else {}
+    base = {
+        'can_edit_inventory': False,
+        'can_confirm_payments': False,
+        'can_manage_orders': True,
+        'can_view_sales': False,
+    }
+    if isinstance(defaults, dict):
+        for k in base:
+            if k in defaults and defaults[k] is not None:
+                base[k] = bool(defaults[k])
+
+    has_any = False
+    raw_preset = (
+        data.get('permission_preset')
+        or data.get('preset')
+        or nested.get('permission_preset')
+        or nested.get('preset')
     )
-    EmployeeStoreAssignment.objects.bulk_create(
-        [EmployeeStoreAssignment(employee=employee, store=s) for s in stores if s.id not in existing_ids],
-        ignore_conflicts=True,
-    )
+    if raw_preset not in (None, ''):
+        preset_key = str(raw_preset).strip().lower()
+        if preset_key not in PERMISSION_PRESET_SLUGS:
+            raise WorkforceError(
+                "El perfil de permisos ('permission_preset') no es válido. Usa 'warehouse', 'customer_care', 'editor', 'cashier' o 'trusted_manager'.",
+                code='invalid_permission_preset',
+            )
+        base.update(PERMISSION_PRESET_SLUGS[preset_key])
+        has_any = True
+
+    def _pick_bool(*keys):
+        for k in keys:
+            if k in data and data.get(k) is not None:
+                return _parse_bool_flag(data.get(k))
+            if k in nested and nested.get(k) is not None:
+                return _parse_bool_flag(nested.get(k))
+        return None
+
+    edit_flag = _pick_bool('can_edit_products', 'can_edit_inventory', 'can_edit_catalog')
+    if edit_flag is not None:
+        base['can_edit_inventory'] = edit_flag
+        has_any = True
+
+    confirm_flag = _pick_bool('can_confirm_payments', 'can_verify_payments')
+    if confirm_flag is not None:
+        base['can_confirm_payments'] = confirm_flag
+        has_any = True
+
+    orders_flag = _pick_bool('can_manage_orders')
+    if orders_flag is not None:
+        base['can_manage_orders'] = orders_flag
+        has_any = True
+
+    sales_flag = _pick_bool('can_view_sales')
+    if sales_flag is not None:
+        base['can_view_sales'] = sales_flag
+        has_any = True
+
+    return base, has_any
+
+
+def _sync_employee_stores(employee: Employee, stores: Optional[list] = None, permissions: Optional[dict] = None) -> EmployeePermission:
+    """
+    Sincroniza EmployeeStoreAssignment y EmployeePermission (sucursales + switches de permisos).
+    """
     permission, _created = EmployeePermission.objects.get_or_create(employee=employee)
-    permission.allowed_stores.set(stores)
+    if stores is not None:
+        store_ids = {s.id for s in stores}
+        EmployeeStoreAssignment.objects.filter(employee=employee).exclude(store_id__in=store_ids).delete()
+        existing_ids = set(
+            EmployeeStoreAssignment.objects.filter(employee=employee).values_list('store_id', flat=True)
+        )
+        EmployeeStoreAssignment.objects.bulk_create(
+            [EmployeeStoreAssignment(employee=employee, store=s) for s in stores if s.id not in existing_ids],
+            ignore_conflicts=True,
+        )
+        permission.allowed_stores.set(stores)
+
+    if isinstance(permissions, dict):
+        perm_update_fields = []
+        for field_name in ('can_edit_inventory', 'can_confirm_payments', 'can_manage_orders', 'can_view_sales'):
+            if field_name in permissions and permissions[field_name] is not None:
+                new_val = bool(permissions[field_name])
+                if getattr(permission, field_name) != new_val:
+                    setattr(permission, field_name, new_val)
+                    perm_update_fields.append(field_name)
+        if perm_update_fields:
+            permission.save(update_fields=perm_update_fields)
+
+    employee._state.fields_cache['permissions'] = permission
+    return permission
 
 
 def get_public_join_base() -> str:
@@ -745,7 +882,8 @@ def create_invitation(owner, data: dict) -> tuple:
     """
     Crea una invitación (solo el dueño del comercio).
 
-    Body esperado: {role, channel, target_email?, target_user_id?, store_ids?, ttl_hours?}
+    Body esperado: {role, channel, target_email?, target_user_id?, store_ids?, ttl_hours?,
+                    permission_preset?, can_edit_products?, can_confirm_payments?, can_manage_orders?, permissions?}
 
     Returns:
         tuple: (invitation, raw_token, link)
@@ -755,6 +893,7 @@ def create_invitation(owner, data: dict) -> tuple:
 
     role = parse_role(data.get('role'))
     channel = parse_channel(data.get('channel') if data.get('channel') not in (None, '') else 'qr_link')
+    perms_input, _has_perms = parse_employee_permissions_input(data)
 
     target_email = (data.get('target_email') or data.get('email') or '').strip().lower() or None
     target_user_id = data.get('target_user_id') or None
@@ -834,6 +973,9 @@ def create_invitation(owner, data: dict) -> tuple:
                 target_user=target_user,
                 stores=stores,
                 ttl_hours=ttl_hours,
+                can_edit_inventory=perms_input['can_edit_inventory'] if role == EmployeeRole.ASSISTANT else False,
+                can_confirm_payments=perms_input['can_confirm_payments'] if role == EmployeeRole.ASSISTANT else False,
+                can_manage_orders=perms_input['can_manage_orders'] if role == EmployeeRole.ASSISTANT else False,
             )
         except (IntegrityError, ValidationError):
             raise WorkforceError("No se pudo generar la invitación. Inténtalo de nuevo.", status_code=503, code='invitation_collision')
@@ -937,6 +1079,7 @@ def build_invitation_preview(invitation: EmployeeInvitation) -> dict:
             'address': addr,
         })
 
+    perms = invitation.get_permissions_dict()
     return {
         'id': invitation.id,
         'company_id': str(company.id),
@@ -969,6 +1112,11 @@ def build_invitation_preview(invitation: EmployeeInvitation) -> dict:
         'is_targeted': bool(invitation.target_user_id or invitation.target_email),
         'requires_cedula_verified': invitation.role == EmployeeRole.DELIVERY,
         'stores': stores_payload,
+        'permissions': perms,
+        'can_edit_products': perms['can_edit_products'],
+        'can_edit_inventory': perms['can_edit_inventory'],
+        'can_confirm_payments': perms['can_confirm_payments'],
+        'can_manage_orders': perms['can_manage_orders'],
         'expires_at': timezone.localtime(invitation.expires_at).isoformat() if invitation.expires_at else None,
     }
 
@@ -1105,7 +1253,16 @@ def accept_invitation(user, token: Optional[str] = None, short_code: Optional[st
         stores = list(invitation.allowed_stores.filter(company=company, is_active=True))
         if not stores:
             stores = list(CompanyStore.objects.filter(company=company, is_active=True))
-        _sync_employee_stores(employee, stores)
+        is_assistant_inv = (invitation.role == EmployeeRole.ASSISTANT)
+        _sync_employee_stores(
+            employee,
+            stores,
+            permissions={
+                'can_edit_inventory': bool(invitation.can_edit_inventory) if is_assistant_inv else False,
+                'can_confirm_payments': bool(invitation.can_confirm_payments) if is_assistant_inv else False,
+                'can_manage_orders': bool(invitation.can_manage_orders) if is_assistant_inv else False,
+            },
+        )
 
         now = timezone.now()
         invitation.status = InvitationStatus.ACCEPTED
@@ -1271,7 +1428,7 @@ def list_my_invitations(user):
 def list_company_employees(owner, include_revoked: bool = False):
     company = require_owned_company(owner)
     qs = (
-        Employee.objects.select_related('user', 'company')
+        Employee.objects.select_related('user', 'company', 'permissions')
         .prefetch_related('employeestoreassignment_set__store')
         .filter(company=company)
         .exclude(user_id=company.owner_id)
@@ -1285,7 +1442,7 @@ def get_company_employee(owner, employee_id) -> Employee:
     company = require_owned_company(owner)
     emp_pk = _parse_int(employee_id, 'employee_id')
     employee = (
-        Employee.objects.select_related('user', 'company')
+        Employee.objects.select_related('user', 'company', 'permissions')
         .prefetch_related('employeestoreassignment_set__store')
         .filter(pk=emp_pk, company=company)
         .first()
@@ -1298,8 +1455,9 @@ def get_company_employee(owner, employee_id) -> Employee:
 def update_employee(owner, employee_id, data: dict) -> Employee:
     """
     Actualiza un trabajador (solo el dueño). Campos aceptados:
-    role, vehicle_type, display_alias, store_ids, status ('active'|'suspended'|'revoked' o 0/1/2)
-    o action ('suspend'|'reactivate'|'revoke').
+    role, vehicle_type, display_alias, store_ids, status ('active'|'suspended'|'revoked')
+    o action ('suspend'|'reactivate'|'revoke'), más permisos granulares
+    (permission_preset, can_edit_products, can_confirm_payments, can_manage_orders, permissions).
     """
     company = require_owned_company(owner)
     emp_pk = _parse_int(employee_id, 'employee_id')
@@ -1308,7 +1466,7 @@ def update_employee(owner, employee_id, data: dict) -> Employee:
     with transaction.atomic():
         employee = (
             Employee.objects.select_for_update(of=('self',))
-            .select_related('user', 'company')
+            .select_related('user', 'company', 'permissions')
             .filter(pk=emp_pk, company=company)
             .first()
         )
@@ -1369,11 +1527,19 @@ def update_employee(owner, employee_id, data: dict) -> Employee:
         if update_fields:
             employee.save(update_fields=list(dict.fromkeys(update_fields)))
 
-        # --- Sucursales ---
+        # --- Sucursales y Permisos Granulares ---
+        current_perms = employee.get_permissions_dict()
+        parsed_perms, has_perm_updates = parse_employee_permissions_input(data, defaults=current_perms)
         store_ids = data.get('store_ids', data.get('allowed_store_ids'))
+        stores = None
         if store_ids is not None:
             stores = _resolve_company_stores(company, store_ids, default_all=False)
-            _sync_employee_stores(employee, stores)
+        if stores is not None or has_perm_updates:
+            _sync_employee_stores(
+                employee,
+                stores=stores,
+                permissions=parsed_perms if has_perm_updates else None,
+            )
 
         status_changed = employee.status != old_status
         role_changed = employee.role != old_role
@@ -1389,10 +1555,15 @@ def update_employee(owner, employee_id, data: dict) -> Employee:
             schedule_worker_revocation(employee, reason='role_changed')
         else:
             emp_id_for_cache = employee.id
+            user_id_for_cache = employee.user_id
             reactivated = status_changed and employee.status == EmployeeStatus.ACTIVE
 
             def _after_commit_update():
                 invalidate_employee_cache(emp_id_for_cache)
+                try:
+                    cache.delete(f"cartmaker:tenant:{user_id_for_cache}:worker:{emp_id_for_cache}:company")
+                except Exception:
+                    pass
                 if reactivated:
                     clear_worker_revoked_in_realtime(emp_id_for_cache)
 
@@ -1472,3 +1643,740 @@ def leave_company(user, employee_id) -> Employee:
 
         transaction.on_commit(_after_commit)
     return employee
+
+
+# =========================================================================
+# 7. CERO DESTRUCCIÓN, PERMISOS GRANULARES, CORTAFUEGOS ANTI-SABOTAJE
+#    Y MÁQUINA DEL TIEMPO (REVERSIÓN EN 1 TOQUE)
+# =========================================================================
+WORKER_MAX_PRICE_DROP_RATIO = 0.30          # Máximo 30% de rebaja de precio o descuento por asistentes
+CIRCUIT_BREAKER_WINDOW_S = 180              # Ventana de vigilancia: 3 minutos (180 s)
+CIRCUIT_BREAKER_MAX_EDITS_IN_WINDOW = 6     # Máximo 6 productos/lotes distintos editados en 3 min
+CIRCUIT_BREAKER_MAX_ZERO_IN_WINDOW = 3      # Máximo 3 lotes puestos en stock 0 o pausados en 3 min
+CIRCUIT_BREAKER_MAX_STRIKES_IN_WINDOW = 3   # Máximo 3 intentos bloqueados de caída brusca de precio en 3 min
+
+
+def is_worker_actor(request_or_user, employee: Optional[Employee] = None) -> bool:
+    if employee is not None:
+        return True
+    ctx = str(_extract_auth_claim(request_or_user, CTX_CLAIM, '') or CTX_PERSONAL)
+    return ctx == CTX_WORKER
+
+
+def require_owner_for_destructive_action(request_or_user, employee: Optional[Employee] = None,
+                                         resource_label: str = "elementos del catálogo") -> None:
+    """
+    Regla de Cero Destrucción: Ningún trabajador puede ejecutar DELETE sobre productos, lotes o videos.
+    """
+    if is_worker_actor(request_or_user, employee=employee):
+        raise WorkforceError(
+            f"Por seguridad, un asistente no puede eliminar {resource_label}. Solo el dueño del comercio puede realizar eliminaciones.",
+            status_code=403,
+            code='worker_delete_forbidden',
+        )
+
+
+def check_employee_permission(employee: Optional[Employee], perm_key: str) -> bool:
+    """ Si `employee` es None (es el dueño), siempre retorna True. """
+    if employee is None:
+        return True
+    perms = employee.get_permissions_dict()
+    return bool(perms.get(perm_key, False))
+
+
+def require_employee_permission(employee: Optional[Employee], perm_key: str) -> None:
+    """
+    Valida que el asistente tenga activo el permiso solicitado (`can_edit_products`, `can_confirm_payments`, `can_manage_orders`).
+    Si `employee` es None (es el dueño), pasa sin restricción.
+    """
+    if employee is None:
+        return
+    perms = employee.get_permissions_dict()
+    if perms.get(perm_key, False):
+        return
+
+    messages = {
+        'can_edit_products': (
+            "No tienes permiso para editar productos ni inventario existente. "
+            "Puedes agregar productos nuevos o sumar stock, o pedir autorización al dueño del comercio.",
+            'permission_can_edit_products_required',
+        ),
+        'can_edit_inventory': (
+            "No tienes permiso para editar productos ni inventario existente. "
+            "Puedes agregar productos nuevos o sumar stock, o pedir autorización al dueño del comercio.",
+            'permission_can_edit_products_required',
+        ),
+        'can_confirm_payments': (
+            "No tienes permiso para confirmar pagos ni finalizar órdenes manualmente. "
+            "Solicita al dueño del comercio que verifique el pago o que el repartidor valide el PIN del cliente.",
+            'permission_can_confirm_payments_required',
+        ),
+        'can_manage_orders': (
+            "No tienes permiso para gestionar pedidos ni despachos en este comercio.",
+            'permission_can_manage_orders_required',
+        ),
+    }
+    msg, code = messages.get(
+        perm_key,
+        ("No tienes permiso para realizar esta acción.", f"permission_{perm_key}_required"),
+    )
+    raise WorkforceError(msg, status_code=403, code=code)
+
+
+def trigger_worker_circuit_breaker(employee: Employee, reason_summary: str) -> None:
+    """
+    Cortafuegos Anti-Sabotaje:
+    Suspende inmediatamente al trabajador en una transacción independiente (no revertida por el error HTTP),
+    desconecta su sesión en tiempo real vía Redis + Node.js (`worker_access_revoked`) y envía una alerta urgente al dueño.
+    """
+    import threading
+
+    emp_id = employee.id
+    user_id = employee.user_id
+    company = employee.company
+    company_id = company.id
+    owner_id = company.owner_id
+    worker_name = _user_display_name(employee.user)
+
+    Employee.objects.filter(pk=emp_id).update(
+        status=EmployeeStatus.SUSPENDED,
+        is_active=False,
+    )
+    employee.status = EmployeeStatus.SUSPENDED
+    employee.is_active = False
+
+    try:
+        EmployeeAuditLog.objects.create(
+            company=company,
+            employee=employee,
+            user=employee.user,
+            action_type='circuit_breaker_triggered',
+            target_type='security',
+            target_id=str(emp_id),
+            target_label=worker_name,
+            summary=f"Cortafuegos Anti-Sabotaje activado: {reason_summary}",
+            before_snapshot={'status': int(EmployeeStatus.ACTIVE)},
+            after_snapshot={'status': int(EmployeeStatus.SUSPENDED), 'reason': reason_summary},
+            is_reversible=False,
+        )
+    except Exception as e:
+        logger.warning(f"Workforce: error guardando log de circuit breaker para emp {emp_id}: {e}")
+
+    invalidate_employee_cache(emp_id)
+    mark_worker_revoked_in_realtime(emp_id, 'circuit_breaker_sabotage_protection')
+    threading.Thread(
+        target=_post_worker_revoked_to_node,
+        args=(user_id, emp_id, company_id, 'circuit_breaker_sabotage_protection'),
+        daemon=True,
+    ).start()
+
+    def _notify_owner_and_worker():
+        try:
+            from .firebase_admin import NotificationManager
+            NotificationManager.notify_workforce_event(
+                user_id=owner_id,
+                title="⚠️ Alerta de seguridad: Acceso pausado",
+                body=(
+                    f"Pausamos preventivamente el acceso de {worker_name} por detectar modificaciones "
+                    f"masivas inusuales en tu catálogo ({reason_summary}). Puedes revisar y revertir "
+                    f"sus cambios en 1 toque desde Equipo de Trabajo."
+                ),
+                event_type='employee_circuit_breaker',
+                category=NotificationCategory.EMPLOYEE_UPDATE,
+                section=NotificationSection.MERCHANT_EMPLOYEES,
+                extra_data={
+                    'employee_id': emp_id,
+                    'company_id': str(company_id),
+                    'reason': reason_summary,
+                },
+            )
+            NotificationManager.notify_workforce_event(
+                user_id=user_id,
+                title="Acceso pausado preventivamente",
+                body=f"Tu acceso como trabajador en {company.name} fue pausado por seguridad tras detectar ediciones masivas inusuales.",
+                event_type='employee_status_changed',
+                category=NotificationCategory.EMPLOYEE_UPDATE,
+                section=NotificationSection.HOME,
+                extra_data={
+                    'employee_id': emp_id,
+                    'company_id': str(company_id),
+                    'status': int(EmployeeStatus.SUSPENDED),
+                },
+            )
+        except Exception as e:
+            logger.warning(f"Workforce: error enviando notificación de circuit breaker emp {emp_id}: {e}")
+
+    threading.Thread(target=_notify_owner_and_worker, daemon=True).start()
+
+    raise WorkforceError(
+        "Por seguridad, hemos pausado preventivamente tu acceso como trabajador tras detectar modificaciones masivas inusuales en el catálogo. El dueño del comercio ha sido notificado.",
+        status_code=403,
+        code='worker_circuit_breaker_triggered',
+    )
+
+
+def _record_worker_sabotage_strike(employee: Employee, reason: str) -> None:
+    """
+    Suma un intento sospechoso (ej. intentar bajar precios >30% o poner precios en $0).
+    Si acumula 3 intentos en 3 minutos, dispara el Cortafuegos Anti-Sabotaje.
+    """
+    if employee is None:
+        return
+    now_ts = time.time()
+    key = f"cartmaker:cb:strikes:{employee.id}"
+    strikes = []
+    try:
+        raw = cache.get(key)
+        if isinstance(raw, list):
+            strikes = [float(t) for t in raw if (now_ts - float(t)) <= CIRCUIT_BREAKER_WINDOW_S]
+    except Exception:
+        strikes = []
+    strikes.append(now_ts)
+    try:
+        cache.set(key, strikes, timeout=CIRCUIT_BREAKER_WINDOW_S)
+    except Exception:
+        pass
+    if len(strikes) >= CIRCUIT_BREAKER_MAX_STRIKES_IN_WINDOW:
+        trigger_worker_circuit_breaker(employee, reason)
+
+
+def validate_worker_price_change(employee: Optional[Employee], old_price, new_price, item_label: str = '') -> None:
+    """
+    Impide que un asistente rebaje el precio de un producto/lote en más de un 30% o lo ponga en <= $0.
+    Si es el dueño (`employee is None`), no aplica límite.
+    """
+    if employee is None or new_price is None:
+        return
+    try:
+        new_val = float(new_price)
+        old_val = float(old_price) if old_price is not None else 0.0
+    except (TypeError, ValueError):
+        raise WorkforceError("El precio indicado no es válido.", status_code=400, code='invalid_price')
+
+    label_part = f" de '{item_label}'" if item_label else ""
+    if new_val <= 0:
+        _record_worker_sabotage_strike(employee, f"intentos repetidos de poner precios en $0.00{label_part}")
+        raise WorkforceError(
+            f"Un asistente no puede establecer el precio{label_part} en $0.00 o un valor negativo.",
+            status_code=403,
+            code='price_drop_exceeds_worker_limit',
+        )
+
+    if old_val > 0:
+        min_allowed = round(old_val * (1.0 - WORKER_MAX_PRICE_DROP_RATIO), 2)
+        if new_val + 0.001 < min_allowed:
+            drop_pct = round(((old_val - new_val) / old_val) * 100.0, 1)
+            _record_worker_sabotage_strike(employee, f"intentos repetidos de rebajar precios >30% ({drop_pct}%{label_part})")
+            raise WorkforceError(
+                f"Por seguridad anti-sabotaje, un asistente no puede reducir el precio{label_part} en más de un 30% "
+                f"(precio actual: ${old_val:.2f}, mínimo permitido para asistentes: ${min_allowed:.2f}). "
+                f"Solicita esta rebaja al dueño del comercio.",
+                status_code=403,
+                code='price_drop_exceeds_worker_limit',
+            )
+
+
+def validate_worker_offer_percentage(employee: Optional[Employee], percentage, item_label: str = '') -> None:
+    """ Impide que un asistente aplique ofertas superiores al 30% de descuento. """
+    if employee is None:
+        return
+    try:
+        pct = int(percentage)
+    except (TypeError, ValueError):
+        raise WorkforceError("El porcentaje de descuento no es válido.", status_code=400, code='invalid_offer_percentage')
+
+    if pct <= 0 or pct >= 100:
+        raise WorkforceError("El porcentaje de descuento debe estar entre 1% y 99%.", status_code=400, code='invalid_offer_percentage')
+
+    if pct > int(WORKER_MAX_PRICE_DROP_RATIO * 100):
+        label_part = f" en '{item_label}'" if item_label else ""
+        _record_worker_sabotage_strike(employee, f"intentos repetidos de aplicar descuentos >30% ({pct}%{label_part})")
+        raise WorkforceError(
+            f"Por seguridad anti-sabotaje, un asistente no puede aplicar ofertas mayores al 30% de descuento{label_part}. "
+            f"Solicita este descuento al dueño del comercio.",
+            status_code=403,
+            code='price_drop_exceeds_worker_limit',
+        )
+
+
+def check_and_record_worker_catalog_mutation(
+    employee: Optional[Employee],
+    target_type: str,
+    target_id,
+    is_zero_stock_or_pause: bool = False,
+) -> None:
+    """
+    Evalúa la tasa de modificaciones en catálogo/inventario realizadas por el asistente en los últimos 3 minutos.
+    Si supera los umbrales de seguridad (>6 ítems editados o >3 lotes vaciados/pausados en 3 min),
+    dispara `trigger_worker_circuit_breaker` antes de permitir el cambio.
+    """
+    if employee is None:
+        return
+
+    now_ts = time.time()
+    target_key = f"{target_type}:{target_id}"
+    edits_cache_key = f"cartmaker:cb:edits:{employee.id}"
+    zero_cache_key = f"cartmaker:cb:zero:{employee.id}"
+
+    # 1. Ventana de ediciones generales en catálogo
+    edits_entries = []
+    try:
+        raw_edits = cache.get(edits_cache_key)
+        if isinstance(raw_edits, list):
+            edits_entries = [
+                e for e in raw_edits
+                if isinstance(e, dict) and (now_ts - float(e.get('ts', 0))) <= CIRCUIT_BREAKER_WINDOW_S
+            ]
+    except Exception:
+        edits_entries = []
+
+    edits_entries.append({'ts': now_ts, 'target': target_key})
+    distinct_targets = {e.get('target') for e in edits_entries if e.get('target')}
+
+    # Respaldo en BD si Redis estuviese vacío o reiniciado
+    if len(distinct_targets) <= CIRCUIT_BREAKER_MAX_EDITS_IN_WINDOW:
+        window_start = timezone.now() - timedelta(seconds=CIRCUIT_BREAKER_WINDOW_S)
+        db_targets = set(
+            EmployeeAuditLog.objects.filter(
+                employee=employee,
+                is_reversible=True,
+                created_at__gte=window_start,
+            ).values_list('target_type', 'target_id')
+        )
+        for t_type, t_id in db_targets:
+            distinct_targets.add(f"{t_type}:{t_id}")
+
+    try:
+        cache.set(edits_cache_key, edits_entries, timeout=CIRCUIT_BREAKER_WINDOW_S)
+    except Exception:
+        pass
+
+    if len(distinct_targets) > CIRCUIT_BREAKER_MAX_EDITS_IN_WINDOW:
+        trigger_worker_circuit_breaker(
+            employee,
+            f"{len(distinct_targets)} productos/lotes modificados en menos de 3 minutos",
+        )
+
+    # 2. Ventana específica de vaciado de stock (stock -> 0) o pausado de lotes
+    if is_zero_stock_or_pause:
+        zero_entries = []
+        try:
+            raw_zeros = cache.get(zero_cache_key)
+            if isinstance(raw_zeros, list):
+                zero_entries = [
+                    e for e in raw_zeros
+                    if isinstance(e, dict) and (now_ts - float(e.get('ts', 0))) <= CIRCUIT_BREAKER_WINDOW_S
+                ]
+        except Exception:
+            zero_entries = []
+
+        zero_entries.append({'ts': now_ts, 'target': target_key})
+        distinct_zeros = {e.get('target') for e in zero_entries if e.get('target')}
+        try:
+            cache.set(zero_cache_key, zero_entries, timeout=CIRCUIT_BREAKER_WINDOW_S)
+        except Exception:
+            pass
+
+        if len(distinct_zeros) > CIRCUIT_BREAKER_MAX_ZERO_IN_WINDOW:
+            trigger_worker_circuit_breaker(
+                employee,
+                f"{len(distinct_zeros)} lotes pausados o puestos en stock 0 en menos de 3 minutos",
+            )
+
+
+def snapshot_product(product: Product) -> dict:
+    """ Captura el estado serializable completo de un `Product` para poder restaurarlo en 1 toque. """
+    return {
+        'name': product.name,
+        'price': str(product.price),
+        'description': product.description,
+        'category_id': product.category_id,
+        'discounts_by_tokens_active': bool(product.discounts_by_tokens_active),
+        'discounts_data': product.discounts_data,
+        'images': list(product.images or []),
+        'selling_unit': product.selling_unit,
+        'unit_label': product.unit_label,
+        'allow_fractional_quantity': bool(product.allow_fractional_quantity),
+        'min_order_quantity': str(product.min_order_quantity),
+        'unit_step': str(product.unit_step),
+        'attributes': product.attributes,
+        'variants': product.variants,
+        'modifier_groups': product.modifier_groups,
+    }
+
+
+def snapshot_inventory_item(item: InventoryItem) -> dict:
+    """ Captura el estado serializable completo de un `InventoryItem` (incluyendo su oferta vigente). """
+    offer_data = None
+    try:
+        offer = item.offer
+        if offer is not None:
+            offer_data = {
+                'percentage': int(offer.percentage),
+                'valid_until': offer.valid_until.isoformat() if offer.valid_until else None,
+            }
+    except Exception:
+        offer_data = None
+
+    return {
+        'stock': int(item.stock),
+        'custom_price': str(item.custom_price) if item.custom_price is not None else None,
+        'paused': bool(item.paused),
+        'expiration_date': item.expiration_date.isoformat() if item.expiration_date else None,
+        'offer': offer_data,
+    }
+
+
+def snapshot_video_story(story: CompanyVideoStory) -> dict:
+    """ Captura el estado editable de un `CompanyVideoStory`. """
+    return {
+        'title': story.title,
+        'description': story.description,
+        'associated_item_id': str(story.associated_item_id) if story.associated_item_id else None,
+        'metadata': story.metadata,
+        'applied_filter_matrix': story.applied_filter_matrix,
+    }
+
+
+def record_employee_audit_log(
+    employee: Optional[Employee],
+    *,
+    action_type: str,
+    target_type: str,
+    target_id,
+    target_label: str = '',
+    summary: str = '',
+    before_snapshot: Optional[dict] = None,
+    after_snapshot: Optional[dict] = None,
+    is_reversible: bool = False,
+) -> Optional[EmployeeAuditLog]:
+    """
+    Registra una entrada en `EmployeeAuditLog` cuando quien ejecuta la operación es un empleado.
+    Si `employee` es None (es el dueño), no hace nada y retorna None.
+    """
+    if employee is None:
+        return None
+    try:
+        return EmployeeAuditLog.objects.create(
+            company_id=employee.company_id,
+            employee=employee,
+            user_id=employee.user_id,
+            action_type=action_type,
+            target_type=target_type,
+            target_id=str(target_id),
+            target_label=(target_label or '')[:255],
+            summary=(summary or '')[:255],
+            before_snapshot=before_snapshot or {},
+            after_snapshot=after_snapshot or {},
+            is_reversible=bool(is_reversible),
+        )
+    except Exception as e:
+        logger.warning(f"Workforce: no se pudo registrar EmployeeAuditLog para emp {employee.id}: {e}")
+        return None
+
+
+def list_employee_audit_logs(
+    owner,
+    employee_id=None,
+    hours: int = 168,
+    only_reversible: bool = False,
+) -> dict:
+    """
+    Lista la bitácora de cambios realizados por un empleado (o todos los empleados del comercio).
+    """
+    company = require_owned_company(owner)
+    try:
+        hours_val = max(1, min(720, int(hours or 168)))
+    except (TypeError, ValueError):
+        hours_val = 168
+
+    cutoff = timezone.now() - timedelta(hours=hours_val)
+    qs = (
+        EmployeeAuditLog.objects.select_related('employee__user', 'user', 'reverted_by')
+        .filter(company=company, created_at__gte=cutoff)
+    )
+    if employee_id not in (None, ''):
+        emp_pk = _parse_int(employee_id, 'employee_id')
+        if not Employee.objects.filter(pk=emp_pk, company=company).exists():
+            raise WorkforceError("El trabajador no existe en tu comercio.", status_code=404, code='employee_not_found')
+        qs = qs.filter(employee_id=emp_pk)
+
+    if only_reversible:
+        qs = qs.filter(is_reversible=True, reverted_at__isnull=True)
+
+    logs = list(qs.order_by('-created_at')[:200])
+    pending_reversible_24h = EmployeeAuditLog.objects.filter(
+        company=company,
+        is_reversible=True,
+        reverted_at__isnull=True,
+        created_at__gte=timezone.now() - timedelta(hours=24),
+        **({'employee_id': int(employee_id)} if employee_id not in (None, '') else {}),
+    ).count()
+    pending_reversible_7d = EmployeeAuditLog.objects.filter(
+        company=company,
+        is_reversible=True,
+        reverted_at__isnull=True,
+        created_at__gte=timezone.now() - timedelta(hours=168),
+        **({'employee_id': int(employee_id)} if employee_id not in (None, '') else {}),
+    ).count()
+
+    return {
+        'hours': hours_val,
+        'reversible_count_24h': pending_reversible_24h,
+        'reversible_count_7d': pending_reversible_7d,
+        'logs': [log.get_json() for log in logs],
+    }
+
+
+def rollback_employee_changes(
+    owner,
+    employee_id,
+    hours: int = 24,
+    log_ids: Optional[list] = None,
+    also_suspend: bool = False,
+) -> dict:
+    """
+    Máquina del Tiempo (Reversión en 1 Toque):
+    Restaura los productos, lotes de inventario, ofertas e historias de video modificados por el
+    empleado (`employee_id`) a su estado original previo (`before_snapshot`).
+    Si un mismo producto fue editado varias veces en la ventana, aplica el `before_snapshot` de la
+    primera edición cronológica de esa ventana para dejarlo exactamente como estaba antes.
+    """
+    company = require_owned_company(owner)
+    emp_pk = _parse_int(employee_id, 'employee_id')
+    employee = (
+        Employee.objects.select_related('user', 'company', 'permissions')
+        .filter(pk=emp_pk, company=company)
+        .first()
+    )
+    if employee is None:
+        raise WorkforceError("El trabajador no existe en tu comercio.", status_code=404, code='employee_not_found')
+
+    try:
+        hours_val = max(1, min(720, int(hours or 24)))
+    except (TypeError, ValueError):
+        hours_val = 24
+
+    qs = EmployeeAuditLog.objects.filter(
+        company=company,
+        employee=employee,
+        is_reversible=True,
+        reverted_at__isnull=True,
+    )
+    if isinstance(log_ids, (list, tuple)) and len(log_ids) > 0:
+        clean_log_ids = []
+        for raw_id in log_ids:
+            try:
+                clean_log_ids.append(int(raw_id))
+            except (TypeError, ValueError):
+                pass
+        if not clean_log_ids:
+            raise WorkforceError("La lista 'log_ids' no contiene identificadores válidos.", code='invalid_log_ids')
+        qs = qs.filter(id__in=clean_log_ids)
+    else:
+        cutoff = timezone.now() - timedelta(hours=hours_val)
+        qs = qs.filter(created_at__gte=cutoff)
+
+    # Orden ascendente: el primer log por cada (target_type, target_id) tiene el before_snapshot original
+    logs_to_revert = list(qs.order_by('created_at', 'id'))
+    if not logs_to_revert and not also_suspend:
+        return {
+            'reverted_logs_count': 0,
+            'restored_products_count': 0,
+            'restored_inventory_items_count': 0,
+            'restored_stories_count': 0,
+            'employee_status': int(employee.status),
+            'employee_status_label': str(employee.get_status_display()),
+            'reverted_items': [],
+        }
+
+    earliest_by_target = {}
+    grouped_log_ids = []
+    for log in logs_to_revert:
+        grouped_log_ids.append(log.id)
+        key = (log.target_type, str(log.target_id))
+        if key not in earliest_by_target:
+            earliest_by_target[key] = log
+
+    restored_products = 0
+    restored_items = 0
+    restored_stories = 0
+    reverted_items_summary = []
+    affected_item_cache_ids = set()
+
+    with transaction.atomic():
+        for (target_type, target_id), first_log in earliest_by_target.items():
+            snap = first_log.before_snapshot if isinstance(first_log.before_snapshot, dict) else {}
+            if not snap:
+                continue
+
+            if target_type == 'product':
+                prod = Product.objects.select_for_update(of=('self',)).filter(id=target_id, company=company).first()
+                if prod is None:
+                    continue
+                if 'name' in snap:
+                    prod.name = snap['name']
+                if 'price' in snap and snap['price'] is not None:
+                    try:
+                        prod.price = Decimal(str(snap['price']))
+                    except (InvalidOperation, TypeError, ValueError):
+                        pass
+                if 'description' in snap:
+                    prod.description = snap['description']
+                if 'category_id' in snap and snap['category_id']:
+                    if SubCategory.objects.filter(id=snap['category_id']).exists():
+                        prod.category_id = snap['category_id']
+                if 'discounts_by_tokens_active' in snap:
+                    prod.discounts_by_tokens_active = bool(snap['discounts_by_tokens_active'])
+                if 'discounts_data' in snap:
+                    prod.discounts_data = snap['discounts_data']
+                if 'images' in snap and isinstance(snap['images'], list):
+                    prod.images = snap['images']
+                if 'selling_unit' in snap and snap['selling_unit']:
+                    prod.selling_unit = snap['selling_unit']
+                if 'unit_label' in snap and snap['unit_label'] is not None:
+                    prod.unit_label = snap['unit_label']
+                if 'allow_fractional_quantity' in snap:
+                    prod.allow_fractional_quantity = bool(snap['allow_fractional_quantity'])
+                if 'min_order_quantity' in snap and snap['min_order_quantity'] is not None:
+                    try:
+                        prod.min_order_quantity = Decimal(str(snap['min_order_quantity']))
+                    except (InvalidOperation, TypeError, ValueError):
+                        pass
+                if 'unit_step' in snap and snap['unit_step'] is not None:
+                    try:
+                        prod.unit_step = Decimal(str(snap['unit_step']))
+                    except (InvalidOperation, TypeError, ValueError):
+                        pass
+                if 'attributes' in snap and isinstance(snap['attributes'], dict):
+                    prod.attributes = snap['attributes']
+                if 'variants' in snap and isinstance(snap['variants'], list):
+                    prod.variants = snap['variants']
+                if 'modifier_groups' in snap and isinstance(snap['modifier_groups'], list):
+                    prod.modifier_groups = snap['modifier_groups']
+                prod.save()
+                restored_products += 1
+                for iid in InventoryItem.objects.filter(product=prod).values_list('id', flat=True):
+                    affected_item_cache_ids.add(str(iid))
+                reverted_items_summary.append({
+                    'target_type': 'product',
+                    'target_id': str(prod.id),
+                    'target_label': prod.name,
+                    'summary': f"Producto '{prod.name}' restaurado a su estado anterior.",
+                })
+
+            elif target_type == 'inventory_item':
+                item = (
+                    InventoryItem.objects.select_for_update(of=('self',))
+                    .select_related('product', 'store')
+                    .filter(id=target_id, store__company=company)
+                    .first()
+                )
+                if item is None:
+                    continue
+                if 'stock' in snap and snap['stock'] is not None:
+                    item.stock = int(snap['stock'])
+                if 'custom_price' in snap:
+                    if snap['custom_price'] in (None, ''):
+                        item.custom_price = None
+                    else:
+                        try:
+                            item.custom_price = Decimal(str(snap['custom_price']))
+                        except (InvalidOperation, TypeError, ValueError):
+                            pass
+                if 'paused' in snap:
+                    item.paused = bool(snap['paused'])
+                if 'expiration_date' in snap:
+                    if not snap['expiration_date']:
+                        item.expiration_date = None
+                    else:
+                        parsed_dt = parse_datetime(str(snap['expiration_date']))
+                        if parsed_dt is not None:
+                            item.expiration_date = parsed_dt
+                item.save()
+
+                if 'offer' in snap:
+                    offer_snap = snap.get('offer')
+                    if not offer_snap:
+                        InventoryItemOffer.objects.filter(product_item=item).delete()
+                    elif isinstance(offer_snap, dict):
+                        valid_dt = parse_datetime(str(offer_snap.get('valid_until') or ''))
+                        if valid_dt is not None and offer_snap.get('percentage') is not None:
+                            InventoryItemOffer.objects.update_or_create(
+                                product_item=item,
+                                defaults={
+                                    'percentage': int(offer_snap['percentage']),
+                                    'valid_until': valid_dt,
+                                },
+                            )
+                restored_items += 1
+                affected_item_cache_ids.add(str(item.id))
+                reverted_items_summary.append({
+                    'target_type': 'inventory_item',
+                    'target_id': str(item.id),
+                    'target_label': item.product.name,
+                    'summary': f"Lote de '{item.product.name}' ({item.store.name}) restaurado.",
+                })
+
+            elif target_type == 'story_video':
+                story = (
+                    CompanyVideoStory.objects.select_for_update(of=('self',))
+                    .filter(id=target_id, company=company)
+                    .first()
+                )
+                if story is None:
+                    continue
+                if 'title' in snap:
+                    story.title = snap['title'] or ''
+                if 'description' in snap:
+                    story.description = snap['description'] or ''
+                if 'associated_item_id' in snap:
+                    assoc_id = snap['associated_item_id']
+                    if not assoc_id:
+                        story.associated_item = None
+                    else:
+                        assoc_item = InventoryItem.objects.filter(id=assoc_id, store__company=company).first()
+                        if assoc_item is not None:
+                            story.associated_item = assoc_item
+                if 'metadata' in snap and isinstance(snap['metadata'], dict):
+                    story.metadata = snap['metadata']
+                if 'applied_filter_matrix' in snap:
+                    story.applied_filter_matrix = snap['applied_filter_matrix']
+                story.save()
+                restored_stories += 1
+                reverted_items_summary.append({
+                    'target_type': 'story_video',
+                    'target_id': str(story.id),
+                    'target_label': story.title or f"Video #{story.id}",
+                    'summary': f"Historia de video '{story.title or story.id}' restaurada.",
+                })
+
+        now = timezone.now()
+        if grouped_log_ids:
+            EmployeeAuditLog.objects.filter(id__in=grouped_log_ids).update(
+                reverted_at=now,
+                reverted_by=owner,
+            )
+
+        if also_suspend and employee.status == EmployeeStatus.ACTIVE:
+            employee.status = EmployeeStatus.SUSPENDED
+            employee.save(update_fields=['status', 'is_active'])
+            schedule_worker_revocation(employee, reason='suspended')
+
+        if affected_item_cache_ids:
+            keys_to_del = (
+                [f"cartmaker:struct:item:{iid}" for iid in affected_item_cache_ids]
+                + [f"cartmaker:volatile:item:{iid}" for iid in affected_item_cache_ids]
+            )
+            transaction.on_commit(lambda: cache.delete_many(keys_to_del))
+
+    return {
+        'reverted_logs_count': len(grouped_log_ids),
+        'restored_products_count': restored_products,
+        'restored_inventory_items_count': restored_items,
+        'restored_stories_count': restored_stories,
+        'employee_status': int(employee.status),
+        'employee_status_label': str(employee.get_status_display()),
+        'reverted_items': reverted_items_summary,
+    }
+

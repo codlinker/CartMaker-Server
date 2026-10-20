@@ -161,13 +161,20 @@ class EmployeeInvitationAdmin(ModelAdmin):
 
 @admin.register(EmployeePermission)
 class EmployeePermissionAdmin(ModelAdmin):
-    list_display = ("employee", "can_edit_inventory", "can_view_sales", "can_manage_orders")
-    list_filter = ("can_edit_inventory", "can_view_sales", "can_manage_orders")
+    list_display = ("employee", "can_edit_inventory", "can_confirm_payments", "can_manage_orders", "can_view_sales")
+    list_filter = ("can_edit_inventory", "can_confirm_payments", "can_manage_orders", "can_view_sales")
 
 @admin.register(EmployeeStoreAssignment)
 class EmployeeStoreAssignmentAdmin(ModelAdmin):
     list_display = ("employee", "store")
     list_filter = ("store",)
+
+@admin.register(EmployeeAuditLog)
+class EmployeeAuditLogAdmin(ModelAdmin):
+    list_display = ("id", "company", "employee", "action_type", "target_type", "target_label", "is_reversible", "reverted_at", "created_at")
+    list_filter = ("action_type", "target_type", "is_reversible", "company")
+    search_fields = ("target_label", "summary", "employee__user__email", "company__name")
+    readonly_fields = ("company", "employee", "user", "action_type", "target_type", "target_id", "target_label", "summary", "before_snapshot", "after_snapshot", "is_reversible", "reverted_at", "reverted_by", "created_at")
 
 # --- MÓDULO 4: VENTAS Y FIDELIZACIÓN ---
 

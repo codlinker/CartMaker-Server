@@ -1,7 +1,28 @@
 """Company Video Stories, Gamification / CartMaker Tokens, and Universal Q&A Conversations."""
 from .base import *
 from .base import _get_cached_bcv_rate, _extract_and_validate_category_ids
-from ..core.workforce import resolve_merchant_actor, user_can_manage_company, user_can_manage_store
+from ..core.workforce import (
+    WorkforceError,
+    resolve_merchant_actor,
+    user_can_manage_company,
+    user_can_manage_store,
+    require_owner_for_destructive_action,
+    require_employee_permission,
+    check_and_record_worker_catalog_mutation,
+    snapshot_video_story,
+    record_employee_audit_log,
+)
+
+
+def _story_workforce_error_response(err: WorkforceError) -> Response:
+    payload = {
+        'success': False,
+        'error': err.message,
+        'detail': err.message,
+    }
+    if err.code:
+        payload['code'] = err.code
+    return Response(payload, status=err.status_code)
 
 class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
     """
@@ -118,6 +139,19 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        try:
+            _company, emp, _allowed = resolve_merchant_actor(request, target_company_id=instance.company_id)
+            if emp is not None:
+                require_employee_permission(emp, 'can_edit_products')
+                check_and_record_worker_catalog_mutation(
+                    emp,
+                    f"story:{instance.id}",
+                    zeroed_stock_or_paused=False,
+                )
+        except WorkforceError as e:
+            return _story_workforce_error_response(e)
+
+        before_snap = snapshot_video_story(instance)
         company = instance.company
         old_item_id = instance.associated_item_id
         update_fields = set()
@@ -260,6 +294,18 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
 
                 update_fields.add('updated_at')
                 instance.save(update_fields=list(update_fields))
+
+                if emp is not None:
+                    record_employee_audit_log(
+                        emp,
+                        action='video_story_updated',
+                        target_type='video_story',
+                        target_id=instance.id,
+                        target_label=instance.title or instance.description[:60] or 'Historia de video',
+                        before_snapshot=before_snap,
+                        after_snapshot=snapshot_video_story(instance),
+                        is_reversible=True,
+                    )
 
                 if video_obj or (filter_changed and instance.video_file):
                     optimize_and_transcode_video_story.delay(instance.id)
@@ -460,9 +506,14 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
 
     # 💡 2. OVERRIDE: Destrucción segura
     def destroy(self, request, *args, **kwargs):
+        try:
+            require_owner_for_destructive_action(request, resource_label='videos del comercio')
+        except WorkforceError as e:
+            return _story_workforce_error_response(e)
+
         instance = self.get_object()
         
-        # Validar que el dueño o asistente de la compañía sea el que intenta borrar
+        # Validar que el dueño de la compañía sea el que intenta borrar
         if not user_can_manage_company(request, instance.company):
              return Response({"error": "No tienes permiso para eliminar este video."}, status=status.HTTP_403_FORBIDDEN)
         
@@ -485,7 +536,7 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
         """
         try:
             # 1. Obtener la compañía del comerciante o asistente
-            company, _emp, _allowed_store_ids = resolve_merchant_actor(request)
+            company, emp, _allowed_store_ids = resolve_merchant_actor(request)
             if not company:
                 return Response({
                     "error": "No tienes una compañía registrada para subir videos."
@@ -572,6 +623,18 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
                     expires_at=expires_at,
                     duration_seconds=duration
                 )
+
+                if emp is not None:
+                    record_employee_audit_log(
+                        emp,
+                        action='video_story_created',
+                        target_type='video_story',
+                        target_id=story.id,
+                        target_label=story.title or story.description[:60] or 'Historia de video',
+                        before_snapshot={},
+                        after_snapshot=snapshot_video_story(story),
+                        is_reversible=False,
+                    )
 
                 # 💡 Lanzamos la tarea a Celery
                 optimize_and_transcode_video_story.delay(story.id)

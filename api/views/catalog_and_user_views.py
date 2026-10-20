@@ -1,7 +1,31 @@
 """Inventory Items, Products, Push Notifications, Client Contact Methods, Locations, and User Profile."""
 from .base import *
 from .base import _get_cached_bcv_rate, _extract_and_validate_category_ids
-from ..core.workforce import resolve_merchant_actor, user_can_manage_store
+from ..core.workforce import (
+    WorkforceError,
+    resolve_merchant_actor,
+    user_can_manage_store,
+    require_owner_for_destructive_action,
+    require_employee_permission,
+    validate_worker_price_change,
+    validate_worker_offer_percentage,
+    check_and_record_worker_catalog_mutation,
+    snapshot_product,
+    snapshot_inventory_item,
+    record_employee_audit_log,
+)
+
+
+def _catalog_workforce_error_response(err: WorkforceError) -> Response:
+    payload = {
+        'success': False,
+        'error': err.message,
+        'detail': err.message,
+    }
+    if err.code:
+        payload['code'] = err.code
+    return Response(payload, status=err.status_code)
+
 
 class InventoryItemViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
@@ -12,28 +36,32 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         company, _emp, allowed_store_ids = resolve_merchant_actor(self.request)
         if company is None:
             return InventoryItem.objects.none()
-        qs = InventoryItem.objects.filter(store__company=company)
+        qs = InventoryItem.objects.select_related('store__company', 'product__company', 'product__category').filter(store__company=company)
         if allowed_store_ids is not None:
             qs = qs.filter(store_id__in=allowed_store_ids)
         return qs.order_by('-creation')
 
     def create(self, request, *args, **kwargs):
         try:
+            store_id = request.data.get('store_id')
+            product_id = request.data.get('product_id')
+            stock = request.data.get('stock', 0)
+            expiration_date_raw = request.data.get('expiration_date')
+            custom_price = request.data.get('custom_price')
+
+            store = CompanyStore.objects.select_related('company').get(id=store_id)
+            if not user_can_manage_store(request, store):
+                return Response(
+                    {'success': False, 'error': 'No tienes permisos operativos sobre esta sucursal.', 'code': 'store_not_allowed'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            _company, emp, _allowed = resolve_merchant_actor(request, target_company_id=store.company_id)
+            product = Product.objects.select_related('company').get(id=product_id, company=store.company)
+
+            if emp is not None and custom_price not in (None, ''):
+                validate_worker_price_change(emp, product.price, custom_price, target_label=product.name)
+
             with transaction.atomic():
-                store_id = request.data.get('store_id')
-                product_id = request.data.get('product_id')
-                stock = request.data.get('stock', 0)
-                expiration_date_raw = request.data.get('expiration_date')
-                custom_price = request.data.get('custom_price')
-
-                store = CompanyStore.objects.select_related('company').get(id=store_id)
-                if not user_can_manage_store(request, store):
-                    return Response(
-                        {'success': False, 'error': 'No tienes permisos operativos sobre esta sucursal.'},
-                        status=status.HTTP_403_FORBIDDEN,
-                    )
-                product = Product.objects.select_related('company').get(id=product_id, company=store.company)
-
                 # Procesamos la fecha de caducidad usando nuestra función flexible
                 exp_datetime = None
                 if expiration_date_raw:
@@ -47,17 +75,139 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
                     product=product,
                     stock=int(stock),
                     expiration_date=exp_datetime,
-                    custom_price=custom_price if custom_price else None
+                    custom_price=custom_price if custom_price not in (None, '') else None
                 )
                 InventoryItemTransaction.objects.create(
                     item=item,
                     units=int(stock),
                     transaction_type=TransactionType.CREATION
                 )
+                if emp is not None:
+                    record_employee_audit_log(
+                        emp,
+                        action='inventory_item_created',
+                        target_type='inventory_item',
+                        target_id=item.id,
+                        target_label=f"{product.name} ({store.name})",
+                        before_snapshot={},
+                        after_snapshot=snapshot_inventory_item(item),
+                        is_reversible=True,
+                    )
 
                 return Response({'success': True, 'data': item.get_json()}, status=status.HTTP_201_CREATED)
+        except WorkforceError as e:
+            return _catalog_workforce_error_response(e)
         except Exception as e:
             return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def update(self, request, *args, **kwargs):
+        item_ref = self.get_object()
+        try:
+            _company, emp, _allowed = resolve_merchant_actor(request, target_company_id=item_ref.store.company_id)
+            if emp is not None:
+                require_employee_permission(emp, 'can_edit_products')
+
+            data = request.data if isinstance(request.data, dict) else {}
+            if emp is not None and 'custom_price' in data and data.get('custom_price') not in (None, ''):
+                ref_price = item_ref.custom_price if item_ref.custom_price is not None else item_ref.product.price
+                validate_worker_price_change(emp, ref_price, data.get('custom_price'), target_label=item_ref.product.name)
+
+            zeroed_or_paused = False
+            if emp is not None:
+                if 'paused' in data:
+                    new_paused = str(data.get('paused')).strip().lower() in ('1', 'true', 'yes', 'si', 'sí') if not isinstance(data.get('paused'), bool) else data.get('paused')
+                    if new_paused and not item_ref.paused:
+                        zeroed_or_paused = True
+                if 'stock' in data and data.get('stock') not in (None, ''):
+                    try:
+                        if int(data.get('stock')) <= 0 and item_ref.stock > 0:
+                            zeroed_or_paused = True
+                    except (TypeError, ValueError):
+                        pass
+                check_and_record_worker_catalog_mutation(
+                    emp,
+                    f"item:{item_ref.id}",
+                    zeroed_stock_or_paused=zeroed_or_paused,
+                )
+
+            with transaction.atomic():
+                locked_item = (
+                    InventoryItem.objects.select_for_update()
+                    .select_related('product', 'store')
+                    .get(pk=item_ref.pk)
+                )
+                before_snap = snapshot_inventory_item(locked_item)
+
+                if 'paused' in data:
+                    raw_paused = data.get('paused')
+                    locked_item.paused = (
+                        raw_paused
+                        if isinstance(raw_paused, bool)
+                        else str(raw_paused).strip().lower() in ('1', 'true', 'yes', 'si', 'sí')
+                    )
+
+                if 'custom_price' in data:
+                    raw_cp = data.get('custom_price')
+                    locked_item.custom_price = float(raw_cp) if raw_cp not in (None, '') else None
+
+                if 'expiration_date' in data:
+                    exp_raw = data.get('expiration_date')
+                    if exp_raw in (None, ''):
+                        locked_item.expiration_date = None
+                    else:
+                        parsed_date = parse_flexible_date(exp_raw)
+                        if parsed_date:
+                            locked_item.expiration_date = timezone.make_aware(
+                                datetime.combine(parsed_date.date(), datetime.max.time())
+                            )
+
+                if 'stock' in data and data.get('stock') not in (None, ''):
+                    new_stock = max(0, int(data.get('stock')))
+                    delta = new_stock - int(locked_item.stock or 0)
+                    locked_item.stock = new_stock
+                    if delta != 0:
+                        InventoryItemTransaction.objects.create(
+                            item=locked_item,
+                            units=abs(delta),
+                            transaction_type=TransactionType.INCOME if delta > 0 else TransactionType.OUTCOME,
+                        )
+
+                locked_item.save()
+                after_snap = snapshot_inventory_item(locked_item)
+
+                if emp is not None:
+                    record_employee_audit_log(
+                        emp,
+                        action='inventory_item_updated',
+                        target_type='inventory_item',
+                        target_id=locked_item.id,
+                        target_label=f"{locked_item.product.name} ({locked_item.store.name})",
+                        before_snapshot=before_snap,
+                        after_snapshot=after_snap,
+                        is_reversible=True,
+                    )
+
+                item_id = locked_item.id
+                transaction.on_commit(lambda: cache.delete(f"cartmaker:struct:item:{item_id}"))
+
+            locked_item.refresh_from_db()
+            return Response({'success': True, 'data': locked_item.get_json()}, status=status.HTTP_200_OK)
+        except WorkforceError as e:
+            return _catalog_workforce_error_response(e)
+        except Exception as e:
+            return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def partial_update(self, request, *args, **kwargs):
+        return self.update(request, *args, **kwargs)
+
+    @action(detail=True, methods=['post'])
+    def toggle_pause(self, request, pk=None):
+        item = self.get_object()
+        desired_paused = request.data.get('paused')
+        if desired_paused is None:
+            desired_paused = not item.paused
+        request._full_data = {'paused': desired_paused}
+        return self.update(request, pk=pk)
 
     @action(detail=True, methods=['post'])
     def apply_offer(self, request, pk=None):
@@ -66,6 +216,16 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         valid_until_raw = request.data.get('valid_until')
 
         try:
+            _company, emp, _allowed = resolve_merchant_actor(request, target_company_id=item.store.company_id)
+            if emp is not None:
+                require_employee_permission(emp, 'can_edit_products')
+                validate_worker_offer_percentage(emp, percentage, target_label=item.product.name)
+                check_and_record_worker_catalog_mutation(
+                    emp,
+                    f"item:{item.id}",
+                    zeroed_stock_or_paused=False,
+                )
+
             # Procesamos la fecha de la oferta
             parsed_date = parse_flexible_date(valid_until_raw)
             if not parsed_date:
@@ -74,13 +234,31 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             # Seteamos la expiración a las 23:59:59 de ese día con su Timezone
             valid_datetime = timezone.make_aware(datetime.combine(parsed_date.date(), datetime.max.time()))
 
-            InventoryItemOffer.objects.update_or_create(
-                product_item=item,
-                defaults={'percentage': int(percentage), 'valid_until': valid_datetime}
-            )
-            
-            item.refresh_from_db()
+            with transaction.atomic():
+                before_snap = snapshot_inventory_item(item)
+                InventoryItemOffer.objects.update_or_create(
+                    product_item=item,
+                    defaults={'percentage': int(percentage), 'valid_until': valid_datetime}
+                )
+                item.refresh_from_db()
+                after_snap = snapshot_inventory_item(item)
+                if emp is not None:
+                    record_employee_audit_log(
+                        emp,
+                        action='offer_applied',
+                        target_type='inventory_item',
+                        target_id=item.id,
+                        target_label=f"{item.product.name} ({item.store.name})",
+                        before_snapshot=before_snap,
+                        after_snapshot=after_snap,
+                        is_reversible=True,
+                    )
+                item_id = item.id
+                transaction.on_commit(lambda: cache.delete(f"cartmaker:struct:item:{item_id}"))
+
             return Response({'success': True, 'data': item.get_json()}, status=status.HTTP_200_OK)
+        except WorkforceError as e:
+            return _catalog_workforce_error_response(e)
         except Exception as e:
             return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
@@ -97,8 +275,10 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             return Response({'error': {'error': 'Cantidad inválida.'}}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
+            _company, emp, _allowed = resolve_merchant_actor(request, target_company_id=item.store.company_id)
             with transaction.atomic():
-                locked_item = InventoryItem.objects.select_for_update().get(pk=item.pk)
+                locked_item = InventoryItem.objects.select_for_update().select_related('product', 'store').get(pk=item.pk)
+                before_snap = snapshot_inventory_item(locked_item)
                 # 1. Actualizamos el stock de forma atómica
                 locked_item.stock += units
                 locked_item.creation = timezone.now()
@@ -110,13 +290,31 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
                     units=units,
                     transaction_type=TransactionType.INCOME
                 )
+                after_snap = snapshot_inventory_item(locked_item)
+                if emp is not None:
+                    record_employee_audit_log(
+                        emp,
+                        action='inventory_item_restocked',
+                        target_type='inventory_item',
+                        target_id=locked_item.id,
+                        target_label=f"{locked_item.product.name} ({locked_item.store.name})",
+                        before_snapshot=before_snap,
+                        after_snapshot=after_snap,
+                        is_reversible=False,
+                    )
 
             item.refresh_from_db()
             return Response({'success': True, 'data': item.get_json()}, status=status.HTTP_200_OK)
+        except WorkforceError as e:
+            return _catalog_workforce_error_response(e)
         except Exception as e:
             return Response({'success': False, 'error': {'error': str(e)}}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def destroy(self, request, *args, **kwargs):
+        try:
+            require_owner_for_destructive_action(request, resource_label='lotes de inventario')
+        except WorkforceError as e:
+            return _catalog_workforce_error_response(e)
         item = self.get_object()
         try:
             with transaction.atomic():
@@ -162,7 +360,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         from api.core.category_schemas import validate_and_normalize_product_dynamic_data
 
         company_id = request.data.get('company_id')
-        company, _emp, _allowed_store_ids = resolve_merchant_actor(request, target_company_id=company_id)
+        company, emp, _allowed_store_ids = resolve_merchant_actor(request, target_company_id=company_id)
         if company is None:
             return Response({'error': 'Compañía no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -182,6 +380,15 @@ class ProductViewSet(viewsets.ModelViewSet):
         dtnow_str = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
 
         try:
+            if emp is not None:
+                for prod_data in products_list:
+                    validate_worker_price_change(
+                        emp,
+                        None,
+                        prod_data.get('price'),
+                        target_label=prod_data.get('name', 'Producto'),
+                    )
+
             with transaction.atomic():
                 # 1. Pre-cargar subcategorías involucradas en un solo viaje a la BD
                 category_ids = {prod_data['category_id'] for prod_data in products_list if prod_data.get('category_id')}
@@ -275,9 +482,22 @@ class ProductViewSet(viewsets.ModelViewSet):
 
                 for product in created_products:
                     created_products_json.append(product.get_json())
+                    if emp is not None:
+                        record_employee_audit_log(
+                            emp,
+                            action='product_created',
+                            target_type='product',
+                            target_id=product.id,
+                            target_label=product.name,
+                            before_snapshot={},
+                            after_snapshot=snapshot_product(product),
+                            is_reversible=False,
+                        )
 
             return Response({'success': True, 'data': created_products_json}, status=status.HTTP_201_CREATED)
 
+        except WorkforceError as e:
+            return _catalog_workforce_error_response(e)
         except Exception as e:
             return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -291,12 +511,15 @@ class ProductViewSet(viewsets.ModelViewSet):
         d = serializer.validated_data
         
         try:
-            with transaction.atomic():
-                company_id = request.data.get('company_id')
-                company, _emp, _allowed_store_ids = resolve_merchant_actor(request, target_company_id=company_id)
-                if company is None:
-                    return Response({'error': 'Compañía no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+            company_id = request.data.get('company_id')
+            company, emp, _allowed_store_ids = resolve_merchant_actor(request, target_company_id=company_id)
+            if company is None:
+                return Response({'error': 'Compañía no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
+            if emp is not None:
+                validate_worker_price_change(emp, None, d.get('price'), target_label=d.get('name', 'Producto'))
+
+            with transaction.atomic():
                 category = SubCategory.objects.select_related('parent_category').get(id=d['category_id'])
                 raw_discounts = request.data.get('discounts_data')
                 if isinstance(raw_discounts, str) and raw_discounts.strip():
@@ -374,8 +597,22 @@ class ProductViewSet(viewsets.ModelViewSet):
                 product.images = final_images
                 product.save()
 
+                if emp is not None:
+                    record_employee_audit_log(
+                        emp,
+                        action='product_created',
+                        target_type='product',
+                        target_id=product.id,
+                        target_label=product.name,
+                        before_snapshot={},
+                        after_snapshot=snapshot_product(product),
+                        is_reversible=False,
+                    )
+
                 return Response({'success': True, 'data': product.get_json()}, status=status.HTTP_201_CREATED)
 
+        except WorkforceError as e:
+            return _catalog_workforce_error_response(e)
         except Exception as e:
             return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -383,6 +620,13 @@ class ProductViewSet(viewsets.ModelViewSet):
         from api.core.category_schemas import validate_and_normalize_product_dynamic_data
 
         product_ref = self.get_object()
+        try:
+            _company, emp, _allowed = resolve_merchant_actor(request, target_company_id=product_ref.company_id)
+            if emp is not None:
+                require_employee_permission(emp, 'can_edit_products')
+        except WorkforceError as e:
+            return _catalog_workforce_error_response(e)
+
         serializer = self.get_serializer(product_ref, data=request.data, partial=True)
         if not serializer.is_valid():
             return Response({'success': False, 'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
@@ -390,6 +634,21 @@ class ProductViewSet(viewsets.ModelViewSet):
         d = serializer.validated_data
 
         try:
+            if emp is not None:
+                if 'price' in d or 'price' in request.data:
+                    new_price_val = d.get('price', request.data.get('price'))
+                    validate_worker_price_change(
+                        emp,
+                        product_ref.price,
+                        new_price_val,
+                        target_label=product_ref.name,
+                    )
+                check_and_record_worker_catalog_mutation(
+                    emp,
+                    f"product:{product_ref.id}",
+                    zeroed_stock_or_paused=False,
+                )
+
             with transaction.atomic():
                 # Bloqueamos la fila de Product (of=('self',)) para serializar contra checkouts/cancelaciones de variantes
                 product = (
@@ -397,6 +656,8 @@ class ProductViewSet(viewsets.ModelViewSet):
                     .select_related('category__parent_category', 'company')
                     .get(pk=product_ref.pk)
                 )
+                before_snap = snapshot_product(product)
+
                 product.name = d.get('name', product.name)
                 product.price = d.get('price', product.price)
                 product.description = d.get('description', product.description)
@@ -460,13 +721,15 @@ class ProductViewSet(viewsets.ModelViewSet):
                                 clean_path = item.split('/media/')[-1] if '/media/' in item else item
                                 processed_image_order.append(clean_path)
                     
-                    # 2. BORRAR IMÁGENES DESCARTADAS
-                    for old_url in product.images:
-                        if old_url not in processed_image_order:
-                            try:
-                                storage_manager.delete_file(old_url)
-                            except Exception as e:
-                                print(f"Error borrando img descartada: {e}")
+                    # 2. BORRAR IMÁGENES DESCARTADAS (Solo si edita el dueño; si edita un asistente
+                    #    conservamos las imágenes anteriores en storage para permitir Rollback en 1 toque).
+                    if emp is None:
+                        for old_url in product.images:
+                            if old_url not in processed_image_order:
+                                try:
+                                    storage_manager.delete_file(old_url)
+                                except Exception as e:
+                                    print(f"Error borrando img descartada: {e}")
 
                     final_images = []
                     dtnow_str = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
@@ -494,13 +757,32 @@ class ProductViewSet(viewsets.ModelViewSet):
                     product.images = final_images
 
                 product.save()
+                after_snap = snapshot_product(product)
+
+                if emp is not None:
+                    record_employee_audit_log(
+                        emp,
+                        action='product_updated',
+                        target_type='product',
+                        target_id=product.id,
+                        target_label=product.name,
+                        before_snapshot=before_snap,
+                        after_snapshot=after_snap,
+                        is_reversible=True,
+                    )
 
             return Response({'success': True, 'data': product.get_json()}, status=status.HTTP_200_OK)
 
+        except WorkforceError as e:
+            return _catalog_workforce_error_response(e)
         except Exception as e:
             return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def destroy(self, request, *args, **kwargs):
+        try:
+            require_owner_for_destructive_action(request, resource_label='productos del catálogo')
+        except WorkforceError as e:
+            return _catalog_workforce_error_response(e)
         product = self.get_object()
         try:
             with transaction.atomic():
@@ -538,6 +820,11 @@ class ProductViewSet(viewsets.ModelViewSet):
         Recibe una lista de IDs y elimina los productos masivamente.
         CART-67: Antes de eliminar los productos, desvincula explícitamente los videos asociados.
         """
+        try:
+            require_owner_for_destructive_action(request, resource_label='productos del catálogo')
+        except WorkforceError as e:
+            return _catalog_workforce_error_response(e)
+
         product_ids = request.data.get('product_ids') or request.data.get('ids') or []
         if isinstance(product_ids, str):
             try:

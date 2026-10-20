@@ -26,6 +26,8 @@ from ..core.workforce import (
     get_user_workspaces,
     build_worker_workspace,
     select_workspace,
+    list_employee_audit_logs,
+    rollback_employee_changes,
 )
 from ..permissions import IsPersonalContext, get_request_ctx, get_token_claim
 
@@ -230,7 +232,18 @@ class WorkforceEmployeeDetailAPI(APIView):
             employee = get_company_employee(request.user, employee_id)
         except WorkforceError as e:
             return _workforce_error_response(e)
-        return Response({'data': employee.get_json()}, status=status.HTTP_200_OK)
+        emp_json = employee.get_json()
+        try:
+            emp_json['reversible_changes_24h'] = EmployeeAuditLog.objects.filter(
+                company=employee.company,
+                employee=employee,
+                is_reversible=True,
+                reverted_at__isnull=True,
+                created_at__gte=timezone.now() - timedelta(hours=24),
+            ).count()
+        except Exception:
+            emp_json['reversible_changes_24h'] = 0
+        return Response({'data': emp_json}, status=status.HTTP_200_OK)
 
     def patch(self, request, employee_id: int):
         try:
@@ -240,6 +253,63 @@ class WorkforceEmployeeDetailAPI(APIView):
         return Response({
             'message': "Trabajador actualizado.",
             'data': employee.get_json(),
+        }, status=status.HTTP_200_OK)
+
+
+class WorkforceEmployeeAuditLogsAPI(APIView):
+    """
+    GET /api/v1/workforce/employees/<id>/audit-logs/?hours=24&only_reversible=1&limit=100
+    GET /api/v1/workforce/audit-logs/?employee_id=<id>&hours=24&only_reversible=1&limit=100
+    Bitácora de auditoría ("Time-Machine") de acciones realizadas por los trabajadores del comercio.
+    Solo el dueño del comercio (cuenta personal).
+    """
+    permission_classes = [IsAuthenticated, IsPersonalContext]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'navigation'
+
+    def get(self, request, employee_id=None):
+        resolved_emp_id = employee_id if employee_id not in (None, '') else request.query_params.get('employee_id')
+        try:
+            data = list_employee_audit_logs(
+                request.user,
+                employee_id=resolved_emp_id,
+                hours=request.query_params.get('hours'),
+                only_reversible=_truthy(request.query_params.get('only_reversible')),
+                limit=request.query_params.get('limit', 100),
+            )
+        except WorkforceError as e:
+            return _workforce_error_response(e)
+        return Response({'data': data, **data}, status=status.HTTP_200_OK)
+
+
+class WorkforceEmployeeRollbackAPI(APIView):
+    """
+    POST /api/v1/workforce/employees/<id>/rollback/
+    Body opcional: {hours?: 24, log_ids?: [int], also_suspend?: bool}
+    Revierte en 1 toque todos los cambios reversibles realizados por ese trabajador
+    en el rango indicado (o la lista de `log_ids` específicos).
+    Solo el dueño del comercio (cuenta personal).
+    """
+    permission_classes = [IsAuthenticated, IsPersonalContext]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'actions'
+
+    def post(self, request, employee_id: int):
+        body = request.data if isinstance(request.data, dict) else {}
+        try:
+            result = rollback_employee_changes(
+                request.user,
+                employee_id=employee_id,
+                hours=body.get('hours', 24),
+                log_ids=body.get('log_ids'),
+                also_suspend=_truthy(body.get('also_suspend')),
+            )
+        except WorkforceError as e:
+            return _workforce_error_response(e)
+        return Response({
+            'message': result['message'],
+            'data': result,
+            **result,
         }, status=status.HTTP_200_OK)
 
 

@@ -5,7 +5,12 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated, AllowAny
 
 from api.core.firebase_admin import NotificationManager
-from api.core.workforce import resolve_merchant_actor, user_can_manage_store
+from api.core.workforce import (
+    WorkforceError,
+    resolve_merchant_actor,
+    user_can_manage_store,
+    require_owner_for_destructive_action,
+)
 from .models import ChatMessage, PredefinedMessage
 from api.models import Order, SupportMessage, SupportTicket, MerchantPaymentMethod, Company, User
 from .permissions import IsNodeMicroservice
@@ -145,8 +150,15 @@ class ChatViewSet(viewsets.ViewSet):
                 msg = PredefinedMessage.objects.create(company=company, title=title, text=text)
                 return Response({'data': msg.get_json()}, status=status.HTTP_201_CREATED)
 
-            # 💡 NUEVA LÓGICA DE ELIMINACIÓN
+            # 💡 NUEVA LÓGICA DE ELIMINACIÓN (Solo permitida al dueño del comercio; Cero Destrucción para asistentes)
             elif request.method == 'DELETE':
+                try:
+                    require_owner_for_destructive_action(request, resource_label='mensajes rápidos del comercio')
+                except WorkforceError as e:
+                    return Response(
+                        {"success": False, "error": e.message, "code": e.code},
+                        status=e.status_code,
+                    )
                 message_id = request.query_params.get('message_id')
                 if not message_id:
                     return Response({"error": "Falta el ID del mensaje a eliminar."}, status=status.HTTP_400_BAD_REQUEST)
