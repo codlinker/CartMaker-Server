@@ -258,6 +258,9 @@ app.post('/internal/emit-support-mute', (req, res) => {
   const {
     ticket_id,
     ticket,
+    target_role,
+    target_user_id,
+    is_muted,
     muted_client,
     muted_merchant,
     mute_reason,
@@ -266,21 +269,41 @@ app.post('/internal/emit-support-mute', (req, res) => {
     system_message
   } = req.body;
 
-  const mutePayload = {
+  const cleanMutedIds = Array.isArray(muted_user_ids) ? muted_user_ids.map((id) => String(id)) : [];
+  const mutedSet = new Set(cleanMutedIds);
+
+  // Removemos cualquier campo dependiente de sesión (is_current_user_muted / is_muted) del broadcast grupal
+  let roomTicketPayload = null;
+  if (ticket && typeof ticket === 'object') {
+    roomTicketPayload = { ...ticket };
+    delete roomTicketPayload.is_current_user_muted;
+    delete roomTicketPayload.is_muted;
+    roomTicketPayload.muted_client = Boolean(muted_client);
+    roomTicketPayload.muted_merchant = Boolean(muted_merchant);
+    roomTicketPayload.mute_reason = mute_reason || null;
+    roomTicketPayload.muted_user_ids = cleanMutedIds;
+  }
+
+  const roomMutePayload = {
     ticket_id,
     id: ticket_id,
+    target_role: target_role || null,
+    target_user_id: target_user_id != null ? String(target_user_id) : null,
     muted_client: Boolean(muted_client),
     muted_merchant: Boolean(muted_merchant),
     mute_reason: mute_reason || null,
-    muted_user_ids: Array.isArray(muted_user_ids) ? muted_user_ids : [],
-    ticket: ticket || null
+    muted_user_ids: cleanMutedIds,
+    ticket: roomTicketPayload
   };
+  if (typeof is_muted === 'boolean' && target_user_id != null) {
+    roomMutePayload.target_is_muted = is_muted;
+  }
 
   const roomName = `support_${ticket_id}`;
-  io.to(roomName).emit('support_mute_status', mutePayload);
-  io.to(roomName).emit('participant_muted', mutePayload);
-  if (ticket) {
-    io.to(roomName).emit('ticket_updated', ticket);
+  io.to(roomName).emit('support_mute_status', roomMutePayload);
+  io.to(roomName).emit('participant_muted', roomMutePayload);
+  if (roomTicketPayload) {
+    io.to(roomName).emit('ticket_updated', roomTicketPayload);
   }
   if (system_message) {
     io.to(roomName).emit('new_support_message', system_message);
@@ -289,11 +312,74 @@ app.post('/internal/emit-support-mute', (req, res) => {
   if (Array.isArray(participant_ids)) {
     participant_ids.forEach((uid) => {
       if (!uid) return;
-      io.to(`user_${uid}`).emit('support_mute_status', mutePayload);
-      if (ticket) {
-        io.to(`user_${uid}`).emit('ticket_updated', ticket);
+      const uidStr = String(uid);
+      const isUserMuted = mutedSet.has(uidStr);
+      const userTicketPayload = roomTicketPayload
+        ? {
+            ...roomTicketPayload,
+            recipient_id: uidStr,
+            is_current_user_muted: isUserMuted,
+            is_muted: isUserMuted
+          }
+        : null;
+      const userMutePayload = {
+        ...roomMutePayload,
+        recipient_id: uidStr,
+        is_current_user_muted: isUserMuted,
+        is_muted: isUserMuted,
+        ticket: userTicketPayload
+      };
+      io.to(`user_${uidStr}`).emit('support_mute_status', userMutePayload);
+      io.to(`user_${uidStr}`).emit('participant_muted', userMutePayload);
+      if (userTicketPayload) {
+        io.to(`user_${uidStr}`).emit('ticket_updated', userTicketPayload);
       }
     });
+  }
+
+  res.json({ success: true });
+});
+
+// 5. Django ordena: "Notifica cambio de estado de orden en tiempo real"
+app.post('/internal/emit-order-status', (req, res) => {
+  if (!isValidMicroserviceToken(req.headers['x-microservice-token'])) return res.status(403).send('Forbidden');
+  const {
+    order_id,
+    status,
+    recipient_id,
+    is_merchant_receiver,
+    reported_by_role,
+    reporter_id,
+    reported_by_user_id,
+    support_ticket_id,
+    active_ticket_id,
+    title,
+    body
+  } = req.body;
+
+  const payload = {
+    type: 'order_status_changed',
+    order_id: order_id != null ? String(order_id) : null,
+    id: order_id,
+    status,
+    recipient_id: recipient_id != null ? String(recipient_id) : null,
+    is_merchant_receiver: Boolean(is_merchant_receiver),
+    reported_by_role: reported_by_role || null,
+    reporter_id: reporter_id != null ? String(reporter_id) : null,
+    reported_by_user_id: reported_by_user_id != null ? String(reported_by_user_id) : null,
+    support_ticket_id: support_ticket_id || null,
+    active_ticket_id: active_ticket_id || null,
+    title: title || null,
+    body: body || null
+  };
+
+  if (recipient_id) {
+    io.to(`user_${recipient_id}`).emit('order_status_changed', payload);
+    io.to(`user_${recipient_id}`).emit('order_updated', payload);
+  }
+  if (order_id != null) {
+    io.to(`order_${order_id}`).emit('order_status_changed', payload);
+    io.to(`order_${order_id}`).emit('order_updated', payload);
   }
 
   res.json({ success: true });

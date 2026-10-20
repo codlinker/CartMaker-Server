@@ -1936,6 +1936,7 @@ class SupportTicket(models.Model):
         return {
             'reported_by_role': role,
             'reported_by_user_id': reporter_uid_str,
+            'reporter_id': reporter_uid_str,
             'reported_by_name': reporter_name,
         }
 
@@ -2067,9 +2068,8 @@ class SupportTicket(models.Model):
         resolution_note_clean = (self.resolution_note or '').strip() or None
         closed_at_str = timezone.localtime(self.close_time).strftime("%d/%m/%Y %I:%M %p").lower() if self.close_time else None
 
-        is_current_muted = False
-        if current_user is not None and getattr(current_user, 'is_authenticated', False):
-            is_current_muted = self.is_user_muted(current_user.id)
+        has_explicit_user = bool(current_user is not None and getattr(current_user, 'is_authenticated', False))
+        is_current_muted = self.is_user_muted(current_user.id) if has_explicit_user else None
 
         client_display_name = f"{buyer_user.first_name} {buyer_user.last_name}".strip() if buyer_user else None
         merchant_display_name = (
@@ -2078,7 +2078,7 @@ class SupportTicket(models.Model):
             else (f"{merchant_user.first_name} {merchant_user.last_name}".strip() if merchant_user else None)
         )
 
-        return {
+        payload = {
             'id': self.id,
             'status': status_str,
             'client_id': str(self.client_id) if self.client_id else None,
@@ -2105,7 +2105,6 @@ class SupportTicket(models.Model):
             'muted_merchant': bool(self.muted_merchant),
             'mute_reason': (self.mute_reason or '').strip() or None,
             'muted_user_ids': self.get_muted_user_ids(),
-            'is_current_user_muted': is_current_muted,
             'closed': self.closed,
             'close_reason': close_reason_label,
             'close_reason_id': self.close_reason,
@@ -2118,6 +2117,10 @@ class SupportTicket(models.Model):
             'unread_client': unread_client,
             'unread_agent': unread_agent,
         }
+        if has_explicit_user:
+            payload['is_current_user_muted'] = bool(is_current_muted)
+            payload['is_muted'] = bool(is_current_muted)
+        return payload
 
 class SupportMessage(models.Model):
     class MessageType(models.TextChoices):

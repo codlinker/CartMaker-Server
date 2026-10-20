@@ -99,6 +99,7 @@ class OrderViewSet(viewsets.ViewSet):
                 'resolution_note': resolution_note_str,
                 'reported_by_role': reported_by_role,
                 'reported_by_user_id': reported_by_user_id,
+                'reporter_id': reported_by_user_id,
                 'reported_by_name': reported_by_name,
                 'is_tripartite': True,
                 'muted_client': bool(getattr(latest_ticket, 'muted_client', False)),
@@ -116,6 +117,7 @@ class OrderViewSet(viewsets.ViewSet):
             'active_ticket_id': active_ticket_id,
             'reported_by_role': reported_by_role,
             'reported_by_user_id': reported_by_user_id,
+            'reporter_id': reported_by_user_id,
             'reported_by_name': reported_by_name,
             'support_resolution_note': support_resolution_note,
             'support_ticket': ticket_summary,
@@ -179,7 +181,7 @@ class OrderViewSet(viewsets.ViewSet):
             ]
             report_meta = self._build_order_report_meta(order)
 
-            # Mandamos la estructura limpia que espera Flutter
+            # Mandamos la estructura limpia que espera Flutter (tanto en raíz como dentro de 'data')
             payload = {
                 'id': order.id, 
                 "is_merchant_mode": is_merchant_mode,
@@ -188,7 +190,8 @@ class OrderViewSet(viewsets.ViewSet):
                 'withdrawal_type': order.withdrawal_type,
                 'store_id': str(order.store_id),
                 'company_id': str(company.id),
-                'store_name': company.name,
+                'company_name': company.name,
+                'store_name': order.store.name if is_merchant_mode else company.name,
                 'store_image': store_image_url,
                 'store_lat': store_lat,
                 'store_lng': store_lng,
@@ -201,7 +204,7 @@ class OrderViewSet(viewsets.ViewSet):
                 'client_lat': client_lat,
                 'client_lng': client_lng,
                 'client_address': client_address,
-                "client_image": storage_manager.get_url(order.client.profile_picture) if order.client.profile_picture else None,
+                "client_image": order.client.get_profile_picture_url() if order.client.profile_picture else None,
                 'client_name': f"{order.client.first_name} {order.client.last_name}",
                 'client_contact_methods': contact_methods_dict,
                 'end_time': timezone.localtime(order.end_time).strftime("%d/%m/%Y %I:%M %p").lower() if order.end_time else creation_str,
@@ -211,7 +214,7 @@ class OrderViewSet(viewsets.ViewSet):
                 payload['client_cedula'] = order.client.cedula_number
                 payload['client_email'] = order.client.email
             
-            return Response(payload, status=status.HTTP_200_OK)
+            return Response({'data': dict(payload), **payload}, status=status.HTTP_200_OK)
 
         except Order.DoesNotExist:
             return Response(
@@ -808,21 +811,34 @@ class OrderViewSet(viewsets.ViewSet):
                 if not (is_buyer or is_merchant or request.user.is_staff):
                     return Response({"error": "No tienes permisos para reportar esta orden."}, status=status.HTTP_403_FORBIDDEN)
 
+                explicit_role = str(request.data.get('reported_by_role') or '').strip().lower()
+                if explicit_role in ('merchant', 'seller') and is_merchant:
+                    reporter_role = 'merchant'
+                elif explicit_role in ('client', 'buyer') and is_buyer:
+                    reporter_role = 'client'
+                elif is_merchant and not is_buyer:
+                    reporter_role = 'merchant'
+                else:
+                    reporter_role = 'client'
+
                 was_already_reported = (order.status == OrderStatus.REPORTED)
                 cart_dict = dict(order.cart) if isinstance(order.cart, dict) else {}
                 if not was_already_reported:
                     cart_dict['previous_status_before_report'] = order.status
                 cart_dict['is_reported'] = True
                 cart_dict['under_review'] = True
+                resolved_ticket_id = None
                 if ticket_id:
                     try:
-                        cart_dict['active_ticket_id'] = int(ticket_id)
+                        resolved_ticket_id = int(ticket_id)
+                        cart_dict['active_ticket_id'] = resolved_ticket_id
                     except (TypeError, ValueError):
                         pass
                 if reason:
                     cart_dict['report_reason'] = reason
                 cart_dict['reported_by_user_id'] = str(request.user.id)
-                cart_dict['reported_by_role'] = 'merchant' if is_merchant else 'client'
+                cart_dict['reporter_id'] = str(request.user.id)
+                cart_dict['reported_by_role'] = reporter_role
                 cart_dict['reported_at'] = timezone.now().isoformat()
                 order.cart = cart_dict
 
@@ -834,32 +850,39 @@ class OrderViewSet(viewsets.ViewSet):
 
                 if not was_already_reported:
                     oid = order.id
-                    t_str = f" (#{ticket_id})" if ticket_id else ""
-                    company_name = order.store.company.name if order.store and order.store.company else "Comercio"
-                    if is_buyer and order.store and order.store.company:
+                    reporter_uid_str = str(request.user.id)
+                    if reporter_role == 'client' and order.store and order.store.company:
                         target_uid = order.store.company.owner_id
-                        transaction.on_commit(
-                            lambda: NotificationManager.notify_order_status_change(
-                                user_id=target_uid,
-                                order_id=oid,
-                                title="Orden Reportada a Soporte",
-                                body=f"El comprador ha reportado la orden N° {oid} a Soporte{t_str}. La orden se encuentra en revisión.",
-                                is_merchant=True,
-                                new_status=OrderStatus.REPORTED,
+                        if target_uid and str(target_uid) != reporter_uid_str:
+                            transaction.on_commit(
+                                lambda: NotificationManager.notify_order_status_change(
+                                    user_id=target_uid,
+                                    order_id=oid,
+                                    title="Pedido Reportado a Soporte",
+                                    body=f"El cliente ha reportado el pedido #{oid}. Entra al chat de soporte.",
+                                    is_merchant=True,
+                                    new_status=OrderStatus.REPORTED,
+                                    reported_by_role='client',
+                                    reporter_id=reporter_uid_str,
+                                    support_ticket_id=resolved_ticket_id,
+                                )
                             )
-                        )
-                    elif is_merchant:
+                    elif reporter_role == 'merchant':
                         target_uid = order.client_id
-                        transaction.on_commit(
-                            lambda: NotificationManager.notify_order_status_change(
-                                user_id=target_uid,
-                                order_id=oid,
-                                title="Orden en Revisión de Soporte",
-                                body=f"{company_name} ha reportado la orden N° {oid} a Soporte{t_str}. La orden se encuentra en revisión.",
-                                is_merchant=False,
-                                new_status=OrderStatus.REPORTED,
+                        if target_uid and str(target_uid) != reporter_uid_str:
+                            transaction.on_commit(
+                                lambda: NotificationManager.notify_order_status_change(
+                                    user_id=target_uid,
+                                    order_id=oid,
+                                    title="Inconveniente con tu Pedido",
+                                    body=f"El comercio ha reportado un inconveniente con tu pedido #{oid}.",
+                                    is_merchant=False,
+                                    new_status=OrderStatus.REPORTED,
+                                    reported_by_role='merchant',
+                                    reporter_id=reporter_uid_str,
+                                    support_ticket_id=resolved_ticket_id,
+                                )
                             )
-                        )
 
                 report_meta = self._build_order_report_meta(order)
                 return Response({

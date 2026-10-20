@@ -1,5 +1,7 @@
 from django.utils import timezone
+from django.conf import settings
 import logging
+import requests
 from typing import List, Dict, Optional
 from firebase_admin import messaging
 from firebase_admin.exceptions import FirebaseError
@@ -35,9 +37,20 @@ class NotificationManager:
         if not tokens:
             print(f"FCM Abortado: Usuario {user.id} sin dispositivos.")
             return
+
+        # Garantizamos que todo push de FCM lleve siempre recipient_id y valores tipo string
+        normalized_data: Dict[str, str] = {
+            'recipient_id': str(user.id),
+            'target_user_id': str(user.id),
+        }
+        if data_payload:
+            for k, v in data_payload.items():
+                if v is not None:
+                    normalized_data[str(k)] = str(v)
+
         message = messaging.MulticastMessage(
             notification=messaging.Notification(title=title, body=body),
-            data=data_payload or {},
+            data=normalized_data,
             tokens=tokens,
         )
         try:
@@ -232,11 +245,20 @@ class NotificationManager:
             title=title,
             body=body,
             category=NotificationCategory.NEW_ORDER,
-            metadata={'order_id': str(order_id)}
+            metadata={
+                'order_id': str(order_id),
+                'recipient_id': str(merchant_id),
+                'is_merchant_receiver': True,
+            }
         )
         
-        # 💡 CAMBIO AQUÍ: Ahora especificamos que el evento es 'new_order'
-        data = {'type': 'new_order', 'order_id': str(order_id)} 
+        # 💡 CAMBIO AQUÍ: Ahora especificamos que el evento es 'new_order' e incluimos recipient_id
+        data = {
+            'type': 'new_order',
+            'order_id': str(order_id),
+            'recipient_id': str(merchant_id),
+            'is_merchant_receiver': 'true',
+        } 
         
         try:
             user = User.objects.prefetch_related('fcm_tokens').get(id=merchant_id)
@@ -245,28 +267,96 @@ class NotificationManager:
             logger.error(f"Fallo al notificar creación de orden al comerciante: {e}")
 
     @classmethod
-    def notify_order_status_change(cls, user_id: int, order_id: int, title: str, body: str, is_merchant: bool, new_status: int = -1) -> None:
+    def notify_order_status_change(
+        cls,
+        user_id: int,
+        order_id: int,
+        title: str,
+        body: str,
+        is_merchant: bool,
+        new_status: int = -1,
+        reported_by_role: Optional[str] = None,
+        reporter_id: Optional[str] = None,
+        support_ticket_id: Optional[int] = None,
+        extra_data: Optional[Dict] = None,
+    ) -> None:
         """ 
-        Notifica cambios de estado (Cancelado, Enviado, Completado) cruzados entre cliente y comerciante. 
+        Notifica cambios de estado (Cancelado, Enviado, Completado, Reportado, Resuelto) cruzados entre cliente y comerciante. 
         """
         section = NotificationSection.MERCHANT_ORDERS if is_merchant else NotificationSection.ORDERS
-        
+        meta = {
+            'order_id': str(order_id),
+            'recipient_id': str(user_id),
+            'is_merchant_receiver': bool(is_merchant),
+            'status': int(new_status),
+        }
+        if reported_by_role:
+            meta['reported_by_role'] = str(reported_by_role)
+        if reporter_id:
+            meta['reporter_id'] = str(reporter_id)
+            meta['reported_by_user_id'] = str(reporter_id)
+        if support_ticket_id is not None:
+            meta['support_ticket_id'] = int(support_ticket_id)
+            meta['active_ticket_id'] = int(support_ticket_id)
+        if extra_data:
+            for k, v in extra_data.items():
+                if v is not None:
+                    meta[str(k)] = v
+
         notification = Notification.objects.create(
             user_id=user_id,
             section=section,
             title=title,
             body=body,
             category=NotificationCategory.ORDER_STATUS_CHANGED,
-            metadata={'order_id': str(order_id)}
+            metadata=meta
         )
         
-        # 💡 AÑADIMOS EL FLAG DE MERCHANT PARA FLUTTER
+        # 💡 AÑADIMOS EL FLAG DE MERCHANT, RECIPIENT_ID Y ATRIBUCIÓN DE REPORTE PARA FLUTTER
         data = {
             'type': 'order_status_changed',
             'order_id': str(order_id),
             'status': str(new_status),
-            'is_merchant_receiver': str(is_merchant).lower() # <-- ¡Línea clave!
-        } 
+            'recipient_id': str(user_id),
+            'target_user_id': str(user_id),
+            'is_merchant_receiver': str(is_merchant).lower(),
+            'notification_id': str(notification.id),
+        }
+        if reported_by_role:
+            data['reported_by_role'] = str(reported_by_role)
+        if reporter_id:
+            data['reporter_id'] = str(reporter_id)
+            data['reported_by_user_id'] = str(reporter_id)
+        if support_ticket_id is not None:
+            data['support_ticket_id'] = str(support_ticket_id)
+            data['active_ticket_id'] = str(support_ticket_id)
+        if extra_data:
+            for k, v in extra_data.items():
+                if v is not None:
+                    data[str(k)] = str(v)
+
+        # Emitimos también por WebSocket en tiempo real hacia la sala del usuario y de la orden
+        try:
+            requests.post(
+                f"{settings.INTERNAL_WEBSOCKETS_URL}internal/emit-order-status",
+                json={
+                    'order_id': order_id,
+                    'status': int(new_status),
+                    'recipient_id': str(user_id),
+                    'is_merchant_receiver': bool(is_merchant),
+                    'reported_by_role': reported_by_role,
+                    'reporter_id': str(reporter_id) if reporter_id else None,
+                    'reported_by_user_id': str(reporter_id) if reporter_id else None,
+                    'support_ticket_id': support_ticket_id,
+                    'active_ticket_id': support_ticket_id,
+                    'title': title,
+                    'body': body,
+                },
+                headers={'X-Microservice-Token': settings.SECRET_KEY},
+                timeout=2,
+            )
+        except Exception:
+            pass
         
         try:
             user = User.objects.prefetch_related('fcm_tokens').get(id=user_id)
@@ -395,12 +485,16 @@ class NotificationManager:
                             'type': 'new_support_message',
                             'ticket_id': str(ticket.id),
                             'order_id': str(ticket.order_id) if ticket.order_id else None,
+                            'recipient_id': str(target_uid),
+                            'sender_role': sender_role,
                         },
                     )
                 data = {
                     'type': 'new_support_message',
                     'ticket_id': str(ticket.id),
                     'notification_id': str(notification.id),
+                    'recipient_id': str(target_uid),
+                    'sender_role': sender_role,
                 }
                 if ticket.order_id:
                     data['order_id'] = str(ticket.order_id)
@@ -408,3 +502,48 @@ class NotificationManager:
                 cls._send_multicast(user=user_obj, title=title, body=body, data_payload=data)
             except Exception as e:
                 logger.error(f"Fallo al notificar mensaje de soporte a {target_uid}: {e}")
+
+    @classmethod
+    def notify_ticket_closed(
+        cls,
+        user_id,
+        ticket_id: int,
+        reason_str: str,
+        resolution_note: Optional[str] = None,
+        order_id: Optional[int] = None,
+    ) -> None:
+        title = f"Ticket de Soporte #{ticket_id} Cerrado"
+        body = f"Soporte CartMaker ha finalizado la revisión del ticket #{ticket_id} ({reason_str})."
+        if resolution_note:
+            body += f" Conclusión: {resolution_note}"
+        try:
+            notification = Notification.objects.create(
+                user_id=user_id,
+                section=NotificationSection.HELP,
+                title=title,
+                body=body,
+                category=NotificationCategory.ORDER_STATUS_CHANGED,
+                metadata={
+                    'type': 'ticket_closed',
+                    'ticket_id': str(ticket_id),
+                    'order_id': str(order_id) if order_id else None,
+                    'close_reason': reason_str,
+                    'resolution_note': resolution_note,
+                    'recipient_id': str(user_id),
+                },
+            )
+            data = {
+                'type': 'ticket_closed',
+                'ticket_id': str(ticket_id),
+                'notification_id': str(notification.id),
+                'close_reason': str(reason_str),
+                'recipient_id': str(user_id),
+            }
+            if resolution_note:
+                data['resolution_note'] = str(resolution_note)
+            if order_id:
+                data['order_id'] = str(order_id)
+            user_obj = User.objects.prefetch_related('fcm_tokens').get(id=user_id)
+            cls._send_multicast(user=user_obj, title=title, body=body, data_payload=data)
+        except Exception as e:
+            logger.error(f"Fallo al notificar cierre de ticket a {user_id}: {e}")

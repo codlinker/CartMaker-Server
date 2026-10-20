@@ -619,7 +619,7 @@ def close_ticket(request, ticket_id):
                     locked_order.cart = cart_dict
                     locked_order.save(update_fields=['cart'])
 
-    ticket_json = ticket.get_json(current_user=request.user)
+    broadcast_ticket_json = ticket.get_json(current_user=None)
     participant_ids = ticket.get_all_participant_ids()
 
     # 💡 ALERTAMOS A NODE.JS EN TIEMPO REAL
@@ -634,7 +634,7 @@ def close_ticket(request, ticket_id):
                 'client_id': str(ticket.client.id),
                 'agent_id': str(ticket.agent.id) if ticket.agent else None,
                 'participant_ids': participant_ids,
-                'ticket': ticket_json,
+                'ticket': broadcast_ticket_json,
             },
             headers={'X-Microservice-Token': settings.SECRET_KEY},
             timeout=2
@@ -713,13 +713,27 @@ def mute_ticket_participant(request, ticket_id):
         )
         sys_msg_payload = sys_msg.get_json()
         ticket_json = locked_ticket.get_json(current_user=request.user)
+        broadcast_ticket_json = locked_ticket.get_json(current_user=None)
+
+        resolved_target_role = changed_roles[0][0] if changed_roles else None
+        resolved_target_muted = changed_roles[0][1] if changed_roles else None
+        resolved_target_uid = None
+        if resolved_target_role == 'client':
+            buyer_u = locked_ticket.get_buyer_user()
+            resolved_target_uid = str(buyer_u.id) if buyer_u else None
+        elif resolved_target_role == 'merchant':
+            merch_u = locked_ticket.get_merchant_user()
+            resolved_target_uid = str(merch_u.id) if merch_u else None
 
     try:
         requests.post(
             f"{settings.INTERNAL_WEBSOCKETS_URL}internal/emit-support-mute",
             json={
                 'ticket_id': locked_ticket.id,
-                'ticket': ticket_json,
+                'ticket': broadcast_ticket_json,
+                'target_role': resolved_target_role,
+                'target_user_id': resolved_target_uid,
+                'is_muted': resolved_target_muted,
                 'muted_client': locked_ticket.muted_client,
                 'muted_merchant': locked_ticket.muted_merchant,
                 'mute_reason': locked_ticket.mute_reason or None,

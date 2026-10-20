@@ -249,6 +249,16 @@ class SupportTicketViewSet(viewsets.ViewSet):
                     .select_related('client', 'store__company', 'store__company__owner')
                     .get(pk=linked_order.pk)
                 )
+                explicit_role = str(request.data.get('reported_by_role') or '').strip().lower()
+                if explicit_role in ('merchant', 'seller') and is_merchant_owner:
+                    reporter_role = 'merchant'
+                elif explicit_role in ('client', 'buyer') and is_buyer:
+                    reporter_role = 'client'
+                elif is_merchant_owner and not is_buyer:
+                    reporter_role = 'merchant'
+                else:
+                    reporter_role = 'client'
+
                 cart_dict = dict(locked_order.cart) if isinstance(locked_order.cart, dict) else {}
                 if locked_order.status != OrderStatus.REPORTED:
                     cart_dict['previous_status_before_report'] = locked_order.status
@@ -256,7 +266,8 @@ class SupportTicketViewSet(viewsets.ViewSet):
                 cart_dict['under_review'] = True
                 cart_dict['active_ticket_id'] = ticket.id
                 cart_dict['reported_by_user_id'] = str(request.user.id)
-                cart_dict['reported_by_role'] = 'merchant' if is_merchant_owner else 'client'
+                cart_dict['reporter_id'] = str(request.user.id)
+                cart_dict['reported_by_role'] = reporter_role
                 cart_dict['reported_at'] = timezone.now().isoformat()
                 locked_order.cart = cart_dict
 
@@ -268,40 +279,50 @@ class SupportTicketViewSet(viewsets.ViewSet):
 
                 ticket.order = locked_order
 
-                # Notificamos a la contraparte de la orden que fue reportada y está en revisión
+                # Notificamos exclusivamente a la contraparte de la orden que fue reportada y está en revisión
                 order_id_val = locked_order.id
                 ticket_id_val = ticket.id
-                company_name_val = locked_order.store.company.name if locked_order.store and locked_order.store.company else 'Comercio'
-                if is_buyer and locked_order.store and locked_order.store.company:
+                reporter_uid_str = str(request.user.id)
+                if reporter_role == 'client' and locked_order.store and locked_order.store.company:
                     target_uid = locked_order.store.company.owner_id
-                    transaction.on_commit(
-                        lambda: NotificationManager.notify_order_status_change(
-                            user_id=target_uid,
-                            order_id=order_id_val,
-                            title="Orden Reportada a Soporte",
-                            body=f"El comprador ha abierto el ticket #{ticket_id_val} por la orden N° {order_id_val}. La orden está en revisión.",
-                            is_merchant=True,
-                            new_status=OrderStatus.REPORTED,
+                    if target_uid and str(target_uid) != reporter_uid_str:
+                        transaction.on_commit(
+                            lambda: NotificationManager.notify_order_status_change(
+                                user_id=target_uid,
+                                order_id=order_id_val,
+                                title="Pedido Reportado a Soporte",
+                                body=f"El cliente ha reportado el pedido #{order_id_val}. Entra al chat de soporte.",
+                                is_merchant=True,
+                                new_status=OrderStatus.REPORTED,
+                                reported_by_role='client',
+                                reporter_id=reporter_uid_str,
+                                support_ticket_id=ticket_id_val,
+                            )
                         )
-                    )
-                elif is_merchant_owner:
+                elif reporter_role == 'merchant':
                     target_uid = locked_order.client_id
-                    transaction.on_commit(
-                        lambda: NotificationManager.notify_order_status_change(
-                            user_id=target_uid,
-                            order_id=order_id_val,
-                            title="Orden en Revisión de Soporte",
-                            body=f"{company_name_val} ha abierto el ticket #{ticket_id_val} por la orden N° {order_id_val}. La orden está en revisión.",
-                            is_merchant=False,
-                            new_status=OrderStatus.REPORTED,
+                    if target_uid and str(target_uid) != reporter_uid_str:
+                        transaction.on_commit(
+                            lambda: NotificationManager.notify_order_status_change(
+                                user_id=target_uid,
+                                order_id=order_id_val,
+                                title="Inconveniente con tu Pedido",
+                                body=f"El comercio ha reportado un inconveniente con tu pedido #{order_id_val}.",
+                                is_merchant=False,
+                                new_status=OrderStatus.REPORTED,
+                                reported_by_role='merchant',
+                                reporter_id=reporter_uid_str,
+                                support_ticket_id=ticket_id_val,
+                            )
                         )
-                    )
 
             ticket_json = ticket.get_json(current_user=request.user)
+            broadcast_ticket_json = ticket.get_json(current_user=None)
             if locked_order is not None:
-                ticket_json['order_status'] = locked_order.status
-                ticket_json['order_status_label'] = locked_order.get_status_display()
-                ticket_json['order_under_review'] = (locked_order.status == OrderStatus.REPORTED)
+                for tj in (ticket_json, broadcast_ticket_json):
+                    tj['order_status'] = locked_order.status
+                    tj['order_status_label'] = locked_order.get_status_display()
+                    tj['order_under_review'] = (locked_order.status == OrderStatus.REPORTED)
 
         # 5. Si encontramos agente, disparamos las alertas en tiempo real mediante Node.js
         if best_agent:
@@ -309,7 +330,7 @@ class SupportTicketViewSet(viewsets.ViewSet):
                 requests.post(
                     f"{settings.INTERNAL_WEBSOCKETS_URL}internal/emit-assignment",
                     json={
-                        'ticket': ticket_json, 
+                        'ticket': broadcast_ticket_json, 
                         'agent_id': str(best_agent.id),
                         'client_id': str(request.user.id),
                         'participant_ids': ticket.get_all_participant_ids(),
@@ -431,13 +452,27 @@ class SupportTicketViewSet(viewsets.ViewSet):
                 system_msg_payload = sys_msg.get_json()
 
             ticket_json = locked_ticket.get_json(current_user=request.user)
+            broadcast_ticket_json = locked_ticket.get_json(current_user=None)
+
+            resolved_target_role = changed_roles[0][0] if len(changed_roles) == 1 else (target_role or None)
+            resolved_target_muted = changed_roles[0][1] if len(changed_roles) == 1 else None
+            resolved_target_uid = None
+            if resolved_target_role == 'client':
+                buyer_u = locked_ticket.get_buyer_user()
+                resolved_target_uid = str(buyer_u.id) if buyer_u else None
+            elif resolved_target_role == 'merchant':
+                merch_u = locked_ticket.get_merchant_user()
+                resolved_target_uid = str(merch_u.id) if merch_u else None
 
         try:
             requests.post(
                 f"{settings.INTERNAL_WEBSOCKETS_URL}internal/emit-support-mute",
                 json={
                     'ticket_id': locked_ticket.id,
-                    'ticket': ticket_json,
+                    'ticket': broadcast_ticket_json,
+                    'target_role': resolved_target_role,
+                    'target_user_id': resolved_target_uid,
+                    'is_muted': resolved_target_muted,
                     'muted_client': locked_ticket.muted_client,
                     'muted_merchant': locked_ticket.muted_merchant,
                     'mute_reason': locked_ticket.mute_reason or None,
@@ -553,19 +588,19 @@ class SupportTicketViewSet(viewsets.ViewSet):
                     pass
 
             ticket_json = locked_ticket.get_json(current_user=request.user)
+            broadcast_ticket_json = locked_ticket.get_json(current_user=None)
             participant_ids = locked_ticket.get_all_participant_ids()
             close_reason_display = locked_ticket.get_close_reason_display()
 
             for p_uid in participant_ids:
                 if str(p_uid) == str(request.user.id):
                     continue
-                body_txt = f"Tu ticket '{locked_ticket.title}' ha sido cerrado ({close_reason_display})."
-                if resolution_note:
-                    body_txt += f" Conclusión: {resolution_note}"
                 NotificationManager.notify_ticket_closed(
                     user_id=p_uid,
                     ticket_id=locked_ticket.id,
                     reason_str=close_reason_display,
+                    resolution_note=resolution_note or None,
+                    order_id=locked_ticket.order_id,
                 )
 
         try:
@@ -579,7 +614,7 @@ class SupportTicketViewSet(viewsets.ViewSet):
                     'reason': close_reason_display,
                     'close_reason': close_reason_display,
                     'resolution_note': resolution_note or None,
-                    'ticket': ticket_json,
+                    'ticket': broadcast_ticket_json,
                 },
                 headers={'X-Microservice-Token': settings.SECRET_KEY},
                 timeout=2,

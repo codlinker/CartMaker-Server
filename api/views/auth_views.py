@@ -13,25 +13,41 @@ class RegistDeviceView(APIView):
     throttle_scope = 'auth'
 
     def delete(self, request):
-        token = request.data.get('fcm_token')
-        DeviceToken.objects.filter(token=token, user=request.user).delete()
+        token = (
+            request.data.get('fcm_token')
+            or request.data.get('registration_id')
+            or request.query_params.get('fcm_token')
+            or request.query_params.get('registration_id')
+        )
+        if token and str(token).strip():
+            # Eliminamos el token físico sin importar la cuenta previa para impedir cruce de pushes en el mismo teléfono
+            DeviceToken.objects.filter(token=str(token).strip()).delete()
+        else:
+            # Si el logout no envía el token en el body/query, desvinculamos los tokens activos de esta cuenta
+            DeviceToken.objects.filter(user=request.user).delete()
         return Response({"message": "Token eliminado"}, status=status.HTTP_204_NO_CONTENT)
 
     def post(self, request):
-        fcm_token = request.data.get('fcm_token')
+        raw_token = request.data.get('fcm_token') or request.data.get('registration_id')
+        fcm_token = str(raw_token).strip() if raw_token else ''
         platform = request.data.get('platform', 'android')
+        if not fcm_token:
+            return Response({'error': 'El fcm_token es obligatorio.'}, status=status.HTTP_400_BAD_REQUEST)
         if request.user.is_superuser:
             return Response({
                 'error':"No se permite acceso a cuentas administrativas."
             }, status=status.HTTP_406_NOT_ACCEPTABLE)
-        device, created = DeviceToken.objects.update_or_create(
-            token=fcm_token,
-            defaults={
-                'user': request.user, 
-                'platform': platform
-            }
-        )
-        return Response({"message": "Dispositivo registrado"}, status=status.HTTP_200_OK)
+        with transaction.atomic():
+            # Unicidad de fcm_token activo: eliminamos cualquier vínculo previo con otra cuenta en este mismo dispositivo
+            DeviceToken.objects.filter(token=fcm_token).exclude(user=request.user).delete()
+            device, created = DeviceToken.objects.update_or_create(
+                token=fcm_token,
+                defaults={
+                    'user': request.user, 
+                    'platform': platform
+                }
+            )
+        return Response({"message": "Dispositivo registrado", "user_id": str(request.user.id)}, status=status.HTTP_200_OK)
 
 class BiometricLoginView(APIView):
     """

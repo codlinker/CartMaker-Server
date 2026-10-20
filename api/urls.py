@@ -79,6 +79,9 @@ urlpatterns = [
     path('v1/upload-subscription-payment', UploadSubscriptionPayment.as_view(), name='upload_subscription_payment'),
     # Rutas para la autenticacion
     path('v1/regist-new-device', RegistDeviceView.as_view(), name="regist_new_device"),
+    path('v1/regist-new-device/', RegistDeviceView.as_view(), name="regist_new_device_slash"),
+    path('v1/devices', RegistDeviceView.as_view(), name="devices_no_slash"),
+    path('v1/devices/', RegistDeviceView.as_view(), name="devices_slash"),
     path('v1/token', CartMakerTokenView.as_view(), name='token_obtain_pair'),
     path('v1/biometric-login', BiometricLoginView.as_view(), name='biometric_login'),
     path('v1/token/refresh', TokenRefreshView.as_view(), name='token_refresh'),
