@@ -1,6 +1,7 @@
 """Company, Store, Subscriptions, KYB RIF Validation, Merchant Catalog, and Public Store Profile views."""
 from .base import *
 from .base import _get_cached_bcv_rate, _extract_and_validate_category_ids
+from ..core.workforce import resolve_merchant_actor, user_can_manage_company, user_can_manage_store
 from ..permissions import IsPersonalContext
 
 ######################################################
@@ -14,12 +15,13 @@ class CompanyMainBranchViewSet(APIView):
 
     def get(self, request):
         """
-        Devuelve todas las sucursales de la compañía del usuario.
+        Devuelve todas las sucursales de la compañía del usuario (dueño o asistente asignado).
         Incluye la foto de la sucursal y la lista de productos únicos 
         publicados en ella, con el conteo de sus lotes (InventoryItems) activos.
         """
-        print("LLEGO:")
-        user = request.user
+        company, _emp, allowed_store_ids = resolve_merchant_actor(request)
+        if company is None:
+            return Response({'data': []}, status=status.HTTP_200_OK)
         
         # 1. Optimizamos la consulta con Prefetch
         # Buscamos solo los InventoryItems activos (paused=False, stock>0)
@@ -33,10 +35,11 @@ class CompanyMainBranchViewSet(APIView):
             to_attr='active_items'
         )
 
-        # 2. Obtenemos las tiendas que le pertenecen a la compañía de este usuario
-        stores = CompanyStore.objects.filter(
-            company__owner=user
-        ).prefetch_related(active_inventory_prefetch)
+        # 2. Obtenemos las tiendas que le pertenecen a la compañía (filtradas por sucursales permitidas para asistentes)
+        stores_qs = CompanyStore.objects.filter(company=company)
+        if allowed_store_ids is not None:
+            stores_qs = stores_qs.filter(id__in=allowed_store_ids)
+        stores = stores_qs.prefetch_related(active_inventory_prefetch)
 
         data = []
 
@@ -134,8 +137,8 @@ class GetCompanyProducts(APIView):
         """
         try:
             company = Company.objects.get(id=company_id)
-            if company.owner.id != request.user.id:
-                return Response({'error': 'Usted no es el propietario de la compania.'}, status=status.HTTP_406_NOT_ACCEPTABLE)
+            if not user_can_manage_company(request, company):
+                return Response({'error': 'Usted no tiene permisos sobre esta compañía.'}, status=status.HTTP_406_NOT_ACCEPTABLE)
             
             # Categorías globales de la empresa (siempre se devuelven todas)
             company_categories = SubCategory.objects.filter(
@@ -191,7 +194,7 @@ class GetCompanySubCategories(APIView):
         """
         try:
             company = Company.objects.get(id=company_id)
-            if company.owner.id != request.user.id:
+            if not user_can_manage_company(request, company):
                 return Response({'error': 'No autorizado.'}, status=status.HTTP_406_NOT_ACCEPTABLE)
             
             # ORM Mágico: Filtra las subcategorías cruzándolas con los productos de esta empresa
@@ -214,7 +217,7 @@ class GetStoreInventoryItems(APIView):
     def get(self, request, store_id=None):
         try:
             store = CompanyStore.objects.select_related('company').get(id=store_id)
-            if store.company.owner_id != request.user.id:
+            if not user_can_manage_store(request, store):
                 return Response({'error': 'No tiene permisos para esta sucursal.'}, status=status.HTTP_406_NOT_ACCEPTABLE)
 
             # 1. Categorías únicas del inventario de esta sucursal
@@ -1989,7 +1992,11 @@ class MerchantPaymentMethodViewSet(viewsets.ViewSet):
             order = Order.objects.select_related('store__company').filter(id=order_id).first()
             if not order:
                 return Response({'error': 'Orden no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
-            if request.user.id not in (order.client_id, order.store.company.owner_id) and not request.user.is_staff:
+            if (
+                request.user.id not in (order.client_id, order.store.company.owner_id)
+                and not user_can_manage_store(request, order.store)
+                and not request.user.is_staff
+            ):
                 return Response({'error': 'No tienes permiso para ver los métodos de pago de esta orden.'}, status=status.HTTP_403_FORBIDDEN)
             target_company = order.store.company
         elif store_id:
@@ -2002,7 +2009,7 @@ class MerchantPaymentMethodViewSet(viewsets.ViewSet):
             if not target_company:
                 return Response({'error': 'Compañía no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
         else:
-            target_company = self._get_user_company(request)
+            target_company, _, _ = resolve_merchant_actor(request)
             if not target_company:
                 return Response({
                     'payment_methods': [],
@@ -2012,7 +2019,7 @@ class MerchantPaymentMethodViewSet(viewsets.ViewSet):
                     'supported_types': self.get_supported_types_catalog(),
                 }, status=status.HTTP_200_OK)
 
-        is_owner = (target_company.owner_id == request.user.id)
+        is_owner = user_can_manage_company(request, target_company)
         qs = MerchantPaymentMethod.objects.filter(company=target_company)
         if not is_owner or active_only_param:
             qs = qs.filter(is_active=True)
@@ -2029,7 +2036,7 @@ class MerchantPaymentMethodViewSet(viewsets.ViewSet):
         }, status=status.HTTP_200_OK)
 
     def retrieve(self, request, pk=None):
-        company = self._get_user_company(request)
+        company, _, _ = resolve_merchant_actor(request)
         if not company:
             return Response({'error': 'No posees una compañía registrada.'}, status=status.HTTP_404_NOT_FOUND)
         pm = MerchantPaymentMethod.objects.filter(id=pk, company=company).first()

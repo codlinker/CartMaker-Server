@@ -1,6 +1,7 @@
 """Company Video Stories, Gamification / CartMaker Tokens, and Universal Q&A Conversations."""
 from .base import *
 from .base import _get_cached_bcv_rate, _extract_and_validate_category_ids
+from ..core.workforce import resolve_merchant_actor, user_can_manage_company, user_can_manage_store
 
 class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
     """
@@ -29,8 +30,10 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
             return base_qs.none()
         if self.action in ('list', 'retrieve'):
             now = timezone.now()
+            company, _, _ = resolve_merchant_actor(self.request)
+            merchant_q = Q(company=company) if company is not None else Q(company__owner=user)
             return base_qs.filter(
-                Q(expires_at__gt=now, video_file__isnull=False) | Q(company__owner=user)
+                Q(expires_at__gt=now, video_file__isnull=False) | merchant_q
             )
         return base_qs
 
@@ -109,7 +112,7 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
             print(f"Nota: No se pudo limpiar el caché por patrón: {e}")
 
     def _perform_story_update(self, request, instance):
-        if instance.company.owner_id != request.user.id:
+        if not user_can_manage_company(request, instance.company):
             return Response(
                 {"error": "No tienes permisos para editar esta historia."},
                 status=status.HTTP_403_FORBIDDEN,
@@ -294,7 +297,7 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
         Retorna todos los InventoryItems agrupados por sucursal.
         Indica si el ítem ya tiene un video vigente.
         """
-        company = Company.objects.filter(owner=request.user).first()
+        company, _emp, allowed_store_ids = resolve_merchant_actor(request)
         if not company:
             return Response({"error": "No tienes una compañía registrada."}, status=status.HTTP_403_FORBIDDEN)
 
@@ -309,7 +312,10 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
             queryset=InventoryItem.objects.filter(paused=False, stock__gt=0).select_related('product').prefetch_related(active_stories_prefetch),
             to_attr='active_product_items'
         )
-        stores = company.stores.filter(is_active=True).prefetch_related(active_items_prefetch)
+        stores_qs = company.stores.filter(is_active=True)
+        if allowed_store_ids is not None:
+            stores_qs = stores_qs.filter(id__in=allowed_store_ids)
+        stores = stores_qs.prefetch_related(active_items_prefetch)
         
         data = []
         for store in stores:
@@ -341,7 +347,7 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def my_videos(self, request):
-        company = Company.objects.filter(owner=request.user).first()
+        company, _emp, _allowed_store_ids = resolve_merchant_actor(request)
         if not company:
             return Response({"error": "No tienes una compañía registrada."}, status=status.HTTP_403_FORBIDDEN)
 
@@ -456,8 +462,8 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         
-        # Validar que el dueño sea el que intenta borrar
-        if instance.company.owner != request.user:
+        # Validar que el dueño o asistente de la compañía sea el que intenta borrar
+        if not user_can_manage_company(request, instance.company):
              return Response({"error": "No tienes permiso para eliminar este video."}, status=status.HTTP_403_FORBIDDEN)
         
         old_item_id = instance.associated_item_id
@@ -478,8 +484,8 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
         Maneja los archivos físicamente a través del COS (storage_manager).
         """
         try:
-            # 1. Obtener la compañía del comerciante
-            company = Company.objects.filter(owner=request.user).first()
+            # 1. Obtener la compañía del comerciante o asistente
+            company, _emp, _allowed_store_ids = resolve_merchant_actor(request)
             if not company:
                 return Response({
                     "error": "No tienes una compañía registrada para subir videos."
@@ -610,19 +616,25 @@ class UniversalConversationViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['get'])
     def merchant_items_summary(self, request):
         """
-        Retorna la TOTALIDAD de los productos y videos del comerciante,
-        calculando sus preguntas pendientes para servir como panel histórico.
+        Retorna la TOTALIDAD de los productos y videos del comerciante (o de las sucursales
+        asignadas al asistente de tienda), calculando sus preguntas pendientes para servir como panel histórico.
         """
-        user = request.user
+        company, _emp, allowed_store_ids = resolve_merchant_actor(request)
+        if company is None:
+            return Response({'data': []}, status=200)
+
         item_ct = ContentType.objects.get_for_model(InventoryItem)
         video_ct = ContentType.objects.get_for_model(CompanyVideoStory)
 
         # ==========================================
         # 1. OBTENER TODO EL INVENTARIO Y SUS ALERTAS
         # ==========================================
-        db_items = list(InventoryItem.objects.select_related('product').filter(
-            store__company__owner=user
-        ))
+        items_qs = InventoryItem.objects.select_related('product').filter(
+            store__company=company
+        )
+        if allowed_store_ids is not None:
+            items_qs = items_qs.filter(store_id__in=allowed_store_ids)
+        db_items = list(items_qs)
         items_ids_strs = [str(item.id) for item in db_items]
 
         products_summary = UniversalComment.objects.filter(
@@ -636,7 +648,7 @@ class UniversalConversationViewSet(viewsets.ViewSet):
         # ==========================================
         # 2. OBTENER TODAS LAS VIDEO HISTORIAS Y SUS ALERTAS
         # ==========================================
-        db_videos = list(CompanyVideoStory.objects.filter(company__owner=user))
+        db_videos = list(CompanyVideoStory.objects.filter(company=company))
         videos_ids_strs = [str(vid.id) for vid in db_videos]
 
         videos_summary = UniversalComment.objects.filter(
@@ -800,21 +812,21 @@ class UniversalConversationViewSet(viewsets.ViewSet):
             except UniversalComment.DoesNotExist:
                 return Response({'error': 'La pregunta no existe.'}, status=status.HTTP_404_NOT_FOUND)
 
-            # Extraemos dinámicamente al dueño para verificar permisos
-            owner = None
+            # Validamos permisos operativos (dueño del comercio o asistente asignado)
+            can_answer = False
             company_name = ""
             item_name = ""
             
-            if comment.content_type.model == 'inventoryitem':
-                owner = comment.content_object.store.company.owner
+            if comment.content_type.model == 'inventoryitem' and comment.content_object is not None:
+                can_answer = user_can_manage_store(request, comment.content_object.store)
                 company_name = comment.content_object.store.company.name
                 item_name = comment.content_object.product.name
-            elif comment.content_type.model == 'companyvideostory':
-                owner = comment.content_object.company.owner
+            elif comment.content_type.model == 'companyvideostory' and comment.content_object is not None:
+                can_answer = user_can_manage_company(request, comment.content_object.company)
                 company_name = comment.content_object.company.name
                 item_name = "tu Video"
 
-            if owner != request.user:
+            if not can_answer:
                 return Response({'error': 'No tienes permisos para responder.'}, status=status.HTTP_403_FORBIDDEN)
 
             if comment.answer_text is not None:

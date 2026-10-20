@@ -1,6 +1,7 @@
 """Inventory Items, Products, Push Notifications, Client Contact Methods, Locations, and User Profile."""
 from .base import *
 from .base import _get_cached_bcv_rate, _extract_and_validate_category_ids
+from ..core.workforce import resolve_merchant_actor, user_can_manage_store
 
 class InventoryItemViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
@@ -8,7 +9,13 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
     throttle_scope = 'actions'
 
     def get_queryset(self):
-        return InventoryItem.objects.filter(store__company__owner=self.request.user).order_by('-creation')
+        company, _emp, allowed_store_ids = resolve_merchant_actor(self.request)
+        if company is None:
+            return InventoryItem.objects.none()
+        qs = InventoryItem.objects.filter(store__company=company)
+        if allowed_store_ids is not None:
+            qs = qs.filter(store_id__in=allowed_store_ids)
+        return qs.order_by('-creation')
 
     def create(self, request, *args, **kwargs):
         try:
@@ -19,8 +26,13 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
                 expiration_date_raw = request.data.get('expiration_date')
                 custom_price = request.data.get('custom_price')
 
-                store = CompanyStore.objects.select_related('company').get(id=store_id, company__owner=request.user)
-                product = Product.objects.select_related('company').get(id=product_id, company__owner=request.user)
+                store = CompanyStore.objects.select_related('company').get(id=store_id)
+                if not user_can_manage_store(request, store):
+                    return Response(
+                        {'success': False, 'error': 'No tienes permisos operativos sobre esta sucursal.'},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+                product = Product.objects.select_related('company').get(id=product_id, company=store.company)
 
                 # Procesamos la fecha de caducidad usando nuestra función flexible
                 exp_datetime = None
@@ -127,8 +139,11 @@ class ProductViewSet(viewsets.ModelViewSet):
     parser_classes = [parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser]
 
     def get_queryset(self):
-        # Aseguramos que el usuario solo pueda interactuar con los productos de su compañía
-        return Product.objects.select_related('company', 'category__parent_category').filter(company__owner=self.request.user).order_by('-creation')
+        # Aseguramos que el usuario solo pueda interactuar con los productos de la compañía activa (dueño o asistente)
+        company, _emp, _allowed_store_ids = resolve_merchant_actor(self.request)
+        if company is None:
+            return Product.objects.none()
+        return Product.objects.select_related('company', 'category__parent_category').filter(company=company).order_by('-creation')
 
     @action(detail=False, methods=['get'], url_path='schema', permission_classes=[AllowAny])
     def schema(self, request):
@@ -147,9 +162,8 @@ class ProductViewSet(viewsets.ModelViewSet):
         from api.core.category_schemas import validate_and_normalize_product_dynamic_data
 
         company_id = request.data.get('company_id')
-        try:
-            company = Company.objects.get(id=company_id, owner=request.user)
-        except Company.DoesNotExist:
+        company, _emp, _allowed_store_ids = resolve_merchant_actor(request, target_company_id=company_id)
+        if company is None:
             return Response({'error': 'Compañía no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
         raw_products = request.data.get('products_data')
@@ -279,9 +293,8 @@ class ProductViewSet(viewsets.ModelViewSet):
         try:
             with transaction.atomic():
                 company_id = request.data.get('company_id')
-                try:
-                    company = Company.objects.get(id=company_id, owner=request.user)
-                except Company.DoesNotExist:
+                company, _emp, _allowed_store_ids = resolve_merchant_actor(request, target_company_id=company_id)
+                if company is None:
                     return Response({'error': 'Compañía no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
                 category = SubCategory.objects.select_related('parent_category').get(id=d['category_id'])

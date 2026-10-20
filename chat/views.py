@@ -5,8 +5,9 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated, AllowAny
 
 from api.core.firebase_admin import NotificationManager
+from api.core.workforce import resolve_merchant_actor, user_can_manage_store
 from .models import ChatMessage, PredefinedMessage
-from api.models import Order, SupportMessage, SupportTicket, MerchantPaymentMethod, Company
+from api.models import Order, SupportMessage, SupportTicket, MerchantPaymentMethod, Company, User
 from .permissions import IsNodeMicroservice
 from django.db import transaction
 from django.utils import timezone
@@ -61,7 +62,7 @@ class ChatViewSet(viewsets.ViewSet):
         try:
             order = Order.objects.select_related('store__company').get(id=order_id)
             is_client = order.client_id == request.user.id
-            is_merchant = order.store.company.owner_id == request.user.id
+            is_merchant = user_can_manage_store(request, order.store)
 
             if not is_client and not is_merchant:
                 return Response({"error": "No tienes acceso."}, status=status.HTTP_403_FORBIDDEN)
@@ -123,8 +124,8 @@ class ChatViewSet(viewsets.ViewSet):
             order = Order.objects.select_related('store__company').get(id=order_id)
             company = order.store.company
             
-            # Validamos que el usuario logueado sea el dueño
-            if company.owner_id != request.user.id:
+            # Validamos que el usuario logueado sea el dueño o asistente asignado a la sucursal
+            if not user_can_manage_store(request, order.store):
                 return Response({"error": "No tienes acceso a esta compañía."}, status=status.HTTP_403_FORBIDDEN)
 
             if request.method == 'GET':
@@ -171,13 +172,16 @@ class ChatViewSet(viewsets.ViewSet):
         if order_id:
             try:
                 order = Order.objects.select_related('store__company').get(id=order_id)
-                if request.user.id not in (order.client_id, order.store.company.owner_id):
+                if (
+                    request.user.id not in (order.client_id, order.store.company.owner_id)
+                    and not user_can_manage_store(request, order.store)
+                ):
                     return Response({"error": "No tienes acceso a esta orden."}, status=status.HTTP_403_FORBIDDEN)
                 company = order.store.company
             except Order.DoesNotExist:
                 return Response({"error": "La orden no existe."}, status=status.HTTP_404_NOT_FOUND)
         else:
-            company = Company.objects.filter(owner=request.user).first()
+            company, _, _ = resolve_merchant_actor(request)
 
         if not company:
             return Response({"data": [], "payment_methods": []}, status=status.HTTP_200_OK)
@@ -280,7 +284,11 @@ class ChatWebhookViewSet(viewsets.ViewSet):
 
         try:
             order = Order.objects.select_related('store__company').get(id=order_id)
-            if str(sender_id) not in (str(order.client_id), str(order.store.company.owner_id)):
+            can_send = str(sender_id) in (str(order.client_id), str(order.store.company.owner_id))
+            if not can_send and sender_id:
+                sender_user = User.objects.filter(id=sender_id).first()
+                can_send = bool(sender_user and user_can_manage_store(sender_user, order.store))
+            if not can_send:
                 return Response({"error": "No tienes permiso para enviar mensajes en esta orden"}, status=status.HTTP_403_FORBIDDEN)
 
             if order.status >= 3:
@@ -371,7 +379,11 @@ class ChatWebhookViewSet(viewsets.ViewSet):
         
         try:
             order = Order.objects.select_related('store__company').get(id=order_id)
-            if str(reader_id) not in (str(order.client_id), str(order.store.company.owner_id)):
+            can_read = str(reader_id) in (str(order.client_id), str(order.store.company.owner_id))
+            if not can_read and reader_id:
+                reader_user = User.objects.filter(id=reader_id).first()
+                can_read = bool(reader_user and user_can_manage_store(reader_user, order.store))
+            if not can_read:
                 return Response({"error": "No tienes acceso a esta sala"}, status=status.HTTP_403_FORBIDDEN)
 
             with transaction.atomic():

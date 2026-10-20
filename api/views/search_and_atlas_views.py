@@ -1,6 +1,7 @@
 """Hyper-Local PostGIS + Trigram Product Search Engine and Atlas 2.0 AI Conversational Assistant."""
 from .base import *
 from .base import _get_cached_bcv_rate, _extract_and_validate_category_ids
+from ..core.workforce import resolve_merchant_actor
 
 class ProductSearchEngineViewSet(viewsets.ViewSet):
     """
@@ -1249,15 +1250,10 @@ class AtlasViewSet(viewsets.ViewSet):
     # ========================================================================
     # 🧠 PILAR 2: ATLAS BUSINESS COPILOT (MODO COMERCIANTE)
     # ========================================================================
-    def _resolve_merchant_company(self, user):
-        company = Company.objects.select_related('category').filter(owner=user).first()
-        if company:
-            return company
-        # Solo asistentes: los repartidores no acceden a las herramientas del comerciante
-        emp = Employee.objects.select_related('company', 'company__category').filter(
-            user=user, is_active=True, role=EmployeeRole.ASSISTANT
-        ).first()
-        return emp.company if emp else None
+    def _resolve_merchant_company(self, user=None):
+        req_or_user = getattr(self, 'request', None) or user
+        company, _emp, _allowed_store_ids = resolve_merchant_actor(req_or_user)
+        return company
 
     def _handle_merchant_briefing(self, request):
         from ..core.atlas_merchant import AtlasMerchantCopilot

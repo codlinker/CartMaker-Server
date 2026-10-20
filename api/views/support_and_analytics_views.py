@@ -1,6 +1,7 @@
 """Support Tickets, Merchant Business Intelligence (Analytics), and Telemetry Interaction Logs."""
 from .base import *
 from .base import _get_cached_bcv_rate, _extract_and_validate_category_ids
+from ..core.workforce import resolve_merchant_actor, user_can_manage_store
 
 ####################################################
 #################### VIEW SETS #####################
@@ -47,11 +48,17 @@ class SupportTicketViewSet(viewsets.ViewSet):
 
     def list(self, request):
         user = request.user
+        company, _emp, allowed_store_ids = resolve_merchant_actor(request)
         participant_filter = (
             Q(client=user)
             | Q(order__client=user)
             | Q(order__store__company__owner=user)
         )
+        if company is not None:
+            if allowed_store_ids is not None:
+                participant_filter = participant_filter | Q(order__store__company=company, order__store_id__in=allowed_store_ids)
+            else:
+                participant_filter = participant_filter | Q(order__store__company=company)
         if user.is_superuser or user.is_staff:
             participant_filter = participant_filter | Q(agent=user)
 
@@ -149,8 +156,7 @@ class SupportTicketViewSet(viewsets.ViewSet):
                 is_buyer = (linked_order.client_id == request.user.id)
                 is_merchant_owner = bool(
                     linked_order.store
-                    and linked_order.store.company
-                    and linked_order.store.company.owner_id == request.user.id
+                    and user_can_manage_store(request, linked_order.store)
                 )
                 if not (is_buyer or is_merchant_owner):
                     return Response(
@@ -800,7 +806,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
     # =========================================================================
     @action(detail=False, methods=['get'])
     def content_performance(self, request):
-        company = Company.objects.filter(owner=request.user).first()
+        company, _emp, _allowed_store_ids = resolve_merchant_actor(request)
         if not company:
             return Response({'error': 'Compañía no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
 

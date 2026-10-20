@@ -104,12 +104,15 @@ def ship_order_service(order: Order, actor_user=None,
 # FINALIZACIÓN (-> COMPLETED) Y CALIFICACIÓN DEL CLIENTE
 # =========================================================================
 def resolve_order_actor_role(order: Order, actor_user) -> Optional[str]:
-    """ 'client' si es el comprador, 'merchant' si es el dueño del comercio, o None. """
+    """ 'client' si es el comprador, 'merchant' si es el dueño o asistente de la sucursal, o None. """
     if actor_user is None:
         return None
     if order.client_id == actor_user.id:
         return ACTOR_CLIENT
     if order.store.company.owner_id == actor_user.id:
+        return ACTOR_MERCHANT
+    from .workforce import user_can_manage_store
+    if user_can_manage_store(actor_user, order.store):
         return ACTOR_MERCHANT
     return None
 

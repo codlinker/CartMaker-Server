@@ -2133,11 +2133,12 @@ class Order(models.Model):
             models.Index(fields=['status', 'creation'], name='order_status_creation_idx'),
         ]
 
-    def get_delivery_json(self, viewer_user=None) -> Optional[dict]:
+    def get_delivery_json(self, viewer_user=None, viewer_role: Optional[str] = None) -> Optional[dict]:
         """
         Bloque `delivery` de la orden (solo para órdenes con delivery que tengan DeliveryAssignment).
-        Si `viewer_user` es None o es el comprador, se usa la vista del cliente (incluye el PIN de entrega);
-        para cualquier otro usuario (comerciante) se usa la vista del comercio (sin PIN).
+        Si se indica `viewer_role` ('client' | 'merchant' | 'rider'), se respeta; de lo contrario,
+        si `viewer_user` es None o es el comprador, se usa la vista del cliente (incluye el PIN de entrega),
+        y para cualquier otro usuario (comerciante) se usa la vista del comercio (sin PIN).
         """
         try:
             if int(self.withdrawal_type) != WithdrawalType.DELIVERY:
@@ -2147,8 +2148,10 @@ class Order(models.Model):
         assignment = getattr(self, 'delivery_assignment', None)
         if assignment is None:
             return None
-        is_client = viewer_user is None or getattr(viewer_user, 'id', None) == self.client_id
-        return assignment.get_json(viewer_role='client' if is_client else 'merchant')
+        if viewer_role not in ('client', 'merchant', 'rider'):
+            is_client = viewer_user is None or getattr(viewer_user, 'id', None) == self.client_id
+            viewer_role = 'client' if is_client else 'merchant'
+        return assignment.get_json(viewer_role=viewer_role)
 
 
 # ==========================================
@@ -2661,6 +2664,17 @@ class SupportTicket(models.Model):
             company = self.get_merchant_company()
             if company and company.owner_id and uid_str == str(company.owner_id) and uid_str != str(self.order.client_id):
                 return 'merchant'
+            if (
+                company
+                and uid_str != str(self.order.client_id)
+                and Employee.objects.filter(
+                    user_id=uid_str,
+                    company_id=company.id,
+                    status=EmployeeStatus.ACTIVE,
+                    role=EmployeeRole.ASSISTANT,
+                ).exists()
+            ):
+                return 'merchant'
             if self.order.client_id and uid_str == str(self.order.client_id):
                 return 'client'
             if company and company.owner_id and uid_str == str(company.owner_id):
@@ -2690,7 +2704,20 @@ class SupportTicket(models.Model):
             company = self.get_merchant_company()
             if company and company.owner_id:
                 allowed.add(str(company.owner_id))
-        return uid_str in allowed
+        if uid_str in allowed:
+            return True
+        if self.order_id and self.order and self.order.store_id:
+            from api.core.workforce import get_employee_allowed_store_ids
+            emps = Employee.objects.filter(
+                user_id=uid_str,
+                company_id=self.order.store.company_id,
+                status=EmployeeStatus.ACTIVE,
+                role=EmployeeRole.ASSISTANT,
+            )
+            for emp in emps:
+                if self.order.store_id in get_employee_allowed_store_ids(emp):
+                    return True
+        return False
 
     def get_all_participant_ids(self) -> list:
         ids = []

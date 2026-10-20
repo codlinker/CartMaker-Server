@@ -1,6 +1,8 @@
 """PostGIS Map Views, Redis Split-Cache Synchronization, Dynamic Category Schemas (SDUI), and User Preferences."""
 from .base import *
 from .base import _get_cached_bcv_rate, _extract_and_validate_category_ids
+from ..core.workforce import resolve_merchant_actor
+from ..permissions import get_request_ctx
 
 #########################################################
 #################### MANEJO DE MAPAS ####################
@@ -423,26 +425,38 @@ class CompanyCacheAPI(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        cache_key = f"cartmaker:tenant:{request.user.id}:company"
-        cached_data = cache.get(cache_key)
+        company_obj, emp, allowed_store_ids = resolve_merchant_actor(request)
+        is_worker = (emp is not None) or (get_request_ctx(request) == 'worker')
+        cache_key = (
+            f"cartmaker:tenant:{request.user.id}:worker:{emp.id}:company"
+            if emp is not None
+            else f"cartmaker:tenant:{request.user.id}:company"
+        )
 
-        if cached_data is not None:
-            if cached_data.get("message") == "Suscripción expirada.":
-                cache.delete(cache_key)
-            elif "error_status" in cached_data:
-                return Response({'message': cached_data["message"]}, status=cached_data["error_status"])
-            elif "payment_methods" not in cached_data:
-                cache.delete(cache_key)
-            else:
-                return Response(cached_data, status=status.HTTP_200_OK)
-            
-        try:
-            company_obj = Company.objects.select_related('category').prefetch_related('payment_methods').get(owner=request.user)
-            company = company_obj.get_json()
-        except Company.DoesNotExist:
+        if not is_worker:
+            cached_data = cache.get(cache_key)
+            if cached_data is not None:
+                if cached_data.get("message") == "Suscripción expirada.":
+                    cache.delete(cache_key)
+                elif "error_status" in cached_data:
+                    return Response({'message': cached_data["message"]}, status=cached_data["error_status"])
+                elif "payment_methods" not in cached_data:
+                    cache.delete(cache_key)
+                else:
+                    return Response(cached_data, status=status.HTTP_200_OK)
+
+        if company_obj is None:
             error_data = {"error_status": status.HTTP_404_NOT_FOUND, "message": "No ha configurado su tienda."}
-            cache.set(cache_key, error_data, timeout=300)
+            if not is_worker:
+                cache.set(cache_key, error_data, timeout=300)
             return Response({'message': error_data["message"]}, status=error_data["error_status"])
+
+        company_obj = (
+            Company.objects.select_related('category')
+            .prefetch_related('payment_methods')
+            .get(id=company_obj.id)
+        )
+        company = company_obj.get_json()
 
         stores_qs = CompanyStore.objects.filter(
             company_id=company['id']
@@ -450,13 +464,19 @@ class CompanyCacheAPI(APIView):
             'location', 'location__mall', 'company'
         ).prefetch_related(
             'contact_methods'
-        ).order_by('creation')
+        )
+        if allowed_store_ids is not None:
+            stores_qs = stores_qs.filter(id__in=allowed_store_ids)
+        stores_qs = stores_qs.order_by('creation')
         stores = [company_store.get_json() for company_store in stores_qs]
 
         item_ct = ContentType.objects.get_for_model(InventoryItem)
         video_ct = ContentType.objects.get_for_model(CompanyVideoStory)
 
-        items_pks = InventoryItem.objects.filter(store__company_id=company['id']).values_list('id', flat=True)
+        items_qs = InventoryItem.objects.filter(store__company_id=company['id'])
+        if allowed_store_ids is not None:
+            items_qs = items_qs.filter(store_id__in=allowed_store_ids)
+        items_pks = items_qs.values_list('id', flat=True)
         videos_pks = CompanyVideoStory.objects.filter(company_id=company['id']).values_list('id', flat=True)
 
         pending_items = UniversalComment.objects.filter(content_type=item_ct).annotate(
@@ -477,7 +497,7 @@ class CompanyCacheAPI(APIView):
             'payment_methods': payment_methods,
             'banks_catalog': VENEZUELAN_BANKS_CATALOG,
         }
-        cache.set(cache_key, data, timeout=3600)
+        cache.set(cache_key, data, timeout=180 if is_worker else 3600)
         return Response(data, status=status.HTTP_200_OK)
 
 class SubscriptionsCacheAPI(APIView):

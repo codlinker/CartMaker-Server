@@ -12,14 +12,14 @@ from ..core.delivery import (
     reassign_delivery,
     unassign_delivery,
 )
-from ..permissions import IsPersonalContext
+from ..core.workforce import resolve_merchant_actor, user_can_manage_store
+from ..permissions import IsPersonalContext, get_request_ctx
 
 class OrderViewSet(viewsets.ViewSet):
     """
-    API para la gestión y consulta de órdenes de compra del usuario.
+    API para la gestión y consulta de órdenes de compra (comprador, dueño del comercio y asistente de tienda).
     """
-    # Solo cuenta personal: con un token de trabajador no se ven ni gestionan órdenes personales
-    permission_classes = [IsAuthenticated, IsPersonalContext]
+    permission_classes = [IsAuthenticated]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'actions'
 
@@ -140,10 +140,9 @@ class OrderViewSet(viewsets.ViewSet):
     def retrieve(self, request, pk=None):
         """
         GET /api/v1/orders/<id>/
-        Permite recuperar una orden individual si eres el cliente O el comerciante dueño.
+        Permite recuperar una orden individual si eres el cliente, el dueño del comercio o un asistente asignado a la sucursal.
         """
         try:
-            # Buscamos la orden garantizando que el usuario sea el cliente O el dueño de la compañía
             order = Order.objects.select_related(
                 'client',
                 'store__company',
@@ -157,9 +156,13 @@ class OrderViewSet(viewsets.ViewSet):
                 'store__contact_methods',
                 'store__company__payment_methods',
                 'support_tickets',
-            ).get(
-                Q(id=pk) & (Q(client=request.user) | Q(store__company__owner=request.user))
-            )
+            ).get(id=pk)
+
+            is_worker_ctx = (get_request_ctx(request) == 'worker')
+            can_manage_as_merchant = user_can_manage_store(request, order.store)
+            is_client_viewer = (not is_worker_ctx) and (order.client_id == request.user.id)
+            if not (can_manage_as_merchant or is_client_viewer):
+                raise Order.DoesNotExist
             
             # Formateamos la data exactamente igual que en tus otros métodos
             company = order.store.company
@@ -177,7 +180,10 @@ class OrderViewSet(viewsets.ViewSet):
             client_lng = float(order.client_location.coordinates.x) if order.client_location else None
             client_address = order.client_location.description if order.client_location else None
 
-            is_merchant_mode = (company.owner_id == request.user.id)
+            is_merchant_mode = bool(
+                can_manage_as_merchant
+                and (is_worker_ctx or order.client_id != request.user.id or company.owner_id == request.user.id)
+            )
 
             contact_methods_dict = {
                 ContactMethodType(contact.method_type).name.lower(): contact.get_json()
@@ -223,7 +229,10 @@ class OrderViewSet(viewsets.ViewSet):
                 'client_name': f"{order.client.first_name} {order.client.last_name}",
                 'client_contact_methods': contact_methods_dict,
                 'end_time': timezone.localtime(order.end_time).strftime("%d/%m/%Y %I:%M %p").lower() if order.end_time else creation_str,
-                'delivery': order.get_delivery_json(viewer_user=request.user),
+                'delivery': order.get_delivery_json(
+                    viewer_user=request.user,
+                    viewer_role='merchant' if is_merchant_mode else 'client',
+                ),
             }
             # CART-60 (Principio de Proporcionalidad): nunca exponer client_cedula ni documentos de identidad al comerciante
             if not is_merchant_mode:
@@ -239,6 +248,10 @@ class OrderViewSet(viewsets.ViewSet):
             )
 
     def list(self, request):
+        # En contexto de trabajador no se listan las compras personales del usuario (evita 403 en el arranque de la app)
+        if get_request_ctx(request) == 'worker':
+            return Response({'data': []}, status=status.HTTP_200_OK)
+
         # 💡 Optimizamos con select_related para traer la info de la tienda, la compañía y la ubicación de entrega de un solo golpe
         orders = Order.objects.select_related(
             'client',
@@ -323,15 +336,22 @@ class OrderViewSet(viewsets.ViewSet):
                 'end_time': timezone.localtime(order.end_time).strftime("%d/%m/%Y %I:%M %p").lower() if order.end_time else creation_str,
                 'client_cedula': order.client.cedula_number,
                 'client_email': order.client.email,
-                'delivery': order.get_delivery_json(viewer_user=request.user),
+                'delivery': order.get_delivery_json(viewer_user=request.user, viewer_role='client'),
             })
 
         return Response({'data': orders_data}, status=status.HTTP_200_OK)
     
     @action(detail=False, methods=['get'])
     def merchant_orders(self, request):
-        """ Retorna las órdenes pertenecientes a las tiendas del comerciante autenticado """
-        orders = Order.objects.select_related(
+        """ Retorna las órdenes pertenecientes a las tiendas del comerciante o asistente autenticado """
+        company, _emp, allowed_store_ids = resolve_merchant_actor(request)
+        if company is None:
+            return Response(
+                {"error": "No tienes permisos operativos sobre un comercio activo."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        orders_qs = Order.objects.select_related(
             'store__company', 
             'store__location', 
             'client',
@@ -342,8 +362,16 @@ class OrderViewSet(viewsets.ViewSet):
             'client__contact_methods',
             'support_tickets',
         ).filter(
-            store__company__owner=request.user
-        ).order_by('-creation')
+            store__company=company
+        )
+        if allowed_store_ids is not None:
+            orders_qs = orders_qs.filter(store_id__in=allowed_store_ids)
+
+        store_filter = request.query_params.get('store_id')
+        if store_filter:
+            orders_qs = orders_qs.filter(store_id=store_filter)
+
+        orders = orders_qs.order_by('-creation')
         
         orders_data = []
         for order in orders:
@@ -408,58 +436,69 @@ class OrderViewSet(viewsets.ViewSet):
                 
                 'cart': order.cart,
                 'creation': creation_str,
-                'delivery': order.get_delivery_json(viewer_user=request.user),
+                'delivery': order.get_delivery_json(viewer_user=request.user, viewer_role='merchant'),
             })
         return Response({'data': orders_data}, status=status.HTTP_200_OK)
     
     @action(detail=False, methods=['post'])
     def merchant_ship_order(self, request):
         """
-        Permite al comerciante marcar un delivery como enviado (Status 1).
+        Permite al comerciante o asistente marcar un delivery como enviado (Status 1).
         Si la orden tiene una entrega con repartidor (DeliveryAssignment), se usa el flujo del repartidor
         (`picked_up`) para que el cliente vea el mapa en vivo; sin repartidor aceptado no se puede despachar.
         """
         order_id = request.data.get('order_id')
-        assignment = DeliveryAssignment.objects.filter(
-            order_id=order_id, order__store__company__owner=request.user,
-        ).only('id', 'status').first() if order_id else None
-        if assignment is not None and int(assignment.status) not in DELIVERY_TERMINAL_STATUSES:
-            if int(assignment.status) in (DeliveryStatus.ACCEPTED, DeliveryStatus.AT_STORE):
-                try:
-                    delivery = mark_picked_up(request.user, assignment.id)
-                except DeliveryError as e:
-                    payload = {'error': e.message}
-                    if e.code:
-                        payload['code'] = e.code
-                    return Response(payload, status=e.status_code)
+        assignment = (
+            DeliveryAssignment.objects.select_related('order__store__company')
+            .filter(order_id=order_id)
+            .first()
+            if order_id else None
+        )
+        if assignment is not None:
+            if not user_can_manage_store(request, assignment.order.store):
+                return Response(
+                    {"error": "La orden no existe o no tienes permisos sobre esta sucursal."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            if int(assignment.status) not in DELIVERY_TERMINAL_STATUSES:
+                if int(assignment.status) in (DeliveryStatus.ACCEPTED, DeliveryStatus.AT_STORE):
+                    try:
+                        delivery = mark_picked_up(request.user, assignment.id)
+                    except DeliveryError as e:
+                        payload = {'error': e.message}
+                        if e.code:
+                            payload['code'] = e.code
+                        return Response(payload, status=e.status_code)
+                    return Response({
+                        "success": True,
+                        "message": "Pedido entregado al repartidor. El cliente ya puede verlo en el mapa.",
+                        "delivery": delivery.get_json(viewer_role='merchant'),
+                    }, status=status.HTTP_200_OK)
+                if int(assignment.status) in (DeliveryStatus.PENDING_RIDER, DeliveryStatus.ASSIGNED):
+                    return Response({
+                        "error": "Esta orden aún no tiene un repartidor que haya aceptado la entrega.",
+                        "code": "rider_not_accepted",
+                    }, status=status.HTTP_409_CONFLICT)
                 return Response({
-                    "success": True,
-                    "message": "Pedido entregado al repartidor. El cliente ya puede verlo en el mapa.",
-                    "delivery": delivery.get_json(viewer_role='merchant'),
-                }, status=status.HTTP_200_OK)
-            if int(assignment.status) in (DeliveryStatus.PENDING_RIDER, DeliveryStatus.ASSIGNED):
-                return Response({
-                    "error": "Esta orden aún no tiene un repartidor que haya aceptado la entrega.",
-                    "code": "rider_not_accepted",
+                    "error": "El pedido ya va en camino con el repartidor.",
+                    "code": "already_in_transit",
                 }, status=status.HTTP_409_CONFLICT)
-            return Response({
-                "error": "El pedido ya va en camino con el repartidor.",
-                "code": "already_in_transit",
-            }, status=status.HTTP_409_CONFLICT)
         try:
             with transaction.atomic():
                 order = (
                     Order.objects.select_for_update(of=('self',))
                     .select_related('store__company')
-                    .get(id=order_id, store__company__owner=request.user)
+                    .get(id=order_id)
                 )
+                if not user_can_manage_store(request, order.store):
+                    raise Order.DoesNotExist
                 # La lógica de despacho vive en api/core/order_services.py (reutilizada por el flujo de delivery)
                 ship_order_service(order, request.user)
             return Response({"success": True, "message": "Orden marcada como enviada."}, status=status.HTTP_200_OK)
         except OrderServiceError as e:
             return Response({"error": e.message}, status=e.status_code)
         except Order.DoesNotExist:
-            return Response({"error": "La orden no existe o no eres el dueño del comercio."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"error": "La orden no existe o no tienes permisos sobre el comercio."}, status=status.HTTP_404_NOT_FOUND)
 
     # =========================================================================
     # 💡 OBTENER TÓPICOS DIRECTO DEL CÓDIGO (Sin tocar la BD)
@@ -478,6 +517,14 @@ class OrderViewSet(viewsets.ViewSet):
     # =========================================================================
     @action(detail=False, methods=['post'])
     def cancel_order(self, request):
+        if get_request_ctx(request) != 'personal':
+            return Response(
+                {
+                    "error": "Esta acción solo está disponible desde tu cuenta personal. Cambia de espacio de trabajo para continuar.",
+                    "code": "personal_context_required",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
         order_id = request.data.get('order_id')
         topic_id = request.data.get('cancellation_topic_id') 
 
@@ -623,6 +670,12 @@ class OrderViewSet(viewsets.ViewSet):
             with transaction.atomic():
                 # Bloqueamos únicamente la fila de la orden (of=('self',)) para evitar bloqueos innecesarios en tablas relacionadas
                 order = Order.objects.select_for_update(of=('self',)).select_related('store__company').get(id=order_id)
+                actor_role = None
+                if get_request_ctx(request) == 'worker':
+                    if user_can_manage_store(request, order.store):
+                        actor_role = 'merchant'
+                    else:
+                        raise OrderServiceError("No tienes permisos sobre esta orden.", status_code=403)
                 # La lógica de finalización (stock, tokens, atribución, calificación y notificaciones cruzadas)
                 # vive en api/core/order_services.py para reutilizarla en el flujo de delivery con PIN.
                 result = complete_order_service(
@@ -630,6 +683,7 @@ class OrderViewSet(viewsets.ViewSet):
                     request.user,
                     merchant_rating=merchant_rating,
                     product_ratings=product_ratings,
+                    actor_role=actor_role,
                 )
                 # Si la orden tenía una entrega activa, se cierra para liberar al repartidor
                 if not result.get('already_completed'):
@@ -686,8 +740,9 @@ class OrderViewSet(viewsets.ViewSet):
                     .prefetch_related('support_tickets')
                     .get(id=order_id)
                 )
-                is_buyer = (order.client_id == request.user.id)
-                is_merchant = bool(order.store and order.store.company and order.store.company.owner_id == request.user.id)
+                is_worker_ctx = (get_request_ctx(request) == 'worker')
+                is_buyer = (not is_worker_ctx) and (order.client_id == request.user.id)
+                is_merchant = bool(order.store and user_can_manage_store(request, order.store))
                 if not (is_buyer or is_merchant or request.user.is_staff):
                     return Response({"error": "No tienes permisos para reportar esta orden."}, status=status.HTTP_403_FORBIDDEN)
 

@@ -126,20 +126,51 @@ def require_owned_company(user) -> Company:
     return company
 
 
+def get_employee_allowed_store_ids(employee: Employee) -> set:
+    """
+    Retorna el conjunto de UUIDs de sucursales a las que el trabajador tiene acceso.
+    Si no tiene asignaciones explícitas (EmployeeStoreAssignment / EmployeePermission.allowed_stores),
+    se asume acceso a todas las sucursales de la compañía.
+    """
+    if employee is None:
+        return set()
+    store_ids = set(
+        EmployeeStoreAssignment.objects.filter(
+            employee=employee,
+            store__company_id=employee.company_id,
+        ).values_list('store_id', flat=True)
+    )
+    perm_ids = set(
+        EmployeePermission.objects.filter(
+            employee=employee,
+            allowed_stores__company_id=employee.company_id,
+        ).values_list('allowed_stores__id', flat=True)
+    )
+    perm_ids.discard(None)
+    store_ids |= perm_ids
+    if not store_ids:
+        store_ids = set(
+            CompanyStore.objects.filter(company_id=employee.company_id).values_list('id', flat=True)
+        )
+    return store_ids
+
+
 def user_works_at_store(user, store) -> bool:
     """
     True si el usuario es trabajador ACTIVO de la compañía de la sucursal y está asignado a ella
-    (EmployeeStoreAssignment o EmployeePermission.allowed_stores).
+    (EmployeeStoreAssignment, EmployeePermission.allowed_stores o acceso general a la compañía).
     """
     if not user or not getattr(user, 'is_authenticated', False) or store is None:
         return False
-    return Employee.objects.filter(
+    emps = Employee.objects.filter(
         user=user,
         company_id=store.company_id,
         status=EmployeeStatus.ACTIVE,
-    ).filter(
-        Q(employeestoreassignment__store=store) | Q(permissions__allowed_stores=store)
-    ).exists()
+    )
+    for emp in emps:
+        if store.id in get_employee_allowed_store_ids(emp):
+            return True
+    return False
 
 
 def user_is_store_owner_or_worker(user, store) -> bool:
@@ -150,6 +181,136 @@ def user_is_store_owner_or_worker(user, store) -> bool:
     if company is not None and company.owner_id == user.id:
         return True
     return user_works_at_store(user, store)
+
+
+def _extract_auth_claim(request_or_user, claim: str, default=None):
+    auth = getattr(request_or_user, 'auth', None)
+    if auth is None:
+        return default
+    try:
+        return auth.get(claim, default)
+    except AttributeError:
+        if isinstance(auth, dict):
+            return auth.get(claim, default)
+        return default
+
+
+def resolve_merchant_actor(request_or_user, target_company_id=None, target_store_id=None):
+    """
+    Resuelve el contexto operativo de comercio (Dueño o Asistente de Tienda activo).
+    Los repartidores (`EmployeeRole.DELIVERY`) NO obtienen acceso de gestión de comercio/catálogo/órdenes.
+
+    Retorna `(company, employee, allowed_store_ids)`:
+    - Si es el dueño: `(company, None, None)` (`allowed_store_ids=None` indica acceso total a todas las sucursales).
+    - Si es un asistente activo: `(company, employee, set_of_store_uuids)`.
+    - Si no tiene permisos: `(None, None, None)`.
+    """
+    user = getattr(request_or_user, 'user', request_or_user)
+    if not user or not getattr(user, 'is_authenticated', False):
+        return None, None, None
+
+    target_store_obj = target_store_id if isinstance(target_store_id, CompanyStore) else None
+    target_store_str = str(target_store_obj.id if target_store_obj is not None else target_store_id).strip() if target_store_id is not None else None
+    if target_company_id is None and target_store_obj is not None:
+        target_company_id = target_store_obj.company_id
+    target_company_str = str(target_company_id).strip() if target_company_id is not None else None
+
+    ctx = str(_extract_auth_claim(request_or_user, CTX_CLAIM, '') or CTX_PERSONAL)
+    emp_id = _extract_auth_claim(request_or_user, EMP_ID_CLAIM, None)
+
+    # 1. Sesión explícita en modo trabajador (ctx='worker')
+    if ctx == CTX_WORKER:
+        if not emp_id:
+            return None, None, None
+        state = get_employee_state(emp_id)
+        if not state.get('active') or str(state.get('user_id')) != str(user.id):
+            return None, None, None
+        if state.get('role') != 'assistant':
+            return None, None, None
+
+        emp = (
+            Employee.objects.select_related('company', 'company__category')
+            .filter(
+                id=emp_id,
+                user=user,
+                status=EmployeeStatus.ACTIVE,
+                role=EmployeeRole.ASSISTANT,
+            )
+            .first()
+        )
+        if emp is None or emp.company.owner_id == user.id:
+            return None, None, None
+
+        allowed_store_ids = get_employee_allowed_store_ids(emp)
+        if target_company_str and str(emp.company_id) != target_company_str:
+            return None, None, None
+        if target_store_str and target_store_str not in {str(sid) for sid in allowed_store_ids}:
+            return None, None, None
+        return emp.company, emp, allowed_store_ids
+
+    # 2. Sesión en modo personal (o llamada interna con instancia User):
+    # Primero intentamos como dueño directo de su propio comercio.
+    owned_company = Company.objects.select_related('category').filter(owner=user).first()
+    if owned_company is not None:
+        company_ok = (not target_company_str) or (str(owned_company.id) == target_company_str)
+        store_ok = True
+        if target_store_str:
+            if target_store_obj is not None:
+                store_ok = str(target_store_obj.company_id) == str(owned_company.id)
+            else:
+                store_ok = CompanyStore.objects.filter(id=target_store_str, company=owned_company).exists()
+        if company_ok and store_ok:
+            return owned_company, None, None
+
+    # 3. Respaldo: usuario con rol de Asistente activo en el comercio consultado
+    emp_qs = (
+        Employee.objects.select_related('company', 'company__category')
+        .filter(
+            user=user,
+            status=EmployeeStatus.ACTIVE,
+            role=EmployeeRole.ASSISTANT,
+        )
+        .exclude(company__owner=user)
+    )
+    if target_company_str:
+        emp_qs = emp_qs.filter(company_id=target_company_str)
+    elif target_store_str:
+        if target_store_obj is not None:
+            emp_qs = emp_qs.filter(company_id=target_store_obj.company_id)
+        else:
+            emp_qs = emp_qs.filter(company__stores__id=target_store_str).distinct()
+
+    for emp in emp_qs:
+        allowed_store_ids = get_employee_allowed_store_ids(emp)
+        if target_store_str and target_store_str not in {str(sid) for sid in allowed_store_ids}:
+            continue
+        return emp.company, emp, allowed_store_ids
+
+    return None, None, None
+
+
+def user_can_manage_store(request_or_user, store) -> bool:
+    """ True si el usuario es dueño de la compañía de la sucursal o asistente activo asignado a ella. """
+    if store is None:
+        return False
+    company, _, _ = resolve_merchant_actor(
+        request_or_user,
+        target_company_id=getattr(store, 'company_id', None),
+        target_store_id=store,
+    )
+    return company is not None
+
+
+def user_can_manage_company(request_or_user, company) -> bool:
+    """ True si el usuario es dueño de la compañía o asistente activo de ella. """
+    if company is None:
+        return False
+    cid = company.id if hasattr(company, 'id') else company
+    resolved_company, _, _ = resolve_merchant_actor(
+        request_or_user,
+        target_company_id=cid,
+    )
+    return resolved_company is not None
 
 
 # =========================================================================

@@ -873,9 +873,10 @@ def _notify_rider_on_commit(rider, title: str, body: str, event_type: str, deliv
 # 4. PERMISOS Y BÚSQUEDAS
 # =========================================================================
 def employee_assigned_to_store(employee, store) -> bool:
-    return Employee.objects.filter(pk=employee.pk, company_id=store.company_id).filter(
-        Q(employeestoreassignment__store=store) | Q(permissions__allowed_stores=store)
-    ).exists()
+    if employee is None or store is None or str(employee.company_id) != str(store.company_id):
+        return False
+    from .workforce import get_employee_allowed_store_ids
+    return store.id in get_employee_allowed_store_ids(employee)
 
 
 def user_can_manage_store_deliveries(user, store) -> bool:
@@ -884,11 +885,14 @@ def user_can_manage_store_deliveries(user, store) -> bool:
         return False
     if store.company.owner_id == user.id:
         return True
-    return Employee.objects.filter(
+    from .workforce import get_employee_allowed_store_ids
+    emps = Employee.objects.filter(
         user=user, company_id=store.company_id, status=EmployeeStatus.ACTIVE, role=EmployeeRole.ASSISTANT,
-    ).filter(
-        Q(employeestoreassignment__store=store) | Q(permissions__allowed_stores=store)
-    ).exists()
+    )
+    for emp in emps:
+        if store.id in get_employee_allowed_store_ids(emp):
+            return True
+    return False
 
 
 def get_rider_employee(employee_id) -> Employee:

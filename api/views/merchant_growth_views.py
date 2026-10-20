@@ -12,24 +12,16 @@ from .base import _get_cached_bcv_rate
 from ..core.atlas_merchant import AtlasMerchantCopilot
 from ..core.storefront_themes import resolve_company_storefront_theme
 from ..core.ve_geo import describe_zone
+from ..core.workforce import resolve_merchant_actor
 
 
-def _get_merchant_company_for_user(user) -> Optional[Company]:
+def _get_merchant_company_for_user(request_or_user) -> Optional[Company]:
     """
-    Obtiene la compañía del dueño autenticado o del empleado activo con permisos.
+    Obtiene la compañía del dueño autenticado o del empleado asistente activo.
+    Respeta el contexto `ctx='worker'` si se recibe un `request`.
     """
-    if not user or not user.is_authenticated:
-        return None
-    company = Company.objects.select_related("category").filter(owner=user).first()
-    if company:
-        return company
-    emp = (
-        Employee.objects.select_related("company", "company__category")
-        # Solo asistentes: los repartidores no acceden a las herramientas de crecimiento
-        .filter(user=user, is_active=True, role=EmployeeRole.ASSISTANT)
-        .first()
-    )
-    return emp.company if emp else None
+    company, _emp, _allowed_store_ids = resolve_merchant_actor(request_or_user)
+    return company
 
 
 def _get_public_domain() -> str:
@@ -60,7 +52,7 @@ class MerchantGrowthViewSet(viewsets.ViewSet):
     # 1. KIT DE PROMOCIÓN EXTERNA Y QR PHYGITAL (GET /api/v1/merchant-growth/share-kit/)
     # =========================================================================
     def _handle_share_kit(self, request):
-        company = _get_merchant_company_for_user(request.user)
+        company = _get_merchant_company_for_user(request)
         if not company:
             return Response(
                 {"error": "No se encontró una compañía asociada a tu cuenta."},
@@ -192,7 +184,7 @@ class MerchantGrowthViewSet(viewsets.ViewSet):
     #    POST /api/v1/merchant-growth/product-story-card/
     # =========================================================================
     def _handle_product_story_card(self, request):
-        company = _get_merchant_company_for_user(request.user)
+        company = _get_merchant_company_for_user(request)
         if not company:
             return Response({"error": "Compañía no encontrada."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -299,7 +291,7 @@ class MerchantGrowthViewSet(viewsets.ViewSet):
     #    POST /api/v1/merchant-growth/express-order-link/
     # =========================================================================
     def _handle_express_order_link(self, request):
-        company = _get_merchant_company_for_user(request.user)
+        company = _get_merchant_company_for_user(request)
         if not company:
             return Response({"error": "Compañía no encontrada."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -591,7 +583,7 @@ class MerchantGrowthViewSet(viewsets.ViewSet):
     #    POST /api/v1/merchant-growth/launch-rescue-campaign/
     # =========================================================================
     def _handle_rescue_opportunities(self, request):
-        company = _get_merchant_company_for_user(request.user)
+        company = _get_merchant_company_for_user(request)
         if not company:
             return Response({"error": "Compañía no encontrada."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -623,7 +615,7 @@ class MerchantGrowthViewSet(viewsets.ViewSet):
         return self._handle_rescue_opportunities(request)
 
     def _handle_launch_rescue_campaign(self, request):
-        company = _get_merchant_company_for_user(request.user)
+        company = _get_merchant_company_for_user(request)
         if not company:
             return Response({"error": "Compañía no encontrada."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -650,7 +642,7 @@ class MerchantGrowthViewSet(viewsets.ViewSet):
     #    GET /api/v1/merchant-growth/zone-fomo-radar/
     # =========================================================================
     def _handle_zone_fomo_radar(self, request):
-        company = _get_merchant_company_for_user(request.user)
+        company = _get_merchant_company_for_user(request)
         if not company:
             return Response({"error": "Compañía no encontrada."}, status=status.HTTP_404_NOT_FOUND)
 
