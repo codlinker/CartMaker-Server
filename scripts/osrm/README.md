@@ -1,9 +1,9 @@
-# OSRM Local Nativo (Venezuela, MLD, `--mmap`, Sin Docker)
+# OSRM Local Nativo (Venezuela, MLD, `--mmap`)
 
-Infraestructura local de enrutamiento para CartMaker sobre el extracto de Venezuela de Geofabrik, ejecutada **nativamente con `systemd` sin Docker**.
+Infraestructura local de enrutamiento para CartMaker sobre el extracto de Venezuela de Geofabrik, ejecutada nativamente con `systemd`.
 
-## Por qué sin Docker
-En una instancia **AWS EC2 Micro (1 GB RAM)**, el demonio de Docker (`dockerd` + `containerd`) consume ~150 MB de RAM solo por existir. `rebuild.sh` descarga directamente los binarios C++ precompilados de OSRM v5.27.1 en `/opt/osrm/rootfs` usando únicamente `curl` + `python3` + `tar`, y registra el motor como un servicio nativo de Linux (`osrm-car.service`) con `--mmap` (~80–120 MB de RAM).
+## Arquitectura en Instancias EC2 Micro (1 GB RAM)
+`rebuild.sh` descarga directamente los binarios C++ precompilados de OSRM v5.27.1 en `/opt/osrm/rootfs` usando únicamente `curl`, `python3` y `tar`, y registra el motor como un servicio nativo de Linux (`osrm-car.service`) con `--mmap` (~80–120 MB de RAM).
 
 ## Puertos (solo loopback `127.0.0.1`)
 - `127.0.0.1:5000` — servicio `osrm-car.service` (perfil `car`, usado para carro, moto y fallback de bici/pie)
@@ -19,7 +19,7 @@ chmod +x rebuild.sh
 
 El script:
 1. Verifica que haya suficiente RAM + Swap (crea `/swapfile` de 4 GB automáticamente si hace falta).
-2. Descarga los binarios precompilados de OSRM v5.27.1 en `/opt/osrm/rootfs` sin instalar Docker.
+2. Descarga los binarios precompilados de OSRM v5.27.1 en `/opt/osrm/rootfs`.
 3. Descarga `venezuela-latest.osm.pbf` y valida su MD5.
 4. Ejecuta `osrm-extract`, `osrm-partition` y `osrm-customize` de forma atómica.
 5. Crea y arranca `/etc/systemd/system/osrm-car.service` con `--mmap` y verifica con un `curl` de prueba que `http://127.0.0.1:5000` responda.

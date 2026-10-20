@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Reconstruye los datos de OSRM a partir del extracto de Venezuela de Geofabrik
-# y levanta osrm-routed como servicio nativo de Linux (systemd) SIN DOCKER.
+# y levanta osrm-routed como servicio nativo de Linux (systemd).
 #
-# - Cero Docker: descarga los binarios C++ precompilados de OSRM v5.27.1 directo
-#   a /opt/osrm/rootfs usando solo curl + python3 + tar (ahorra ~150 MB de RAM
-#   que consumiría dockerd en una instancia AWS EC2 Micro).
+# - Instalación nativa: descarga los binarios C++ precompilados de OSRM v5.27.1
+#   directo a /opt/osrm/rootfs usando solo curl + python3 + tar.
 # - Modo --mmap activo por defecto: osrm-routed mapea el grafo desde disco sin
 #   cargar todo en RAM (~80-120 MB de consumo real).
 # - Idempotente: si el .pbf no cambió y los datos ya existen, no reprocesa (FORCE=1 para forzar).
@@ -81,7 +80,7 @@ ensure_swap_for_micro() {
 ensure_swap_for_micro
 
 # -----------------------------------------------------------------------------
-# 1. Descarga de binarios precompilados de OSRM en /opt/osrm/rootfs (SIN DOCKER)
+# 1. Descarga de binarios precompilados de OSRM en /opt/osrm/rootfs
 # -----------------------------------------------------------------------------
 ensure_osrm_rootfs() {
   if [ -x "$ROOTFS/usr/local/bin/osrm-routed" ] || [ -x "$ROOTFS/usr/bin/osrm-routed" ]; then
@@ -89,7 +88,7 @@ ensure_osrm_rootfs() {
     return 0
   fi
 
-  log "Descargando binarios precompilados de OSRM ($OSRM_TAG) directamente (sin Docker)..."
+  log "Descargando binarios precompilados de OSRM ($OSRM_TAG) directamente..."
   sudo mkdir -p "$ROOTFS"
   local tmp_layers
   tmp_layers="$(mktemp -d)"
@@ -162,7 +161,7 @@ PYEOF
     log "ERROR: No se encontró osrm-routed tras extraer las capas en $ROOTFS."
     exit 1
   fi
-  log "Binarios OSRM instalados correctamente en $ROOTFS (0% Docker)."
+  log "Binarios OSRM instalados correctamente en $ROOTFS."
 }
 
 ensure_osrm_rootfs
@@ -285,7 +284,7 @@ done
 cleanup_chroot_mounts
 
 # -----------------------------------------------------------------------------
-# 4. Instalación y arranque del servicio nativo systemd (sin Docker)
+# 4. Instalación y arranque del servicio nativo systemd
 # -----------------------------------------------------------------------------
 if [ -x "$ROOTFS/usr/local/bin/osrm-routed" ]; then
   OSRM_ROUTED_BIN="/usr/local/bin/osrm-routed"
@@ -301,7 +300,7 @@ install_systemd_unit() {
 
   sudo tee "$unit_path" >/dev/null <<EOF
 [Unit]
-Description=CartMaker OSRM Routing Engine (${profile}, --mmap, Native No-Docker)
+Description=CartMaker OSRM Routing Engine (${profile}, --mmap, Native)
 After=network.target
 
 [Service]
@@ -314,7 +313,11 @@ MemoryMax=350M
 
 [Install]
 WantedBy=multi-user.target
+Alias=cartmaker-osrm.service
 EOF
+  if [ "$svc_name" = "osrm-car" ]; then
+    sudo ln -sf "$unit_path" /etc/systemd/system/cartmaker-osrm.service
+  fi
 }
 
 if [ "$SKIP_RESTART" = "1" ]; then
@@ -336,7 +339,7 @@ else
 
   sleep 2
   if curl -fsS "http://127.0.0.1:5000/route/v1/driving/-66.9036,10.4806;-66.8520,10.4910?overview=false" >/dev/null 2>&1; then
-    log "EXITO: OSRM nativo respondiendo en http://127.0.0.1:5000 (modo --mmap, sin Docker)."
+    log "EXITO: OSRM nativo respondiendo en http://127.0.0.1:5000 (modo --mmap)."
   else
     log "AVISO: El servicio osrm-car se inició; verifica su estado con: sudo systemctl status osrm-car"
   fi

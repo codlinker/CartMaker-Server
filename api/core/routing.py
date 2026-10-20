@@ -1,5 +1,5 @@
 """
-Cliente mínimo de OSRM (instancias propias en Docker, ver `scripts/osrm/`).
+Cliente de OSRM nativo (servicios systemd `osrm-car` / `osrm-bike`, ver `scripts/osrm/`).
 
 Instancias:
 - `settings.OSRM_CAR_URL`  (:5000, perfil car.lua)      -> moto y carro.
@@ -313,8 +313,8 @@ def _build_cumulative_profile(route: dict, n_points: int) -> Tuple[List[float], 
 def route(origin: LatLng, dest: LatLng, profile: str = PROFILE_CAR) -> dict:
     """
     Calcula la ruta entre dos puntos `(lat, lng)`.
-    Si el contenedor OSRM local no está activo (p. ej. en una instancia EC2 micro),
-    usa automáticamente Mapbox Directions API o interpolación geodésica urbana.
+    Si el servicio OSRM local no está activo, usa automáticamente Mapbox Directions API
+    o interpolación geodésica urbana.
 
     Returns:
         dict: {
@@ -340,7 +340,7 @@ def route(origin: LatLng, dest: LatLng, profile: str = PROFILE_CAR) -> dict:
         data = _get(profile, 'route', _coords_param([o, d]), req_params)
         scale_time = 1.0
     except RoutingError as err:
-        # Si pidió 'bike' y solo el contenedor 'car' (:5000) está encendido en la EC2 micro:
+        # Si pidió 'bike' y solo el servicio 'osrm-car' (:5000) está encendido en la EC2 micro:
         if profile == PROFILE_BIKE and err.code in ('unavailable', 'timeout'):
             try:
                 data = _get(PROFILE_CAR, 'route', _coords_param([o, d]), req_params)
