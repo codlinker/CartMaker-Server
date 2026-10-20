@@ -112,7 +112,7 @@ class WorkforceInvitationPreviewAPI(APIView):
             data = preview_invitation(token)
         except WorkforceError as e:
             return _workforce_error_response(e)
-        return Response({'data': data}, status=status.HTTP_200_OK)
+        return Response({'data': data, 'invitation': data, **data}, status=status.HTTP_200_OK)
 
 
 class WorkforceInvitationAcceptAPI(APIView):

@@ -1381,6 +1381,29 @@ def _resolve_order_delivery_for_manager(actor_user, order_id) -> DeliveryAssignm
 
 def _set_rider_manually(actor_user, order_id, employee_id, allowed_statuses) -> DeliveryAssignment:
     delivery = _resolve_order_delivery_for_manager(actor_user, order_id)
+    if employee_id in (None, '', 'auto'):
+        # Si el comerciante toca "Auto-asignar al repartidor más cercano" sin enviar employee_id,
+        # limpiamos la lista de rechazos previos y ejecutamos el motor de auto-asignación OSRM.
+        with transaction.atomic():
+            locked = _lock_delivery(delivery.id)
+            if int(locked.status) not in allowed_statuses:
+                raise DeliveryError(
+                    "La entrega ya no admite este cambio de repartidor.", status_code=409, code='invalid_delivery_status',
+                )
+            previous_rider = locked.rider
+            if previous_rider is not None:
+                _release_to_pending(locked)
+                _notify_rider_on_commit(
+                    previous_rider, "Entrega reasignada",
+                    f"La orden N° {locked.order_id} fue puesta en búsqueda automática.",
+                    'delivery_unassigned', locked,
+                )
+            locked.declined_rider_ids = []
+            locked.save(update_fields=['declined_rider_ids'])
+            transaction.on_commit(lambda: sync_delivery_meta(locked))
+        auto_assign_delivery(delivery.id)
+        return get_delivery(delivery.id)
+
     try:
         emp_pk = int(employee_id)
     except (TypeError, ValueError):
@@ -1457,6 +1480,12 @@ def unassign_delivery(actor_user, order_id) -> DeliveryAssignment:
     delivery = _resolve_order_delivery_for_manager(actor_user, order_id)
     with transaction.atomic():
         locked = _lock_delivery(delivery.id)
+        if int(locked.status) == DeliveryStatus.PENDING_RIDER:
+            locked.declined_rider_ids = []
+            locked.save(update_fields=['declined_rider_ids'])
+            transaction.on_commit(lambda: sync_delivery_meta(locked))
+            _schedule_auto_assign(locked.id)
+            return get_delivery(delivery.id)
         if int(locked.status) not in (DeliveryStatus.ASSIGNED, DeliveryStatus.ACCEPTED, DeliveryStatus.AT_STORE):
             raise DeliveryError("La entrega no tiene un repartidor que se pueda quitar.", status_code=409,
                                 code='invalid_delivery_status')

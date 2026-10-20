@@ -754,16 +754,22 @@ class OrderViewSet(viewsets.ViewSet):
             if e.code:
                 payload['code'] = e.code
             return Response(payload, status=e.status_code)
+        delivery_json = delivery.get_json(viewer_role='merchant')
+        if int(delivery.status) == DeliveryStatus.PENDING_RIDER:
+            msg = "Buscando repartidor automáticamente. No hay repartidores con turno activo en esta sucursal ahora mismo; se asignará apenas uno inicie turno."
+        else:
+            msg = "Repartidor asignado. Esperando su aceptación (45 s)."
         return Response({
-            'message': "Repartidor asignado. Esperando su aceptación (45 s).",
-            'delivery': delivery.get_json(viewer_role='merchant'),
+            'message': msg,
+            'delivery': delivery_json,
+            'data': delivery_json,
         }, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
     def reassign_rider(self, request, pk=None):
         """
         POST /api/v1/orders/<id>/reassign_rider/
-        Body: {"employee_id": <int>}
+        Body: {"employee_id": <int>} (o vacío para auto-asignar al más cercano)
         Reasigna la orden a otro repartidor mientras el paquete no haya salido de la tienda.
         """
         try:
@@ -773,9 +779,15 @@ class OrderViewSet(viewsets.ViewSet):
             if e.code:
                 payload['code'] = e.code
             return Response(payload, status=e.status_code)
+        delivery_json = delivery.get_json(viewer_role='merchant')
+        if int(delivery.status) == DeliveryStatus.PENDING_RIDER:
+            msg = "Buscando repartidor automáticamente. No hay otros repartidores con turno activo ahora mismo."
+        else:
+            msg = "Entrega reasignada. Esperando aceptación del nuevo repartidor."
         return Response({
-            'message': "Entrega reasignada. Esperando aceptación del nuevo repartidor.",
-            'delivery': delivery.get_json(viewer_role='merchant'),
+            'message': msg,
+            'delivery': delivery_json,
+            'data': delivery_json,
         }, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
@@ -791,9 +803,11 @@ class OrderViewSet(viewsets.ViewSet):
             if e.code:
                 payload['code'] = e.code
             return Response(payload, status=e.status_code)
+        delivery_json = delivery.get_json(viewer_role='merchant')
         return Response({
             'message': "Repartidor retirado. Buscando otro disponible automáticamente.",
-            'delivery': delivery.get_json(viewer_role='merchant'),
+            'delivery': delivery_json,
+            'data': delivery_json,
         }, status=status.HTTP_200_OK)
 
 

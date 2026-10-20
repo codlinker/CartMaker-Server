@@ -656,7 +656,11 @@ def find_invitation_by_secret(token: Optional[str] = None, short_code: Optional[
     Busca una invitación por token en claro (vía hash SHA-256) o por código corto.
     Si solo se recibe `token` y tiene la forma de un código corto, se trata como tal.
     """
-    qs = queryset if queryset is not None else EmployeeInvitation.objects.select_related('company')
+    qs = (
+        queryset
+        if queryset is not None
+        else EmployeeInvitation.objects.select_related('company', 'company__category', 'invited_by')
+    )
     token = (token or '').strip()
     code = EmployeeInvitation.normalize_short_code(short_code) if short_code else ''
 
@@ -679,25 +683,57 @@ def _mark_expired(invitation: EmployeeInvitation) -> None:
 
 
 def build_invitation_preview(invitation: EmployeeInvitation) -> dict:
-    """ Vista pública mínima de la invitación (no revela destinatario ni token). """
+    """ Vista pública de la invitación con los datos del comercio y sucursales (no revela destinatario ni token_hash). """
     company = invitation.company
+    invited_by = invitation.invited_by
     eff_status = invitation.effective_status
+    company_img = _company_image_url(company)
+    company_cat = company.category.name if (company and getattr(company, 'category_id', None) and company.category) else ''
+    company_rif = (getattr(company, 'rif', '') or '').strip() if company else ''
+    inviter_name = _user_display_name(invited_by) if invited_by else ''
+
+    stores_payload = []
+    for s in invitation.allowed_stores.select_related('location').all():
+        loc = getattr(s, 'location', None)
+        addr = (loc.name or '').strip() if loc else ''
+        stores_payload.append({
+            'id': str(s.id),
+            'name': s.name,
+            'address': addr,
+        })
+
     return {
         'id': invitation.id,
+        'company_id': str(company.id),
+        'company_name': company.name,
+        'company_image': company_img,
+        'company_rif': company_rif,
+        'company_category': company_cat,
         'company': {
             'id': str(company.id),
             'name': company.name,
-            'image': _company_image_url(company),
+            'image': company_img,
+            'rif': company_rif,
+            'category': company_cat,
         },
-        'role': invitation.role_slug,
+        'invited_by_name': inviter_name,
+        'invited_by': {
+            'id': str(invited_by.id),
+            'first_name': (invited_by.first_name or '').strip(),
+            'last_name': (invited_by.last_name or '').strip(),
+            'full_name': inviter_name,
+        } if invited_by else None,
+        'role': int(invitation.role),
         'role_id': int(invitation.role),
+        'role_slug': invitation.role_slug,
         'role_label': str(invitation.get_role_display()),
+        'short_code': invitation.short_code,
         'status': int(eff_status),
         'status_label': str(InvitationStatus(eff_status).label),
         'is_valid': eff_status == InvitationStatus.PENDING,
         'is_targeted': bool(invitation.target_user_id or invitation.target_email),
         'requires_cedula_verified': invitation.role == EmployeeRole.DELIVERY,
-        'stores': [{'id': str(s.id), 'name': s.name} for s in invitation.allowed_stores.all()],
+        'stores': stores_payload,
         'expires_at': timezone.localtime(invitation.expires_at).isoformat() if invitation.expires_at else None,
     }
 

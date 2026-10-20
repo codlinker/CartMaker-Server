@@ -1527,15 +1527,42 @@ class EmployeeInvitation(models.Model):
         target_user = self.target_user
         accepted_by = self.accepted_by
         invited_by = self.invited_by
+        company = self.company
+        company_img = storage_manager.get_url(company.image) if (company and company.image) else ''
+        company_cat = company.category.name if (company and getattr(company, 'category_id', None) and company.category) else ''
+        company_rif = (getattr(company, 'rif', '') or '').strip() if company else ''
+        inviter_name = (
+            f"{(invited_by.first_name or '').strip()} {(invited_by.last_name or '').strip()}".strip()
+            or invited_by.email
+        ) if invited_by else ''
+
+        stores_payload = []
+        for store in self.allowed_stores.select_related('location').all():
+            loc = getattr(store, 'location', None)
+            addr = (loc.name or '').strip() if loc else ''
+            stores_payload.append({
+                'id': str(store.id),
+                'name': store.name,
+                'address': addr,
+            })
+
         data = {
             'id': self.id,
+            'company_id': str(company.id) if company else '',
+            'company_name': company.name if company else '',
+            'company_image': company_img,
+            'company_rif': company_rif,
+            'company_category': company_cat,
+            'invited_by_name': inviter_name,
             'role': int(self.role),
+            'role_id': int(self.role),
             'role_slug': self.role_slug,
             'role_label': str(self.get_role_display()),
             'channel': int(self.channel),
             'channel_label': str(self.get_channel_display()),
             'status': int(eff_status),
             'status_label': str(InvitationStatus(eff_status).label),
+            'is_valid': eff_status == InvitationStatus.PENDING,
             'short_code': self.short_code,
             'target_email': self.target_email,
             'target_user': {
@@ -1548,27 +1575,25 @@ class EmployeeInvitation(models.Model):
                 'id': str(invited_by.id),
                 'first_name': (invited_by.first_name or '').strip(),
                 'last_name': (invited_by.last_name or '').strip(),
+                'full_name': inviter_name,
             } if invited_by else None,
             'accepted_by': {
                 'id': str(accepted_by.id),
                 'first_name': (accepted_by.first_name or '').strip(),
                 'last_name': (accepted_by.last_name or '').strip(),
             } if accepted_by else None,
-            'stores': [
-                {'id': str(store.id), 'name': store.name}
-                for store in self.allowed_stores.all()
-            ],
+            'stores': stores_payload,
             'expires_at': timezone.localtime(self.expires_at).isoformat() if self.expires_at else None,
             'accepted_at': timezone.localtime(self.accepted_at).isoformat() if self.accepted_at else None,
             'created_at': timezone.localtime(self.created_at).isoformat() if self.created_at else None,
-        }
-        if include_company:
-            company = self.company
-            data['company'] = {
+            'company': {
                 'id': str(company.id),
                 'name': company.name,
-                'image': storage_manager.get_url(company.image) if company.image else '',
-            }
+                'image': company_img,
+                'rif': company_rif,
+                'category': company_cat,
+            } if company else None,
+        }
         return data
 
 

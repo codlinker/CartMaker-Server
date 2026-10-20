@@ -178,7 +178,7 @@ class DeliveryAvailableRidersAPI(APIView):
             data = list_available_riders(request.user, store_id)
         except DeliveryError as e:
             return _delivery_error_response(e)
-        return Response({'data': data}, status=status.HTTP_200_OK)
+        return Response({'data': data, **data}, status=status.HTTP_200_OK)
 
 
 ####################################################

@@ -522,3 +522,227 @@ def match(points: Sequence[LatLng], timestamps: Optional[Sequence[int]] = None,
             tracepoints.append(None)
 
     return {'matchings': matchings, 'tracepoints': tracepoints}
+
+
+# =========================================================================
+# /nearest + Geocodificación Inversa Local (Ahorro de Mapbox Geocoding)
+# =========================================================================
+# Principales zonas urbanas y ciudades de Venezuela (lat, lng, radio_km, ciudad, estado)
+_VE_CITIES_REFERENCE = (
+    # Gran Caracas y sub-zonas
+    (10.4960, -66.8530, 4.5, "Chacao, Caracas", "Miranda"),
+    (10.4800, -66.8560, 5.5, "Baruta, Caracas", "Miranda"),
+    (10.4830, -66.8030, 6.0, "Sucre (Petare), Caracas", "Miranda"),
+    (10.4360, -66.8220, 5.5, "El Hatillo, Caracas", "Miranda"),
+    (10.5000, -66.9170, 9.0, "Libertador, Caracas", "Distrito Capital"),
+    (10.4806, -66.9036, 18.0, "Caracas", "Distrito Capital"),
+    # Miranda / Vargas / Aragua / Carabobo
+    (10.5990, -66.9540, 12.0, "La Guaira / Maiquetía", "La Guaira"),
+    (10.3445, -67.0433, 10.0, "Los Teques", "Miranda"),
+    (10.4760, -66.6180, 10.0, "Guarenas / Guatire", "Miranda"),
+    (10.2353, -66.8586, 12.0, "Charallave / Valles del Tuy", "Miranda"),
+    (10.2469, -67.5958, 15.0, "Maracay", "Aragua"),
+    (10.2289, -67.4750, 9.0, "Turmero / Cagua", "Aragua"),
+    (10.1620, -68.0077, 16.0, "Valencia", "Carabobo"),
+    (10.2540, -68.0110, 7.0, "Naguanagua", "Carabobo"),
+    (10.2400, -67.9600, 7.0, "San Diego", "Carabobo"),
+    (10.4731, -68.0125, 10.0, "Puerto Cabello", "Carabobo"),
+    # Occidente y Andes
+    (10.0678, -69.3474, 16.0, "Barquisimeto", "Lara"),
+    (10.0331, -69.2633, 8.0, "Cabudare", "Lara"),
+    (10.6427, -71.6125, 18.0, "Maracaibo", "Zulia"),
+    (10.5500, -71.6400, 10.0, "San Francisco", "Zulia"),
+    (10.3980, -71.4450, 10.0, "Cabimas", "Zulia"),
+    (10.1960, -71.3090, 10.0, "Ciudad Ojeda", "Zulia"),
+    (11.6915, -70.1996, 12.0, "Punto Fijo", "Falcón"),
+    (11.4045, -69.6734, 10.0, "Coro", "Falcón"),
+    (10.3353, -68.7425, 10.0, "San Felipe", "Yaracuy"),
+    (9.5597, -69.2017, 12.0, "Acarigua / Araure", "Portuguesa"),
+    (9.0419, -69.7422, 10.0, "Guanare", "Portuguesa"),
+    (8.6226, -70.2075, 12.0, "Barinas", "Barinas"),
+    (8.5983, -71.1444, 12.0, "Mérida", "Mérida"),
+    (9.3178, -70.6031, 10.0, "Valera", "Trujillo"),
+    (7.7669, -72.2250, 14.0, "San Cristóbal", "Táchira"),
+    # Oriente, Llanos y Sur
+    (10.1363, -64.6862, 12.0, "Barcelona", "Anzoátegui"),
+    (10.1880, -64.6930, 6.0, "Lechería", "Anzoátegui"),
+    (10.2142, -64.6328, 10.0, "Puerto La Cruz", "Anzoátegui"),
+    (8.8875, -64.2454, 12.0, "El Tigre", "Anzoátegui"),
+    (10.4539, -64.1826, 12.0, "Cumaná", "Sucre"),
+    (10.9577, -63.8697, 15.0, "Porlamar / Pampatar", "Nueva Esparta"),
+    (9.7457, -63.1832, 15.0, "Maturín", "Monagas"),
+    (8.2969, -62.7117, 18.0, "Puerto Ordaz / Ciudad Guayana", "Bolívar"),
+    (8.1222, -63.5497, 14.0, "Ciudad Bolívar", "Bolívar"),
+    (9.9115, -67.3538, 10.0, "San Juan de los Morros", "Guárico"),
+    (7.8878, -67.4724, 10.0, "San Fernando de Apure", "Apure"),
+)
+
+
+def _resolve_ve_city_and_state(lat: float, lng: float) -> Tuple[str, str]:
+    """Determina la ciudad/municipio y estado venezolano más cercano en memoria (< 0.1 ms)."""
+    best_within = None
+    best_within_dist = float("inf")
+    nearest_any = ("Venezuela", "")
+    nearest_any_dist = float("inf")
+
+    pt = (lat, lng)
+    for ref_lat, ref_lng, radius_km, city, state in _VE_CITIES_REFERENCE:
+        dist_km = _haversine_m(pt, (ref_lat, ref_lng)) / 1000.0
+        if dist_km <= radius_km and dist_km < best_within_dist:
+            best_within = (city, state)
+            best_within_dist = dist_km
+        if dist_km < nearest_any_dist:
+            nearest_any_dist = dist_km
+            nearest_any = (city, state)
+
+    if best_within is not None:
+        return best_within
+    if nearest_any_dist <= 45.0:
+        return nearest_any
+    return ("Venezuela", "")
+
+
+def nearest(point: LatLng, number: int = 3, profile: str = PROFILE_CAR) -> dict:
+    """
+    Consulta el endpoint `/nearest/v1/{profile}/{lng},{lat}` de `cartmaker-osrm`
+    para obtener el segmento vial más cercano y el nombre de la calle o avenida.
+    """
+    pt = _validate_point(point, 'punto')
+    n = max(1, min(10, int(number or 1)))
+    try:
+        data = _get(profile, 'nearest', _coords_param([pt]), {'number': str(n)})
+    except RoutingError:
+        if profile == PROFILE_BIKE:
+            data = _get(PROFILE_CAR, 'nearest', _coords_param([pt]), {'number': str(n)})
+        else:
+            raise
+
+    waypoints = data.get('waypoints') or []
+    parsed_waypoints = []
+    for wp in waypoints:
+        loc = wp.get('location') or [pt[1], pt[0]]
+        name = (wp.get('name') or '').strip()
+        dist = float(wp.get('distance') or 0.0)
+        parsed_waypoints.append({
+            'name': name,
+            'lat': round(float(loc[1]), 6),
+            'lng': round(float(loc[0]), 6),
+            'distance_m': round(dist, 2),
+        })
+
+    primary = parsed_waypoints[0] if parsed_waypoints else {
+        'name': '',
+        'lat': round(pt[0], 6),
+        'lng': round(pt[1], 6),
+        'distance_m': 0.0,
+    }
+
+    # Si el segmento más cercano es un callejón sin nombre pero a menos de 40 m hay una calle con nombre, la usamos
+    street_name = primary['name']
+    intersection_name = ''
+    for wp in parsed_waypoints:
+        if not street_name and wp['name'] and wp['distance_m'] <= 60.0:
+            street_name = wp['name']
+        elif street_name and wp['name'] and wp['name'].lower() != street_name.lower() and wp['distance_m'] <= 40.0:
+            intersection_name = wp['name']
+            break
+
+    return {
+        'street': street_name,
+        'intersection': intersection_name,
+        'snapped_lat': primary['lat'],
+        'snapped_lng': primary['lng'],
+        'distance_to_road_m': primary['distance_m'],
+        'waypoints': parsed_waypoints,
+    }
+
+
+def reverse_geocode(point: LatLng, allow_mapbox_fallback: bool = False) -> dict:
+    """
+    Geocodificación inversa rápida y gratuita basada en `cartmaker-osrm` (`/nearest`) +
+    caché por cuadrícula de ~22 metros en Redis (TTL 30 días).
+
+    Permite que Flutter obtenga el nombre de la calle/avenida y ciudad al mover el pin
+    sin gastar peticiones de Mapbox Geocoding API.
+    """
+    from django.core.cache import cache
+
+    pt = _validate_point(point, 'coordenada')
+    lat, lng = pt[0], pt[1]
+
+    # Cuadrícula de 0.0002 grados (~22 metros)
+    grid_lat = round(round(lat / 0.0002) * 0.0002, 4)
+    grid_lng = round(round(lng / 0.0002) * 0.0002, 4)
+    cache_key = f"cartmaker:revgeo:v1:{grid_lat:.4f}:{grid_lng:.4f}"
+
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    city, state = _resolve_ve_city_and_state(lat, lng)
+    street = ''
+    intersection = ''
+    snapped_lat = round(lat, 6)
+    snapped_lng = round(lng, 6)
+    distance_to_road_m = 0.0
+    source = 'osrm_local'
+
+    try:
+        near = nearest((lat, lng), number=3, profile=PROFILE_CAR)
+        street = near.get('street') or ''
+        intersection = near.get('intersection') or ''
+        snapped_lat = near.get('snapped_lat', snapped_lat)
+        snapped_lng = near.get('snapped_lng', snapped_lng)
+        distance_to_road_m = near.get('distance_to_road_m', 0.0)
+    except Exception as exc:
+        logger.debug("OSRM nearest no disponible (%s).", exc)
+        source = 'local_city_fallback'
+
+    # Fallback opcional a Mapbox Geocoding únicamente si se solicitó explícitamente y OSRM no devolvió calle
+    if not street and allow_mapbox_fallback:
+        token = getattr(settings, 'MAPBOX_APIKEY', None)
+        if token:
+            try:
+                mb_url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{lng:.6f},{lat:.6f}.json"
+                resp = _session.get(
+                    mb_url,
+                    params={'access_token': token, 'language': 'es', 'types': 'address,street,neighborhood,locality,place'},
+                    timeout=2.5,
+                )
+                if resp.status_code == 200:
+                    features = (resp.json() or {}).get('features') or []
+                    if features:
+                        street = (features[0].get('text') or '').strip()
+                        source = 'mapbox_cached'
+            except Exception:
+                pass
+
+    if street and intersection:
+        street_display = f"{street} con {intersection}"
+    elif street:
+        street_display = street
+    else:
+        street_display = "Vía sin nombre registrado"
+
+    parts = [p for p in (street_display if street else None, city, state) if p]
+    formatted_address = ", ".join(parts) if parts else street_display
+
+    result = {
+        'lat': round(lat, 6),
+        'lng': round(lng, 6),
+        'snapped_lat': snapped_lat,
+        'snapped_lng': snapped_lng,
+        'distance_to_road_m': distance_to_road_m,
+        'street': street or street_display,
+        'intersection': intersection,
+        'street_display': street_display,
+        'city': city,
+        'state': state,
+        'country': 'Venezuela',
+        'formatted_address': formatted_address,
+        'source': source,
+    }
+
+    # Cacheamos por 30 días en Redis (las calles no cambian a diario)
+    cache.set(cache_key, result, timeout=2592000)
+    return result

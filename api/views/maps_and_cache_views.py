@@ -17,7 +17,7 @@ class CartMakerMapViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_permissions(self):
-        if self.action in ('get_locations', 'store_products'):
+        if self.action in ('get_locations', 'store_products', 'reverse_geocode'):
             return [AllowAny()]
         return [IsAuthenticated()]
 
@@ -311,6 +311,37 @@ class CartMakerMapViewSet(viewsets.ViewSet):
             # Retornamos la firma de respuesta idéntica a la original {'data': [...]}
             return Response({'data': final_realtime_data}, status=status.HTTP_200_OK)
 
+        except Exception as e:
+            return Response({'error': f'Error interno: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['get', 'post'], url_path='reverse_geocode')
+    def reverse_geocode(self, request):
+        """
+        Geocodificación inversa rápida y sin costo de Mapbox usando `cartmaker-osrm` (`/nearest`)
+        + caché por cuadrícula de ~22 metros en Redis (30 días).
+        GET /api/v1/cartmaker-map/reverse_geocode/?lat=10.4960&lng=-66.8530
+        """
+        from api.core.routing import RoutingError, reverse_geocode as osrm_reverse_geocode
+
+        raw_lat = request.query_params.get('lat') if request.method == 'GET' else (request.data.get('lat') or request.query_params.get('lat'))
+        raw_lng = request.query_params.get('lng') if request.method == 'GET' else (request.data.get('lng') or request.query_params.get('lng'))
+        raw_fallback = request.query_params.get('mapbox_fallback') if request.method == 'GET' else request.data.get('mapbox_fallback')
+        allow_mb = str(raw_fallback or '').strip().lower() in ('1', 'true', 'yes')
+
+        try:
+            lat = float(raw_lat)
+            lng = float(raw_lng)
+        except (TypeError, ValueError):
+            return Response(
+                {'error': 'Los parámetros lat y lng son requeridos y deben ser numéricos.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            data = osrm_reverse_geocode((lat, lng), allow_mapbox_fallback=allow_mb)
+            return Response({'data': data, **data}, status=status.HTTP_200_OK)
+        except RoutingError as err:
+            return Response({'error': err.message, 'code': err.code}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             return Response({'error': f'Error interno: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
