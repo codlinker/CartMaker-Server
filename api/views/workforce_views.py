@@ -118,20 +118,21 @@ class WorkforceInvitationPreviewAPI(APIView):
 class WorkforceInvitationAcceptAPI(APIView):
     """
     POST /api/v1/workforce/invitations/accept/
-    Body: {token} | {short_code} | {invitation_id} (este último solo para invitaciones dirigidas al usuario).
-    Usuario autenticado en su cuenta personal.
+    Body: {token} | {short_code} | {invitation_id}
+    Usuario autenticado (en contexto personal o trabajador).
     """
-    permission_classes = [IsAuthenticated, IsPersonalContext]
+    permission_classes = [IsAuthenticated]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'workforce_invite'
 
     def post(self, request):
+        data = request.data if isinstance(request.data, dict) else {}
         try:
             employee = accept_invitation(
                 request.user,
-                token=request.data.get('token'),
-                short_code=request.data.get('short_code') or request.data.get('code'),
-                invitation_id=request.data.get('invitation_id'),
+                token=data.get('token'),
+                short_code=data.get('short_code') or data.get('code'),
+                invitation_id=data.get('invitation_id') or data.get('id'),
             )
         except WorkforceError as e:
             return _workforce_error_response(e)
@@ -150,7 +151,7 @@ class MyInvitationsAPI(APIView):
     GET /api/v1/workforce/my-invitations/
     Invitaciones pendientes y vigentes dirigidas al usuario autenticado (por cuenta o por correo).
     """
-    permission_classes = [IsAuthenticated, IsPersonalContext]
+    permission_classes = [IsAuthenticated]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'navigation'
 
@@ -162,14 +163,22 @@ class MyInvitationsAPI(APIView):
 class MyInvitationDeclineAPI(APIView):
     """
     POST /api/v1/workforce/my-invitations/<id>/decline/
+    También admite: POST /api/v1/workforce/invitations/<id>/decline/ o body {invitation_id, token, short_code}.
     """
-    permission_classes = [IsAuthenticated, IsPersonalContext]
+    permission_classes = [IsAuthenticated]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'actions'
 
-    def post(self, request, invitation_id: int):
+    def post(self, request, invitation_id=None):
+        data = request.data if isinstance(request.data, dict) else {}
+        resolved_id = invitation_id if invitation_id not in (None, '') else (data.get('invitation_id') or data.get('id'))
         try:
-            invitation = decline_invitation(request.user, invitation_id)
+            invitation = decline_invitation(
+                request.user,
+                invitation_id=resolved_id,
+                token=data.get('token'),
+                short_code=data.get('short_code') or data.get('code'),
+            )
         except WorkforceError as e:
             return _workforce_error_response(e)
         return Response({

@@ -630,6 +630,9 @@ def create_invitation(owner, data: dict) -> tuple:
                 code='target_user_not_found',
             )
 
+    if target_email and target_user is None:
+        target_user = User.objects.filter(email__iexact=target_email, is_active=True).first()
+
     # El dueño nunca puede ser trabajador de su propio comercio
     if (target_user and target_user.id == company.owner_id) or (
         target_email and owner.email and target_email == owner.email.strip().lower()
@@ -822,11 +825,9 @@ def _invitation_targets_user(invitation: EmployeeInvitation, user) -> bool:
     """ True si la invitación está dirigida a este usuario (por cuenta o por correo). """
     if invitation.target_user_id and invitation.target_user_id == user.id:
         return True
-    # La coincidencia por correo solo cuenta si el usuario ya verificó ese correo
     if (
         invitation.target_email
         and user.email
-        and getattr(user, 'email_verified', False)
         and invitation.target_email.strip().lower() == user.email.strip().lower()
     ):
         return True
@@ -861,13 +862,21 @@ def accept_invitation(user, token: Optional[str] = None, short_code: Optional[st
         invitation = find_invitation_by_secret(token=token, short_code=short_code)
 
     if invitation is None and invitation_id not in (None, ''):
-        inv_pk = _parse_int(invitation_id, 'invitation_id')
-        candidate = EmployeeInvitation.objects.select_related('company').filter(pk=inv_pk).first()
-        # Por ID SOLO se aceptan invitaciones dirigidas explícitamente a este usuario (bandeja my-invitations).
-        # Las invitaciones abiertas (QR / enlace / código corto) exigen el secreto (token o short_code),
-        # de lo contrario cualquiera podría unirse adivinando IDs secuenciales.
-        if candidate is not None and _invitation_targets_user(candidate, user):
-            invitation = candidate
+        raw_inv = str(invitation_id).strip()
+        if raw_inv.isdigit():
+            inv_pk = int(raw_inv)
+            candidate = EmployeeInvitation.objects.select_related('company').filter(pk=inv_pk).first()
+            if candidate is not None:
+                is_targeted = bool(candidate.target_user_id or candidate.target_email)
+                if is_targeted and not _invitation_targets_user(candidate, user):
+                    raise WorkforceError(
+                        "Esta invitación fue enviada a otra cuenta.",
+                        status_code=403,
+                        code='invitation_not_for_user',
+                    )
+                invitation = candidate
+        else:
+            invitation = find_invitation_by_secret(token=raw_inv)
 
     if invitation is None:
         raise WorkforceError("La invitación no existe o el código es inválido.", status_code=404, code='invitation_not_found')
@@ -970,17 +979,48 @@ def accept_invitation(user, token: Optional[str] = None, short_code: Optional[st
     return employee
 
 
-def decline_invitation(user, invitation_id) -> EmployeeInvitation:
-    inv_pk = _parse_int(invitation_id, 'invitation_id')
+def decline_invitation(user, invitation_id=None, token: Optional[str] = None,
+                       short_code: Optional[str] = None) -> EmployeeInvitation:
+    """
+    Rechaza una invitación dirigida al usuario o abierta en el modal de código/QR.
+    Acepta `invitation_id` (PK numérico o código corto) y opcionalmente `token`/`short_code`.
+    """
+    lookup_obj = None
+    if token or short_code:
+        lookup_obj = find_invitation_by_secret(token=token, short_code=short_code)
+
+    if lookup_obj is None and invitation_id not in (None, ''):
+        raw_inv = str(invitation_id).strip()
+        if raw_inv.isdigit():
+            lookup_obj = EmployeeInvitation.objects.select_related('company').filter(pk=int(raw_inv)).first()
+        else:
+            lookup_obj = find_invitation_by_secret(token=raw_inv)
+
+    if lookup_obj is None:
+        raise WorkforceError("La invitación no existe.", status_code=404, code='invitation_not_found')
+
     with transaction.atomic():
         invitation = (
             EmployeeInvitation.objects.select_for_update(of=('self',))
             .select_related('company')
-            .filter(pk=inv_pk)
+            .filter(pk=lookup_obj.pk)
             .first()
         )
-        if invitation is None or not _invitation_targets_user(invitation, user):
+        if invitation is None:
             raise WorkforceError("La invitación no existe.", status_code=404, code='invitation_not_found')
+
+        is_targeted = bool(invitation.target_user_id or invitation.target_email)
+        if is_targeted and not _invitation_targets_user(invitation, user):
+            raise WorkforceError(
+                "Esta invitación fue enviada a otra cuenta.",
+                status_code=403,
+                code='invitation_not_for_user',
+            )
+
+        # Idempotencia: si ya estaba rechazada, devolvemos 200 OK sin error
+        if invitation.status == InvitationStatus.DECLINED:
+            return invitation
+
         status_error = _status_error_for_invitation(invitation)
         if status_error is not None:
             raise status_error
@@ -993,16 +1033,17 @@ def decline_invitation(user, invitation_id) -> EmployeeInvitation:
         inv_id = invitation.id
 
         def _after_commit():
-            from .firebase_admin import NotificationManager
-            NotificationManager.notify_workforce_event(
-                user_id=owner_id,
-                title="Invitación rechazada",
-                body=f"{invited_name} rechazó tu invitación para trabajar en tu comercio.",
-                event_type='employee_invitation_declined',
-                category=NotificationCategory.EMPLOYEE_UPDATE,
-                section=NotificationSection.MERCHANT_EMPLOYEES,
-                extra_data={'invitation_id': inv_id},
-            )
+            if owner_id and owner_id != user.id:
+                from .firebase_admin import NotificationManager
+                NotificationManager.notify_workforce_event(
+                    user_id=owner_id,
+                    title="Invitación rechazada",
+                    body=f"{invited_name} rechazó tu invitación para trabajar en tu comercio.",
+                    event_type='employee_invitation_declined',
+                    category=NotificationCategory.EMPLOYEE_UPDATE,
+                    section=NotificationSection.MERCHANT_EMPLOYEES,
+                    extra_data={'invitation_id': inv_id},
+                )
 
         transaction.on_commit(_after_commit)
     return invitation
@@ -1052,8 +1093,8 @@ def list_company_invitations(owner, status_filter=None):
 def list_my_invitations(user):
     """ Invitaciones PENDIENTES y vigentes dirigidas al usuario (por cuenta o por correo). """
     target_q = Q(target_user=user)
-    if user.email and getattr(user, 'email_verified', False):
-        target_q |= Q(target_email=user.email.strip().lower())
+    if user.email:
+        target_q |= Q(target_email__iexact=user.email.strip())
     return (
         EmployeeInvitation.objects.select_related('company', 'company__category', 'invited_by', 'target_user', 'accepted_by')
         .prefetch_related(Prefetch('allowed_stores', queryset=CompanyStore.objects.select_related('location')))
