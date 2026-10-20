@@ -1396,3 +1396,142 @@ def atlas_invoice_view(request, invoice_id):
         'inv': inv_data,
         'auto_print': auto_print,
     })
+
+
+def public_workforce_join_view(request, code_or_token: str):
+    """
+    Vista web puente pública para enlaces y códigos QR de invitación de equipo:
+    GET /join/<code_or_token>/
+    Redirige automáticamente al deep link `cartmaker://join/<code_or_token>` y muestra la
+    tarjeta del comercio con botón "Abrir en CartMaker" + copia rápida del código corto.
+    """
+    from django.http import HttpResponse
+    from django.utils.html import escape
+    from api.core.workforce import find_invitation_by_secret, build_invitation_preview
+
+    clean_secret = (code_or_token or '').strip()
+    invitation = find_invitation_by_secret(token=clean_secret)
+
+    if invitation is None:
+        if request.GET.get('format') == 'json':
+            return JsonResponse({'error': 'La invitación no existe o el enlace es inválido.'}, status=404)
+        html_404 = f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Invitación no válida · CartMaker</title>
+  <style>
+    body {{ margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:#0B1020; color:#F8FAFC; display:flex; align-items:center; justify-content:center; min-height:100vh; padding:20px; box-sizing:border-box; }}
+    .card {{ max-width:420px; width:100%; background:#131B2E; border:1px solid rgba(255,255,255,0.08); border-radius:20px; padding:28px 24px; text-align:center; box-shadow:0 20px 50px rgba(0,0,0,0.45); }}
+    h1 {{ font-size:20px; margin:12px 0 8px; }}
+    p {{ font-size:14px; color:#94A3B8; line-height:1.5; }}
+    .btn {{ display:inline-block; margin-top:18px; padding:13px 22px; background:#FF6B00; color:#fff; font-weight:700; text-decoration:none; border-radius:12px; }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div style="font-size:42px;">⚠️</div>
+    <h1>Invitación no encontrada</h1>
+    <p>El enlace o código <strong>{escape(clean_secret)}</strong> no existe o ya no está disponible. Solicita un nuevo código QR al comercio.</p>
+    <a class="btn" href="cartmaker://open">Abrir CartMaker</a>
+  </div>
+</body>
+</html>"""
+        return HttpResponse(html_404, status=404)
+
+    preview = build_invitation_preview(invitation)
+    if request.GET.get('format') == 'json':
+        return JsonResponse({'data': preview, 'invitation': preview, **preview})
+
+    short_code = preview.get('short_code') or clean_secret
+    company_name = escape(preview.get('company_name') or 'Comercio en CartMaker')
+    company_rif = escape(preview.get('company_rif') or '')
+    company_cat = escape(preview.get('company_category') or '')
+    company_img = escape(preview.get('company_image') or '')
+    role_label = escape(preview.get('role_label') or 'Trabajador')
+    invited_by_name = escape(preview.get('invited_by_name') or '')
+    is_valid = bool(preview.get('is_valid', True))
+    status_label = escape(preview.get('status_label') or '')
+    stores = preview.get('stores') or []
+    stores_names = ", ".join(escape(s.get('name') or '') for s in stores if s.get('name')) or "Todas las sucursales activas"
+
+    deep_link = f"cartmaker://join/{escape(clean_secret)}"
+    initial = escape((preview.get('company_name') or 'C')[:1].upper())
+
+    avatar_html = (
+        f'<img src="{company_img}" alt="{company_name}" style="width:72px;height:72px;border-radius:18px;object-fit:cover;border:2px solid rgba(255,107,0,0.4);">'
+        if company_img
+        else f'<div style="width:72px;height:72px;border-radius:18px;background:linear-gradient(135deg,#FF6B00,#FF3D00);display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:800;color:#fff;margin:0 auto;">{initial}</div>'
+    )
+
+    subtitle_parts = [p for p in (company_cat, company_rif) if p]
+    subtitle_html = f'<div style="font-size:13px;color:#94A3B8;margin-top:4px;">{" · ".join(subtitle_parts)}</div>' if subtitle_parts else ''
+    inviter_html = f'<div style="font-size:13px;color:#CBD5E1;margin-top:10px;">Invitado por <strong>{invited_by_name}</strong></div>' if invited_by_name else ''
+    status_banner = (
+        ''
+        if is_valid
+        else f'<div style="background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.4);color:#FCA5A5;padding:10px 12px;border-radius:10px;font-size:13px;margin-bottom:16px;">Estado de la invitación: <strong>{status_label}</strong></div>'
+    )
+
+    html = f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Invitación de {company_name} · CartMaker</title>
+  <style>
+    body {{ margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:#0B1020; color:#F8FAFC; display:flex; align-items:center; justify-content:center; min-height:100vh; padding:20px; box-sizing:border-box; }}
+    .card {{ max-width:430px; width:100%; background:#131B2E; border:1px solid rgba(255,255,255,0.09); border-radius:24px; padding:28px 24px; text-align:center; box-shadow:0 24px 60px rgba(0,0,0,0.5); }}
+    .badge {{ display:inline-block; background:rgba(255,107,0,0.16); color:#FF8A3D; border:1px solid rgba(255,107,0,0.35); font-size:12px; font-weight:700; padding:5px 12px; border-radius:999px; letter-spacing:0.4px; text-transform:uppercase; margin-top:14px; }}
+    h1 {{ font-size:22px; margin:12px 0 2px; color:#FFFFFF; }}
+    .meta-box {{ background:#0E1525; border:1px solid rgba(255,255,255,0.06); border-radius:14px; padding:14px; margin:18px 0; text-align:left; font-size:13px; color:#CBD5E1; }}
+    .meta-row {{ display:flex; justify-content:space-between; gap:10px; padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.05); }}
+    .meta-row:last-child {{ border-bottom:none; }}
+    .meta-label {{ color:#64748B; }}
+    .code-box {{ background:#090E1A; border:1px dashed rgba(255,107,0,0.45); border-radius:14px; padding:12px 16px; margin-bottom:18px; display:flex; align-items:center; justify-content:space-between; }}
+    .code-val {{ font-family:monospace; font-size:20px; font-weight:800; letter-spacing:2px; color:#FF8A3D; }}
+    .copy-btn {{ background:#1E293B; color:#E2E8F0; border:1px solid rgba(255,255,255,0.1); border-radius:8px; padding:7px 12px; font-size:12px; font-weight:600; cursor:pointer; }}
+    .btn-primary {{ display:block; width:100%; box-sizing:border-box; padding:15px 20px; background:linear-gradient(135deg,#FF6B00,#FF4500); color:#FFFFFF; font-size:15px; font-weight:700; text-decoration:none; border-radius:14px; box-shadow:0 10px 25px rgba(255,107,0,0.3); }}
+    .hint {{ font-size:12px; color:#64748B; margin-top:14px; line-height:1.5; }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    {status_banner}
+    <div style="display:flex;justify-content:center;">{avatar_html}</div>
+    <span class="badge">Invitación · {role_label}</span>
+    <h1>{company_name}</h1>
+    {subtitle_html}
+    {inviter_html}
+
+    <div class="meta-box">
+      <div class="meta-row">
+        <span class="meta-label">Rol asignado</span>
+        <strong>{role_label}</strong>
+      </div>
+      <div class="meta-row">
+        <span class="meta-label">Sucursales</span>
+        <strong style="text-align:right;">{stores_names}</strong>
+      </div>
+    </div>
+
+    <div class="code-box">
+      <div style="text-align:left;">
+        <div style="font-size:11px;color:#64748B;text-transform:uppercase;">Código de invitación</div>
+        <div class="code-val" id="shortCode">{escape(short_code)}</div>
+      </div>
+      <button class="copy-btn" onclick="navigator.clipboard.writeText('{escape(short_code)}');this.innerText='¡Copiado!';">Copiar código</button>
+    </div>
+
+    <a class="btn-primary" href="{deep_link}">Abrir en CartMaker App</a>
+    <div class="hint">Si la app no se abre automáticamente, copia el código <strong>{escape(short_code)}</strong> e ingrésalo en <em>Unirse a un equipo de trabajo</em> dentro de CartMaker.</div>
+  </div>
+  <script>
+    setTimeout(function() {{
+      window.location.href = "{deep_link}";
+    }}, 250);
+  </script>
+</body>
+</html>"""
+    return HttpResponse(html)

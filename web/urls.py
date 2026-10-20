@@ -11,6 +11,8 @@ urlpatterns = [
     path('t/<uuid:company_id>/', views.public_storefront_view, name='public_storefront_short'),
     path('p/<uuid:item_id>/', views.public_product_redirect_view, name='public_product_link'),
     path('orden-express/<str:token>/', views.public_express_order_view, name='public_express_order'),
+    path('join/<str:code_or_token>/', views.public_workforce_join_view, name='public_workforce_join'),
+    path('join/<str:code_or_token>', views.public_workforce_join_view, name='public_workforce_join_no_slash'),
     path('tienda/<uuid:company_id>/handoff-cart/', views.create_web_cart_handoff_ajax, name='web_cart_handoff_ajax'),
 
     # 🔒 Zona de Autenticación (Compartida)

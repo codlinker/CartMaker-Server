@@ -779,14 +779,18 @@ def accept_invitation(user, token: Optional[str] = None, short_code: Optional[st
     if not token and not short_code and not invitation_id:
         raise WorkforceError("Debes enviar 'token' o 'short_code'.", code='secret_required')
 
-    if invitation_id:
-        inv_pk = _parse_int(invitation_id, 'invitation_id')
-        invitation = EmployeeInvitation.objects.select_related('company').filter(pk=inv_pk).first()
-        # Por ID solo se aceptan invitaciones dirigidas a este usuario
-        if invitation is not None and not _invitation_targets_user(invitation, user):
-            invitation = None
-    else:
+    invitation = None
+    if token or short_code:
         invitation = find_invitation_by_secret(token=token, short_code=short_code)
+
+    if invitation is None and invitation_id not in (None, ''):
+        inv_pk = _parse_int(invitation_id, 'invitation_id')
+        candidate = EmployeeInvitation.objects.select_related('company').filter(pk=inv_pk).first()
+        if candidate is not None:
+            # Si la invitación tiene destinatario específico, solo ese usuario puede aceptarla;
+            # si es una invitación abierta (QR / código corto sin target_user ni target_email), también se permite.
+            if not (candidate.target_user_id or candidate.target_email) or _invitation_targets_user(candidate, user):
+                invitation = candidate
 
     if invitation is None:
         raise WorkforceError("La invitación no existe o el código es inválido.", status_code=404, code='invitation_not_found')
