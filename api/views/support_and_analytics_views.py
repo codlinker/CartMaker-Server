@@ -579,6 +579,12 @@ class SupportTicketViewSet(viewsets.ViewSet):
                             locked_order.status = prev_st if prev_st in (OrderStatus.WAITING, OrderStatus.DELIVERY_SENT) else OrderStatus.SOLVED
                         locked_order.cart = cart_dict
                         locked_order.save(update_fields=['status', 'cart', 'end_time'])
+                        if locked_order.status in (OrderStatus.SOLVED, OrderStatus.COMPLETED, OrderStatus.CANCELLED):
+                            try:
+                                from api.core.delivery import finalize_delivery_for_closed_order
+                                finalize_delivery_for_closed_order(locked_order, reason='support_resolved')
+                            except Exception:
+                                pass
                     else:
                         locked_order.cart = cart_dict
                         locked_order.save(update_fields=['cart'])

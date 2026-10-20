@@ -172,8 +172,30 @@ class CartMakerTokenRefreshView(TokenRefreshView):
     """
     Refresh de tokens que conserva el contexto de sesión (personal / trabajador)
     y rechaza refrescar sesiones de trabajador suspendidas o revocadas.
+    Los rechazos de contexto se devuelven como `{error, code, detail}` (401) para que la app
+    los maneje igual que el resto de errores de negocio.
     """
     serializer_class = WorkspaceTokenRefreshSerializer
+
+    def post(self, request, *args, **kwargs):
+        from rest_framework.exceptions import AuthenticationFailed as DRFAuthenticationFailed
+
+        try:
+            return super().post(request, *args, **kwargs)
+        except DRFAuthenticationFailed as exc:
+            detail = exc.detail
+            if isinstance(detail, dict):
+                code = str(detail.get('code') or '')
+                msg = str(detail.get('detail') or '')
+            else:
+                code = str(getattr(detail, 'code', '') or '')
+                msg = str(detail)
+            if code in ('worker_access_revoked', 'worker_role_changed'):
+                return Response(
+                    {'error': msg, 'detail': msg, 'code': code},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+            raise
 
 class GoogleClientId(APIView):
     """

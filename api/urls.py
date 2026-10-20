@@ -128,12 +128,14 @@ urlpatterns = [
     path('v1/delivery/<int:delivery_id>/arrived_store/', DeliveryArrivedStoreAPI.as_view(), name='delivery_arrived_store'),
     path('v1/delivery/<int:delivery_id>/picked_up/', DeliveryPickedUpAPI.as_view(), name='delivery_picked_up'),
     path('v1/delivery/<int:delivery_id>/deliver/', DeliveryCompleteWithPinAPI.as_view(), name='delivery_deliver'),
+    path('v1/delivery/<int:delivery_id>/confirm/', DeliveryConfirmByMerchantAPI.as_view(), name='delivery_confirm_by_merchant'),
     path('v1/delivery/<int:delivery_id>/fail/', DeliveryFailAPI.as_view(), name='delivery_fail'),
     path('v1/delivery/<int:delivery_id>/reroute/', DeliveryRerouteAPI.as_view(), name='delivery_reroute'),
     path('v1/delivery/<int:delivery_id>/trace/', DeliveryTraceUploadAPI.as_view(), name='delivery_trace_upload'),
     # Endpoints internos de delivery para node_chat_server
     path('v1/delivery/internal/meta/<int:delivery_id>/', DeliveryInternalMetaAPI.as_view(), name='delivery_internal_meta'),
     path('v1/delivery/internal/node-event/', DeliveryInternalNodeEventAPI.as_view(), name='delivery_internal_node_event'),
+    path('v1/delivery/internal/company-access/<str:company_id>/<str:user_id>/', DeliveryInternalCompanyAccessAPI.as_view(), name='delivery_internal_company_access'),
     # CRUD de modelos (viewsets)
     path('v1/', include(router.urls)),
 ]

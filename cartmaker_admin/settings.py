@@ -184,7 +184,8 @@ SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
     'ROTATE_REFRESH_TOKENS': True,
-    'BLACKLIST_AFTER_ROTATION': True,
+    # La app 'token_blacklist' no está instalada: con True SimpleJWT fallaba en silencio. Se deja explícito en False.
+    'BLACKLIST_AFTER_ROTATION': False,
     'ALGORITHM': 'HS256',
     'SIGNING_KEY': env_manager.JWT_SECRET_KEY,
     'AUTH_HEADER_TYPES': ('Bearer',),
@@ -519,8 +520,8 @@ OPENROUTER_API_KEY = env_manager.OPENROUTER_API_KEY
 MAPBOX_APIKEY = env_manager.MAPBOX_APIKEY
 MAPBOX_STYLE_URL = env_manager.MAPBOX_STYLE_URL
 
-# RUTAS (OSRM propio en Docker, escuchando solo en 127.0.0.1). Opcionales: si no se definen en
-# variables.sh se usan los puertos por defecto de scripts/osrm/docker-compose.yml.
+# RUTAS (OSRM propio nativo con systemd: osrm-car / cartmaker-osrm, escuchando solo en 127.0.0.1). Opcionales: si no se
+# definen en variables.sh se usan los puertos por defecto de scripts/osrm/rebuild.sh.
 OSRM_CAR_URL = (os.environ.get("OSRM_CAR_URL", "") or "http://127.0.0.1:5000").strip().rstrip("/")
 OSRM_BIKE_URL = (os.environ.get("OSRM_BIKE_URL", "") or "http://127.0.0.1:5001").strip().rstrip("/")
 OSRM_TIMEOUT_SECONDS = float(os.environ.get("OSRM_TIMEOUT_SECONDS", "") or 4)
@@ -532,3 +533,13 @@ OSRM_TIMEOUT_SECONDS = float(os.environ.get("OSRM_TIMEOUT_SECONDS", "") or 4)
 REALTIME_REDIS_URL = (os.environ.get("REALTIME_REDIS_URL", "") or os.environ.get("REDIS_URL", "") or "redis://127.0.0.1:6379/2").strip()
 # UUID de 16 bits del Service Data BLE del repartidor (pendiente de confirmar/registrar antes de producción)
 DELIVERY_BLE_SERVICE_UUID16 = (os.environ.get("DELIVERY_BLE_SERVICE_UUID16", "") or "CA7E").strip().upper()
+
+# APP LINKS (Android) / UNIVERSAL LINKS (iOS) para que https://www.cartmaker.app/join/... abra la app directamente.
+# ANDROID_APP_PACKAGE: id de la app (ej. com.codlinker.cartmaker)
+# ANDROID_SHA256_CERT_FINGERPRINTS: huellas SHA-256 separadas por coma (firma de release + Play App Signing)
+# IOS_APP_IDS: "<TEAMID>.<bundle_id>" separados por coma
+ANDROID_APP_PACKAGE = (os.environ.get("ANDROID_APP_PACKAGE", "") or "").strip()
+ANDROID_SHA256_CERT_FINGERPRINTS = [
+    fp.strip() for fp in (os.environ.get("ANDROID_SHA256_CERT_FINGERPRINTS", "") or "").split(",") if fp.strip()
+]
+IOS_APP_IDS = [x.strip() for x in (os.environ.get("IOS_APP_IDS", "") or "").split(",") if x.strip()]

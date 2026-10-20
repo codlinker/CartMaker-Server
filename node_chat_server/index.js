@@ -24,9 +24,21 @@ function loadEnvFromSh() {
         const key = line.substring(0, separatorIndex).trim();
         let value = line.substring(separatorIndex + 1).trim();
 
-        if ((value.startsWith('"') && value.endsWith('"')) ||
-          (value.startsWith("'") && value.endsWith("'"))) {
-          value = value.substring(1, value.length - 1);
+        // Mismo criterio que cartmaker_admin/enviroment_manager.py (_parse) para que Django y Node
+        // lean EXACTAMENTE los mismos valores (p. ej. JWT_SECRET_KEY / DJANGO_SECRET_KEY):
+        //  - Valor entre comillas: se toma hasta la comilla de cierre (se descarta lo que siga, p. ej. "# comentario")
+        //  - Valor sin comillas: se corta en el primer '#' (comentario en línea) y se recorta
+        if (value.startsWith('"') || value.startsWith("'")) {
+          const quoteChar = value[0];
+          const endQuoteIdx = value.indexOf(quoteChar, 1);
+          if (endQuoteIdx !== -1) {
+            value = value.substring(1, endQuoteIdx);
+          } else {
+            // Equivalente a str.strip(quote_char) de Python
+            value = value.replace(new RegExp(`^${quoteChar}+|${quoteChar}+$`, 'g'), '');
+          }
+        } else {
+          value = value.split('#')[0].trim();
         }
 
         process.env[key] = value;
@@ -49,7 +61,8 @@ const axios = require('axios');
 const jwt = require('jsonwebtoken');
 
 const app = express();
-app.use(express.json());
+// Límite ampliado: el backfill de trazas (/internal/delivery-trace-backfill) supera los 100 kb por defecto
+app.use(express.json({ limit: '2mb' }));
 const server = http.createServer(app);
 
 // Configuramos Socket.io
@@ -84,7 +97,17 @@ const DJANGO_WEBHOOK_URL = `${DJANGO_BASE_URL}/chat/webhook/process_message/`;
 const DJANGO_SUPPORT_WEBHOOK_URL = `${DJANGO_BASE_URL}/chat/webhook/process_support_message/`;
 const DJANGO_DELIVERY_META_URL = `${DJANGO_BASE_URL}/api/v1/delivery/internal/meta/`;
 const DJANGO_DELIVERY_EVENT_URL = `${DJANGO_BASE_URL}/api/v1/delivery/internal/node-event/`;
+const DJANGO_COMPANY_ACCESS_URL = `${DJANGO_BASE_URL}/api/v1/delivery/internal/company-access/`;
 const AXIOS_WEBHOOK_TIMEOUT_MS = 5000;
+const DJANGO_INTERNAL_TIMEOUT_MS = 3000;
+
+// GET interno a Django (API /internal/ de delivery) con el token de microservicio y timeout corto
+function djangoInternalGet(url) {
+  return axios.get(url, {
+    headers: { 'X-Microservice-Token': INTERNAL_SECRET },
+    timeout: DJANGO_INTERNAL_TIMEOUT_MS
+  });
+}
 
 // =========================================================================
 // 🧠 REDIS COMPARTIDO CON DJANGO (estado de delivery en tiempo real, Fase 2+)
@@ -95,8 +118,23 @@ let redis = null;
 let redisReady = false;
 
 function initRedis() {
+  let Redis = null;
   try {
-    const Redis = require('ioredis');
+    Redis = require('ioredis');
+  } catch (err) {
+    redis = null;
+    redisReady = false;
+    const banner = '='.repeat(78);
+    console.error(`\n${banner}`);
+    console.error('❌❌❌ DEPENDENCIA FALTANTE: no se pudo cargar "ioredis" ❌❌❌');
+    console.error('   El servidor arranca SIN Redis: no habrá estado de delivery compartido con Django,');
+    console.error('   ni presencia de repartidores, ni verificación de revocación de trabajadores en Redis.');
+    console.error('   Solución:  cd node_chat_server && npm install');
+    console.error(`   Detalle: ${err.message}`);
+    console.error(`${banner}\n`);
+    return;
+  }
+  try {
     redis = new Redis(REDIS_URL, {
       lazyConnect: false,
       enableOfflineQueue: false,
@@ -121,7 +159,7 @@ function initRedis() {
   } catch (err) {
     redis = null;
     redisReady = false;
-    console.error('⚠️ No se pudo inicializar ioredis (¿falta npm install?). El servidor sigue sin Redis:', err.message);
+    console.error('⚠️ No se pudo inicializar el cliente ioredis. El servidor sigue sin Redis:', err.message);
   }
 }
 
@@ -151,20 +189,67 @@ function applyAuthContext(socket, decoded) {
 }
 
 // =========================================================================
+// ⛔ REVOCACIÓN DE TRABAJADORES (suspensión / revocación / cambio de rol / renuncia)
+// =========================================================================
+// Django hace SET `emp:{emp_id}:revoked` (valor = motivo, TTL 3600 s) en la misma BD de Redis
+// en tiempo real y DEL cuando el empleo se reactiva o se vuelve a aceptar. Si Redis no está
+// disponible usamos el respaldo en memoria que llena /internal/emit-worker-revoked.
+const REVOKED_MEMORY_TTL_MS = 3600 * 1000;
+const revokedEmployees = new Map(); // empId -> expiresAtMs
+
+function isRevokedInMemory(empKey, now = Date.now()) {
+  const expiresAt = revokedEmployees.get(empKey);
+  if (!expiresAt) return false;
+  if (expiresAt <= now) {
+    revokedEmployees.delete(empKey);
+    return false;
+  }
+  return true;
+}
+
+// Nunca lanza: ante cualquier fallo de Redis degrada al respaldo en memoria.
+async function isEmployeeRevoked(empId) {
+  if (empId == null || empId === '') return false;
+  const empKey = String(empId);
+  const r = getRedis();
+  if (r) {
+    try {
+      const reason = await r.get(`emp:${empKey}:revoked`);
+      if (reason) return true;
+      // Redis es la fuente de verdad: si Django borró la llave (reactivación) olvidamos el respaldo local
+      revokedEmployees.delete(empKey);
+      return false;
+    } catch (err) {
+      console.error('⚠️ Error consultando revocación de trabajador en Redis (se usa respaldo en memoria):', err.message);
+    }
+  }
+  return isRevokedInMemory(empKey);
+}
+
+// SimpleJWT incluye `token_type` ('access' / 'refresh'). Solo aceptamos tokens de acceso;
+// los tokens antiguos sin `token_type` se siguen aceptando por compatibilidad.
+function isAccessTokenClaims(decoded) {
+  if (!decoded || typeof decoded !== 'object') return false;
+  if (decoded.token_type !== undefined && decoded.token_type !== null && decoded.token_type !== 'access') {
+    return false;
+  }
+  return true;
+}
+
+// =========================================================================
 // 🔒 MIDDLEWARE DE AUTENTICACIÓN PROTEGIDO
 // =========================================================================
-io.use((socket, next) => {
+io.use(async (socket, next) => {
+  let decoded;
   try {
-    const token = socket.handshake.auth.token;
+    const token = socket.handshake.auth && socket.handshake.auth.token;
 
     if (!token) {
       console.log("WS Auth: Token no provisto");
       return next(new Error("token_missing"));
     }
 
-    const decoded = jwt.verify(token, JWT_SECRET);
-    applyAuthContext(socket, decoded);
-    next();
+    decoded = jwt.verify(token, JWT_SECRET);
   } catch (err) {
     console.error("❌ Error descifrando JWT en el handshake:", err.message);
     
@@ -174,6 +259,23 @@ io.use((socket, next) => {
     
     return next(new Error("invalid_token"));
   }
+
+  // Un refresh token (u otro tipo) nunca debe abrir un socket
+  if (!isAccessTokenClaims(decoded)) {
+    console.log("WS Auth: token_type no permitido:", decoded && decoded.token_type);
+    return next(new Error("invalid_token"));
+  }
+
+  // Un trabajador suspendido/revocado no puede reconectar con el mismo JWT
+  if (decoded.ctx === 'worker' && decoded.emp_id != null) {
+    if (await isEmployeeRevoked(decoded.emp_id)) {
+      console.log(`WS Auth: trabajador revocado rechazado [user: ${decoded.user_id}, emp: ${decoded.emp_id}]`);
+      return next(new Error("worker_access_revoked"));
+    }
+  }
+
+  applyAuthContext(socket, decoded);
+  next();
 });
 
 // =========================================================================
@@ -223,6 +325,46 @@ function hasCounterpartyInRoom(roomName, userId) {
     }
   }
   return false;
+}
+
+// Avisa "offline" en las salas de chat (órdenes / soporte) que el socket tenía abiertas, en nombre de `userId`.
+// Se usa al desconectar y al re-escopar el socket en refresh_auth (cambio de identidad).
+function announceChatRoomsOffline(socket, userId) {
+  const rooms = activeChats.get(socket.id);
+  if (!rooms) return;
+  for (const roomName of rooms) {
+    if (hasOtherUserSocketInRoom(roomName, userId, socket.id)) continue;
+    if (roomName.startsWith('order_')) {
+      const orderId = roomName.slice(6);
+      io.to(roomName).except(socket.id).emit('presence_change', {
+        order_id: orderId,
+        is_support: false,
+        user_id: String(userId),
+        status: 'offline'
+      });
+    } else if (roomName.startsWith('support_')) {
+      const ticketId = roomName.slice(8);
+      io.to(roomName).except(socket.id).emit('support_presence_change', {
+        ticket_id: ticketId,
+        is_support: true,
+        user_id: String(userId),
+        status: 'offline'
+      });
+    }
+  }
+}
+
+// Límite de frecuencia simple por socket (ventana fija). Devuelve true si se excedió.
+function isRateLimited(socket, bucket, max, windowMs) {
+  const now = Date.now();
+  if (!socket._rateLimits) socket._rateLimits = new Map();
+  let entry = socket._rateLimits.get(bucket);
+  if (!entry || now - entry.start >= windowMs) {
+    entry = { start: now, count: 0 };
+    socket._rateLimits.set(bucket, entry);
+  }
+  entry.count += 1;
+  return entry.count > max;
 }
 
 // =========================================================================
@@ -471,6 +613,16 @@ app.post('/internal/emit-worker-revoked', (req, res) => {
     reason: reason || 'revoked'
   };
 
+  // Respaldo en memoria (1 h) para rechazar reconexiones con el mismo JWT aunque Redis caiga
+  revokedEmployees.set(empIdStr, Date.now() + REVOKED_MEMORY_TTL_MS);
+  // Defensa adicional: si Django no alcanzó a escribir la llave, la creamos (NX no pisa la de Django)
+  const rRevoked = getRedis();
+  if (rRevoked) {
+    rRevoked.set(`emp:${empIdStr}:revoked`, String(payload.reason), 'EX', 3600, 'NX').catch(() => {});
+  }
+  // Invalidamos permisos cacheados de company_riders para este usuario
+  invalidateCompanyAccessForUser(userIdStr);
+
   let disconnected = 0;
   const socketIds = onlineUsers.has(userIdStr) ? Array.from(onlineUsers.get(userIdStr)) : [];
   socketIds.forEach((sid) => {
@@ -492,6 +644,19 @@ app.post('/internal/emit-worker-revoked', (req, res) => {
 
   console.log(`👷 Acceso de trabajador revocado [user: ${userIdStr}, emp: ${empIdStr}] -> ${disconnected} socket(s)`);
   res.json({ success: true, disconnected });
+});
+
+// 6b. (Opcional) Django avisa: "Este empleo fue reactivado / re-aceptado".
+//     Limpia el respaldo en memoria; la llave de Redis la borra Django (DEL emp:{emp_id}:revoked).
+app.post('/internal/emit-worker-restored', (req, res) => {
+  if (!isValidMicroserviceToken(req.headers['x-microservice-token'])) return res.status(403).send('Forbidden');
+  const { employee_id, user_id } = req.body || {};
+  if (employee_id == null) {
+    return res.status(400).json({ success: false, error: 'employee_id es obligatorio.' });
+  }
+  revokedEmployees.delete(String(employee_id));
+  if (user_id) invalidateCompanyAccessForUser(String(user_id));
+  res.json({ success: true });
 });
 
 // =========================================================================
@@ -522,13 +687,168 @@ const OFF_ROUTE_THRESHOLD_M = 40.0;
 const ARRIVING_RADIUS_M = 150.0;
 const LIVE_TTL_S = 6 * 3600;
 const TRACE_MAXLEN = 20000;
+const META_CACHE_TTL_MS = 5000;          // Caché caliente de meta
+const META_MEMORY_SWEEP_MS = 60000;      // Entradas de meta más viejas se purgan
+const META_MISS_TTL_MS = 30000;          // Caché negativa (404 / inexistente)
+const REROUTE_COOLDOWN_SWEEP_MS = 60000;
+const COMPANY_ACCESS_TTL_MS = 60000;
+const RIDER_ONLINE_TTL_S = 90;
+const RIDER_ONLINE_REFRESH_MS = 45000;
+const FIX_FLAG_FROM_BUFFER = 0x04;       // Bit de flags: fix reenviado desde el búfer offline
+const STALE_FIX_MAX_AGE_MS = 10000;      // Fixes más viejos solo van a la traza
+const ARRIVING_RETRY_MS = 15000;         // Reintento del evento 'arriving' si Django falló
 
 // Cachés en memoria (respaldo si Redis no está disponible y acelerador de lecturas)
 const deliveryMetaMemory = new Map(); // deliveryId -> { meta, fetchedAt }
+const deliveryMetaMiss = new Map();   // deliveryId -> timestamp ms del último 404/miss
 const deliveryLiveMemory = new Map(); // deliveryId -> liveObj
 const deliveryLocks = new Map();      // deliveryId -> Promise
 const rerouteCooldowns = new Map();   // deliveryId -> timestamp ms
+const arrivingAttempts = new Map();   // deliveryId -> timestamp ms del último intento de 'arriving'
 const riderSockets = new Map();       // empId -> Set(socket.id)
+const companyAccessCache = new Map(); // `${companyId}:${userId}` -> { allowed, at }
+
+function invalidateCompanyAccessForUser(userId) {
+  const suffix = `:${userId}`;
+  for (const key of Array.from(companyAccessCache.keys())) {
+    if (key.endsWith(suffix)) companyAccessCache.delete(key);
+  }
+}
+
+// Limpieza de cachés en memoria para evitar fugas en procesos de larga duración
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of deliveryMetaMemory) {
+    if (!entry || now - entry.fetchedAt > META_MEMORY_SWEEP_MS) deliveryMetaMemory.delete(key);
+  }
+  for (const [key, ts] of deliveryMetaMiss) {
+    if (now - ts > META_MISS_TTL_MS) deliveryMetaMiss.delete(key);
+  }
+  for (const [key, ts] of rerouteCooldowns) {
+    if (now - ts > REROUTE_COOLDOWN_SWEEP_MS) rerouteCooldowns.delete(key);
+  }
+  for (const [key, ts] of arrivingAttempts) {
+    if (now - ts > REROUTE_COOLDOWN_SWEEP_MS) arrivingAttempts.delete(key);
+  }
+  for (const [key, live] of deliveryLiveMemory) {
+    const stateT = live ? Number(live.state_t_ms || live.t_a || 0) : 0;
+    if (!stateT || now - stateT > LIVE_TTL_S * 1000) deliveryLiveMemory.delete(key);
+  }
+  for (const [key, entry] of companyAccessCache) {
+    if (!entry || now - entry.at > COMPANY_ACCESS_TTL_MS) companyAccessCache.delete(key);
+  }
+  for (const [key, expiresAt] of revokedEmployees) {
+    if (expiresAt <= now) revokedEmployees.delete(key);
+  }
+}, 60000).unref();
+
+// =========================================================================
+// 🟢 PRESENCIA DE REPARTIDORES (riderSockets + rider:{emp}:online en Redis)
+// =========================================================================
+function touchRiderOnline(empKey) {
+  const r = getRedis();
+  if (r && empKey) {
+    r.set(`rider:${empKey}:online`, '1', 'EX', RIDER_ONLINE_TTL_S).catch(() => {});
+  }
+}
+
+// Registra el socket como repartidor conectado si su contexto es trabajador/delivery.
+// Guarda la identidad registrada en el socket para poder des-registrarla aunque cambie el JWT.
+function registerRider(socket) {
+  if (socket.ctx !== 'worker' || socket.worker_role !== 'delivery' || !socket.emp_id) return;
+  const empKey = String(socket.emp_id);
+  if (socket._riderEmpKey === empKey) return;
+  if (socket._riderEmpKey) unregisterRider(socket);
+  if (!riderSockets.has(empKey)) {
+    riderSockets.set(empKey, new Set());
+  }
+  riderSockets.get(empKey).add(socket.id);
+  socket._riderEmpKey = empKey;
+  socket._riderCompanyId = socket.company_id || null;
+  touchRiderOnline(empKey);
+  if (socket.company_id) {
+    io.to(`company_riders_${socket.company_id}`).emit('rider_presence', {
+      employee_id: Number(empKey),
+      online: true
+    });
+  }
+}
+
+// Revierte registerRider: si era el último socket del repartidor lo marca offline (Redis + comercio)
+function unregisterRider(socket) {
+  const empKey = socket._riderEmpKey;
+  if (!empKey) return;
+  const companyId = socket._riderCompanyId;
+  socket._riderEmpKey = null;
+  socket._riderCompanyId = null;
+  const set = riderSockets.get(empKey);
+  if (!set) return;
+  set.delete(socket.id);
+  if (set.size === 0) {
+    riderSockets.delete(empKey);
+    const r = getRedis();
+    if (r) {
+      r.del(`rider:${empKey}:online`).catch(() => {});
+    }
+    if (companyId) {
+      io.to(`company_riders_${companyId}`).emit('rider_presence', {
+        employee_id: Number(empKey),
+        online: false
+      });
+    }
+  }
+}
+
+// La llave rider:{emp}:online (TTL 90 s) expiraría para repartidores conectados sin entregas activas
+setInterval(() => {
+  const r = getRedis();
+  if (!r || riderSockets.size === 0) return;
+  const pipe = r.pipeline();
+  for (const empKey of riderSockets.keys()) {
+    pipe.set(`rider:${empKey}:online`, '1', 'EX', RIDER_ONLINE_TTL_S);
+  }
+  pipe.exec().catch(() => {});
+}, RIDER_ONLINE_REFRESH_MS).unref();
+
+// =========================================================================
+// 🏢 AUTORIZACIÓN PARA company_riders_<id> (presencia de repartidores del comercio)
+// =========================================================================
+// Permitido si: (a) asistente en modo trabajador de esa empresa, o
+//               (b) Django confirma acceso: GET /api/v1/delivery/internal/company-access/<company>/<user>/
+//                   -> { "data": { "allowed": true|false } }  (caché 60 s por empresa+usuario)
+async function checkCompanyRidersAccess(socket, companyId) {
+  if (socket.ctx === 'worker' && socket.worker_role === 'assistant' && String(socket.company_id) === companyId) {
+    return { allowed: true, code: null };
+  }
+  const userId = String(socket.user_id || '');
+  if (!userId) return { allowed: false, code: 'forbidden' };
+
+  const cacheKey = `${companyId}:${userId}`;
+  const now = Date.now();
+  const cached = companyAccessCache.get(cacheKey);
+  if (cached && now - cached.at < COMPANY_ACCESS_TTL_MS) {
+    return { allowed: cached.allowed, code: cached.allowed ? null : 'forbidden' };
+  }
+
+  try {
+    const resp = await djangoInternalGet(
+      `${DJANGO_COMPANY_ACCESS_URL}${encodeURIComponent(companyId)}/${encodeURIComponent(userId)}/`
+    );
+    const data = resp.data && resp.data.data;
+    const allowed = Boolean(data && data.allowed === true);
+    companyAccessCache.set(cacheKey, { allowed, at: now });
+    return { allowed, code: allowed ? null : 'forbidden' };
+  } catch (err) {
+    const status = err.response && err.response.status;
+    if (status === 403 || status === 404) {
+      companyAccessCache.set(cacheKey, { allowed: false, at: now });
+      return { allowed: false, code: 'forbidden' };
+    }
+    // Fallo de red / 5xx: se niega sin cachear para permitir reintento
+    console.error('⚠️ Error verificando acceso a company_riders en Django:', err.message);
+    return { allowed: false, code: 'access_check_failed' };
+  }
+}
 
 function haversineM(lat1, lng1, lat2, lng2) {
   const toRad = (d) => (d * Math.PI) / 180.0;
@@ -697,6 +1017,12 @@ async function getDeliveryMeta(deliveryId, forceRefresh = false) {
   const cached = deliveryMetaCacheGet(key, now, forceRefresh);
   if (cached) return cached;
 
+  // Caché negativa: evita martillar a Django con IDs inexistentes
+  if (!forceRefresh) {
+    const missAt = deliveryMetaMiss.get(key);
+    if (missAt && now - missAt < META_MISS_TTL_MS) return null;
+  }
+
   const r = getRedis();
   if (r) {
     try {
@@ -704,6 +1030,7 @@ async function getDeliveryMeta(deliveryId, forceRefresh = false) {
       const parsed = normalizeMeta(raw);
       if (parsed) {
         deliveryMetaMemory.set(key, { meta: parsed, fetchedAt: now });
+        deliveryMetaMiss.delete(key);
         return parsed;
       }
     } catch (err) {
@@ -712,17 +1039,20 @@ async function getDeliveryMeta(deliveryId, forceRefresh = false) {
   }
 
   try {
-    const resp = await axios.get(`${DJANGO_DELIVERY_META_URL}${encodeURIComponent(key)}/`, {
-      headers: { 'X-Microservice-Token': INTERNAL_SECRET },
-      timeout: 3000
-    });
+    const resp = await djangoInternalGet(`${DJANGO_DELIVERY_META_URL}${encodeURIComponent(key)}/`);
     const parsed = normalizeMeta(resp.data && resp.data.data);
     if (parsed) {
       deliveryMetaMemory.set(key, { meta: parsed, fetchedAt: now });
+      deliveryMetaMiss.delete(key);
       return parsed;
     }
+    // Respuesta 2xx sin meta válida: se trata como inexistente
+    deliveryMetaMiss.set(key, now);
   } catch (err) {
-    // 404 o timeout
+    // 404 -> caché negativa; timeout / 5xx no se cachea
+    if (err.response && err.response.status === 404) {
+      deliveryMetaMiss.set(key, now);
+    }
   }
   return null;
 }
@@ -730,23 +1060,36 @@ async function getDeliveryMeta(deliveryId, forceRefresh = false) {
 function deliveryMetaCacheGet(key, now, forceRefresh) {
   if (forceRefresh) return null;
   const entry = deliveryMetaMemory.get(key);
-  if (entry && now - entry.fetchedAt < 5000) {
+  if (entry && now - entry.fetchedAt < META_CACHE_TTL_MS) {
     return entry.meta;
   }
   return null;
 }
 
+// Olvida meta (positiva y negativa) de una entrega: la próxima lectura vuelve a Redis/Django
+function invalidateDeliveryMeta(deliveryId) {
+  const key = String(deliveryId);
+  deliveryMetaMemory.delete(key);
+  deliveryMetaMiss.delete(key);
+}
+
 function resolveSocketDeliveryRole(socket, meta) {
   if (!socket || !meta) return null;
   const uid = String(socket.user_id || '');
+  const isMerchantUser = uid === meta.merchant_user_id ||
+    (Array.isArray(meta.merchant_user_ids) && meta.merchant_user_ids.map(String).includes(uid));
   if (socket.ctx === 'worker') {
     if (meta.rider_emp_id && String(socket.emp_id) === String(meta.rider_emp_id) && uid === meta.rider_user_id) {
       return 'rider';
     }
+    // Los asistentes en modo trabajador siguen la entrega como el comercio (Django aplica el mismo criterio)
+    if (socket.worker_role === 'assistant' && uid && isMerchantUser) {
+      return 'merchant';
+    }
     return null;
   }
   if (uid === meta.client_user_id) return 'client';
-  if (uid === meta.merchant_user_id || (Array.isArray(meta.merchant_user_ids) && meta.merchant_user_ids.includes(uid))) {
+  if (isMerchantUser) {
     return 'merchant';
   }
   return null;
@@ -767,6 +1110,35 @@ async function getLiveState(deliveryId) {
   return deliveryLiveMemory.get(key) || null;
 }
 
+function pipeTracePoint(pipe, key, tracePoint) {
+  pipe.xadd(
+    `dlv:${key}:trace`,
+    'MAXLEN', '~', String(TRACE_MAXLEN), '*',
+    't', String(tracePoint.t_ms),
+    'ts', String(tracePoint.ts_ms),
+    'lat', String(tracePoint.lat),
+    'lng', String(tracePoint.lng),
+    'v', String(tracePoint.speed_mps),
+    'hdg', String(tracePoint.heading),
+    'acc', String(tracePoint.accuracy_m),
+    'src', String(tracePoint.src_code)
+  );
+  pipe.expire(`dlv:${key}:trace`, LIVE_TTL_S);
+}
+
+// Solo agrega el punto a la traza (fixes viejos / del búfer offline): no toca el estado vivo
+async function appendTracePoint(deliveryId, tracePoint) {
+  const r = getRedis();
+  if (!r || !tracePoint) return;
+  try {
+    const pipe = r.pipeline();
+    pipeTracePoint(pipe, String(deliveryId), tracePoint);
+    await pipe.exec();
+  } catch (err) {
+    console.error('⚠️ Error agregando punto a la traza de delivery en Redis:', err.message);
+  }
+}
+
 async function saveLiveState(deliveryId, stateObj, tracePoint = null) {
   const key = String(deliveryId);
   const strMap = {};
@@ -784,24 +1156,31 @@ async function saveLiveState(deliveryId, stateObj, tracePoint = null) {
     pipe.hset(`dlv:${key}:live`, strMap);
     pipe.expire(`dlv:${key}:live`, LIVE_TTL_S);
     if (tracePoint) {
-      pipe.xadd(
-        `dlv:${key}:trace`,
-        'MAXLEN', '~', String(TRACE_MAXLEN), '*',
-        't', String(tracePoint.t_ms),
-        'ts', String(tracePoint.ts_ms),
-        'lat', String(tracePoint.lat),
-        'lng', String(tracePoint.lng),
-        'v', String(tracePoint.speed_mps),
-        'hdg', String(tracePoint.heading),
-        'acc', String(tracePoint.accuracy_m),
-        'src', String(tracePoint.src_code)
-      );
-      pipe.expire(`dlv:${key}:trace`, LIVE_TTL_S);
+      pipeTracePoint(pipe, key, tracePoint);
     }
     await pipe.exec();
   } catch (err) {
     console.error('⚠️ Error guardando estado vivo de delivery en Redis:', err.message);
   }
+}
+
+// Persiste arriving_sent=1 SOLO cuando Django confirmó (2xx) el evento 'arriving'
+function markArrivingSent(deliveryId) {
+  const key = String(deliveryId);
+  return withDeliveryLock(key, async () => {
+    const mem = deliveryLiveMemory.get(key);
+    if (mem) mem.arriving_sent = '1';
+    const r = getRedis();
+    if (!r) return;
+    try {
+      const exists = await r.exists(`dlv:${key}:live`);
+      if (exists) {
+        await r.hset(`dlv:${key}:live`, 'arriving_sent', '1');
+      }
+    } catch (err) {
+      console.error('⚠️ Error marcando arriving_sent en Redis:', err.message);
+    }
+  });
 }
 
 function publicAnchorFromState(state) {
@@ -837,13 +1216,16 @@ function broadcastAnchor(deliveryId, status, anchor) {
   }
 }
 
+// Devuelve una promesa que resuelve `true` si Django respondió 2xx (nunca rechaza)
 function notifyDjangoDeliveryEvent(payload) {
-  axios.post(DJANGO_DELIVERY_EVENT_URL, payload, {
+  return axios.post(DJANGO_DELIVERY_EVENT_URL, payload, {
     headers: { 'X-Microservice-Token': INTERNAL_SECRET },
-    timeout: 3000
-  }).catch((err) => {
-    console.error(`⚠️ Error enviando evento de delivery (${payload.event}) a Django:`, err.message);
-  });
+    timeout: DJANGO_INTERNAL_TIMEOUT_MS
+  }).then((resp) => resp.status >= 200 && resp.status < 300)
+    .catch((err) => {
+      console.error(`⚠️ Error enviando evento de delivery (${payload.event}) a Django:`, err.message);
+      return false;
+    });
 }
 
 function parseRiderFixPayload(raw, defaultDeliveryId = null) {
@@ -878,13 +1260,15 @@ function parseRiderFixPayload(raw, defaultDeliveryId = null) {
     const lat = Number(raw.lat);
     const lng = Number(raw.lng);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    // Rumbo: `heading` en grados, o `heading_cd` / `hdg_cd` en centésimas de grado
+    const headingCd = raw.heading_cd != null ? raw.heading_cd : raw.hdg_cd;
     return {
       delivery_id: raw.delivery_id != null ? Number(raw.delivery_id) : defaultDeliveryId,
       t_ms: Number(raw.t_ms != null ? raw.t_ms : 0),
       lat,
       lng,
       speed_mps: Math.max(0, Number(raw.speed_mps != null ? raw.speed_mps : (raw.v_cms || 0) / 100.0) || 0),
-      heading: ((Number(raw.heading != null ? raw.heading : (raw.heading_cd || 0) / 100.0) || 0) % 360 + 360) % 360,
+      heading: ((Number(raw.heading != null ? raw.heading : (headingCd || 0) / 100.0) || 0) % 360 + 360) % 360,
       accuracy_m: Math.max(1, Number(raw.accuracy_m != null ? raw.accuracy_m : (raw.acc_dm || 100) / 10.0) || 10),
       seq: raw.seq != null ? Number(raw.seq) & 0xFF : null,
       flags: Number(raw.flags || 0) & 0xFF
@@ -905,7 +1289,7 @@ function withDeliveryLock(deliveryId, fn) {
   return next;
 }
 
-async function ingestDeliveryFix(deliveryId, fix, source = 'gnss_socket') {
+async function ingestDeliveryFix(deliveryId, fix, source = 'gnss_socket', options = {}) {
   return withDeliveryLock(deliveryId, async () => {
     const meta = await getDeliveryMeta(deliveryId);
     if (!meta) return null;
@@ -919,10 +1303,51 @@ async function ingestDeliveryFix(deliveryId, fix, source = 'gnss_socket') {
 
     const now = Date.now();
     const prev = await getLiveState(deliveryId);
-    if (prev && source === 'gnss_socket' && fix.seq != null && prev.last_seq !== undefined && prev.last_seq !== '') {
-      if (Number(prev.last_seq) === Number(fix.seq)) {
+    // Detección de duplicados con secuencias independientes por canal (GNSS por socket / BLE relay)
+    const isGnss = source === 'gnss_socket';
+    if (prev && fix.seq != null) {
+      let lastSeq = isGnss ? prev.last_seq_gnss : prev.last_seq_ble;
+      if (lastSeq === undefined && isGnss) lastSeq = prev.last_seq; // estados guardados antes del cambio
+      if (lastSeq !== undefined && lastSeq !== null && lastSeq !== '' && Number(lastSeq) === Number(fix.seq)) {
         return null; // Paquete duplicado
       }
+    }
+
+    const assignedAtMs = meta.assigned_at_ms || now;
+    const relTms = fix.t_ms > 0 ? fix.t_ms : Math.max(0, now - assignedAtMs);
+    const srcCode = source === 'ble_relay' ? 2 : 0;
+
+    // Hora real del fix: `ts_ms` (relay BLE desde Django) o assigned_at_ms + t_ms; sin datos = ahora
+    let fixTsMs = now;
+    const tsHint = Number(options && options.ts_ms);
+    if (Number.isFinite(tsHint) && tsHint > 0) {
+      fixTsMs = tsHint;
+    } else if (fix.t_ms > 0 && meta.assigned_at_ms > 0) {
+      fixTsMs = meta.assigned_at_ms + fix.t_ms;
+    }
+    fixTsMs = Math.min(fixTsMs, now); // relojes adelantados no pueden "viajar al futuro"
+
+    const tracePoint = {
+      t_ms: relTms,
+      ts_ms: fixTsMs,
+      lat: fix.lat,
+      lng: fix.lng,
+      speed_mps: fix.speed_mps,
+      heading: fix.heading,
+      accuracy_m: fix.accuracy_m || 10,
+      src_code: srcCode
+    };
+
+    // Fixes viejos (búfer offline, desordenados o > 10 s) solo alimentan la traza:
+    // no mueven el filtro de Kalman ni generan anchors.
+    const prevFixTs = prev && prev.fix_ts_ms ? Number(prev.fix_ts_ms) : 0;
+    const isStale =
+      ((Number(fix.flags) || 0) & FIX_FLAG_FROM_BUFFER) !== 0 ||
+      now - fixTsMs > STALE_FIX_MAX_AGE_MS ||
+      (prevFixTs > 0 && fixTsMs < prevFixTs);
+    if (isStale) {
+      await appendTracePoint(deliveryId, tracePoint);
+      return null;
     }
 
     if (prev && prev.lat != null && prev.lng != null && prev.state_t_ms) {
@@ -933,8 +1358,6 @@ async function ingestDeliveryFix(deliveryId, fix, source = 'gnss_socket') {
       }
     }
 
-    const assignedAtMs = meta.assigned_at_ms || now;
-    const relTms = fix.t_ms > 0 ? fix.t_ms : Math.max(0, now - assignedAtMs);
     const inTransit = st === DELIVERY_STATUS.PICKED_UP || st === DELIVERY_STATUS.ARRIVING;
     const points = Array.isArray(meta.route_points) ? meta.route_points : [];
     const cumDist = Array.isArray(meta.route_cum_dist) ? meta.route_cum_dist : [];
@@ -1034,21 +1457,31 @@ async function ingestDeliveryFix(deliveryId, fix, source = 'gnss_socket') {
     }
 
     // Geocerca de llegada (< 150 m del cliente) cuando va en camino (PICKED_UP -> ARRIVING)
+    // arriving_sent solo se persiste cuando Django confirma (2xx); si falla se reintenta tras 15 s
     if (st === DELIVERY_STATUS.PICKED_UP && !arrivingSent && meta.dest_lat && meta.dest_lng) {
       const distToDest = haversineM(fix.lat, fix.lng, meta.dest_lat, meta.dest_lng);
       if (distToDest <= ARRIVING_RADIUS_M) {
-        arrivingSent = 1;
-        notifyDjangoDeliveryEvent({
-          event: 'arriving',
-          delivery_id: Number(deliveryId)
-        });
+        const arrivingKey = String(deliveryId);
+        const lastAttempt = arrivingAttempts.get(arrivingKey) || 0;
+        if (now - lastAttempt >= ARRIVING_RETRY_MS) {
+          arrivingAttempts.set(arrivingKey, now);
+          notifyDjangoDeliveryEvent({
+            event: 'arriving',
+            delivery_id: Number(deliveryId)
+          }).then((ok) => {
+            if (ok) {
+              markArrivingSent(deliveryId).catch(() => {});
+            }
+          });
+        }
       }
     }
 
     const sigmaA = Number(clamp(Math.sqrt(Math.max(9.0, p00)), 3.0, 250.0).toFixed(1));
     const sigmaRate = Number((mode === 'free' ? 2.5 : clamp(Math.sqrt(Math.max(0.5, p11)), 0.8, 3.0)).toFixed(2));
-    const srcCode = source === 'ble_relay' ? 2 : 0;
 
+    const prevSeqGnss = prev ? (prev.last_seq_gnss !== undefined ? prev.last_seq_gnss : prev.last_seq) : null;
+    const prevSeqBle = prev ? prev.last_seq_ble : null;
     const nextState = {
       delivery_id: Number(deliveryId),
       t_a: now,
@@ -1061,6 +1494,7 @@ async function ingestDeliveryFix(deliveryId, fix, source = 'gnss_socket') {
       p01: Number(p01.toFixed(3)),
       p11: Number(p11.toFixed(3)),
       state_t_ms: now,
+      fix_ts_ms: fixTsMs,
       route_version: meta.route_version,
       mode,
       lat: outLat,
@@ -1070,20 +1504,12 @@ async function ingestDeliveryFix(deliveryId, fix, source = 'gnss_socket') {
       eta_remaining_s: etaRemainingS,
       off_route_count: offRouteCount,
       arriving_sent: arrivingSent,
-      last_seq: fix.seq != null ? fix.seq : (prev && prev.last_seq != null ? prev.last_seq : ''),
+      last_seq_gnss: isGnss && fix.seq != null ? fix.seq : (prevSeqGnss != null ? prevSeqGnss : ''),
+      last_seq_ble: !isGnss && fix.seq != null ? fix.seq : (prevSeqBle != null ? prevSeqBle : ''),
       source
     };
 
-    await saveLiveState(deliveryId, nextState, {
-      t_ms: relTms,
-      ts_ms: now,
-      lat: fix.lat,
-      lng: fix.lng,
-      speed_mps: fix.speed_mps,
-      heading: fix.heading,
-      accuracy_m: fix.accuracy_m || 10,
-      src_code: srcCode
-    });
+    await saveLiveState(deliveryId, nextState, tracePoint);
 
     const anchor = publicAnchorFromState(nextState);
     broadcastAnchor(deliveryId, st, anchor);
@@ -1092,17 +1518,95 @@ async function ingestDeliveryFix(deliveryId, fix, source = 'gnss_socket') {
 }
 
 // 7. Django ordena: "Envía oferta de entrega (45 s) al repartidor"
+//    Solo a los sockets en modo trabajador de ESE empleo; si no hay ninguno (aún no entró en modo
+//    trabajador) se usa la sala personal user_<rider_user_id> como respaldo.
 app.post('/internal/delivery-offer', (req, res) => {
   if (!isValidMicroserviceToken(req.headers['x-microservice-token'])) return res.status(403).send('Forbidden');
   const payload = req.body || {};
   if (payload.delivery_id != null) {
-    deliveryMetaMemory.delete(String(payload.delivery_id));
+    invalidateDeliveryMeta(payload.delivery_id);
   }
-  if (payload.rider_user_id) {
+  let workerSockets = 0;
+  if (payload.rider_emp_id != null && payload.rider_emp_id !== '') {
+    const empKey = String(payload.rider_emp_id);
+    const set = riderSockets.get(empKey);
+    if (set) {
+      for (const sid of set) {
+        const s = io.sockets.sockets.get(sid);
+        if (s && s.ctx === 'worker' && String(s.emp_id) === empKey) {
+          s.emit('delivery_offer', payload);
+          workerSockets += 1;
+        }
+      }
+    }
+  }
+  if (workerSockets === 0 && payload.rider_user_id) {
     io.to(`user_${payload.rider_user_id}`).emit('delivery_offer', payload);
   }
-  res.json({ success: true });
+  res.json({ success: true, worker_sockets: workerSockets });
 });
+
+function deliveryRoomNames(deliveryId) {
+  return [
+    `delivery_${deliveryId}`,
+    `delivery_${deliveryId}_track_all`,
+    `delivery_${deliveryId}_track_client`
+  ];
+}
+
+// Saca un socket local de las salas de una entrega y limpia la contabilidad asociada
+function evictSocketFromDelivery(s, deliveryId) {
+  deliveryRoomNames(deliveryId).forEach((room) => {
+    s.leave(room);
+    removeActiveRoom(s.id, room);
+  });
+  if (s.active_delivery_id != null && String(s.active_delivery_id) === String(deliveryId)) {
+    s.active_delivery_id = null;
+  }
+}
+
+// Expulsa al repartidor anterior (reasignación) de las salas de la entrega.
+// Si ese usuario sigue siendo participante por otra vía (cliente / comercio / nuevo repartidor),
+// solo se expulsan sus sockets de repartidor que ya no correspondan.
+function evictPreviousRider(payload) {
+  const deliveryId = payload.delivery_id;
+  const prevUid = String(payload.previous_rider_user_id);
+  const merchantIds = Array.isArray(payload.merchant_user_ids) ? payload.merchant_user_ids.map(String) : [];
+  const stillParticipant =
+    prevUid === String(payload.client_user_id || '') ||
+    merchantIds.includes(prevUid) ||
+    prevUid === String(payload.rider_user_id || '');
+  const newRiderEmp = payload.rider_emp_id != null ? String(payload.rider_emp_id) : '';
+
+  if (!stillParticipant) {
+    io.in(`user_${prevUid}`).socketsLeave(deliveryRoomNames(deliveryId));
+  }
+  const sids = onlineUsers.has(prevUid) ? Array.from(onlineUsers.get(prevUid)) : [];
+  sids.forEach((sid) => {
+    const s = io.sockets.sockets.get(sid);
+    if (!s) return;
+    if (stillParticipant) {
+      const isStaleRiderSocket = s.ctx === 'worker' && s.worker_role === 'delivery' && String(s.emp_id) !== newRiderEmp;
+      if (!isStaleRiderSocket) return;
+    }
+    evictSocketFromDelivery(s, deliveryId);
+  });
+}
+
+// Payload público de delivery_status_changed: sin campos internos de enrutamiento.
+// Privacidad (Habeas Data Art. 28): el anchor solo viaja en PICKED_UP / ARRIVING porque este
+// evento también llega al cliente (los demás lo reciben por delivery_anchor en su sala de tracking).
+function buildPublicDeliveryStatusPayload(payload) {
+  const publicPayload = { ...payload };
+  delete publicPayload.client_user_id;
+  delete publicPayload.merchant_user_ids;
+  delete publicPayload.previous_rider_user_id;
+  const st = Number(payload.status);
+  if (publicPayload.anchor && st !== DELIVERY_STATUS.PICKED_UP && st !== DELIVERY_STATUS.ARRIVING) {
+    delete publicPayload.anchor;
+  }
+  return publicPayload;
+}
 
 // 8. Django ordena: "Notifica cambio de estado de delivery"
 app.post('/internal/delivery-status', (req, res) => {
@@ -1110,30 +1614,43 @@ app.post('/internal/delivery-status', (req, res) => {
   const payload = req.body || {};
   const deliveryId = payload.delivery_id;
   if (deliveryId != null) {
-    deliveryMetaMemory.delete(String(deliveryId));
-    io.to(`delivery_${deliveryId}`).emit('delivery_status_changed', payload);
+    invalidateDeliveryMeta(deliveryId);
   }
-  if (payload.order_id != null) {
-    io.to(`order_${payload.order_id}`).emit('delivery_status_changed', payload);
-  }
-  const userTargets = new Set();
-  if (payload.client_user_id) userTargets.add(String(payload.client_user_id));
-  if (payload.rider_user_id) userTargets.add(String(payload.rider_user_id));
-  if (payload.previous_rider_user_id) userTargets.add(String(payload.previous_rider_user_id));
+
+  // Un único emit encadenando todas las salas: Socket.IO v4 deduplica y cada socket lo recibe una vez
+  const targetRooms = new Set();
+  if (deliveryId != null) targetRooms.add(`delivery_${deliveryId}`);
+  if (payload.order_id != null) targetRooms.add(`order_${payload.order_id}`);
+  if (payload.client_user_id) targetRooms.add(`user_${payload.client_user_id}`);
+  if (payload.rider_user_id) targetRooms.add(`user_${payload.rider_user_id}`);
+  if (payload.previous_rider_user_id) targetRooms.add(`user_${payload.previous_rider_user_id}`);
   if (Array.isArray(payload.merchant_user_ids)) {
     payload.merchant_user_ids.forEach((uid) => {
-      if (uid) userTargets.add(String(uid));
+      if (uid) targetRooms.add(`user_${uid}`);
     });
   }
-  userTargets.forEach((uid) => {
-    io.to(`user_${uid}`).emit('delivery_status_changed', payload);
-  });
+  if (targetRooms.size > 0) {
+    let op = null;
+    targetRooms.forEach((room) => {
+      op = op ? op.to(room) : io.to(room);
+    });
+    op.emit('delivery_status_changed', buildPublicDeliveryStatusPayload(payload));
+  }
+
+  // Reasignación: el repartidor anterior deja de recibir estado y posiciones de esta entrega
+  if (deliveryId != null && payload.previous_rider_user_id) {
+    evictPreviousRider(payload);
+  }
 
   if (deliveryId != null && payload.anchor) {
     broadcastAnchor(deliveryId, payload.status, payload.anchor);
   }
   if (deliveryId != null && Number(payload.status) >= DELIVERY_STATUS.DELIVERED) {
-    deliveryLiveMemory.delete(String(deliveryId));
+    const key = String(deliveryId);
+    deliveryLiveMemory.delete(key);
+    deliveryMetaMemory.delete(key);
+    rerouteCooldowns.delete(key);
+    arrivingAttempts.delete(key);
   }
   res.json({ success: true });
 });
@@ -1144,7 +1661,7 @@ app.post('/internal/delivery-route', (req, res) => {
   const payload = req.body || {};
   const deliveryId = payload.delivery_id;
   if (deliveryId != null) {
-    deliveryMetaMemory.delete(String(deliveryId));
+    invalidateDeliveryMeta(deliveryId);
     io.to(`delivery_${deliveryId}_track_all`).emit('delivery_route_updated', payload);
     const st = Number(payload.status);
     if (st === DELIVERY_STATUS.PICKED_UP || st === DELIVERY_STATUS.ARRIVING) {
@@ -1166,7 +1683,8 @@ app.post('/internal/delivery-fix', async (req, res) => {
     return res.status(400).json({ success: false, error: 'Fix inválido.' });
   }
   try {
-    const anchor = await ingestDeliveryFix(fix.delivery_id, fix, body.source || 'ble_relay');
+    // `ts_ms` (hora real del fix enviada por Django) permite descartar fixes viejos del relay
+    const anchor = await ingestDeliveryFix(fix.delivery_id, fix, body.source || 'ble_relay', { ts_ms: body.ts_ms });
     res.json({ success: true, anchor });
   } catch (err) {
     console.error('⚠️ Error procesando delivery-fix interno:', err.message);
@@ -1205,32 +1723,72 @@ io.on('connection', (socket) => {
   onlineUsers.get(String(socket.user_id)).add(socket.id);
 
   // Si es un repartidor conectado en contexto de trabajador, marcamos presencia en Redis y avisamos al comercio
-  if (socket.ctx === 'worker' && socket.worker_role === 'delivery' && socket.emp_id) {
-    const empKey = String(socket.emp_id);
-    if (!riderSockets.has(empKey)) {
-      riderSockets.set(empKey, new Set());
-    }
-    riderSockets.get(empKey).add(socket.id);
-    const r = getRedis();
-    if (r) {
-      r.set(`rider:${empKey}:online`, '1', 'EX', 90).catch(() => {});
-    }
-    if (socket.company_id) {
-      io.to(`company_riders_${socket.company_id}`).emit('rider_presence', {
-        employee_id: Number(empKey),
-        online: true
-      });
-    }
-  }
+  registerRider(socket);
 
-  // Permite refrescar la identidad del socket en caliente si el cliente rota su JWT sin reconectar TCP
-  socket.on('refresh_auth', (data, callback) => {
+  // Permite refrescar la identidad del socket en caliente si el cliente rota su JWT sin reconectar TCP.
+  // Si cambia la identidad (user_id, ctx, emp_id o rol) el socket se re-escopa: abandona todas las
+  // salas salvo user_<id> y responde `rejoin_required: true` para que la app vuelva a unirse.
+  socket.on('refresh_auth', async (data, callback) => {
+    const reply = (payload) => {
+      if (typeof callback === 'function') callback(payload);
+    };
+
+    let decoded;
     try {
       const token = data && data.token;
       if (!token) throw new Error('token_missing');
-      const decoded = jwt.verify(token, JWT_SECRET);
+      decoded = jwt.verify(token, JWT_SECRET);
+    } catch (err) {
+      const code = err.message === 'token_missing'
+        ? 'token_missing'
+        : (err.message.includes('expired') ? 'jwt_expired' : 'invalid_token');
+      return reply({ status: 'error', code, message: err.message });
+    }
+
+    if (!isAccessTokenClaims(decoded)) {
+      return reply({ status: 'error', code: 'invalid_token', message: 'invalid_token_type' });
+    }
+
+    if (decoded.ctx === 'worker' && decoded.emp_id != null && await isEmployeeRevoked(decoded.emp_id)) {
+      reply({ status: 'error', code: 'worker_access_revoked', message: 'worker_access_revoked' });
+      // Si el socket ya opera con ese mismo empleo revocado, se cierra
+      if (socket.ctx === 'worker' && String(socket.emp_id) === String(decoded.emp_id)) {
+        setTimeout(() => {
+          try {
+            socket.disconnect(true);
+          } catch (_) {}
+        }, 250);
+      }
+      return;
+    }
+
+    try {
       const oldUserId = String(socket.user_id);
       const newUserId = String(decoded.user_id);
+      const newCtx = decoded.ctx === 'worker' ? 'worker' : 'personal';
+      const newEmpId = newCtx === 'worker' && decoded.emp_id != null ? String(decoded.emp_id) : null;
+      const newRole = newCtx === 'worker' ? (decoded.role || null) : null;
+      const identityChanged =
+        oldUserId !== newUserId ||
+        socket.ctx !== newCtx ||
+        String(socket.emp_id) !== String(newEmpId) ||
+        socket.worker_role !== newRole;
+
+      let roomsDropped = false;
+      if (identityChanged) {
+        // Presencia "offline" en los chats abiertos con la identidad anterior
+        announceChatRoomsOffline(socket, oldUserId);
+        activeChats.delete(socket.id);
+        // Abandonamos todas las salas (order_*, support_*, delivery_*, agent_*, company_riders_*, ...)
+        for (const room of Array.from(socket.rooms)) {
+          if (room === socket.id || room === `user_${oldUserId}` || room === `user_${newUserId}`) continue;
+          socket.leave(room);
+          roomsDropped = true;
+        }
+        socket.active_delivery_id = null;
+        // Bookkeeping de desconexión del repartidor con la identidad anterior
+        unregisterRider(socket);
+      }
 
       if (oldUserId !== newUserId) {
         socket.leave(`user_${oldUserId}`);
@@ -1251,20 +1809,20 @@ io.on('connection', (socket) => {
       // Refrescamos también el contexto de sesión (personal / trabajador) del nuevo token
       applyAuthContext(socket, decoded);
 
-      if (typeof callback === 'function') {
-        callback({
-          status: 'ok',
-          user_id: String(socket.user_id),
-          ctx: socket.ctx,
-          emp_id: socket.emp_id,
-          company_id: socket.company_id,
-          role: socket.worker_role
-        });
-      }
+      // Bookkeeping de conexión del repartidor con la identidad nueva (idempotente)
+      registerRider(socket);
+
+      reply({
+        status: 'ok',
+        user_id: String(socket.user_id),
+        ctx: socket.ctx,
+        emp_id: socket.emp_id,
+        company_id: socket.company_id,
+        role: socket.worker_role,
+        rejoin_required: roomsDropped
+      });
     } catch (err) {
-      if (typeof callback === 'function') {
-        callback({ status: 'error', message: err.message });
-      }
+      reply({ status: 'error', message: err.message });
     }
   });
 
@@ -1609,27 +2167,80 @@ io.on('connection', (socket) => {
   // =========================================================================
 
   // Sincronización de reloj estilo NTP (sección 4.2 / 4.7)
+  // Con ack se responde SOLO por el callback; sin ack se emite el evento 'time_sync'.
   socket.on('time_sync', (data, callback) => {
+    if (typeof data === 'function') {
+      callback = data;
+      data = null;
+    }
     const tClient = data && data.t_client != null ? Number(data.t_client) : 0;
     const payload = { t_client: tClient, t_server: Date.now() };
-    socket.emit('time_sync', payload);
     if (typeof callback === 'function') {
       callback(payload);
+    } else {
+      socket.emit('time_sync', payload);
     }
   });
 
-  // El comercio puede suscribirse a la presencia en vivo de sus repartidores
-  socket.on('join_company_riders', (data, callback) => {
-    const companyId = data && data.company_id ? String(data.company_id) : '';
-    if (!companyId) return;
-    socket.join(`company_riders_${companyId}`);
-    if (typeof callback === 'function') {
-      callback({ status: 'ok', company_id: companyId });
+  // Keep-alive ligero del repartidor: refresca rider:{emp}:online sin necesidad de enviar fixes
+  socket.on('rider_ping', (data, callback) => {
+    if (typeof data === 'function') callback = data;
+    const reply = (payload) => {
+      if (typeof callback === 'function') callback(payload);
+    };
+    if (socket.ctx !== 'worker' || socket.worker_role !== 'delivery' || !socket.emp_id) {
+      return reply({ status: 'error', code: 'worker_context_required' });
     }
+    if (isRateLimited(socket, 'rider_ping', 6, 10000)) {
+      return reply({ status: 'error', code: 'rate_limited' });
+    }
+    registerRider(socket);
+    touchRiderOnline(String(socket.emp_id));
+    reply({ status: 'ok', server_time_ms: Date.now() });
+  });
+
+  // El comercio puede suscribirse a la presencia en vivo de sus repartidores (requiere autorización)
+  socket.on('join_company_riders', async (data, callback) => {
+    const reply = (payload) => {
+      if (typeof callback === 'function') callback(payload);
+    };
+    const companyId = data && data.company_id ? String(data.company_id) : '';
+    if (!companyId) {
+      return reply({ status: 'error', code: 'company_id_required' });
+    }
+    if (isRateLimited(socket, 'join_company_riders', 10, 10000)) {
+      return reply({ status: 'error', code: 'rate_limited', company_id: companyId });
+    }
+    const userIdAtRequest = String(socket.user_id);
+    const access = await checkCompanyRidersAccess(socket, companyId);
+    // La identidad pudo cambiar (refresh_auth) mientras esperábamos a Django
+    if (!access.allowed || String(socket.user_id) !== userIdAtRequest) {
+      return reply({ status: 'error', code: access.code || 'forbidden', company_id: companyId });
+    }
+    socket.join(`company_riders_${companyId}`);
+    reply({ status: 'ok', company_id: companyId });
+  });
+
+  socket.on('leave_company_riders', (data, callback) => {
+    const reply = (payload) => {
+      if (typeof callback === 'function') callback(payload);
+    };
+    const companyId = data && data.company_id ? String(data.company_id) : '';
+    if (!companyId) {
+      return reply({ status: 'error', code: 'company_id_required' });
+    }
+    socket.leave(`company_riders_${companyId}`);
+    reply({ status: 'ok', company_id: companyId });
   });
 
   // Unirse a la sala de seguimiento de una entrega (sección 4.7)
   socket.on('join_delivery', async (data, callback) => {
+    if (isRateLimited(socket, 'join_delivery', 20, 10000)) {
+      if (typeof callback === 'function') {
+        callback({ status: 'error', code: 'rate_limited', message: 'Demasiadas solicitudes, intenta de nuevo.' });
+      }
+      return;
+    }
     const deliveryId = data && data.delivery_id != null ? Number(data.delivery_id) : null;
     if (!deliveryId) {
       const err = { status: 'error', code: 'delivery_id_required', message: 'delivery_id es obligatorio.' };
@@ -1717,6 +2328,13 @@ io.on('connection', (socket) => {
       return;
     }
 
+    if (isRateLimited(socket, 'rider_fix', 10, 1000)) {
+      if (typeof callback === 'function') {
+        callback({ status: 'error', code: 'rate_limited' });
+      }
+      return;
+    }
+
     const fix = parseRiderFixPayload(raw, socket.active_delivery_id);
     if (!fix || !fix.delivery_id) {
       if (typeof callback === 'function') {
@@ -1735,7 +2353,7 @@ io.on('connection', (socket) => {
 
     const r = getRedis();
     if (r) {
-      r.set(`rider:${socket.emp_id}:online`, '1', 'EX', 90).catch(() => {});
+      r.set(`rider:${socket.emp_id}:online`, '1', 'EX', RIDER_ONLINE_TTL_S).catch(() => {});
     }
 
     try {
@@ -1752,50 +2370,10 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    if (socket.ctx === 'worker' && socket.worker_role === 'delivery' && socket.emp_id) {
-      const empKey = String(socket.emp_id);
-      const set = riderSockets.get(empKey);
-      if (set) {
-        set.delete(socket.id);
-        if (set.size === 0) {
-          riderSockets.delete(empKey);
-          const r = getRedis();
-          if (r) {
-            r.del(`rider:${empKey}:online`).catch(() => {});
-          }
-          if (socket.company_id) {
-            io.to(`company_riders_${socket.company_id}`).emit('rider_presence', {
-              employee_id: Number(empKey),
-              online: false
-            });
-          }
-        }
-      }
-    }
+    unregisterRider(socket);
 
-    const rooms = activeChats.get(socket.id);
-    if (rooms) {
-      for (const roomName of rooms) {
-        if (!hasOtherUserSocketInRoom(roomName, socket.user_id, socket.id)) {
-          if (roomName.startsWith('order_')) {
-            const orderId = roomName.slice(6);
-            io.to(roomName).emit('presence_change', {
-              order_id: orderId,
-              is_support: false,
-              user_id: String(socket.user_id),
-              status: 'offline'
-            });
-          } else if (roomName.startsWith('support_')) {
-            const ticketId = roomName.slice(8);
-            io.to(roomName).emit('support_presence_change', {
-              ticket_id: ticketId,
-              is_support: true,
-              user_id: String(socket.user_id),
-              status: 'offline'
-            });
-          }
-        }
-      }
+    if (activeChats.has(socket.id)) {
+      announceChatRoomsOffline(socket, socket.user_id);
       activeChats.delete(socket.id);
     }
 

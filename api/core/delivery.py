@@ -27,8 +27,9 @@ import math
 import secrets
 import struct
 import time
+import uuid
 import zlib
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 import requests
@@ -941,12 +942,25 @@ def resolve_viewer_role(user, delivery, ctx: str, emp_id=None) -> Optional[str]:
         if emp_id is not None and delivery.rider_id is not None and str(delivery.rider_id) == str(emp_id) \
                 and delivery.rider.user_id == user.id:
             return 'rider'
+        # Asistentes del comercio operando con su token de trabajador ven la entrega como el comercio
+        if user_can_manage_store_deliveries(user, delivery.store):
+            return 'merchant'
         return None
     if delivery.order.client_id == user.id:
         return 'client'
     if user_can_manage_store_deliveries(user, delivery.store):
         return 'merchant'
     return None
+
+
+def parse_store_uuid(store_id):
+    """ Valida que `store_id` sea un UUID (CompanyStore.id); evita 500 por ValidationError de Django. """
+    if store_id in (None, '', 'null'):
+        return None
+    try:
+        return uuid.UUID(str(store_id).strip())
+    except (TypeError, ValueError, AttributeError):
+        raise DeliveryError("Identificador de sucursal inválido.", code='invalid_store_id')
 
 
 # =========================================================================
@@ -975,8 +989,9 @@ def start_shift(employee, store_id, lat, lng, battery=None) -> dict:
     """ Abre (o reemplaza) el turno del repartidor en una sucursal asignada. """
     lat_f, lng_f = parse_lat_lng(lat, lng, required=True)
     battery_val = _parse_battery(battery)
-    store = CompanyStore.objects.select_related('company').filter(pk=store_id, company_id=employee.company_id).first() \
-        if store_id else None
+    store_uuid = parse_store_uuid(store_id)
+    store = CompanyStore.objects.select_related('company').filter(pk=store_uuid, company_id=employee.company_id).first() \
+        if store_uuid else None
     if store is None:
         raise DeliveryError("La sucursal no existe o no pertenece a tu comercio.", status_code=404, code='store_not_found')
     if not store.is_active:
@@ -986,6 +1001,8 @@ def start_shift(employee, store_id, lat, lng, battery=None) -> dict:
 
     now = timezone.now()
     with transaction.atomic():
+        # Serializa aperturas concurrentes de turno del mismo repartidor (evita dos turnos activos)
+        Employee.objects.select_for_update().filter(pk=employee.pk).first()
         RiderShift.objects.filter(employee=employee, is_active=True).update(is_active=False, ended_at=now)
         shift = RiderShift.objects.create(
             employee=employee,
@@ -1398,9 +1415,15 @@ def _set_rider_manually(actor_user, order_id, employee_id, allowed_statuses) -> 
                     f"La orden N° {locked.order_id} fue puesta en búsqueda automática.",
                     'delivery_unassigned', locked,
                 )
-            locked.declined_rider_ids = []
+            # Se limpian los rechazos previos, pero NO se vuelve a ofrecer al repartidor recién retirado
+            locked.declined_rider_ids = [previous_rider.id] if previous_rider is not None else []
             locked.save(update_fields=['declined_rider_ids'])
             transaction.on_commit(lambda: sync_delivery_meta(locked))
+            if previous_rider is not None:
+                _post_node_on_commit('delivery-status', build_status_payload(locked, {
+                    'previous_rider_user_id': str(previous_rider.user_id),
+                    'reason': 'auto_reassign',
+                }))
         auto_assign_delivery(delivery.id)
         return get_delivery(delivery.id)
 
@@ -1431,25 +1454,28 @@ def _set_rider_manually(actor_user, order_id, employee_id, allowed_statuses) -> 
                 raise DeliveryError("Ese repartidor ya tiene esta entrega.", status_code=409, code='same_rider')
             previous_rider = locked.rider
             now = timezone.now()
+            extra_fields = []
+            if previous_rider is not None and previous_rider.id != employee.id:
+                extra_fields = _rotate_tracking_secrets(locked)
             locked.rider = employee
             locked.status = DeliveryStatus.ASSIGNED
             locked.assigned_at = now
             locked.accepted_at = None
             locked.at_store_at = None
+            locked.eta_at = None
             locked.offer_expires_at = now + timedelta(seconds=OFFER_TTL_S)
             locked.is_auto_assigned = False
             locked.assigned_by = actor_user
             locked.save(update_fields=[
                 'rider', 'status', 'assigned_at', 'accepted_at', 'at_store_at', 'offer_expires_at',
-                'is_auto_assigned', 'assigned_by',
-            ])
+                'is_auto_assigned', 'assigned_by', 'eta_at',
+            ] + extra_fields)
             if previous_rider is not None and previous_rider.id != employee.id:
                 _notify_rider_on_commit(
                     previous_rider, "Entrega reasignada",
                     f"La orden N° {locked.order_id} fue reasignada a otro repartidor.",
                     'delivery_reassigned', locked,
                 )
-                transaction.on_commit(lambda: unregister_rolling_ids(locked))
             _announce_offer_on_commit(locked)
             if previous_rider is not None and previous_rider.id != employee.id:
                 _post_node_on_commit('delivery-status', build_status_payload(locked, {
@@ -1481,27 +1507,51 @@ def unassign_delivery(actor_user, order_id) -> DeliveryAssignment:
     with transaction.atomic():
         locked = _lock_delivery(delivery.id)
         if int(locked.status) == DeliveryStatus.PENDING_RIDER:
+            # Sin repartidor: se reinicia la búsqueda automática limpiando rechazos previos
             locked.declined_rider_ids = []
             locked.save(update_fields=['declined_rider_ids'])
             transaction.on_commit(lambda: sync_delivery_meta(locked))
             _schedule_auto_assign(locked.id)
-            return get_delivery(delivery.id)
-        if int(locked.status) not in (DeliveryStatus.ASSIGNED, DeliveryStatus.ACCEPTED, DeliveryStatus.AT_STORE):
-            raise DeliveryError("La entrega no tiene un repartidor que se pueda quitar.", status_code=409,
-                                code='invalid_delivery_status')
-        previous_rider = locked.rider
-        _release_to_pending(locked)
-        _notify_rider_on_commit(
-            previous_rider, "Entrega retirada",
-            f"El comercio retiró la orden N° {locked.order_id} de tus entregas.",
-            'delivery_unassigned', locked,
-        )
-        _post_node_on_commit('delivery-status', build_status_payload(locked, {
-            'previous_rider_user_id': str(previous_rider.user_id) if previous_rider else None,
-        }))
-        transaction.on_commit(lambda: sync_delivery_meta(locked))
-        _schedule_auto_assign(locked.id)
+        else:
+            if int(locked.status) not in (DeliveryStatus.ASSIGNED, DeliveryStatus.ACCEPTED, DeliveryStatus.AT_STORE):
+                raise DeliveryError("La entrega no tiene un repartidor que se pueda quitar.", status_code=409,
+                                    code='invalid_delivery_status')
+            previous_rider = locked.rider
+            _release_to_pending(locked)
+            _notify_rider_on_commit(
+                previous_rider, "Entrega retirada",
+                f"El comercio retiró la orden N° {locked.order_id} de tus entregas.",
+                'delivery_unassigned', locked,
+            )
+            transaction.on_commit(lambda: sync_delivery_meta(locked))
+            _post_node_on_commit('delivery-status', build_status_payload(locked, {
+                'previous_rider_user_id': str(previous_rider.user_id) if previous_rider else None,
+                'reason': 'unassigned',
+            }))
+            _schedule_auto_assign(locked.id)
     return get_delivery(delivery.id)
+
+
+def _rotate_tracking_secrets(locked) -> list:
+    """
+    Al cambiar de repartidor se regenera `tracking_key` (BLE / PIN offline) para que el repartidor anterior
+    no pueda seguir firmando posiciones ni entregas offline. El PIN del cliente NO cambia: solo se recalcula su hash.
+    Retorna los campos a guardar. Debe llamarse dentro de la transacción.
+    """
+    if not locked.tracking_key:
+        return []
+    from types import SimpleNamespace
+    snapshot = SimpleNamespace(
+        id=locked.id, tracking_key=locked.tracking_key,
+        accepted_at=locked.accepted_at, created_at=locked.created_at,
+    )
+    transaction.on_commit(lambda: unregister_rolling_ids(snapshot))
+    locked.tracking_key = secrets.token_hex(32)
+    fields = ['tracking_key']
+    if locked.handoff_pin:
+        locked.handoff_pin_hash = hash_handoff_pin(locked.tracking_key, locked.handoff_pin)
+        fields.append('handoff_pin_hash')
+    return fields
 
 
 def _release_to_pending(locked) -> None:
@@ -1509,8 +1559,7 @@ def _release_to_pending(locked) -> None:
     declined = [int(x) for x in (locked.declined_rider_ids or []) if str(x).isdigit()]
     if locked.rider_id and locked.rider_id not in declined:
         declined.append(locked.rider_id)
-    old = locked
-    transaction.on_commit(lambda: unregister_rolling_ids(old))
+    secret_fields = _rotate_tracking_secrets(locked) if locked.rider_id else []
     locked.declined_rider_ids = declined
     locked.rider = None
     locked.status = DeliveryStatus.PENDING_RIDER
@@ -1518,9 +1567,11 @@ def _release_to_pending(locked) -> None:
     locked.assigned_at = None
     locked.accepted_at = None
     locked.at_store_at = None
+    locked.eta_at = None
     locked.save(update_fields=[
         'declined_rider_ids', 'rider', 'status', 'offer_expires_at', 'assigned_at', 'accepted_at', 'at_store_at',
-    ])
+        'eta_at',
+    ] + secret_fields)
 
 
 def expire_offer(delivery_id) -> bool:
@@ -1538,11 +1589,11 @@ def expire_offer(delivery_id) -> bool:
             f"La oferta de la orden N° {locked.order_id} venció y pasó a otro repartidor.",
             'delivery_offer_expired', locked,
         )
+        transaction.on_commit(lambda: sync_delivery_meta(locked))
         _post_node_on_commit('delivery-status', build_status_payload(locked, {
             'previous_rider_user_id': str(previous_rider.user_id) if previous_rider else None,
             'reason': 'offer_expired',
         }))
-        transaction.on_commit(lambda: sync_delivery_meta(locked))
     safe_auto_assign(delivery_id)
     return True
 
@@ -1611,6 +1662,8 @@ def accept_delivery(employee, delivery_id) -> DeliveryAssignment:
         if int(locked.status) != DeliveryStatus.ASSIGNED:
             raise DeliveryError("Esta entrega no está esperando tu aceptación.", status_code=409,
                                 code='invalid_delivery_status')
+        if locked.offer_expires_at and locked.offer_expires_at <= timezone.now():
+            raise DeliveryError("La oferta venció.", status_code=410, code='offer_expired')
         now = timezone.now()
         fields = _apply_route(locked, route)
         locked.status = DeliveryStatus.ACCEPTED
@@ -1652,11 +1705,12 @@ def decline_delivery(employee, delivery_id, reason: str = '') -> DeliveryAssignm
             raise DeliveryError("Solo puedes rechazar una oferta pendiente.", status_code=409, code='invalid_delivery_status')
         rider_user_id = str(employee.user_id)
         _release_to_pending(locked)
+        # Primero la meta (Redis) y luego el aviso a Node, para que Node no relea la meta vieja
+        transaction.on_commit(lambda: sync_delivery_meta(locked))
         _post_node_on_commit('delivery-status', build_status_payload(locked, {
             'previous_rider_user_id': rider_user_id,
             'reason': (str(reason or '')[:60] or 'declined'),
         }))
-        transaction.on_commit(lambda: sync_delivery_meta(locked))
         _schedule_auto_assign(locked.id)
     return get_delivery(locked.id)
 
@@ -1833,7 +1887,7 @@ def complete_delivery_with_pin(employee, delivery_id, pin, lat=None, lng=None, f
             if not signature_ok:
                 raise DeliveryError("La firma de la entrega offline es inválida.", status_code=403,
                                     code='invalid_offline_signature')
-            fix_at = timezone.datetime.fromtimestamp(abs_ms / 1000.0, tz=timezone.get_current_timezone())
+            fix_at = datetime.fromtimestamp(abs_ms / 1000.0, tz=timezone.get_current_timezone())
             source = FixSource.OFFLINE_BUFFER
 
         if not verify_handoff_pin(locked.tracking_key, locked.handoff_pin_hash, pin_str):
@@ -1924,10 +1978,10 @@ def fail_delivery(actor_user, delivery_id, reason: str, employee=None) -> Delive
             locked.failure_reason = reason_clean
             locked.save(update_fields=['failure_reason'])
             _release_to_pending(locked)
+            transaction.on_commit(lambda: sync_delivery_meta(locked))
             _post_node_on_commit('delivery-status', build_status_payload(locked, {
                 'previous_rider_user_id': rider_user_id, 'reason': 'rider_released',
             }))
-            transaction.on_commit(lambda: sync_delivery_meta(locked))
             _notify_merchants_on_commit(
                 locked, "El repartidor liberó la entrega",
                 f"Buscamos otro repartidor para la orden N° {locked.order_id}. Motivo: {reason_clean}",
@@ -1991,6 +2045,103 @@ def cancel_delivery_for_order(order, reason: str = 'order_cancelled') -> Optiona
                             f"La orden N° {locked.order_id} fue cancelada. Ya no debes entregarla.",
                             'delivery_cancelled', locked)
     return locked
+
+
+def finalize_delivery_for_closed_order(order, reason: str = 'order_completed') -> Optional[DeliveryAssignment]:
+    """
+    Cierra la entrega cuando la ORDEN se completa / resuelve por fuera del flujo del repartidor
+    (el cliente o el comercio marcan "completada", o soporte la resuelve).
+    - Si el paquete ya iba en camino (PICKED_UP / ARRIVING) -> DELIVERED.
+    - Si aún no se había retirado -> CANCELLED.
+    Libera al repartidor (restricción one_active_delivery_per_rider), limpia Redis y avisa a Node.
+    Debe llamarse DENTRO de la transacción que bloqueó la orden.
+    """
+    locked = _delivery_qs().select_for_update(of=('self',)).filter(order_id=order.id).first()
+    if locked is None or int(locked.status) in DELIVERY_TERMINAL_STATUSES:
+        return locked
+    rider = locked.rider
+    now = timezone.now()
+    if int(locked.status) in IN_TRANSIT_STATUSES:
+        locked.status = DeliveryStatus.DELIVERED
+        locked.delivered_at = now
+        locked.failure_reason = str(reason or '')[:255]
+        locked.save(update_fields=['status', 'delivered_at', 'failure_reason'])
+    else:
+        locked.status = DeliveryStatus.CANCELLED
+        locked.cancelled_at = now
+        locked.failure_reason = str(reason or '')[:255]
+        locked.offer_expires_at = None
+        locked.save(update_fields=['status', 'cancelled_at', 'failure_reason', 'offer_expires_at'])
+    delivery_ref = locked
+    store_id = locked.store_id
+    is_delivered = int(locked.status) == DeliveryStatus.DELIVERED
+    status_payload = build_status_payload(locked, {'reason': reason})
+
+    def _run():
+        sync_delivery_meta(delivery_ref)
+        _post_node('delivery-status', status_payload)
+        if is_delivered:
+            _enqueue_trace_persist(delivery_ref.id)
+        else:
+            cleanup_realtime_keys(delivery_ref)
+        if rider is not None:
+            _safe_store_retry(store_id)
+
+    transaction.on_commit(_run)
+    if rider is not None:
+        _notify_rider_on_commit(
+            rider, "Entrega cerrada",
+            f"La orden N° {locked.order_id} fue cerrada por el comercio o soporte.",
+            'delivery_closed', locked,
+        )
+    return locked
+
+
+def confirm_delivery_by_manager(actor_user, delivery_id) -> dict:
+    """
+    El comercio (dueño o asistente) confirma la entrega cuando el PIN quedó bloqueado o el cliente no puede
+    dictarlo. Completa la orden igual que el PIN (DELIVERED + COMPLETED).
+    """
+    delivery = get_delivery(delivery_id)
+    if not user_can_manage_store_deliveries(actor_user, delivery.store):
+        raise DeliveryError("No tienes permisos sobre esta entrega.", status_code=403, code='forbidden')
+    tokens_earned = 0.0
+    with transaction.atomic():
+        order = _lock_order(delivery.order_id)
+        locked = _lock_delivery(delivery.id)
+        if int(locked.status) not in IN_TRANSIT_STATUSES:
+            raise DeliveryError("La entrega no está en camino al cliente.", status_code=409,
+                                code='invalid_delivery_status')
+        if order.status == OrderStatus.REPORTED:
+            raise DeliveryError("Esta orden está en revisión por Soporte CartMaker.", status_code=409,
+                                code='order_reported')
+        if order.status != OrderStatus.COMPLETED:
+            try:
+                result = complete_order_service(order, actor_user, actor_role='merchant')
+                tokens_earned = result.get('tokens_earned', 0.0)
+            except OrderServiceError as e:
+                raise DeliveryError(e.message, status_code=e.status_code, code='order_not_completable')
+        locked.status = DeliveryStatus.DELIVERED
+        locked.delivered_at = timezone.now()
+        locked.failure_reason = 'confirmed_by_merchant'
+        locked.save(update_fields=['status', 'delivered_at', 'failure_reason'])
+        delivery_ref = locked
+        store_id = locked.store_id
+        status_payload = build_status_payload(locked, {'reason': 'confirmed_by_merchant'})
+
+        def _run():
+            sync_delivery_meta(delivery_ref)
+            _post_node('delivery-status', status_payload)
+            _enqueue_trace_persist(delivery_ref.id)
+            _safe_store_retry(store_id)
+
+        transaction.on_commit(_run)
+        _notify_rider_on_commit(locked.rider, "Entrega confirmada",
+                                f"El comercio confirmó la entrega de la orden N° {locked.order_id}.",
+                                'delivery_confirmed', locked)
+    final = get_delivery(delivery.id)
+    return {'delivery': final.get_json(viewer_role='merchant'), 'order_status': int(OrderStatus.COMPLETED),
+            'tokens_earned_by_client': tokens_earned}
 
 
 def recalculate_delivery_route(delivery_id, from_lat=None, from_lng=None, force: bool = False,
@@ -2373,7 +2524,7 @@ def process_ble_relay_batch(relayer_user, items) -> dict:
         if ts_ms > (now_s + 60) * 1000 or ts_ms < (now_s - BLE_MAX_AGE_S) * 1000:
             stats['rejected'] += 1
             continue
-        fix_at = timezone.datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.get_current_timezone())
+        fix_at = datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.get_current_timezone())
         DeliveryAssignment.objects.filter(pk=delivery.pk).filter(
             Q(last_fix_at__isnull=True) | Q(last_fix_at__lt=fix_at)
         ).update(
@@ -2448,7 +2599,8 @@ def build_bootstrap(user, delivery_id, ctx: str, emp_id=None) -> dict:
         or (role in ('merchant', 'rider') and status_value in STATUS_FROM_ACCEPTED)
     )
     data['anchor'] = read_live_anchor(delivery.id) if show_anchor else None
-    if role == 'rider':
+    # La clave de rastreo (BLE / PIN offline) solo se entrega cuando el repartidor ya aceptó la entrega
+    if role == 'rider' and status_value in STATUS_FROM_ACCEPTED:
         data['rider_secrets'] = {
             'tracking_key': delivery.tracking_key,
             'assigned_at_ms': dt_ms(delivery.assigned_at),
@@ -2470,7 +2622,8 @@ def list_rider_assignments(employee, status_filter: str = 'active') -> List[Deli
 
 def list_available_riders(actor_user, store_id) -> dict:
     """ Repartidores de la sucursal con turno, estado en línea, batería y carga actual (para el comercio). """
-    store = CompanyStore.objects.select_related('company', 'location').filter(pk=store_id).first() if store_id else None
+    store_uuid = parse_store_uuid(store_id)
+    store = CompanyStore.objects.select_related('company', 'location').filter(pk=store_uuid).first() if store_uuid else None
     if store is None:
         raise DeliveryError("La sucursal no existe.", status_code=404, code='store_not_found')
     if not user_can_manage_store_deliveries(actor_user, store):
@@ -2516,7 +2669,10 @@ def list_available_riders(actor_user, store_id) -> dict:
             'on_shift': on_shift,
             'online': heartbeat_fresh or _rider_is_online(rider.id),
             'available': on_shift and heartbeat_fresh and current is None,
-            'battery_level': (loc or {}).get('battery') if loc else (shift.battery_level if shift else None),
+            'battery_level': (
+                (loc or {}).get('battery') if (loc and loc.get('battery') is not None)
+                else (shift.battery_level if shift else None)
+            ),
             'last_heartbeat_at': timezone.localtime(shift.last_heartbeat_at).isoformat()
             if shift and shift.last_heartbeat_at else None,
             'distance_to_store_m': distance_to_store,
@@ -2525,7 +2681,10 @@ def list_available_riders(actor_user, store_id) -> dict:
             } if current else None,
             'delivered_today': int(delivered_today.get(rider.id, 0)),
         })
-    data.sort(key=lambda d: (not d['available'], not d['online'], d['distance_to_store_m'] or 10 ** 9))
+    data.sort(key=lambda d: (
+        not d['available'], not d['online'],
+        d['distance_to_store_m'] if d['distance_to_store_m'] is not None else 10 ** 9,
+    ))
     pending = DeliveryAssignment.objects.filter(store=store, status=DeliveryStatus.PENDING_RIDER).count()
     return {'store_id': str(store.id), 'pending_deliveries': pending, 'riders': data}
 
@@ -2544,14 +2703,96 @@ def handle_node_event(payload: dict) -> dict:
     - {event: 'reroute', delivery_id, lat, lng}: el repartidor se desvió (2 fixes > 40 m de la ruta).
     """
     event = str((payload or {}).get('event') or '').strip().lower()
-    delivery_id = (payload or {}).get('delivery_id')
+    try:
+        delivery_id = int((payload or {}).get('delivery_id'))
+    except (TypeError, ValueError):
+        raise DeliveryError("Identificador de entrega inválido.", code='invalid_delivery_id')
     if event == 'arriving':
-        delivery = mark_arriving(int(delivery_id))
+        delivery = mark_arriving(delivery_id)
         return {'ok': True, 'status': int(delivery.status) if delivery else None}
     if event == 'reroute':
-        delivery = recalculate_delivery_route(int(delivery_id), payload.get('lat'), payload.get('lng'))
+        delivery = recalculate_delivery_route(delivery_id, payload.get('lat'), payload.get('lng'))
         return {'ok': True, 'route_version': delivery.route_version}
     raise DeliveryError("Evento desconocido.", code='unknown_event')
+
+
+def user_can_manage_company(user_id, company_id) -> bool:
+    """ Dueño de la compañía o asistente ACTIVO de ella (lo consulta Node para `join_company_riders`). """
+    try:
+        company_uuid = uuid.UUID(str(company_id))
+        user_uuid = uuid.UUID(str(user_id))
+    except (TypeError, ValueError, AttributeError):
+        return False
+    from ..models import Company
+    if Company.objects.filter(pk=company_uuid, owner_id=user_uuid).exists():
+        return True
+    return Employee.objects.filter(
+        user_id=user_uuid, company_id=company_uuid, status=EmployeeStatus.ACTIVE, role=EmployeeRole.ASSISTANT,
+    ).exists()
+
+
+def release_active_deliveries_of_rider(emp_id, reason: str = 'rider_revoked') -> int:
+    """
+    Al suspender / revocar / cambiar de rol / renunciar un repartidor: devuelve a búsqueda automática sus
+    entregas que aún NO retiró (ASSIGNED, ACCEPTED, AT_STORE). Las que ya van en camino se mantienen
+    (el paquete está físicamente con él) y se avisa al comercio.
+    """
+    released = 0
+    ids = list(
+        DeliveryAssignment.objects.filter(rider_id=emp_id, status__in=DELIVERY_ACTIVE_STATUSES).values_list('id', flat=True)
+    )
+    for pk in ids:
+        try:
+            with transaction.atomic():
+                locked = _lock_delivery(pk)
+                if locked.rider_id != emp_id:
+                    continue
+                if int(locked.status) in (DeliveryStatus.ASSIGNED, DeliveryStatus.ACCEPTED, DeliveryStatus.AT_STORE):
+                    previous_rider = locked.rider
+                    _release_to_pending(locked)
+                    transaction.on_commit(lambda d=locked: sync_delivery_meta(d))
+                    _post_node_on_commit('delivery-status', build_status_payload(locked, {
+                        'previous_rider_user_id': str(previous_rider.user_id) if previous_rider else None,
+                        'reason': reason,
+                    }))
+                    _schedule_auto_assign(locked.id)
+                    released += 1
+                else:
+                    _notify_merchants_on_commit(
+                        locked,
+                        "Repartidor sin acceso",
+                        f"El repartidor de la orden N° {locked.order_id} perdió su acceso mientras llevaba el pedido.",
+                        'delivery_rider_revoked',
+                    )
+        except DeliveryError:
+            continue
+        except Exception as e:
+            logger.exception(f"Delivery #{pk}: error liberando entrega del repartidor {emp_id}: {e}")
+    return released
+
+
+def ensure_missing_delivery_assignments(limit: int = 50) -> int:
+    """
+    Red de seguridad: crea la entrega de órdenes DELIVERY en espera que no la tengan
+    (p. ej. si falló la creación justo después del checkout).
+    """
+    created = 0
+    orders = (
+        Order.objects.filter(
+            withdrawal_type=WithdrawalType.DELIVERY,
+            status=OrderStatus.WAITING,
+            delivery_assignment__isnull=True,
+            client_location__isnull=False,
+            creation__gte=timezone.now() - timedelta(hours=24),
+        ).order_by('creation')[:limit]
+    )
+    for order in orders:
+        try:
+            if create_or_assign_delivery_for_order(order) is not None:
+                created += 1
+        except Exception as e:
+            logger.exception(f"Orden {order.id}: error creando la entrega faltante: {e}")
+    return created
 
 
 def expire_and_retry_offers() -> dict:
@@ -2583,4 +2824,12 @@ def expire_and_retry_offers() -> dict:
                 assigned += 1
         except Exception as e:
             logger.exception(f"Delivery #{pk}: error reintentando asignación: {e}")
-    return {'expired_offers': expired, 'pending_checked': len(pending_ids), 'newly_assigned': assigned}
+    missing_created = 0
+    try:
+        missing_created = ensure_missing_delivery_assignments()
+    except Exception as e:
+        logger.exception(f"Delivery: error creando entregas faltantes: {e}")
+    return {
+        'expired_offers': expired, 'pending_checked': len(pending_ids), 'newly_assigned': assigned,
+        'missing_assignments_created': missing_created,
+    }

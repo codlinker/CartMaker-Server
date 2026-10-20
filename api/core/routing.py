@@ -704,7 +704,7 @@ def reverse_geocode(point: LatLng, allow_mapbox_fallback: bool = False) -> dict:
         if token:
             try:
                 mb_url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{lng:.6f},{lat:.6f}.json"
-                resp = _session.get(
+                resp = requests.get(
                     mb_url,
                     params={'access_token': token, 'language': 'es', 'types': 'address,street,neighborhood,locality,place'},
                     timeout=2.5,
@@ -743,6 +743,7 @@ def reverse_geocode(point: LatLng, allow_mapbox_fallback: bool = False) -> dict:
         'source': source,
     }
 
-    # Cacheamos por 30 días en Redis (las calles no cambian a diario)
-    cache.set(cache_key, result, timeout=2592000)
+    # Cacheamos por 30 días en Redis cuando proviene de OSRM/Mapbox con calle, o 60s si fue fallback temporal
+    ttl_seconds = 2592000 if (source in ('osrm_local', 'mapbox_cached') and street) else 60
+    cache.set(cache_key, result, timeout=ttl_seconds)
     return result

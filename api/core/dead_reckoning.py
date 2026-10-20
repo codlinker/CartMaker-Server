@@ -78,7 +78,7 @@ def distance_at_time(cum_dist: Sequence[float], cum_time: Sequence[float], tau: 
 def predict_distance(cum_dist: Sequence[float], cum_time: Sequence[float], s_a: float, k: float,
                      t_a_ms: int, t_ms: int) -> float:
     """ ŝ(t) = T⁻¹(T(s_a) + k·(t − t_a)). Los tiempos van en milisegundos UNIX. """
-    k = _clamp(float(k or 1.0), MIN_PACE_K, MAX_PACE_K)
+    k = _clamp(float(1.0 if k is None else k), MIN_PACE_K, MAX_PACE_K)
     elapsed_s = max(0.0, (float(t_ms) - float(t_a_ms)) / 1000.0)
     return distance_at_time(cum_dist, cum_time, time_at_distance(cum_dist, cum_time, s_a) + k * elapsed_s)
 
@@ -180,7 +180,7 @@ def eta_remaining_s(cum_dist: Sequence[float], cum_time: Sequence[float], s_a: f
     if not cum_time:
         return 0.0
     remaining = float(cum_time[-1]) - time_at_distance(cum_dist, cum_time, s_a)
-    return max(0.0, remaining / _clamp(float(k or 1.0), MIN_PACE_K, MAX_PACE_K))
+    return max(0.0, remaining / _clamp(float(1.0 if k is None else k), MIN_PACE_K, MAX_PACE_K))
 
 
 def expected_speed_at(cum_dist: Sequence[float], cum_time: Sequence[float], s: float) -> float:

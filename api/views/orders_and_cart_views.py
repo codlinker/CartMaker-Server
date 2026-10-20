@@ -6,7 +6,9 @@ from ..core.delivery import (
     DeliveryError,
     cancel_delivery_for_order,
     create_or_assign_delivery_for_order,
+    finalize_delivery_for_closed_order,
     manual_assign_delivery,
+    mark_picked_up,
     reassign_delivery,
     unassign_delivery,
 )
@@ -149,6 +151,7 @@ class OrderViewSet(viewsets.ViewSet):
                 'store__location',
                 'client_location',
                 'delivery_assignment__rider__user',
+                'delivery_assignment__store',
             ).prefetch_related(
                 'client__contact_methods',
                 'store__contact_methods',
@@ -244,6 +247,7 @@ class OrderViewSet(viewsets.ViewSet):
             'store__location',
             'client_location',
             'delivery_assignment__rider__user',
+            'delivery_assignment__store',
         ).prefetch_related(
             'store__contact_methods',
             'client__contact_methods',
@@ -333,6 +337,7 @@ class OrderViewSet(viewsets.ViewSet):
             'client',
             'client_location',
             'delivery_assignment__rider__user',
+            'delivery_assignment__store',
         ).prefetch_related(
             'client__contact_methods',
             'support_tickets',
@@ -409,8 +414,38 @@ class OrderViewSet(viewsets.ViewSet):
     
     @action(detail=False, methods=['post'])
     def merchant_ship_order(self, request):
-        """ Permite al comerciante marcar un delivery como enviado (Status 1) """
+        """
+        Permite al comerciante marcar un delivery como enviado (Status 1).
+        Si la orden tiene una entrega con repartidor (DeliveryAssignment), se usa el flujo del repartidor
+        (`picked_up`) para que el cliente vea el mapa en vivo; sin repartidor aceptado no se puede despachar.
+        """
         order_id = request.data.get('order_id')
+        assignment = DeliveryAssignment.objects.filter(
+            order_id=order_id, order__store__company__owner=request.user,
+        ).only('id', 'status').first() if order_id else None
+        if assignment is not None and int(assignment.status) not in DELIVERY_TERMINAL_STATUSES:
+            if int(assignment.status) in (DeliveryStatus.ACCEPTED, DeliveryStatus.AT_STORE):
+                try:
+                    delivery = mark_picked_up(request.user, assignment.id)
+                except DeliveryError as e:
+                    payload = {'error': e.message}
+                    if e.code:
+                        payload['code'] = e.code
+                    return Response(payload, status=e.status_code)
+                return Response({
+                    "success": True,
+                    "message": "Pedido entregado al repartidor. El cliente ya puede verlo en el mapa.",
+                    "delivery": delivery.get_json(viewer_role='merchant'),
+                }, status=status.HTTP_200_OK)
+            if int(assignment.status) in (DeliveryStatus.PENDING_RIDER, DeliveryStatus.ASSIGNED):
+                return Response({
+                    "error": "Esta orden aún no tiene un repartidor que haya aceptado la entrega.",
+                    "code": "rider_not_accepted",
+                }, status=status.HTTP_409_CONFLICT)
+            return Response({
+                "error": "El pedido ya va en camino con el repartidor.",
+                "code": "already_in_transit",
+            }, status=status.HTTP_409_CONFLICT)
         try:
             with transaction.atomic():
                 order = (
@@ -596,6 +631,9 @@ class OrderViewSet(viewsets.ViewSet):
                     merchant_rating=merchant_rating,
                     product_ratings=product_ratings,
                 )
+                # Si la orden tenía una entrega activa, se cierra para liberar al repartidor
+                if not result.get('already_completed'):
+                    finalize_delivery_for_closed_order(order, reason=f"completed_by_{result.get('actor_role')}")
                 return Response({
                     "success": True, 
                     "tokens_earned": result['tokens_earned'],
@@ -907,7 +945,13 @@ class CartViewSet(viewsets.ViewSet):
             }, status=status.HTTP_406_NOT_ACCEPTABLE)
         store_id = request.data.get('store_id')
         items_data = request.data.get('items', [])  # Ej: [{'id': 'uid', 'quantity': 2, 'selected_variant': ..., 'selected_modifiers': [...]}]
-        withdrawal_type = request.data.get('withdrawal_type', 0)
+        withdrawal_type_raw = request.data.get('withdrawal_type', 0)
+        try:
+            withdrawal_type = int(withdrawal_type_raw if withdrawal_type_raw not in (None, '') else 0)
+        except (TypeError, ValueError):
+            return Response({"error": "Tipo de entrega inválido."}, status=status.HTTP_400_BAD_REQUEST)
+        if withdrawal_type not in WithdrawalType.values:
+            return Response({"error": "Tipo de entrega inválido."}, status=status.HTTP_400_BAD_REQUEST)
         location_id = request.data.get('delivery_location_id')
 
         if not store_id or not items_data or not isinstance(items_data, list):
@@ -989,6 +1033,19 @@ class CartViewSet(viewsets.ViewSet):
                 return Response({"error": "La dirección seleccionada no es válida."}, status=status.HTTP_404_NOT_FOUND)
         elif withdrawal_type == WithdrawalType.DELIVERY:
             return Response({"error": "Debes seleccionar una dirección de entrega para pedidos con delivery."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if withdrawal_type == WithdrawalType.DELIVERY:
+            store_location = StoreLocation.objects.filter(store=store).only('id', 'coordinates').first()
+            if store_location is None or store_location.coordinates is None:
+                return Response({
+                    "error": "Esta sucursal no tiene una ubicación registrada y no puede despachar pedidos con delivery.",
+                    "code": "store_without_location",
+                }, status=status.HTTP_400_BAD_REQUEST)
+            if client_location is not None and getattr(client_location, 'coordinates', None) is None:
+                return Response({
+                    "error": "La dirección seleccionada no tiene coordenadas válidas.",
+                    "code": "client_location_invalid",
+                }, status=status.HTTP_400_BAD_REQUEST)
 
         # =========================================================================
         # 2. BLOQUEO ATÓMICO Y HARD RESERVATION
@@ -1270,18 +1327,24 @@ class CartViewSet(viewsets.ViewSet):
 
             # Si es una orden con Delivery, creamos la asignación y disparamos la auto-asignación al repartidor libre más cercano
             delivery_json = None
+            delivery_error = None
             try:
                 if int(order.withdrawal_type) == WithdrawalType.DELIVERY:
                     delivery = create_or_assign_delivery_for_order(order, auto_assign=True)
                     if delivery is not None:
                         delivery_json = delivery.get_json(viewer_role='client')
+                    else:
+                        delivery_error = 'missing_locations'
             except Exception as dlv_err:
+                delivery_error = 'delivery_creation_failed'
                 logger.exception(f"Error iniciando asignación de delivery para orden {order.id}: {dlv_err}")
 
             return Response({
                 "success": True, 
                 "order_id": str(order.id), 
                 "delivery": delivery_json,
+                # Si no es None, la orden quedó sin entrega; el backend reintenta crearla cada 30 s
+                "delivery_error": delivery_error,
                 "message": "¡Orden creada exitosamente!"
             }, status=status.HTTP_201_CREATED)
 

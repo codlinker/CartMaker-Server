@@ -94,6 +94,44 @@ class EmployeeAdmin(ModelAdmin):
     def status_pill(self, obj):
         return obj.get_status_display()
 
+    def save_model(self, request, obj, form, change):
+        """
+        Los cambios hechos desde el admin deben tener el mismo efecto que desde la API:
+        invalidar la caché `emp:active`, marcar la revocación en Redis, liberar entregas y desconectar sockets.
+        """
+        from django.db import transaction
+        from api.core.workforce import (
+            clear_worker_revoked_in_realtime,
+            invalidate_employee_cache,
+            schedule_worker_revocation,
+        )
+
+        old = Employee.objects.filter(pk=obj.pk).values('status', 'role').first() if change and obj.pk else None
+        with transaction.atomic():
+            super().save_model(request, obj, form, change)
+            if old is None:
+                invalidate_employee_cache(obj.pk)
+                return
+            status_changed = old['status'] != obj.status
+            role_changed = old['role'] != obj.role
+            if status_changed and obj.status in (EmployeeStatus.SUSPENDED, EmployeeStatus.REVOKED):
+                schedule_worker_revocation(
+                    obj, reason='suspended' if obj.status == EmployeeStatus.SUSPENDED else 'revoked',
+                )
+            elif role_changed and obj.status == EmployeeStatus.ACTIVE:
+                schedule_worker_revocation(obj, reason='role_changed')
+            else:
+                emp_id = obj.pk
+                reactivated = status_changed and obj.status == EmployeeStatus.ACTIVE
+                invalidate_employee_cache(emp_id)
+
+                def _after_commit():
+                    invalidate_employee_cache(emp_id)
+                    if reactivated:
+                        clear_worker_revoked_in_realtime(emp_id)
+
+                transaction.on_commit(_after_commit)
+
 @admin.register(EmployeeInvitation)
 class EmployeeInvitationAdmin(ModelAdmin):
     list_display = ("short_code", "company", "role_label", "channel", "target_email", "target_user", "status_pill", "expires_at", "accepted_by", "created_at")

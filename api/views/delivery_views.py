@@ -12,6 +12,7 @@ from ..core.delivery import (
     accept_delivery,
     build_bootstrap,
     complete_delivery_with_pin,
+    confirm_delivery_by_manager,
     decline_delivery,
     end_shift,
     fail_delivery,
@@ -29,6 +30,7 @@ from ..core.delivery import (
     resolve_viewer_role,
     start_shift,
     upload_delivery_trace,
+    user_can_manage_company,
 )
 from ..core.workforce import CTX_WORKER, EMP_ID_CLAIM
 from ..permissions import IsDeliveryWorker, get_request_ctx, get_token_claim
@@ -244,6 +246,12 @@ class DeliveryDeclineAPI(APIView):
             'message': "Oferta rechazada.",
             'delivery_id': delivery.id,
             'status': int(delivery.status),
+            'data': {
+                'delivery_id': delivery.id,
+                'order_id': delivery.order_id,
+                'status': int(delivery.status),
+                'status_label': str(delivery.get_status_display()),
+            },
         }, status=status.HTTP_200_OK)
 
 
@@ -326,6 +334,7 @@ class DeliveryCompleteWithPinAPI(APIView):
             return _delivery_error_response(e)
         return Response({
             'message': "¡Entrega completada exitosamente!",
+            'data': result.get('delivery'),
             **result,
         }, status=status.HTTP_200_OK)
 
@@ -499,3 +508,41 @@ class DeliveryInternalNodeEventAPI(APIView):
         except DeliveryError as e:
             return _delivery_error_response(e)
         return Response(result, status=status.HTTP_200_OK)
+
+
+class DeliveryInternalCompanyAccessAPI(APIView):
+    """
+    GET /api/v1/delivery/internal/company-access/<company_id>/<user_id>/
+    Uso exclusivo de `node_chat_server` para autorizar `join_company_riders`
+    (dueño del comercio o asistente activo). Respuesta: {"data": {"allowed": bool}}.
+    """
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request, company_id: str, user_id: str):
+        if not _has_valid_microservice_token(request):
+            return Response({'error': 'No autorizado.'}, status=status.HTTP_403_FORBIDDEN)
+        return Response({'data': {'allowed': bool(user_can_manage_company(user_id, company_id))}},
+                        status=status.HTTP_200_OK)
+
+
+class DeliveryConfirmByMerchantAPI(APIView):
+    """
+    POST /api/v1/delivery/<id>/confirm/
+    El comercio (dueño o asistente) confirma la entrega cuando el PIN quedó bloqueado (5 intentos)
+    o el cliente no puede dictarlo. La entrega pasa a DELIVERED y la orden a COMPLETED.
+    """
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'actions'
+
+    def post(self, request, delivery_id: int):
+        try:
+            result = confirm_delivery_by_manager(request.user, delivery_id)
+        except DeliveryError as e:
+            return _delivery_error_response(e)
+        return Response({
+            'message': "Entrega confirmada por el comercio.",
+            'data': result['delivery'],
+            **result,
+        }, status=status.HTTP_200_OK)

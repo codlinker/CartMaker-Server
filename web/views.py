@@ -1398,6 +1398,44 @@ def atlas_invoice_view(request, invoice_id):
     })
 
 
+def android_assetlinks_view(request):
+    """
+    GET /.well-known/assetlinks.json
+    Verificación de Android App Links (autoVerify) para que https://www.cartmaker.app/join/...,
+    /tienda/..., /p/... y /orden-express/... abran la app directamente.
+    Configurar en variables.sh: ANDROID_APP_PACKAGE y ANDROID_SHA256_CERT_FINGERPRINTS.
+    """
+    package = getattr(settings, 'ANDROID_APP_PACKAGE', '') or ''
+    fingerprints = list(getattr(settings, 'ANDROID_SHA256_CERT_FINGERPRINTS', []) or [])
+    payload = []
+    if package and fingerprints:
+        payload.append({
+            'relation': ['delegate_permission/common.handle_all_urls'],
+            'target': {
+                'namespace': 'android_app',
+                'package_name': package,
+                'sha256_cert_fingerprints': fingerprints,
+            },
+        })
+    return JsonResponse(payload, safe=False)
+
+
+def apple_app_site_association_view(request):
+    """
+    GET /.well-known/apple-app-site-association
+    Verificación de Universal Links en iOS. Configurar IOS_APP_IDS ("TEAMID.bundle.id") en variables.sh.
+    """
+    app_ids = list(getattr(settings, 'IOS_APP_IDS', []) or [])
+    paths = ['/join/*', '/tienda/*', '/t/*', '/p/*', '/orden-express/*']
+    payload = {
+        'applinks': {
+            'apps': [],
+            'details': [{'appID': app_id, 'appIDs': [app_id], 'paths': paths} for app_id in app_ids],
+        }
+    }
+    return JsonResponse(payload)
+
+
 def public_workforce_join_view(request, code_or_token: str):
     """
     Vista web puente pública para enlaces y códigos QR de invitación de equipo:
@@ -1410,6 +1448,18 @@ def public_workforce_join_view(request, code_or_token: str):
     from api.core.workforce import find_invitation_by_secret, build_invitation_preview
 
     clean_secret = (code_or_token or '').strip()
+
+    # Límite simple por IP (30 consultas/min) para evitar enumeración de códigos cortos
+    client_ip = (request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0].strip() or request.META.get('REMOTE_ADDR', ''))
+    rl_key = f"cm:join_rl:{client_ip}"
+    try:
+        hits = cache.get(rl_key, 0) or 0
+        if hits >= 30:
+            return HttpResponse("Demasiadas solicitudes. Intenta de nuevo en un minuto.", status=429)
+        cache.set(rl_key, hits + 1, timeout=60)
+    except Exception:
+        pass
+
     invitation = find_invitation_by_secret(token=clean_secret)
 
     if invitation is None:
@@ -1529,7 +1579,7 @@ def public_workforce_join_view(request, code_or_token: str):
   </div>
   <script>
     setTimeout(function() {{
-      window.location.href = "{deep_link}";
+      window.location.href = {json.dumps("cartmaker://join/" + clean_secret)};
     }}, 250);
   </script>
 </body>

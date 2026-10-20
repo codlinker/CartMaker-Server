@@ -1,3 +1,4 @@
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import BasePermission, SAFE_METHODS
 from api.models import Company, CompanyStore
 from api.core.workforce import (
@@ -118,13 +119,16 @@ class IsPersonalContext(BasePermission):
     """
     Exige un token de la cuenta personal (ctx='personal' o sin ctx).
     Con un token de trabajador no se puede comprar, ni gastar la billetera, ni ver órdenes personales.
+    Responde 403 con `{error, code: 'personal_context_required'}`.
     """
     message = "Esta acción solo está disponible desde tu cuenta personal. Cambia de espacio de trabajo para continuar."
 
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
             return False
-        return get_request_ctx(request) == CTX_PERSONAL
+        if get_request_ctx(request) != CTX_PERSONAL:
+            raise PermissionDenied({'error': self.message, 'code': 'personal_context_required'})
+        return True
 
 
 class IsWorkerContext(BasePermission):
@@ -135,6 +139,8 @@ class IsWorkerContext(BasePermission):
 
     `required_roles` (slugs: 'assistant', 'delivery') restringe el rol vigente del trabajador.
     Si la validación pasa, se exponen `request.worker_employee_id` y `request.worker_company_id`.
+
+    Errores (403, cuerpo `{error, code}`): `worker_context_required`, `worker_access_revoked`, `role_not_allowed`.
     """
     required_roles = None
     message = "Esta acción requiere iniciar sesión como trabajador del comercio."
@@ -147,21 +153,22 @@ class IsWorkerContext(BasePermission):
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
             return False
-        if get_request_ctx(request) != CTX_WORKER:
-            return False
-
         emp_id = get_token_claim(request, EMP_ID_CLAIM, None)
-        if not emp_id:
-            return False
+        if get_request_ctx(request) != CTX_WORKER or not emp_id:
+            raise PermissionDenied({'error': self.message, 'code': 'worker_context_required'})
 
         state = get_employee_state(emp_id)
         if not state.get('active') or str(state.get('user_id')) != str(request.user.id):
-            self.message = "Tu acceso como trabajador fue suspendido o revocado."
-            return False
+            raise PermissionDenied({
+                'error': "Tu acceso como trabajador fue suspendido o revocado.",
+                'code': 'worker_access_revoked',
+            })
 
         if self.required_roles and state.get('role') not in self.required_roles:
-            self.message = "Tu rol en este comercio no permite realizar esta acción."
-            return False
+            raise PermissionDenied({
+                'error': "Tu rol en este comercio no permite realizar esta acción.",
+                'code': 'role_not_allowed',
+            })
 
         request.worker_employee_id = int(emp_id)
         request.worker_company_id = state.get('company_id')

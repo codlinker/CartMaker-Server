@@ -102,6 +102,8 @@ class WorkspaceTokenRefreshSerializer(TokenRefreshSerializer):
     """
 
     def validate(self, attrs):
+        from .core.workforce import ROLE_CLAIM, get_employee_state
+
         incoming = RefreshToken(attrs['refresh'])
         if incoming.payload.get(CTX_CLAIM) == CTX_WORKER:
             emp_id = incoming.payload.get(EMP_ID_CLAIM)
@@ -110,6 +112,14 @@ class WorkspaceTokenRefreshSerializer(TokenRefreshSerializer):
                 raise AuthenticationFailed(
                     "Tu acceso como trabajador fue suspendido o revocado.",
                     code='worker_access_revoked',
+                )
+            # Si el dueño cambió el rol, el token conserva el rol viejo: se obliga a re-seleccionar el espacio
+            current_role = get_employee_state(emp_id, use_cache=False).get('role')
+            token_role = incoming.payload.get(ROLE_CLAIM)
+            if token_role and current_role and token_role != current_role:
+                raise AuthenticationFailed(
+                    "Tu rol en este comercio cambió. Vuelve a seleccionar tu espacio de trabajo.",
+                    code='worker_role_changed',
                 )
         return super().validate(attrs)
     

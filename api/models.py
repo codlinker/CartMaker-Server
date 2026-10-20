@@ -1530,14 +1530,15 @@ class EmployeeInvitation(models.Model):
         company = self.company
         company_img = storage_manager.get_url(company.image) if (company and company.image) else ''
         company_cat = company.category.name if (company and getattr(company, 'category_id', None) and company.category) else ''
-        company_rif = (getattr(company, 'rif', '') or '').strip() if company else ''
+        company_rif = (getattr(company, 'rif_number', '') or '').strip() if company else ''
         inviter_name = (
             f"{(invited_by.first_name or '').strip()} {(invited_by.last_name or '').strip()}".strip()
             or invited_by.email
         ) if invited_by else ''
 
         stores_payload = []
-        for store in self.allowed_stores.select_related('location').all():
+        # Usa el prefetch (`Prefetch('allowed_stores', queryset=...select_related('location'))`) si existe
+        for store in self.allowed_stores.all():
             loc = getattr(store, 'location', None)
             addr = (loc.name or '').strip() if loc else ''
             stores_payload.append({
@@ -2368,6 +2369,8 @@ class DeliveryAssignment(models.Model):
             )
             show_route = show_dest_exact
             show_fix = True
+            show_rider = True
+            include_employee_id = True
             data['is_auto_assigned'] = self.is_auto_assigned
             data['offer_expires_at'] = _dt_iso(self.offer_expires_at)
             data['offer_expires_at_ms'] = _dt_ms(self.offer_expires_at)
@@ -2390,6 +2393,7 @@ class DeliveryAssignment(models.Model):
             show_route = in_transit
             show_fix = in_transit
             show_rider = in_transit
+            include_employee_id = in_transit
             data['handoff_pin'] = self.handoff_pin if status_value not in DELIVERY_TERMINAL_STATUSES else None
             data['has_rider'] = self.rider_id is not None and status_value in DELIVERY_ACTIVE_STATUSES
 
@@ -2417,6 +2421,11 @@ class DeliveryAssignment(models.Model):
             }
 
         if show_fix and self.last_fix_point is not None:
+            source_int = int(self.last_fix_source) if self.last_fix_source is not None else None
+            try:
+                source_lbl = str(FixSource(source_int).label) if source_int is not None else None
+            except ValueError:
+                source_lbl = None
             data['last_fix'] = {
                 'lat': float(self.last_fix_point.y),
                 'lng': float(self.last_fix_point.x),
@@ -2425,7 +2434,8 @@ class DeliveryAssignment(models.Model):
                 'accuracy_m': self.last_fix_accuracy_m,
                 'at': _dt_iso(self.last_fix_at),
                 'at_ms': _dt_ms(self.last_fix_at),
-                'source': int(self.last_fix_source) if self.last_fix_source is not None else None,
+                'source': source_int,
+                'source_label': source_lbl,
             }
 
         if show_rider:

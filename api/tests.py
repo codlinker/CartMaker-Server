@@ -428,17 +428,15 @@ class OsrmRoutingClientTests(SimpleTestCase):
 class WorkforceHelpersTests(SimpleTestCase):
     """Pruebas de parseo de entradas y del contexto de sesión (sin base de datos)."""
 
-    def test_parse_role_accepts_slug_and_int(self):
+    def test_parse_role_accepts_only_slugs(self):
         from api.core.workforce import parse_role, WorkforceError
         from api.models import EmployeeRole
         self.assertEqual(parse_role('delivery'), EmployeeRole.DELIVERY)
         self.assertEqual(parse_role('assistant'), EmployeeRole.ASSISTANT)
-        self.assertEqual(parse_role(1), EmployeeRole.DELIVERY)
-        self.assertEqual(parse_role('0'), EmployeeRole.ASSISTANT)
-        with self.assertRaises(WorkforceError):
-            parse_role('jefe')
-        with self.assertRaises(WorkforceError):
-            parse_role(True)
+        # Los enteros se rechazan para evitar mapeos silenciosos erróneos desde el cliente
+        for bad in (1, '0', 'jefe', True):
+            with self.assertRaises(WorkforceError):
+                parse_role(bad)
 
     def test_parse_vehicle_type_allows_null(self):
         from api.core.workforce import parse_vehicle_type
@@ -451,15 +449,19 @@ class WorkforceHelpersTests(SimpleTestCase):
         self.assertEqual(EmployeeInvitation.normalize_short_code(' ab3d-ef7h '), 'AB3DEF7H')
 
     def test_request_ctx_defaults_to_personal(self):
+        from rest_framework.exceptions import PermissionDenied
         from api.permissions import get_request_ctx, IsPersonalContext
         user = SimpleNamespace(is_authenticated=True, id='u1')
         legacy_request = SimpleNamespace(user=user, auth={'user_id': 'u1'})
         worker_request = SimpleNamespace(user=user, auth={'user_id': 'u1', 'ctx': 'worker', 'emp_id': 7})
         self.assertEqual(get_request_ctx(legacy_request), 'personal')
         self.assertTrue(IsPersonalContext().has_permission(legacy_request, None))
-        self.assertFalse(IsPersonalContext().has_permission(worker_request, None))
+        with self.assertRaises(PermissionDenied) as ctx:
+            IsPersonalContext().has_permission(worker_request, None)
+        self.assertEqual(ctx.exception.detail['code'], 'personal_context_required')
 
     def test_worker_permission_checks_cached_state(self):
+        from rest_framework.exceptions import PermissionDenied
         from api.permissions import IsDeliveryWorker
         user = SimpleNamespace(is_authenticated=True, id='u1')
         request = SimpleNamespace(user=user, auth={'user_id': 'u1', 'ctx': 'worker', 'emp_id': 7})
@@ -468,10 +470,14 @@ class WorkforceHelpersTests(SimpleTestCase):
             self.assertTrue(IsDeliveryWorker().has_permission(request, None))
         revoked_state = dict(active_state, active=False)
         with patch('api.permissions.get_employee_state', return_value=revoked_state):
-            self.assertFalse(IsDeliveryWorker().has_permission(request, None))
+            with self.assertRaises(PermissionDenied) as ctx:
+                IsDeliveryWorker().has_permission(request, None)
+            self.assertEqual(ctx.exception.detail['code'], 'worker_access_revoked')
         assistant_state = dict(active_state, role='assistant')
         with patch('api.permissions.get_employee_state', return_value=assistant_state):
-            self.assertFalse(IsDeliveryWorker().has_permission(request, None))
+            with self.assertRaises(PermissionDenied) as ctx:
+                IsDeliveryWorker().has_permission(request, None)
+            self.assertEqual(ctx.exception.detail['code'], 'role_not_allowed')
 
 
 

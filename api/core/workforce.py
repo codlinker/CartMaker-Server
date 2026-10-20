@@ -20,7 +20,7 @@ from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.db import IntegrityError, transaction
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from django.utils import timezone
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -242,11 +242,45 @@ def _post_worker_revoked_to_node(user_id, employee_id, company_id, reason: str) 
         logger.warning(f"Workforce: no se pudo avisar a Node la revocación del trabajador {employee_id}: {e}")
 
 
+# Marca de revocación compartida con node_chat_server (Redis de tiempo real, DB 2):
+# Node rechaza el handshake / refresh_auth de sockets de trabajador cuyo emp_id tenga esta marca,
+# aunque el JWT siga vigente (el access token dura 60 min).
+WORKER_REVOKED_KEY_TTL_S = 3600
+
+
+def worker_revoked_key(emp_id) -> str:
+    return f"emp:{emp_id}:revoked"
+
+
+def mark_worker_revoked_in_realtime(emp_id, reason: str) -> None:
+    try:
+        from .delivery import get_realtime_redis
+        r = get_realtime_redis()
+        if r is not None:
+            r.set(worker_revoked_key(emp_id), str(reason or 'revoked'), ex=WORKER_REVOKED_KEY_TTL_S)
+    except Exception as e:
+        logger.warning(f"Workforce: no se pudo marcar la revocación del trabajador {emp_id} en Redis: {e}")
+
+
+def clear_worker_revoked_in_realtime(emp_id) -> None:
+    try:
+        from .delivery import get_realtime_redis
+        r = get_realtime_redis()
+        if r is not None:
+            r.delete(worker_revoked_key(emp_id))
+    except Exception as e:
+        logger.warning(f"Workforce: no se pudo limpiar la marca de revocación del trabajador {emp_id}: {e}")
+
+
 def schedule_worker_revocation(employee: Employee, reason: str) -> None:
     """
-    Invalida la caché del trabajador ahora y después del commit, y avisa a Node tras el commit.
+    Invalida la caché del trabajador ahora y después del commit, marca la revocación en Redis
+    (para que Node rechace reconexiones), libera sus entregas no retiradas y avisa a Node tras el commit.
+    El aviso HTTP a Node corre en un hilo para no bloquear la petición si Node está caído.
     Debe llamarse dentro de la transacción que cambió el estado.
     """
+    import threading
+
     emp_id = employee.id
     user_id = employee.user_id
     company_id = employee.company_id
@@ -254,7 +288,17 @@ def schedule_worker_revocation(employee: Employee, reason: str) -> None:
 
     def _after_commit():
         invalidate_employee_cache(emp_id)
-        _post_worker_revoked_to_node(user_id, emp_id, company_id, reason)
+        mark_worker_revoked_in_realtime(emp_id, reason)
+        try:
+            from .delivery import release_active_deliveries_of_rider
+            release_active_deliveries_of_rider(emp_id, reason=reason)
+        except Exception as e:
+            logger.warning(f"Workforce: no se pudieron liberar las entregas del trabajador {emp_id}: {e}")
+        threading.Thread(
+            target=_post_worker_revoked_to_node,
+            args=(user_id, emp_id, company_id, reason),
+            daemon=True,
+        ).start()
 
     transaction.on_commit(_after_commit)
 
@@ -289,13 +333,16 @@ def build_worker_workspace(employee: Employee) -> dict:
         'vehicle_type': int(employee.vehicle_type) if employee.vehicle_type is not None else None,
         'display_alias': employee.display_alias or '',
         'stores': employee.get_store_list(),
+        # Si es True y el usuario no ha verificado su cédula, select_workspace responderá 403 cedula_not_verified
+        'requires_cedula_verified': employee.role == EmployeeRole.DELIVERY,
+        'can_select': not (employee.role == EmployeeRole.DELIVERY and not getattr(employee.user, 'cedula_verified', False)),
     }
 
 
 def get_active_employments(user):
     """ Empleos ACTIVOS del usuario (excluye cualquier registro en su propio comercio). """
     return (
-        Employee.objects.select_related('company')
+        Employee.objects.select_related('company', 'user')
         .prefetch_related('employeestoreassignment_set__store')
         .filter(user=user, status=EmployeeStatus.ACTIVE)
         .exclude(company__owner=user)
@@ -383,6 +430,8 @@ def select_workspace(user, workspace_type: str, employee_id=None) -> dict:
 
     Employee.objects.filter(pk=employee.pk).update(last_seen_at=timezone.now())
     invalidate_employee_cache(employee.id)
+    # El empleo está activo: se levanta cualquier marca previa (p. ej. tras un cambio de rol)
+    clear_worker_revoked_in_realtime(employee.id)
 
     tokens = issue_workspace_tokens(user, employee)
     tokens['workspace'] = build_worker_workspace(employee)
@@ -425,12 +474,34 @@ def _parse_choice(raw, enum_cls, slugs: dict, field_name: str, allow_none: bool 
     return value
 
 
+def _parse_slug_only(raw, slugs: dict, field_name: str, allowed_desc: str) -> int:
+    """
+    Parsea un campo que SOLO admite slugs de texto (nunca enteros).
+    Evita mapeos silenciosos peligrosos: p. ej. si el cliente envía status=2 creyendo que es
+    'suspendido' (cuando en el enum 2 = REVOCADO) se responde 400 en vez de revocar al trabajador.
+    """
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        raise WorkforceError(f"El campo '{field_name}' es obligatorio.", code='invalid_field')
+    if not isinstance(raw, str) or raw.strip().lstrip('-').isdigit():
+        raise WorkforceError(
+            f"El campo '{field_name}' debe enviarse como texto: {allowed_desc}.",
+            code=f'{field_name}_must_be_slug',
+        )
+    clean = raw.strip().lower()
+    if clean not in slugs:
+        raise WorkforceError(
+            f"El valor de '{field_name}' no es válido. Valores permitidos: {allowed_desc}.",
+            code='invalid_field',
+        )
+    return int(slugs[clean])
+
+
 def parse_role(raw) -> int:
-    return _parse_choice(raw, EmployeeRole, ROLE_SLUGS_REVERSE, 'role')
+    return _parse_slug_only(raw, ROLE_SLUGS_REVERSE, 'role', "'assistant' o 'delivery'")
 
 
 def parse_channel(raw) -> int:
-    return _parse_choice(raw, InvitationChannel, CHANNEL_SLUGS, 'channel')
+    return _parse_slug_only(raw, CHANNEL_SLUGS, 'channel', "'email', 'in_app' o 'qr_link'")
 
 
 def parse_vehicle_type(raw):
@@ -522,7 +593,7 @@ def create_invitation(owner, data: dict) -> tuple:
     data = data or {}
 
     role = parse_role(data.get('role'))
-    channel = parse_channel(data.get('channel') if data.get('channel') is not None else 'qr_link')
+    channel = parse_channel(data.get('channel') if data.get('channel') not in (None, '') else 'qr_link')
 
     target_email = (data.get('target_email') or data.get('email') or '').strip().lower() or None
     target_user_id = data.get('target_user_id') or None
@@ -689,7 +760,7 @@ def build_invitation_preview(invitation: EmployeeInvitation) -> dict:
     eff_status = invitation.effective_status
     company_img = _company_image_url(company)
     company_cat = company.category.name if (company and getattr(company, 'category_id', None) and company.category) else ''
-    company_rif = (getattr(company, 'rif', '') or '').strip() if company else ''
+    company_rif = (getattr(company, 'rif_number', '') or '').strip() if company else ''
     inviter_name = _user_display_name(invited_by) if invited_by else ''
 
     stores_payload = []
@@ -751,7 +822,13 @@ def _invitation_targets_user(invitation: EmployeeInvitation, user) -> bool:
     """ True si la invitación está dirigida a este usuario (por cuenta o por correo). """
     if invitation.target_user_id and invitation.target_user_id == user.id:
         return True
-    if invitation.target_email and user.email and invitation.target_email.strip().lower() == user.email.strip().lower():
+    # La coincidencia por correo solo cuenta si el usuario ya verificó ese correo
+    if (
+        invitation.target_email
+        and user.email
+        and getattr(user, 'email_verified', False)
+        and invitation.target_email.strip().lower() == user.email.strip().lower()
+    ):
         return True
     return False
 
@@ -786,11 +863,11 @@ def accept_invitation(user, token: Optional[str] = None, short_code: Optional[st
     if invitation is None and invitation_id not in (None, ''):
         inv_pk = _parse_int(invitation_id, 'invitation_id')
         candidate = EmployeeInvitation.objects.select_related('company').filter(pk=inv_pk).first()
-        if candidate is not None:
-            # Si la invitación tiene destinatario específico, solo ese usuario puede aceptarla;
-            # si es una invitación abierta (QR / código corto sin target_user ni target_email), también se permite.
-            if not (candidate.target_user_id or candidate.target_email) or _invitation_targets_user(candidate, user):
-                invitation = candidate
+        # Por ID SOLO se aceptan invitaciones dirigidas explícitamente a este usuario (bandeja my-invitations).
+        # Las invitaciones abiertas (QR / enlace / código corto) exigen el secreto (token o short_code),
+        # de lo contrario cualquiera podría unirse adivinando IDs secuenciales.
+        if candidate is not None and _invitation_targets_user(candidate, user):
+            invitation = candidate
 
     if invitation is None:
         raise WorkforceError("La invitación no existe o el código es inválido.", status_code=404, code='invitation_not_found')
@@ -877,6 +954,7 @@ def accept_invitation(user, token: Optional[str] = None, short_code: Optional[st
         def _after_commit():
             from .firebase_admin import NotificationManager
             invalidate_employee_cache(emp_id)
+            clear_worker_revoked_in_realtime(emp_id)
             NotificationManager.notify_workforce_event(
                 user_id=owner_id,
                 title="Nuevo trabajador en tu equipo",
@@ -951,8 +1029,8 @@ def revoke_invitation(owner, invitation_id) -> EmployeeInvitation:
 def list_company_invitations(owner, status_filter=None):
     company = require_owned_company(owner)
     qs = (
-        EmployeeInvitation.objects.select_related('company', 'invited_by', 'target_user', 'accepted_by')
-        .prefetch_related('allowed_stores')
+        EmployeeInvitation.objects.select_related('company', 'company__category', 'invited_by', 'target_user', 'accepted_by')
+        .prefetch_related(Prefetch('allowed_stores', queryset=CompanyStore.objects.select_related('location')))
         .filter(company=company)
     )
     if status_filter not in (None, ''):
@@ -974,11 +1052,11 @@ def list_company_invitations(owner, status_filter=None):
 def list_my_invitations(user):
     """ Invitaciones PENDIENTES y vigentes dirigidas al usuario (por cuenta o por correo). """
     target_q = Q(target_user=user)
-    if user.email:
+    if user.email and getattr(user, 'email_verified', False):
         target_q |= Q(target_email=user.email.strip().lower())
     return (
-        EmployeeInvitation.objects.select_related('company', 'invited_by', 'target_user', 'accepted_by')
-        .prefetch_related('allowed_stores')
+        EmployeeInvitation.objects.select_related('company', 'company__category', 'invited_by', 'target_user', 'accepted_by')
+        .prefetch_related(Prefetch('allowed_stores', queryset=CompanyStore.objects.select_related('location')))
         .filter(target_q, status=InvitationStatus.PENDING, expires_at__gt=timezone.now())
         .exclude(company__owner=user)
         .order_by('-created_at')
@@ -1047,7 +1125,9 @@ def update_employee(owner, employee_id, data: dict) -> Employee:
                 raise WorkforceError("La acción debe ser 'suspend', 'reactivate' o 'revoke'.", code='invalid_action')
             new_status = int(STATUS_ACTION_SLUGS[action_slug])
         elif data.get('status') not in (None, ''):
-            new_status = _parse_choice(data.get('status'), EmployeeStatus, STATUS_SLUGS, 'status')
+            new_status = _parse_slug_only(
+                data.get('status'), STATUS_SLUGS, 'status', "'active', 'suspended' o 'revoked'",
+            )
 
         if new_status is not None and new_status != old_status:
             if old_status == EmployeeStatus.REVOKED:
@@ -1107,7 +1187,14 @@ def update_employee(owner, employee_id, data: dict) -> Employee:
             schedule_worker_revocation(employee, reason='role_changed')
         else:
             emp_id_for_cache = employee.id
-            transaction.on_commit(lambda: invalidate_employee_cache(emp_id_for_cache))
+            reactivated = status_changed and employee.status == EmployeeStatus.ACTIVE
+
+            def _after_commit_update():
+                invalidate_employee_cache(emp_id_for_cache)
+                if reactivated:
+                    clear_worker_revoked_in_realtime(emp_id_for_cache)
+
+            transaction.on_commit(_after_commit_update)
 
         if status_changed or role_changed:
             worker_user_id = employee.user_id

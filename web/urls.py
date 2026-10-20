@@ -13,6 +13,10 @@ urlpatterns = [
     path('orden-express/<str:token>/', views.public_express_order_view, name='public_express_order'),
     path('join/<str:code_or_token>/', views.public_workforce_join_view, name='public_workforce_join'),
     path('join/<str:code_or_token>', views.public_workforce_join_view, name='public_workforce_join_no_slash'),
+    # App Links (Android) / Universal Links (iOS): deben responder JSON sin redirecciones
+    path('.well-known/assetlinks.json', views.android_assetlinks_view, name='android_assetlinks'),
+    path('.well-known/apple-app-site-association', views.apple_app_site_association_view, name='apple_aasa'),
+    path('apple-app-site-association', views.apple_app_site_association_view, name='apple_aasa_root'),
     path('tienda/<uuid:company_id>/handoff-cart/', views.create_web_cart_handoff_ajax, name='web_cart_handoff_ajax'),
 
     # 🔒 Zona de Autenticación (Compartida)
