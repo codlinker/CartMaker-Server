@@ -25,7 +25,8 @@ def _get_merchant_company_for_user(user) -> Optional[Company]:
         return company
     emp = (
         Employee.objects.select_related("company", "company__category")
-        .filter(user=user, is_active=True)
+        # Solo asistentes: los repartidores no acceden a las herramientas de crecimiento
+        .filter(user=user, is_active=True, role=EmployeeRole.ASSISTANT)
         .first()
     )
     return emp.company if emp else None

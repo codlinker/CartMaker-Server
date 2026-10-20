@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import hashlib
 import secrets
 from typing import Optional
 import uuid
@@ -233,6 +234,12 @@ class NotificationCategory(models.IntegerChoices):
     GAMIFICATION_ALERT = 10, _('Alerta de tokens/gamificación.')
     ORDER_STATUS_CHANGED = 11, _('Actualización en orden.')
     NEW_CHAT_MESSAGE = 12, _('Nuevo Mensaje de Chat')
+    # Sistema de trabajadores (Workforce)
+    EMPLOYEE_INVITATION = 13, _('Invitación para trabajar en un comercio.')
+    EMPLOYEE_UPDATE = 14, _('Actualización de trabajador.')
+    # Delivery en tiempo real
+    DELIVERY_ASSIGNMENT = 15, _('Asignación de Delivery')
+    DELIVERY_STATUS = 16, _('Estado de Delivery')
 
 class MessageOrigin(models.IntegerChoices):
     """
@@ -240,6 +247,92 @@ class MessageOrigin(models.IntegerChoices):
     """
     CLIENT = 0, _('Cliente')
     ATLAS = 1, _('Atlas')
+
+class EmployeeRole(models.IntegerChoices):
+    """
+    ENUM Rol del trabajador dentro del comercio.
+    """
+    ASSISTANT = 0, _('Asistente')
+    DELIVERY = 1, _('Repartidor')
+
+class EmployeeStatus(models.IntegerChoices):
+    """
+    ENUM Estado laboral del trabajador. Convive con `Employee.is_active`
+    (is_active == True únicamente cuando el estado es ACTIVE).
+    """
+    ACTIVE = 0, _('Activo')
+    SUSPENDED = 1, _('Suspendido')
+    REVOKED = 2, _('Revocado')
+
+class VehicleType(models.IntegerChoices):
+    """
+    ENUM Tipo de vehículo del repartidor. Define el perfil de rutas (OSRM) y de velocidades.
+    """
+    MOTO = 0, _('Moto')
+    BICI = 1, _('Bicicleta')
+    CARRO = 2, _('Carro')
+    PIE = 3, _('A pie')
+
+class InvitationChannel(models.IntegerChoices):
+    """
+    ENUM Canal por el que se envía la invitación de trabajador.
+    """
+    EMAIL = 0, _('Correo electrónico')
+    IN_APP = 1, _('Dentro de la app')
+    QR_LINK = 2, _('Enlace o código QR')
+
+class InvitationStatus(models.IntegerChoices):
+    """
+    ENUM Estado de la invitación de trabajador.
+    """
+    PENDING = 0, _('Pendiente')
+    ACCEPTED = 1, _('Aceptada')
+    DECLINED = 2, _('Rechazada')
+    REVOKED = 3, _('Revocada')
+    EXPIRED = 4, _('Expirada')
+
+# Slugs estables del rol (se usan en los claims del JWT de trabajador y en las respuestas de la API)
+EMPLOYEE_ROLE_SLUGS = {
+    EmployeeRole.ASSISTANT: 'assistant',
+    EmployeeRole.DELIVERY: 'delivery',
+}
+
+class DeliveryStatus(models.IntegerChoices):
+    """
+    ENUM Estado de una entrega a domicilio (DeliveryAssignment).
+    """
+    PENDING_RIDER = 0, _('Buscando repartidor')
+    ASSIGNED = 1, _('Asignado (esperando aceptación)')
+    ACCEPTED = 2, _('Aceptado (en camino a tienda)')
+    AT_STORE = 3, _('En la tienda')
+    PICKED_UP = 4, _('En camino al cliente')
+    ARRIVING = 5, _('Llegando al destino')
+    DELIVERED = 6, _('Entregado')
+    FAILED = 7, _('Entrega fallida')
+    CANCELLED = 8, _('Cancelado')
+
+class FixSource(models.IntegerChoices):
+    """
+    ENUM Origen de una posición del repartidor.
+    """
+    GNSS_SOCKET = 0, _('GPS directo')
+    OFFLINE_BUFFER = 1, _('Buffer offline')
+    BLE_RELAY = 2, _('Retransmisión BLE')
+
+# Estados en los que el repartidor tiene una entrega "viva" (restricción one_active_delivery_per_rider)
+DELIVERY_ACTIVE_STATUSES = (
+    DeliveryStatus.ASSIGNED,
+    DeliveryStatus.ACCEPTED,
+    DeliveryStatus.AT_STORE,
+    DeliveryStatus.PICKED_UP,
+    DeliveryStatus.ARRIVING,
+)
+DELIVERY_TERMINAL_STATUSES = (
+    DeliveryStatus.DELIVERED,
+    DeliveryStatus.FAILED,
+    DeliveryStatus.CANCELLED,
+)
+DELIVERY_MAX_PIN_ATTEMPTS = 5
 
 # ==========================================
 # MÓDULO 1: USUARIOS Y CLIENTES
@@ -1190,13 +1283,100 @@ class MerchantPaymentMethod(models.Model):
 
 
 class Employee(models.Model):
+    """
+    Trabajador de un comercio (asistente o repartidor).
+
+    Attributes:
+        user (ForeignKey): Cuenta personal del trabajador.
+        company (ForeignKey): Comercio que lo emplea.
+        is_active (bool): Espejo de `status == ACTIVE` (se sincroniza en `save`).
+        role (int): Rol dentro del comercio (`EmployeeRole`).
+        status (int): Estado laboral (`EmployeeStatus`).
+        vehicle_type (int): Vehículo del repartidor (`VehicleType`), opcional.
+        display_alias (str): Nombre visible para el cliente.
+        last_seen_at (datetime): Última actividad registrada en contexto de trabajador.
+    """
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="employment_records")
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="employees")
     is_active = models.BooleanField(default=True)
     hired_at = models.DateTimeField(auto_now_add=True)
+    role = models.IntegerField(choices=EmployeeRole.choices, default=EmployeeRole.ASSISTANT)
+    status = models.IntegerField(choices=EmployeeStatus.choices, default=EmployeeStatus.ACTIVE)
+    vehicle_type = models.IntegerField(choices=VehicleType.choices, null=True, blank=True)
+    display_alias = models.CharField(max_length=60, blank=True, default='')
+    last_seen_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         unique_together = ('user', 'company') # Un usuario no puede ser empleado dos veces de la misma empresa
+        indexes = [
+            models.Index(fields=['company', 'role', 'status'], name='emp_company_role_status_idx'),
+        ]
+
+    def __str__(self):
+        return f"{self.user} @ {self.company} ({self.get_role_display()})"
+
+    def save(self, *args, **kwargs):
+        # `is_active` siempre refleja el estado laboral para no romper el código que ya lo consulta
+        self.is_active = (self.status == EmployeeStatus.ACTIVE)
+        update_fields = kwargs.get('update_fields')
+        if update_fields is not None and 'status' in update_fields and 'is_active' not in update_fields:
+            kwargs['update_fields'] = list(update_fields) + ['is_active']
+        super().save(*args, **kwargs)
+
+    @property
+    def role_slug(self) -> str:
+        return EMPLOYEE_ROLE_SLUGS.get(self.role, 'assistant')
+
+    def get_store_list(self) -> list:
+        """
+        Sucursales asignadas al trabajador (EmployeeStoreAssignment), como lista de dicts {id, name}.
+        """
+        prefetched = getattr(self, '_prefetched_objects_cache', None)
+        if prefetched and 'employeestoreassignment_set' in prefetched:
+            assignments = sorted(
+                prefetched['employeestoreassignment_set'],
+                key=lambda a: (a.store.name or '').lower()
+            )
+        else:
+            assignments = self.employeestoreassignment_set.select_related('store').order_by('store__name')
+        return [
+            {'id': str(a.store_id), 'name': a.store.name}
+            for a in assignments
+        ]
+
+    def get_json(self, include_company: bool = False) -> dict:
+        user = self.user
+        data = {
+            'id': self.id,
+            'user': {
+                'id': str(user.id),
+                'first_name': (user.first_name or '').strip(),
+                'last_name': (user.last_name or '').strip(),
+                'email': user.email,
+                'profile_picture': user.get_profile_picture_url() if user.profile_picture else '',
+                'cedula_verified': bool(user.cedula_verified),
+            },
+            'role': int(self.role),
+            'role_slug': self.role_slug,
+            'role_label': str(self.get_role_display()),
+            'status': int(self.status),
+            'status_label': str(self.get_status_display()),
+            'is_active': self.is_active,
+            'vehicle_type': int(self.vehicle_type) if self.vehicle_type is not None else None,
+            'vehicle_type_label': str(self.get_vehicle_type_display()) if self.vehicle_type is not None else None,
+            'display_alias': self.display_alias or '',
+            'hired_at': timezone.localtime(self.hired_at).isoformat() if self.hired_at else None,
+            'last_seen_at': timezone.localtime(self.last_seen_at).isoformat() if self.last_seen_at else None,
+            'stores': self.get_store_list(),
+        }
+        if include_company:
+            company = self.company
+            data['company'] = {
+                'id': str(company.id),
+                'name': company.name,
+                'image': storage_manager.get_url(company.image) if company.image else '',
+            }
+        return data
 
 class EmployeePermission(models.Model):
     employee = models.OneToOneField(Employee, on_delete=models.CASCADE, related_name="permissions")
@@ -1215,6 +1395,181 @@ class EmployeeStoreAssignment(models.Model):
 
     class Meta:
         unique_together = ('employee', 'store')
+
+
+# Alfabeto sin caracteres ambiguos (sin 0/O, 1/I/L) para los códigos cortos escritos a mano
+INVITATION_SHORT_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+INVITATION_SHORT_CODE_LENGTH = 8
+INVITATION_DEFAULT_TTL_HOURS = 72
+
+
+def default_invitation_expiry():
+    """ Vencimiento por defecto de una invitación de trabajador (72 horas). """
+    return timezone.now() + timedelta(hours=INVITATION_DEFAULT_TTL_HOURS)
+
+
+class EmployeeInvitation(models.Model):
+    """
+    Invitación de un comercio para que un usuario de CartMaker trabaje como asistente o repartidor.
+
+    El token en claro SOLO viaja en el enlace `https://www.cartmaker.app/join/<token>`;
+    en la base de datos se guarda únicamente su hash SHA-256 (`token_hash`).
+    `short_code` (8 caracteres) permite aceptar la invitación escribiéndola a mano.
+
+    Attributes:
+        company (ForeignKey): Comercio que invita.
+        invited_by (ForeignKey): Usuario (dueño) que emitió la invitación.
+        role (int): Rol ofrecido (`EmployeeRole`).
+        allowed_stores (ManyToMany): Sucursales ofrecidas.
+        channel (int): Canal de envío (`InvitationChannel`).
+        target_email (str): Correo destinatario (opcional).
+        target_user (ForeignKey): Usuario destinatario (opcional).
+        token_hash (str): SHA-256 (hex) del token del enlace.
+        short_code (str): Código corto de 8 caracteres.
+        status (int): Estado (`InvitationStatus`).
+        expires_at (datetime): Vencimiento (72 h por defecto).
+        accepted_by (ForeignKey): Usuario que aceptó la invitación.
+        accepted_at (datetime): Fecha de aceptación.
+    """
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='employee_invitations')
+    invited_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sent_employee_invitations')
+    role = models.IntegerField(choices=EmployeeRole.choices, default=EmployeeRole.ASSISTANT)
+    allowed_stores = models.ManyToManyField(CompanyStore, blank=True, related_name='employee_invitations')
+    channel = models.IntegerField(choices=InvitationChannel.choices, default=InvitationChannel.QR_LINK)
+    target_email = models.EmailField(null=True, blank=True)
+    target_user = models.ForeignKey(
+        User, on_delete=models.CASCADE, null=True, blank=True,
+        related_name='received_employee_invitations'
+    )
+    token_hash = models.CharField(max_length=64, unique=True)
+    short_code = models.CharField(max_length=INVITATION_SHORT_CODE_LENGTH, unique=True)
+    status = models.IntegerField(choices=InvitationStatus.choices, default=InvitationStatus.PENDING)
+    expires_at = models.DateTimeField(default=default_invitation_expiry)
+    accepted_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='accepted_employee_invitations'
+    )
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['company', 'status'], name='empinv_company_status_idx'),
+            models.Index(fields=['target_user', 'status'], name='empinv_target_user_status_idx'),
+            models.Index(fields=['target_email'], name='empinv_target_email_idx'),
+        ]
+
+    def __str__(self):
+        return f"Invitación {self.short_code} · {self.company} ({self.get_status_display()})"
+
+    @staticmethod
+    def hash_token(raw_token: str) -> str:
+        """ Retorna el SHA-256 (hex) del token en claro. """
+        return hashlib.sha256(str(raw_token or '').encode('utf-8')).hexdigest()
+
+    @staticmethod
+    def normalize_short_code(raw_code: str) -> str:
+        """ Normaliza el código corto escrito a mano (mayúsculas, sin espacios ni guiones). """
+        return re.sub(r'[\s\-]', '', str(raw_code or '')).upper()
+
+    @classmethod
+    def generate_short_code(cls) -> str:
+        """ Genera un código corto único con un alfabeto sin caracteres ambiguos. """
+        for _attempt in range(12):
+            code = ''.join(secrets.choice(INVITATION_SHORT_CODE_ALPHABET) for _i in range(INVITATION_SHORT_CODE_LENGTH))
+            if not cls.objects.filter(short_code=code).exists():
+                return code
+        raise ValidationError("No se pudo generar un código de invitación único. Inténtalo de nuevo.")
+
+    @classmethod
+    def create_with_token(cls, *, company, invited_by, role, channel, target_email=None,
+                          target_user=None, stores=None, ttl_hours: int = INVITATION_DEFAULT_TTL_HOURS):
+        """
+        Crea la invitación con un token nuevo (`secrets.token_urlsafe(32)`).
+
+        Returns:
+            tuple: (invitation, raw_token). El token en claro no se persiste.
+        """
+        raw_token = secrets.token_urlsafe(32)
+        invitation = cls.objects.create(
+            company=company,
+            invited_by=invited_by,
+            role=role,
+            channel=channel,
+            target_email=(target_email or '').strip().lower() or None,
+            target_user=target_user,
+            token_hash=cls.hash_token(raw_token),
+            short_code=cls.generate_short_code(),
+            expires_at=timezone.now() + timedelta(hours=ttl_hours),
+        )
+        if stores:
+            invitation.allowed_stores.set(stores)
+        return invitation, raw_token
+
+    def is_expired(self) -> bool:
+        return bool(self.expires_at and self.expires_at <= timezone.now())
+
+    @property
+    def effective_status(self) -> int:
+        """ Estado real: una invitación PENDING vencida se reporta como EXPIRED. """
+        if self.status == InvitationStatus.PENDING and self.is_expired():
+            return InvitationStatus.EXPIRED
+        return int(self.status)
+
+    @property
+    def role_slug(self) -> str:
+        return EMPLOYEE_ROLE_SLUGS.get(self.role, 'assistant')
+
+    def get_json(self, include_company: bool = True) -> dict:
+        """ Representación pública de la invitación. Nunca incluye `token_hash`. """
+        eff_status = self.effective_status
+        target_user = self.target_user
+        accepted_by = self.accepted_by
+        invited_by = self.invited_by
+        data = {
+            'id': self.id,
+            'role': int(self.role),
+            'role_slug': self.role_slug,
+            'role_label': str(self.get_role_display()),
+            'channel': int(self.channel),
+            'channel_label': str(self.get_channel_display()),
+            'status': int(eff_status),
+            'status_label': str(InvitationStatus(eff_status).label),
+            'short_code': self.short_code,
+            'target_email': self.target_email,
+            'target_user': {
+                'id': str(target_user.id),
+                'first_name': (target_user.first_name or '').strip(),
+                'last_name': (target_user.last_name or '').strip(),
+                'email': target_user.email,
+            } if target_user else None,
+            'invited_by': {
+                'id': str(invited_by.id),
+                'first_name': (invited_by.first_name or '').strip(),
+                'last_name': (invited_by.last_name or '').strip(),
+            } if invited_by else None,
+            'accepted_by': {
+                'id': str(accepted_by.id),
+                'first_name': (accepted_by.first_name or '').strip(),
+                'last_name': (accepted_by.last_name or '').strip(),
+            } if accepted_by else None,
+            'stores': [
+                {'id': str(store.id), 'name': store.name}
+                for store in self.allowed_stores.all()
+            ],
+            'expires_at': timezone.localtime(self.expires_at).isoformat() if self.expires_at else None,
+            'accepted_at': timezone.localtime(self.accepted_at).isoformat() if self.accepted_at else None,
+            'created_at': timezone.localtime(self.created_at).isoformat() if self.created_at else None,
+        }
+        if include_company:
+            company = self.company
+            data['company'] = {
+                'id': str(company.id),
+                'name': company.name,
+                'image': storage_manager.get_url(company.image) if company.image else '',
+            }
+        return data
 
 
 # ==========================================
@@ -1751,6 +2106,327 @@ class Order(models.Model):
             models.Index(fields=['store', 'status', '-creation'], name='order_store_status_idx'),
             models.Index(fields=['status', 'creation'], name='order_status_creation_idx'),
         ]
+
+    def get_delivery_json(self, viewer_user=None) -> Optional[dict]:
+        """
+        Bloque `delivery` de la orden (solo para órdenes con delivery que tengan DeliveryAssignment).
+        Si `viewer_user` es None o es el comprador, se usa la vista del cliente (incluye el PIN de entrega);
+        para cualquier otro usuario (comerciante) se usa la vista del comercio (sin PIN).
+        """
+        try:
+            if int(self.withdrawal_type) != WithdrawalType.DELIVERY:
+                return None
+        except (TypeError, ValueError):
+            return None
+        assignment = getattr(self, 'delivery_assignment', None)
+        if assignment is None:
+            return None
+        is_client = viewer_user is None or getattr(viewer_user, 'id', None) == self.client_id
+        return assignment.get_json(viewer_role='client' if is_client else 'merchant')
+
+
+# ==========================================
+# MÓDULO 4.1: DELIVERY EN TIEMPO REAL
+# ==========================================
+
+def default_trace_expiry():
+    """ Las trazas GPS crudas se eliminan a los 30 días (Habeas Data, Art. 28). """
+    return timezone.now() + timedelta(days=30)
+
+
+def _geo_point_json(point) -> Optional[dict]:
+    if point is None:
+        return None
+    return {'lat': float(point.y), 'lng': float(point.x)}
+
+
+def _dt_iso(value) -> Optional[str]:
+    return timezone.localtime(value).isoformat() if value else None
+
+
+def _dt_ms(value) -> Optional[int]:
+    return int(value.timestamp() * 1000) if value else None
+
+
+def _haversine_between_points_m(p1, p2) -> float:
+    """ Distancia (m) entre dos PointField (x=lng, y=lat). """
+    import math
+    if p1 is None or p2 is None:
+        return 0.0
+    lat1, lon1 = math.radians(p1.y), math.radians(p1.x)
+    lat2, lon2 = math.radians(p2.y), math.radians(p2.x)
+    a = math.sin((lat2 - lat1) / 2.0) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2.0) ** 2
+    return 2.0 * 6371000.0 * math.atan2(math.sqrt(a), math.sqrt(max(0.0, 1.0 - a)))
+
+
+class RiderShift(models.Model):
+    """
+    Turno de un repartidor en una sucursal. Mientras está abierto, el repartidor manda un latido
+    de ubicación cada 60 s (la posición caliente vive en Redis `rider:{emp_id}:loc`, TTL 120 s).
+    Fuera de turno no hay ningún rastreo.
+    """
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='shifts')
+    store = models.ForeignKey(CompanyStore, on_delete=models.CASCADE, related_name='rider_shifts')
+    is_active = models.BooleanField(default=True, db_index=True)
+    started_at = models.DateTimeField(auto_now_add=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    last_point = gis_models.PointField(srid=4326, null=True, blank=True)
+    last_heartbeat_at = models.DateTimeField(null=True, blank=True)
+    battery_level = models.PositiveSmallIntegerField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['store', 'is_active'], name='ridershift_store_active_idx'),
+            models.Index(fields=['employee', 'is_active'], name='ridershift_emp_active_idx'),
+        ]
+
+    def __str__(self):
+        return f"Turno de {self.employee_id} en {self.store_id} ({'abierto' if self.is_active else 'cerrado'})"
+
+    def get_json(self) -> dict:
+        store = self.store
+        return {
+            'id': self.id,
+            'employee_id': self.employee_id,
+            'store': {'id': str(store.id), 'name': store.name},
+            'is_active': self.is_active,
+            'started_at': _dt_iso(self.started_at),
+            'ended_at': _dt_iso(self.ended_at),
+            'last_heartbeat_at': _dt_iso(self.last_heartbeat_at),
+            'battery_level': self.battery_level,
+            'last_point': _geo_point_json(self.last_point),
+        }
+
+
+class DeliveryAssignment(models.Model):
+    """
+    Entrega a domicilio de una orden (1:1 con Order).
+
+    `origin_point` y `dest_point` son COPIAS CONGELADAS de la tienda y del cliente
+    (`client_location` usa SET_NULL y el cliente puede editarla).
+    `route_cum_dist` / `route_cum_time` son el perfil de tiempos por tramo de la ruta planificada:
+    la base matemática del protocolo de predicción (Dead Reckoning).
+    `tracking_key` autentica paquetes BLE y entregas offline; `handoff_pin` solo lo ve el cliente.
+    """
+    order = models.OneToOneField(Order, on_delete=models.CASCADE, related_name='delivery_assignment')
+    store = models.ForeignKey(CompanyStore, on_delete=models.CASCADE, related_name='delivery_assignments')
+    rider = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True, related_name='deliveries')
+    assigned_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_deliveries')
+    is_auto_assigned = models.BooleanField(default=True)
+    status = models.IntegerField(choices=DeliveryStatus.choices, default=DeliveryStatus.PENDING_RIDER, db_index=True)
+
+    origin_point = gis_models.PointField(srid=4326)
+    dest_point = gis_models.PointField(srid=4326)
+    dest_address_snapshot = models.TextField(blank=True, default='')
+
+    route_geometry = gis_models.LineStringField(srid=4326, null=True, blank=True)
+    route_polyline6 = models.TextField(blank=True, default='')
+    route_cum_dist = models.JSONField(default=list, blank=True)
+    route_cum_time = models.JSONField(default=list, blank=True)
+    route_version = models.PositiveIntegerField(default=1)
+    route_distance_m = models.FloatField(default=0.0)
+    route_duration_s = models.FloatField(default=0.0)
+    eta_at = models.DateTimeField(null=True, blank=True)
+
+    tracking_key = models.CharField(max_length=64, default='')
+    handoff_pin = models.CharField(max_length=4, default='')
+    handoff_pin_hash = models.CharField(max_length=128, default='')
+    pin_attempts = models.PositiveSmallIntegerField(default=0)
+
+    declined_rider_ids = models.JSONField(default=list, blank=True)
+    offer_expires_at = models.DateTimeField(null=True, blank=True)
+    failure_reason = models.CharField(max_length=255, blank=True, default='')
+
+    last_fix_point = gis_models.PointField(srid=4326, null=True, blank=True)
+    last_fix_speed_mps = models.FloatField(null=True, blank=True)
+    last_fix_heading = models.FloatField(null=True, blank=True)
+    last_fix_accuracy_m = models.FloatField(null=True, blank=True)
+    last_fix_at = models.DateTimeField(null=True, blank=True)
+    last_fix_source = models.IntegerField(choices=FixSource.choices, null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    assigned_at = models.DateTimeField(null=True, blank=True)
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    at_store_at = models.DateTimeField(null=True, blank=True)
+    picked_up_at = models.DateTimeField(null=True, blank=True)
+    arriving_at = models.DateTimeField(null=True, blank=True)
+    delivered_at = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            UniqueConstraint(
+                fields=['rider'],
+                condition=Q(status__in=[1, 2, 3, 4, 5]),
+                name='one_active_delivery_per_rider',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['store', 'status'], name='dlv_store_status_idx'),
+            models.Index(fields=['rider', 'status'], name='dlv_rider_status_idx'),
+            models.Index(fields=['status', 'offer_expires_at'], name='dlv_status_offer_idx'),
+        ]
+
+    def __str__(self):
+        return f"Delivery #{self.id} · Orden {self.order_id} ({self.get_status_display()})"
+
+    @property
+    def is_active(self) -> bool:
+        return int(self.status) in DELIVERY_ACTIVE_STATUSES
+
+    def get_rider_public_json(self, include_employee_id: bool = False) -> Optional[dict]:
+        rider = self.rider
+        if rider is None:
+            return None
+        user = rider.user
+        alias = (rider.display_alias or '').strip()
+        if not alias:
+            last_initial = (user.last_name or '').strip()[:1]
+            alias = f"{(user.first_name or '').strip()} {last_initial + '.' if last_initial else ''}".strip() or 'Repartidor'
+        data = {
+            'display_name': alias,
+            'vehicle_type': int(rider.vehicle_type) if rider.vehicle_type is not None else None,
+            'vehicle_type_label': str(rider.get_vehicle_type_display()) if rider.vehicle_type is not None else None,
+            'profile_picture': user.get_profile_picture_url() if user.profile_picture else '',
+        }
+        if include_employee_id:
+            data['employee_id'] = rider.id
+        return data
+
+    def get_json(self, viewer_role: str = 'client') -> dict:
+        """
+        Representación con privacidad estricta (Habeas Data, Art. 28):
+        - client: incluye `handoff_pin`; ve al repartidor, su posición y la ruta SOLO en PICKED_UP / ARRIVING.
+        - rider: NUNCA ve el PIN; ve la dirección exacta del cliente solo desde ACCEPTED
+          (en ASSIGNED solo una zona aproximada ~1 km y una distancia estimada).
+        - merchant: NUNCA ve el PIN ni `tracking_key`; ve la posición del repartidor desde ACCEPTED.
+        `tracking_key` y `handoff_pin_hash` nunca se incluyen aquí (la clave va solo en el bootstrap del repartidor).
+        """
+        status_value = int(self.status)
+        data = {
+            'id': self.id,
+            'order_id': self.order_id,
+            'store_id': str(self.store_id),
+            'store_name': self.store.name if self.store_id else '',
+            'status': status_value,
+            'status_label': str(DeliveryStatus(status_value).label),
+            'is_active': status_value in DELIVERY_ACTIVE_STATUSES,
+            'route_version': self.route_version,
+            'eta_at': _dt_iso(self.eta_at),
+            'eta_at_ms': _dt_ms(self.eta_at),
+            'origin': _geo_point_json(self.origin_point),
+            'failure_reason': self.failure_reason or '',
+            'tracking_room': f"delivery_{self.id}",
+            'timestamps': {
+                'created_at': _dt_iso(self.created_at),
+                'assigned_at': _dt_iso(self.assigned_at),
+                'accepted_at': _dt_iso(self.accepted_at),
+                'at_store_at': _dt_iso(self.at_store_at),
+                'picked_up_at': _dt_iso(self.picked_up_at),
+                'arriving_at': _dt_iso(self.arriving_at),
+                'delivered_at': _dt_iso(self.delivered_at),
+                'cancelled_at': _dt_iso(self.cancelled_at),
+            },
+        }
+
+        in_transit = status_value in (DeliveryStatus.PICKED_UP, DeliveryStatus.ARRIVING)
+        show_dest_exact = False
+        show_route = False
+        show_fix = False
+        show_rider = False
+        include_employee_id = False
+
+        if viewer_role == 'rider':
+            show_dest_exact = status_value in (
+                DeliveryStatus.ACCEPTED, DeliveryStatus.AT_STORE, DeliveryStatus.PICKED_UP,
+                DeliveryStatus.ARRIVING, DeliveryStatus.DELIVERED, DeliveryStatus.FAILED,
+            )
+            show_route = show_dest_exact
+            show_fix = True
+            data['is_auto_assigned'] = self.is_auto_assigned
+            data['offer_expires_at'] = _dt_iso(self.offer_expires_at)
+            data['offer_expires_at_ms'] = _dt_ms(self.offer_expires_at)
+            data['pin_attempts_remaining'] = max(0, DELIVERY_MAX_PIN_ATTEMPTS - int(self.pin_attempts or 0))
+        elif viewer_role == 'merchant':
+            show_dest_exact = True
+            show_route = status_value >= DeliveryStatus.ACCEPTED and status_value != DeliveryStatus.CANCELLED
+            show_fix = status_value in (
+                DeliveryStatus.ACCEPTED, DeliveryStatus.AT_STORE, DeliveryStatus.PICKED_UP, DeliveryStatus.ARRIVING,
+            )
+            show_rider = True
+            include_employee_id = True
+            data['is_auto_assigned'] = self.is_auto_assigned
+            data['offer_expires_at'] = _dt_iso(self.offer_expires_at)
+            data['offer_expires_at_ms'] = _dt_ms(self.offer_expires_at)
+            data['declined_count'] = len(self.declined_rider_ids or [])
+        else:
+            # Cliente (comprador)
+            show_dest_exact = True
+            show_route = in_transit
+            show_fix = in_transit
+            show_rider = in_transit
+            data['handoff_pin'] = self.handoff_pin if status_value not in DELIVERY_TERMINAL_STATUSES else None
+            data['has_rider'] = self.rider_id is not None and status_value in DELIVERY_ACTIVE_STATUSES
+
+        if show_dest_exact:
+            dest = _geo_point_json(self.dest_point)
+            if dest is not None:
+                dest['address'] = self.dest_address_snapshot or ''
+            data['destination'] = dest
+        elif viewer_role == 'rider' and self.dest_point is not None:
+            data['destination_zone'] = {
+                'lat': round(float(self.dest_point.y), 2),
+                'lng': round(float(self.dest_point.x), 2),
+                'approx_radius_m': 1000,
+            }
+            data['estimated_distance_m'] = round(
+                _haversine_between_points_m(self.origin_point, self.dest_point) * 1.28
+            )
+
+        if show_route and self.route_polyline6:
+            data['route'] = {
+                'version': self.route_version,
+                'polyline6': self.route_polyline6,
+                'distance_m': self.route_distance_m,
+                'duration_s': self.route_duration_s,
+            }
+
+        if show_fix and self.last_fix_point is not None:
+            data['last_fix'] = {
+                'lat': float(self.last_fix_point.y),
+                'lng': float(self.last_fix_point.x),
+                'speed_mps': self.last_fix_speed_mps,
+                'heading': self.last_fix_heading,
+                'accuracy_m': self.last_fix_accuracy_m,
+                'at': _dt_iso(self.last_fix_at),
+                'at_ms': _dt_ms(self.last_fix_at),
+                'source': int(self.last_fix_source) if self.last_fix_source is not None else None,
+            }
+
+        if show_rider:
+            data['rider'] = self.get_rider_public_json(include_employee_id=include_employee_id)
+
+        return data
+
+
+class DeliveryTrace(models.Model):
+    """
+    Traza real de una entrega (una fila por entrega, se escribe al terminar o al subir el buffer offline).
+
+    `compressed_points` = gzip(msgpack(lista de puntos)), cada punto como
+    `[t_ms, lat_e7, lng_e7, v_cms, heading_cd, acc_dm, source]` (t_ms relativo a `assigned_at`).
+    Se elimina a los 30 días (`expires_at`).
+    """
+    delivery = models.OneToOneField(DeliveryAssignment, on_delete=models.CASCADE, related_name='trace')
+    compressed_points = models.BinaryField(null=True, blank=True)
+    matched_polyline6 = models.TextField(blank=True, default='')
+    point_count = models.PositiveIntegerField(default=0)
+    max_gap_s = models.FloatField(default=0.0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(default=default_trace_expiry, db_index=True)
+
+    def __str__(self):
+        return f"Traza de delivery #{self.delivery_id} ({self.point_count} puntos)"
 
 class TokenWallet(models.Model):
     """

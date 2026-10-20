@@ -366,3 +366,223 @@ class MerchantGrowthAndAtlasCopilotTests(SimpleTestCase):
         self.assertFalse(access_plus["requires_atlas_plus"])
 
 
+
+class OsrmRoutingClientTests(SimpleTestCase):
+    """Pruebas del cliente OSRM (polyline6 y perfil de tiempos acumulado) sin red."""
+
+    def test_decode_known_polyline_precision5(self):
+        from api.core.routing import decode_polyline
+        points = decode_polyline("_p~iF~ps|U_ulLnnqC_mqNvxq`@", precision=5)
+        self.assertEqual(len(points), 3)
+        self.assertAlmostEqual(points[0][0], 38.5, places=5)
+        self.assertAlmostEqual(points[0][1], -120.2, places=5)
+        self.assertAlmostEqual(points[2][0], 43.252, places=5)
+        self.assertAlmostEqual(points[2][1], -126.453, places=5)
+
+    def test_polyline6_round_trip(self):
+        from api.core.routing import decode_polyline, encode_polyline
+        original = [(10.480600, -66.903600), (10.481234, -66.902111), (10.496100, -66.879200)]
+        decoded = decode_polyline(encode_polyline(original, precision=6), precision=6)
+        for (lat_a, lng_a), (lat_b, lng_b) in zip(original, decoded):
+            self.assertAlmostEqual(lat_a, lat_b, places=6)
+            self.assertAlmostEqual(lng_a, lng_b, places=6)
+
+    def test_route_builds_cumulative_profile(self):
+        from api.core import routing
+        pts = [(10.4806, -66.9036), (10.4810, -66.9030), (10.4820, -66.9020)]
+        fake_payload = {
+            'code': 'Ok',
+            'routes': [{
+                'geometry': routing.encode_polyline(pts, precision=6),
+                'distance': 300.0,
+                'duration': 60.0,
+                'legs': [{'annotation': {'distance': [100.0, 200.0], 'duration': [20.0, 40.0]}}],
+            }],
+        }
+        fake_response = MagicMock(status_code=200)
+        fake_response.json.return_value = fake_payload
+        with patch('api.core.routing.requests.get', return_value=fake_response):
+            result = routing.route(pts[0], pts[-1], profile=routing.PROFILE_CAR)
+        self.assertEqual(len(result['points']), 3)
+        self.assertEqual(result['cum_dist'], [0.0, 100.0, 300.0])
+        self.assertEqual(result['cum_time'], [0.0, 20.0, 60.0])
+        self.assertEqual(result['distance_m'], 300.0)
+
+    def test_table_returns_none_for_unreachable(self):
+        from api.core import routing
+        fake_response = MagicMock(status_code=200)
+        fake_response.json.return_value = {'code': 'Ok', 'durations': [[120.5], [None]]}
+        with patch('api.core.routing.requests.get', return_value=fake_response):
+            result = routing.table([(10.48, -66.90), (10.49, -66.91)], (10.50, -66.92))
+        self.assertEqual(result, [120.5, None])
+
+    def test_profile_for_vehicle(self):
+        from api.core.routing import profile_for_vehicle, PROFILE_CAR, PROFILE_BIKE
+        self.assertEqual(profile_for_vehicle(0), PROFILE_CAR)
+        self.assertEqual(profile_for_vehicle(1), PROFILE_BIKE)
+        self.assertEqual(profile_for_vehicle(2), PROFILE_CAR)
+        self.assertEqual(profile_for_vehicle(3), PROFILE_BIKE)
+        self.assertEqual(profile_for_vehicle(None), PROFILE_CAR)
+
+
+class WorkforceHelpersTests(SimpleTestCase):
+    """Pruebas de parseo de entradas y del contexto de sesión (sin base de datos)."""
+
+    def test_parse_role_accepts_slug_and_int(self):
+        from api.core.workforce import parse_role, WorkforceError
+        from api.models import EmployeeRole
+        self.assertEqual(parse_role('delivery'), EmployeeRole.DELIVERY)
+        self.assertEqual(parse_role('assistant'), EmployeeRole.ASSISTANT)
+        self.assertEqual(parse_role(1), EmployeeRole.DELIVERY)
+        self.assertEqual(parse_role('0'), EmployeeRole.ASSISTANT)
+        with self.assertRaises(WorkforceError):
+            parse_role('jefe')
+        with self.assertRaises(WorkforceError):
+            parse_role(True)
+
+    def test_parse_vehicle_type_allows_null(self):
+        from api.core.workforce import parse_vehicle_type
+        self.assertIsNone(parse_vehicle_type(None))
+        self.assertEqual(parse_vehicle_type('moto'), 0)
+        self.assertEqual(parse_vehicle_type('pie'), 3)
+
+    def test_short_code_normalization(self):
+        from api.models import EmployeeInvitation
+        self.assertEqual(EmployeeInvitation.normalize_short_code(' ab3d-ef7h '), 'AB3DEF7H')
+
+    def test_request_ctx_defaults_to_personal(self):
+        from api.permissions import get_request_ctx, IsPersonalContext
+        user = SimpleNamespace(is_authenticated=True, id='u1')
+        legacy_request = SimpleNamespace(user=user, auth={'user_id': 'u1'})
+        worker_request = SimpleNamespace(user=user, auth={'user_id': 'u1', 'ctx': 'worker', 'emp_id': 7})
+        self.assertEqual(get_request_ctx(legacy_request), 'personal')
+        self.assertTrue(IsPersonalContext().has_permission(legacy_request, None))
+        self.assertFalse(IsPersonalContext().has_permission(worker_request, None))
+
+    def test_worker_permission_checks_cached_state(self):
+        from api.permissions import IsDeliveryWorker
+        user = SimpleNamespace(is_authenticated=True, id='u1')
+        request = SimpleNamespace(user=user, auth={'user_id': 'u1', 'ctx': 'worker', 'emp_id': 7})
+        active_state = {'active': True, 'role': 'delivery', 'user_id': 'u1', 'company_id': 'c1'}
+        with patch('api.permissions.get_employee_state', return_value=active_state):
+            self.assertTrue(IsDeliveryWorker().has_permission(request, None))
+        revoked_state = dict(active_state, active=False)
+        with patch('api.permissions.get_employee_state', return_value=revoked_state):
+            self.assertFalse(IsDeliveryWorker().has_permission(request, None))
+        assistant_state = dict(active_state, role='assistant')
+        with patch('api.permissions.get_employee_state', return_value=assistant_state):
+            self.assertFalse(IsDeliveryWorker().has_permission(request, None))
+
+
+
+class DeliveryRealtimeProtocolTests(SimpleTestCase):
+    """Pruebas unitarias de Dead Reckoning, formatos binarios (20 B y 24 B BLE), PIN y ranking."""
+
+    def test_rider_fix_20_bytes_binary_round_trip(self):
+        from api.core.delivery import pack_rider_fix, unpack_rider_fix, FIX_FLAG_OFF_ROUTE
+
+        buf = pack_rider_fix(
+            t_ms=125430,
+            lat=10.4806123,
+            lng=-66.9036456,
+            speed_mps=11.45,
+            heading_deg=274.8,
+            accuracy_m=6.4,
+            seq=42,
+            flags=FIX_FLAG_OFF_ROUTE,
+        )
+        self.assertEqual(len(buf), 20)
+        decoded = unpack_rider_fix(buf)
+        self.assertEqual(decoded['t_ms'], 125430)
+        self.assertAlmostEqual(decoded['lat'], 10.4806123, places=6)
+        self.assertAlmostEqual(decoded['lng'], -66.9036456, places=6)
+        self.assertAlmostEqual(decoded['speed_mps'], 11.45, places=2)
+        self.assertAlmostEqual(decoded['heading'], 274.8, places=1)
+        self.assertAlmostEqual(decoded['accuracy_m'], 6.4, places=1)
+        self.assertEqual(decoded['seq'], 42)
+        self.assertEqual(decoded['flags'], FIX_FLAG_OFF_ROUTE)
+
+    def test_ble_24_byte_packet_aes_ctr_and_hmac_verification(self):
+        import secrets
+        from api.core.delivery import build_ble_packet, parse_ble_packet, BlePacketError
+
+        tracking_key = secrets.token_hex(32)
+        pkt = build_ble_packet(
+            tracking_key=tracking_key,
+            lat=10.4912345,
+            lng=-66.8791234,
+            speed_mps=9.8,
+            heading_deg=180.0,
+            t_rel_s=512,
+            seq=17,
+            window=2880000,
+        )
+        self.assertEqual(len(pkt), 24)
+        parsed = parse_ble_packet(tracking_key, pkt, expected_window=2880000)
+        self.assertEqual(parsed['seq'], 17)
+        self.assertEqual(parsed['t_rel_s'], 512)
+        self.assertAlmostEqual(parsed['lat'], 10.4912345, places=6)
+        self.assertAlmostEqual(parsed['lng'], -66.8791234, places=6)
+        self.assertAlmostEqual(parsed['speed_mps'], 9.8, places=1)
+        self.assertEqual(parsed['heading'], 180.0)
+
+        # Cualquier alteración de 1 bit en el ciphertext invalida el tag HMAC de 6 bytes
+        tampered = bytearray(pkt)
+        tampered[10] ^= 0x01
+        with self.assertRaises(BlePacketError):
+            parse_ble_packet(tracking_key, bytes(tampered), expected_window=2880000)
+
+    def test_handoff_pin_and_offline_signature(self):
+        import secrets
+        from api.core.delivery import (
+            hash_handoff_pin,
+            verify_handoff_pin,
+            compute_offline_signature,
+            verify_offline_signature,
+        )
+
+        key = secrets.token_hex(32)
+        pin_hash = hash_handoff_pin(key, "4829")
+        self.assertTrue(verify_handoff_pin(key, pin_hash, "4829"))
+        self.assertFalse(verify_handoff_pin(key, pin_hash, "4828"))
+
+        sig = compute_offline_signature(key, 99, "4829", 65000, 10.4806, -66.9036)
+        self.assertTrue(verify_offline_signature(key, sig, 99, "4829", 65000, 10.4806, -66.9036))
+        self.assertFalse(verify_offline_signature(key, sig, 99, "0000", 65000, 10.4806, -66.9036))
+
+    def test_dead_reckoning_piecewise_time_distance_and_projection(self):
+        from api.core.dead_reckoning import (
+            time_at_distance,
+            distance_at_time,
+            predict_distance,
+            project_on_route,
+            eta_remaining_s,
+        )
+
+        # Tramo 1: 100 m en 10 s (10 m/s); Tramo 2 (subida/tráfico): 100 m en 40 s (2.5 m/s)
+        pts = [(10.4800, -66.9000), (10.4800, -66.899085), (10.4800, -66.898170)]
+        cum_dist = [0.0, 100.0, 200.0]
+        cum_time = [0.0, 10.0, 50.0]
+
+        self.assertAlmostEqual(time_at_distance(cum_dist, cum_time, 50.0), 5.0, places=3)
+        self.assertAlmostEqual(time_at_distance(cum_dist, cum_time, 150.0), 30.0, places=3)
+        self.assertAlmostEqual(distance_at_time(cum_dist, cum_time, 30.0), 150.0, places=3)
+
+        # Con k=1.0 desde s_a=50m (tau=5s), tras 25s (tau=30s) predice exactamente 150m
+        s_pred = predict_distance(cum_dist, cum_time, s_a=50.0, k=1.0, t_a_ms=1000, t_ms=26000)
+        self.assertAlmostEqual(s_pred, 150.0, places=3)
+        self.assertAlmostEqual(eta_remaining_s(cum_dist, cum_time, s_a=150.0, k=1.0), 20.0, places=3)
+
+        proj = project_on_route(pts, cum_dist, 10.48005, -66.899085)
+        self.assertAlmostEqual(proj['s'], 100.0, delta=2.0)
+        self.assertLess(proj['d_perp'], 10.0)
+
+    def test_rank_candidates_tie_breaker_favors_fewer_deliveries_today(self):
+        from api.core.delivery import rank_candidates
+
+        c1 = {'employee': SimpleNamespace(id=1)}
+        c2 = {'employee': SimpleNamespace(id=2)}
+        c3 = {'employee': SimpleNamespace(id=3)}
+        # c1 tarda 120s (5 entregas hoy), c2 tarda 150s (1 entrega hoy -> diferencia < 60s, gana c2!)
+        ranked = rank_candidates([c1, c2, c3], [120.0, 150.0, 400.0], {1: 5, 2: 1, 3: 0})
+        self.assertEqual([r['employee'].id for r in ranked], [2, 1, 3])

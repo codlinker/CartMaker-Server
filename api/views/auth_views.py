@@ -1,6 +1,8 @@
 """Authentication, OAuth2, Biometric 512-D Login, Device Registration, and KYC Verification views."""
 from .base import *
 from .base import _get_cached_bcv_rate, _extract_and_validate_category_ids
+from rest_framework_simplejwt.views import TokenRefreshView
+from ..core.workforce import get_user_workspaces
 
 ####################################################
 ################## AUTENTICACION ###################
@@ -140,6 +142,8 @@ class BiometricLoginView(APIView):
             update_rolling_template.delay(closest_user.id, vector)
 
         refresh = RefreshToken.for_user(closest_user)
+        # Contexto de sesión: el login biométrico emite tokens de la cuenta personal
+        refresh['ctx'] = 'personal'
         return Response({
             'refresh': str(refresh),
             'access': str(refresh.access_token),
@@ -151,6 +155,8 @@ class BiometricLoginView(APIView):
             'email_verified': closest_user.email_verified,
             'gender': closest_user.gender,
             'preferred_category_ids': closest_user.get_preferred_category_ids(),
+            'ctx': 'personal',
+            'workspaces': get_user_workspaces(closest_user),
         }, status=status.HTTP_200_OK)
 
 class CartMakerTokenView(TokenObtainPairView):
@@ -161,6 +167,13 @@ class CartMakerTokenView(TokenObtainPairView):
     serializer_class = CartMakerTokenSerializer
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'auth'
+
+class CartMakerTokenRefreshView(TokenRefreshView):
+    """
+    Refresh de tokens que conserva el contexto de sesión (personal / trabajador)
+    y rechaza refrescar sesiones de trabajador suspendidas o revocadas.
+    """
+    serializer_class = WorkspaceTokenRefreshSerializer
 
 class GoogleClientId(APIView):
     """
@@ -255,6 +268,8 @@ class GoogleLoginView(APIView):
                 "user_type":user.user_type,
                 "email_verified":True,
                 "preferred_category_ids": user.get_preferred_category_ids(),
+                "ctx": "personal",
+                "workspaces": get_user_workspaces(user),
             }, status=200)
         except ValueError as e:
             print(e)

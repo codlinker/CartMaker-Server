@@ -547,3 +547,54 @@ class NotificationManager:
             cls._send_multicast(user=user_obj, title=title, body=body, data_payload=data)
         except Exception as e:
             logger.error(f"Fallo al notificar cierre de ticket a {user_id}: {e}")
+
+    @classmethod
+    def notify_workforce_event(
+        cls,
+        user_id,
+        title: str,
+        body: str,
+        event_type: str = 'workforce_update',
+        category: int = NotificationCategory.EMPLOYEE_UPDATE,
+        section: int = NotificationSection.MERCHANT_EMPLOYEES,
+        extra_data: Optional[Dict] = None,
+    ) -> None:
+        """
+        Notifica eventos del sistema de trabajadores (invitaciones, altas, suspensiones, renuncias).
+        Persiste la notificación en la bandeja de la app y envía el push FCM.
+        """
+        meta = {
+            'type': event_type,
+            'recipient_id': str(user_id),
+        }
+        if extra_data:
+            for k, v in extra_data.items():
+                if v is not None:
+                    meta[str(k)] = v
+        try:
+            notification = Notification.objects.create(
+                user_id=user_id,
+                section=section,
+                title=title,
+                body=body,
+                category=category,
+                metadata=meta,
+            )
+        except Exception as e:
+            logger.error(f"Fallo al registrar notificación de trabajadores para {user_id}: {e}")
+            return
+
+        data = {
+            'type': event_type,
+            'notification_id': str(notification.id),
+            'recipient_id': str(user_id),
+        }
+        if extra_data:
+            for k, v in extra_data.items():
+                if v is not None:
+                    data[str(k)] = str(v)
+        try:
+            user_obj = User.objects.prefetch_related('fcm_tokens').get(id=user_id)
+            cls._send_multicast(user=user_obj, title=title, body=body, data_payload=data)
+        except Exception as e:
+            logger.error(f"Fallo al enviar push de trabajadores a {user_id}: {e}")

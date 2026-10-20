@@ -223,8 +223,8 @@ class CartMakerClientGatekeeperMiddleware:
                 request.has_valid_cartmaker_api_key = True
                 return self.get_response(request)
 
-            # Respaldo de compatibilidad para comunicación interna de Node.js en /chat/webhook/
-            if path.startswith("/chat/webhook/"):
+            # Respaldo de compatibilidad para comunicación interna de Node.js en /chat/webhook/ y /api/v1/delivery/internal/
+            if path.startswith("/chat/webhook/") or path.startswith("/api/v1/delivery/internal/"):
                 ms_token = request.headers.get("X-Microservice-Token") or ""
                 django_secret = os.environ.get("DJANGO_SECRET_KEY") or ""
                 if ms_token and django_secret and secrets.compare_digest(ms_token, django_secret):

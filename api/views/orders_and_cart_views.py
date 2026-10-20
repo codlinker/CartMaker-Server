@@ -1,12 +1,23 @@
 """Order Lifecycle, Escrow, Checkout Cart, Multi-Store Reservations, and Disputes."""
 from .base import *
 from .base import _get_cached_bcv_rate, _extract_and_validate_category_ids
+from ..core.order_services import ship_order_service, complete_order_service, OrderServiceError
+from ..core.delivery import (
+    DeliveryError,
+    cancel_delivery_for_order,
+    create_or_assign_delivery_for_order,
+    manual_assign_delivery,
+    reassign_delivery,
+    unassign_delivery,
+)
+from ..permissions import IsPersonalContext
 
 class OrderViewSet(viewsets.ViewSet):
     """
     API para la gestión y consulta de órdenes de compra del usuario.
     """
-    permission_classes = [IsAuthenticated]
+    # Solo cuenta personal: con un token de trabajador no se ven ni gestionan órdenes personales
+    permission_classes = [IsAuthenticated, IsPersonalContext]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'actions'
 
@@ -136,7 +147,8 @@ class OrderViewSet(viewsets.ViewSet):
                 'store__company',
                 'store__company__owner',
                 'store__location',
-                'client_location'
+                'client_location',
+                'delivery_assignment__rider__user',
             ).prefetch_related(
                 'client__contact_methods',
                 'store__contact_methods',
@@ -208,6 +220,7 @@ class OrderViewSet(viewsets.ViewSet):
                 'client_name': f"{order.client.first_name} {order.client.last_name}",
                 'client_contact_methods': contact_methods_dict,
                 'end_time': timezone.localtime(order.end_time).strftime("%d/%m/%Y %I:%M %p").lower() if order.end_time else creation_str,
+                'delivery': order.get_delivery_json(viewer_user=request.user),
             }
             # CART-60 (Principio de Proporcionalidad): nunca exponer client_cedula ni documentos de identidad al comerciante
             if not is_merchant_mode:
@@ -229,7 +242,8 @@ class OrderViewSet(viewsets.ViewSet):
             'store__company',
             'store__company__owner',
             'store__location',
-            'client_location'
+            'client_location',
+            'delivery_assignment__rider__user',
         ).prefetch_related(
             'store__contact_methods',
             'client__contact_methods',
@@ -305,6 +319,7 @@ class OrderViewSet(viewsets.ViewSet):
                 'end_time': timezone.localtime(order.end_time).strftime("%d/%m/%Y %I:%M %p").lower() if order.end_time else creation_str,
                 'client_cedula': order.client.cedula_number,
                 'client_email': order.client.email,
+                'delivery': order.get_delivery_json(viewer_user=request.user),
             })
 
         return Response({'data': orders_data}, status=status.HTTP_200_OK)
@@ -316,7 +331,8 @@ class OrderViewSet(viewsets.ViewSet):
             'store__company', 
             'store__location', 
             'client',
-            'client_location'
+            'client_location',
+            'delivery_assignment__rider__user',
         ).prefetch_related(
             'client__contact_methods',
             'support_tickets',
@@ -387,6 +403,7 @@ class OrderViewSet(viewsets.ViewSet):
                 
                 'cart': order.cart,
                 'creation': creation_str,
+                'delivery': order.get_delivery_json(viewer_user=request.user),
             })
         return Response({'data': orders_data}, status=status.HTTP_200_OK)
     
@@ -401,39 +418,11 @@ class OrderViewSet(viewsets.ViewSet):
                     .select_related('store__company')
                     .get(id=order_id, store__company__owner=request.user)
                 )
-                if order.withdrawal_type != WithdrawalType.DELIVERY: # DELIVERY
-                    return Response({"error": "Esta orden no requiere despacho a domicilio."}, status=status.HTTP_400_BAD_REQUEST)
-                
-                if order.status == OrderStatus.REPORTED:
-                    return Response(
-                        {"error": "Esta orden ha sido reportada y se encuentra en revisión por Soporte CartMaker. No puede despacharse hasta que finalice la revisión."},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-
-                if order.status != OrderStatus.WAITING: # WAITING
-                    return Response({"error": "La orden ya ha cambiado de estado."}, status=status.HTTP_400_BAD_REQUEST)
-
-                order.status = OrderStatus.DELIVERY_SENT # ENVIADO / EN CAMINO
-                order.save(update_fields=['status'])
-                
-                # 💡 SOLUCIÓN CASO BORDE 1: Marcamos como leídas las notificaciones previas de esta orden
-                Notification.objects.filter(metadata__order_id=str(order.id), is_read=False).update(is_read=True)
-
-                client_id = order.client_id
-                target_order_id = order.id
-                company_name = order.store.company.name
-
-                transaction.on_commit(
-                    lambda: NotificationManager.notify_order_status_change(
-                        user_id=client_id,
-                        order_id=target_order_id,
-                        title="¡Tu orden va en camino!",
-                        body=f"El repartidor de {company_name} ha salido con tus productos.",
-                        is_merchant=False,
-                        new_status=OrderStatus.DELIVERY_SENT
-                    )
-                )
+                # La lógica de despacho vive en api/core/order_services.py (reutilizada por el flujo de delivery)
+                ship_order_service(order, request.user)
             return Response({"success": True, "message": "Orden marcada como enviada."}, status=status.HTTP_200_OK)
+        except OrderServiceError as e:
+            return Response({"error": e.message}, status=e.status_code)
         except Order.DoesNotExist:
             return Response({"error": "La orden no existe o no eres el dueño del comercio."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -555,6 +544,9 @@ class OrderViewSet(viewsets.ViewSet):
                 order.end_time = timezone.now()
                 order.save(update_fields=['status', 'cancellation_topic', 'end_time'])
 
+                # Si la orden tenía una entrega activa, se cancela y se libera al repartidor
+                cancel_delivery_for_order(order, reason='order_cancelled')
+
                 Notification.objects.filter(metadata__order_id=str(order.id), is_read=False).update(is_read=True)
 
                 merchant_owner_id = order.store.company.owner_id
@@ -596,171 +588,21 @@ class OrderViewSet(viewsets.ViewSet):
             with transaction.atomic():
                 # Bloqueamos únicamente la fila de la orden (of=('self',)) para evitar bloqueos innecesarios en tablas relacionadas
                 order = Order.objects.select_for_update(of=('self',)).select_related('store__company').get(id=order_id)
-                is_client = order.client == request.user
-                is_merchant = order.store.company.owner == request.user
-
-                if not is_client and not is_merchant:
-                    return Response({"error": "No tienes permisos sobre esta orden."}, status=status.HTTP_403_FORBIDDEN)
-
-                if order.status == OrderStatus.REPORTED:
-                    return Response(
-                        {"error": "Esta orden ha sido reportada y se encuentra en revisión por Soporte CartMaker. No puede completarse hasta que finalice la revisión."},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-
-                if order.status in (OrderStatus.CANCELLED, OrderStatus.SOLVED):
-                    return Response({"error": "No se puede completar una orden cancelada o cerrada."}, status=status.HTTP_400_BAD_REQUEST)
-
-                cart_data = order.cart if isinstance(order.cart, dict) else {}
-                already_completed = (order.status == OrderStatus.COMPLETED)
-                client_already_rated = bool(cart_data.get('client_rated', False))
-
-                # Si la orden ya estaba completada, solo permitimos que el cliente envíe su calificación pendiente una única vez
-                if already_completed and (not is_client or client_already_rated):
-                    return Response({"error": "Esta orden ya se encuentra completada."}, status=status.HTTP_400_BAD_REQUEST)
-
-                cart_items = cart_data.get('items', [])
-                tokens_earned = 0.0
-                company = order.store.company
-
-                if not already_completed:
-                    order.status = OrderStatus.COMPLETED
-                    order.end_time = timezone.now()
-
-                    for item in cart_items:
-                        inv_item_id = item.get('inventory_item_id')
-                        raw_qty = float(item.get('quantity', 0) or 0)
-                        qty = int(item.get('stock_units_deducted') or (max(1, math.ceil(raw_qty)) if raw_qty > 0 else 0))
-                        
-                        # 💡 EXTRAEMOS LA ETIQUETA DEL VIDEO DEL SNAPSHOT DE LA ORDEN
-                        source_video_id = item.get('source_video_id')
-                        
-                        if inv_item_id and qty > 0:
-                            try:
-                                inv_item = InventoryItem.objects.get(id=inv_item_id)
-                                InventoryItemTransaction.objects.create(
-                                    item=inv_item,
-                                    units=qty,
-                                    transaction_type=TransactionType.OUTCOME
-                                )
-                            except InventoryItem.DoesNotExist:
-                                pass # Si el producto ya no existe, ignoramos
-
-                        # =========================================================
-                        # 💡 REGISTRO DE COMPRA DE VIDEO (Atribución Real en Checkout)
-                        # =========================================================
-                        if source_video_id:
-                            try:
-                                log = VideoEngagementLog.objects.filter(
-                                    client=order.client,
-                                    video_id=source_video_id
-                                ).order_by('-timestamp').first()
-
-                                if log:
-                                    log.bought_from_video = True
-                                    log.save(update_fields=['bought_from_video'])
-                                else:
-                                    VideoEngagementLog.objects.create(
-                                        client=order.client,
-                                        video_id=source_video_id,
-                                        bought_from_video=True
-                                    )
-                            except Exception as e:
-                                print(f"❌ Error actualizando atribución de video: {e}")
-
-                    Notification.objects.filter(metadata__order_id=str(order.id), is_read=False).update(is_read=True)
-
-                    if company.gamification_enabled and company.gamification_tokens_per_dollar > 0:
-                        order_total = max(0.0, float(cart_data.get('total', 0.0)))
-                        tokens_earned = int(order_total * company.gamification_tokens_per_dollar)
-                        
-                        if tokens_earned > 0:
-                            wallet, _ = TokenWallet.objects.select_for_update().get_or_create(
-                                user=order.client,
-                                company=company
-                            )
-                            wallet.balance += tokens_earned
-                            wallet.save(update_fields=['balance'])
-                            
-                            TokenWalletTransaction.objects.create(
-                                token_wallet=wallet, amount=tokens_earned,
-                                transaction_type=TransactionType.INCOME, order=order
-                            )
-
-                # El cliente califica (una sola vez por orden, validando pertenencia y rango [1.0, 5.0])
-                if is_client and not client_already_rated:
-                    rated_any = False
-                    try:
-                        m_rating_val = float(merchant_rating or 0)
-                    except (ValueError, TypeError):
-                        m_rating_val = 0.0
-                    if m_rating_val > 0:
-                        clamped_m_rating = min(5.0, max(1.0, m_rating_val))
-                        MerchantCalification.objects.create(
-                            merchant=order.store.company,
-                            client=request.user,
-                            rating=clamped_m_rating
-                        )
-                        rated_any = True
-                    valid_product_ids = {str(item.get('product_id')) for item in cart_items if item.get('product_id')}
-                    seen_product_ids = set()
-                    if isinstance(product_ratings, list):
-                        for pr in product_ratings:
-                            if not isinstance(pr, dict):
-                                continue
-                            product_id = pr.get('product_id')
-                            pid_str = str(product_id) if product_id else ''
-                            if not pid_str or pid_str in seen_product_ids or pid_str not in valid_product_ids:
-                                continue
-                            try:
-                                rating_val = float(pr.get('rating', 0) or 0)
-                            except (ValueError, TypeError):
-                                rating_val = 0.0
-                            if rating_val > 0:
-                                seen_product_ids.add(pid_str)
-                                clamped_p_rating = min(5.0, max(1.0, rating_val))
-                                ProductCalification.objects.create(
-                                    product_id=product_id,
-                                    client=request.user,
-                                    rating=clamped_p_rating
-                                )
-                                rated_any = True
-                    if rated_any or not already_completed:
-                        cart_data['client_rated'] = True
-                        order.cart = cart_data
-
-                order.save()
-
-                if not already_completed:
-                    owner_id = order.store.company.owner.id
-                    client_id = order.client.id
-                    company_name = order.store.company.name
-                    oid = order.id
-
-                    if is_client:
-                        transaction.on_commit(lambda: NotificationManager.notify_order_status_change(
-                            user_id=owner_id,
-                            order_id=oid,
-                            title="Cliente confirmó entrega",
-                            body=f"El cliente de la orden N° {oid} la ha marcado como completada.",
-                            is_merchant=True,
-                            new_status=OrderStatus.COMPLETED
-                        ))
-                    elif is_merchant:
-                        transaction.on_commit(lambda: NotificationManager.notify_order_status_change(
-                            user_id=client_id,
-                            order_id=oid,
-                            title="Tu orden fue completada",
-                            body=f"{company_name} ha marcado tu pedido como completado exitosamente.",
-                            is_merchant=False,
-                            new_status=OrderStatus.COMPLETED
-                        ))
-
+                # La lógica de finalización (stock, tokens, atribución, calificación y notificaciones cruzadas)
+                # vive en api/core/order_services.py para reutilizarla en el flujo de delivery con PIN.
+                result = complete_order_service(
+                    order,
+                    request.user,
+                    merchant_rating=merchant_rating,
+                    product_ratings=product_ratings,
+                )
                 return Response({
                     "success": True, 
-                    "tokens_earned": round(float(tokens_earned), 2),
+                    "tokens_earned": result['tokens_earned'],
                     "message": "Orden completada con éxito."
                 }, status=status.HTTP_200_OK)
+        except OrderServiceError as e:
+            return Response({"error": e.message}, status=e.status_code)
         except Order.DoesNotExist:
             return Response({"error": "La orden no existe."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -895,13 +737,73 @@ class OrderViewSet(viewsets.ViewSet):
         except Order.DoesNotExist:
             return Response({"error": "La orden no existe."}, status=status.HTTP_404_NOT_FOUND)
 
+    # =========================================================================
+    # 💡 ASIGNACIÓN MANUAL / REASIGNACIÓN DE REPARTIDOR (Dueño o Asistente)
+    # =========================================================================
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
+    def assign_rider(self, request, pk=None):
+        """
+        POST /api/v1/orders/<id>/assign_rider/
+        Body: {"employee_id": <int>}
+        Asigna manualmente un repartidor a la orden (cuando aún está buscando repartidor o esperando aceptación).
+        """
+        try:
+            delivery = manual_assign_delivery(request.user, pk, request.data.get('employee_id'))
+        except DeliveryError as e:
+            payload = {'error': e.message}
+            if e.code:
+                payload['code'] = e.code
+            return Response(payload, status=e.status_code)
+        return Response({
+            'message': "Repartidor asignado. Esperando su aceptación (45 s).",
+            'delivery': delivery.get_json(viewer_role='merchant'),
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
+    def reassign_rider(self, request, pk=None):
+        """
+        POST /api/v1/orders/<id>/reassign_rider/
+        Body: {"employee_id": <int>}
+        Reasigna la orden a otro repartidor mientras el paquete no haya salido de la tienda.
+        """
+        try:
+            delivery = reassign_delivery(request.user, pk, request.data.get('employee_id'))
+        except DeliveryError as e:
+            payload = {'error': e.message}
+            if e.code:
+                payload['code'] = e.code
+            return Response(payload, status=e.status_code)
+        return Response({
+            'message': "Entrega reasignada. Esperando aceptación del nuevo repartidor.",
+            'delivery': delivery.get_json(viewer_role='merchant'),
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
+    def unassign_rider(self, request, pk=None):
+        """
+        POST /api/v1/orders/<id>/unassign_rider/
+        Retira al repartidor actual (antes de recoger el paquete) y reactiva la búsqueda automática.
+        """
+        try:
+            delivery = unassign_delivery(request.user, pk)
+        except DeliveryError as e:
+            payload = {'error': e.message}
+            if e.code:
+                payload['code'] = e.code
+            return Response(payload, status=e.status_code)
+        return Response({
+            'message': "Repartidor retirado. Buscando otro disponible automáticamente.",
+            'delivery': delivery.get_json(viewer_role='merchant'),
+        }, status=status.HTTP_200_OK)
+
 
 class CartViewSet(viewsets.ViewSet):
     """
     API ultra-optimizada para la gestión del carrito de compras.
     Utiliza MGET y Split Caching para resolver carritos masivos en milisegundos.
     """
-    permission_classes = [IsAuthenticated]
+    # Solo cuenta personal: con un token de trabajador no se puede comprar
+    permission_classes = [IsAuthenticated, IsPersonalContext]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'actions'
 
@@ -1352,9 +1254,20 @@ class CartViewSet(viewsets.ViewSet):
 
                 transaction.on_commit(_post_order_commit)
 
+            # Si es una orden con Delivery, creamos la asignación y disparamos la auto-asignación al repartidor libre más cercano
+            delivery_json = None
+            try:
+                if int(order.withdrawal_type) == WithdrawalType.DELIVERY:
+                    delivery = create_or_assign_delivery_for_order(order, auto_assign=True)
+                    if delivery is not None:
+                        delivery_json = delivery.get_json(viewer_role='client')
+            except Exception as dlv_err:
+                logger.exception(f"Error iniciando asignación de delivery para orden {order.id}: {dlv_err}")
+
             return Response({
                 "success": True, 
                 "order_id": str(order.id), 
+                "delivery": delivery_json,
                 "message": "¡Orden creada exitosamente!"
             }, status=status.HTTP_201_CREATED)
 

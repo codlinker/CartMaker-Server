@@ -76,8 +76,50 @@ class InventoryItemAdmin(ModelAdmin):
 
 @admin.register(Employee)
 class EmployeeAdmin(ModelAdmin):
-    list_display = ("user", "company", "is_active", "hired_at")
-    list_filter = ("company", "is_active")
+    list_display = ("user", "company", "role_label", "status_pill", "vehicle_type", "is_active", "hired_at", "last_seen_at")
+    list_filter = ("company", "is_active", "role", "status", "vehicle_type")
+    search_fields = ("user__email", "user__first_name", "user__last_name", "company__name", "display_alias")
+    # `is_active` se deriva de `status` al guardar (ver Employee.save)
+    readonly_fields = ("is_active", "hired_at", "last_seen_at")
+
+    @display(description="Rol", label=True)
+    def role_label(self, obj):
+        return obj.get_role_display()
+
+    @display(description="Estado", label={
+        str(EmployeeStatus.ACTIVE.label): "success",
+        str(EmployeeStatus.SUSPENDED.label): "warning",
+        str(EmployeeStatus.REVOKED.label): "danger",
+    })
+    def status_pill(self, obj):
+        return obj.get_status_display()
+
+@admin.register(EmployeeInvitation)
+class EmployeeInvitationAdmin(ModelAdmin):
+    list_display = ("short_code", "company", "role_label", "channel", "target_email", "target_user", "status_pill", "expires_at", "accepted_by", "created_at")
+    list_filter = ("status", "role", "channel", "company")
+    search_fields = ("short_code", "target_email", "target_user__email", "company__name", "invited_by__email")
+    # El hash del token nunca se edita a mano; el token en claro no se guarda
+    readonly_fields = ("token_hash", "short_code", "accepted_by", "accepted_at", "created_at")
+    filter_horizontal = ("allowed_stores",)
+
+    def has_add_permission(self, request):
+        # Las invitaciones se crean desde la API (generan token y código corto)
+        return False
+
+    @display(description="Rol", label=True)
+    def role_label(self, obj):
+        return obj.get_role_display()
+
+    @display(description="Estado", label={
+        str(InvitationStatus.PENDING.label): "info",
+        str(InvitationStatus.ACCEPTED.label): "success",
+        str(InvitationStatus.DECLINED.label): "warning",
+        str(InvitationStatus.REVOKED.label): "danger",
+        str(InvitationStatus.EXPIRED.label): "danger",
+    })
+    def status_pill(self, obj):
+        return str(InvitationStatus(obj.effective_status).label)
 
 @admin.register(EmployeePermission)
 class EmployeePermissionAdmin(ModelAdmin):
@@ -657,6 +699,50 @@ class SystemConfigAdmin(ModelAdmin):
             },
         ),
     )
+
+
+@admin.register(RiderShift)
+class RiderShiftAdmin(ModelAdmin):
+    list_display = ("id", "employee", "store", "is_active", "started_at", "last_heartbeat_at", "battery_level")
+    list_filter = ("is_active", "store__company")
+    search_fields = ("employee__user__email", "employee__user__first_name", "store__name")
+    readonly_fields = ("started_at", "ended_at", "last_heartbeat_at")
+
+
+@admin.register(DeliveryAssignment)
+class DeliveryAssignmentAdmin(ModelAdmin):
+    list_display = (
+        "id",
+        "order",
+        "store",
+        "rider",
+        "status",
+        "is_auto_assigned",
+        "route_distance_m",
+        "eta_at",
+        "created_at",
+    )
+    list_filter = ("status", "is_auto_assigned", "store__company")
+    search_fields = ("order__id", "rider__user__email", "store__name")
+    readonly_fields = (
+        "tracking_key",
+        "handoff_pin_hash",
+        "created_at",
+        "assigned_at",
+        "accepted_at",
+        "at_store_at",
+        "picked_up_at",
+        "arriving_at",
+        "delivered_at",
+        "cancelled_at",
+    )
+
+
+@admin.register(DeliveryTrace)
+class DeliveryTraceAdmin(ModelAdmin):
+    list_display = ("id", "delivery", "point_count", "max_gap_s", "created_at", "expires_at")
+    readonly_fields = ("delivery", "point_count", "max_gap_s", "matched_polyline6", "created_at", "expires_at")
+    exclude = ("compressed_points",)
 
 
 others = [

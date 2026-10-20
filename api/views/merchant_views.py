@@ -1,6 +1,7 @@
 """Company, Store, Subscriptions, KYB RIF Validation, Merchant Catalog, and Public Store Profile views."""
 from .base import *
 from .base import _get_cached_bcv_rate, _extract_and_validate_category_ids
+from ..permissions import IsPersonalContext
 
 ######################################################
 ###################### ACTIONS #######################
@@ -415,7 +416,8 @@ class GetAtlasPlusPlanDetails(APIView):
         return Response({'data': payload}, status=status.HTTP_200_OK)
     
 class UploadSubscriptionPayment(APIView):
-    permission_classes = [IsAuthenticated]
+    # Solo cuenta personal: los pagos de suscripción no se hacen con un token de trabajador
+    permission_classes = [IsAuthenticated, IsPersonalContext]
 
     def _try_automatic_bank_validation(self, reference_number, amount_bs) -> bool:
         """
@@ -520,7 +522,8 @@ class UploadSubscriptionPayment(APIView):
 class FullPaySubscriptionWithWalletView(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'actions'
-    permission_classes = [IsAuthenticated]
+    # Solo cuenta personal: con un token de trabajador no se puede gastar la billetera
+    permission_classes = [IsAuthenticated, IsPersonalContext]
 
     def post(self, request, *args, **kwargs):
         try:

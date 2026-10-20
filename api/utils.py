@@ -16,6 +16,8 @@ from email.mime.image import MIMEImage
 
 def get_tokens_for_user(user):
     refresh = RefreshToken.for_user(user)
+    # Contexto de sesión: los logins normales siempre emiten tokens de la cuenta personal
+    refresh['ctx'] = 'personal'
     return {
         'refresh': str(refresh),
         'access': str(refresh.access_token),
@@ -72,6 +74,55 @@ def send_email_otp(user_email: str) -> str:
             raise e
 
     return otp_code
+
+def _deliver_employee_invitation_email_sync(to_email: str, context: dict) -> None:
+    """
+    Envía (de forma síncrona) el correo de invitación para trabajar en un comercio.
+    `context` debe traer: company_name, role_label, link, short_code, expires_at, inviter_name.
+    """
+    safe_context = dict(context or {})
+    safe_context.setdefault('domain', getattr(settings, 'DOMAIN', '') or '')
+    subject = f"{safe_context.get('company_name') or 'Un comercio'} te invitó a trabajar en CartMaker"
+
+    text_content = render_to_string('emails/employee_invitation.txt', safe_context)
+    html_content = render_to_string('emails/employee_invitation.html', safe_context)
+
+    email = EmailMultiAlternatives(
+        subject=subject,
+        body=text_content,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        to=[to_email],
+    )
+    email.attach_alternative(html_content, "text/html")
+
+    logo_path = os.path.join(settings.BASE_DIR, 'web', 'static', 'img', 'logo_sin_letras.png')
+    try:
+        with open(logo_path, 'rb') as f:
+            logo_image = MIMEImage(f.read())
+            logo_image.add_header('Content-ID', '<logo_cartmaker>')
+            logo_image.add_header('Content-Disposition', 'inline', filename='logo.png')
+            email.attach(logo_image)
+    except Exception as img_error:
+        print(f"No se pudo cargar el logo para el correo de invitación: {img_error}")
+
+    email.send(fail_silently=False)
+    print(f"INVITACIÓN DE TRABAJADOR ENVIADA A {to_email}")
+
+
+def send_employee_invitation_email(to_email: str, context: dict) -> None:
+    """
+    Despacha el correo de invitación por Celery (no bloquea el worker HTTP).
+    Si el broker no está disponible, intenta el envío síncrono sin propagar errores.
+    """
+    try:
+        from api.tasks import send_employee_invitation_email_task
+        send_employee_invitation_email_task.delay(to_email, context)
+    except Exception as broker_err:
+        print(f"Fallback síncrono para invitación de trabajador ({broker_err}):")
+        try:
+            _deliver_employee_invitation_email_sync(to_email, context)
+        except Exception as e:
+            print(f"Error enviando la invitación de trabajador a {to_email}: {e}")
 
 def get_email_otp(user_email) -> str:
     """

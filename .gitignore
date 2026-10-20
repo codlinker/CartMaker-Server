@@ -10,3 +10,4 @@ cartmaker-key.pem
 .agents
 test_*.py
 node_chat_server/test_client.js
+scripts/osrm/data/

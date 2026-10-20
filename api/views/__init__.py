@@ -13,4 +13,6 @@ from .social_and_stories_views import *
 from .search_and_atlas_views import *
 from .catalog_and_user_views import *
 from .merchant_growth_views import *
+from .workforce_views import *
+from .delivery_views import *
 

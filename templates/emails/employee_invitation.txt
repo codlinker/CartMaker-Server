@@ -1,0 +1,15 @@
+¡Hola!
+
+{{ inviter_name }} te invitó a trabajar en {{ company_name }} como {{ role_label }} usando CartMaker.
+
+Para aceptar, abre este enlace desde tu teléfono con la app de CartMaker instalada:
+{{ link }}
+
+O ingresa este código en la app de CartMaker:
+{{ short_code }}
+
+La invitación vence el {{ expires_at }}. Si no esperabas este correo, puedes ignorarlo de forma segura.
+
+Atentamente,
+El equipo de CartMaker
+{{ domain }}

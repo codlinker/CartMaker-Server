@@ -1253,7 +1253,10 @@ class AtlasViewSet(viewsets.ViewSet):
         company = Company.objects.select_related('category').filter(owner=user).first()
         if company:
             return company
-        emp = Employee.objects.select_related('company', 'company__category').filter(user=user, is_active=True).first()
+        # Solo asistentes: los repartidores no acceden a las herramientas del comerciante
+        emp = Employee.objects.select_related('company', 'company__category').filter(
+            user=user, is_active=True, role=EmployeeRole.ASSISTANT
+        ).first()
         return emp.company if emp else None
 
     def _handle_merchant_briefing(self, request):

@@ -166,6 +166,9 @@ REST_FRAMEWORK = {
         'navigation': '120/minute', # Mapa y feeds. Sin sesión el cupo es por IP.
         'actions': '50/minute', # Para visualizacion de productos.
         'anti_bots':"1/second",
+        'workforce_invite': '10/minute', # Previsualizar / aceptar invitaciones de trabajador (anti fuerza bruta de códigos).
+        'delivery_relay': '120/minute', # Retransmisiones BLE de delivery por usuario retransmisor.
+        'delivery_rider': '240/minute', # Acciones y latidos del repartidor en turno.
     },
     'NUM_PROXIES': 1,
 }
@@ -316,6 +319,7 @@ UNFOLD = {
                     {"title": "Ubicaciones (Tiendas)", "link": "/admin/api/storelocation/", "icon": "share_location"},
                     {"title": "Directorio de Contacto", "link": "/admin/api/storecontactmethod/", "icon": "support_agent"},
                     {"title": "Personal y Empleados", "link": "/admin/api/employee/", "icon": "badge"},
+                    {"title": "Invitaciones de Trabajo", "link": "/admin/api/employeeinvitation/", "icon": "person_add"},
                     {"title": "Roles y Permisos", "link": "/admin/api/employeepermission/", "icon": "security"},
                     {"title": "Asignación de Sucursal", "link": "/admin/api/employeestoreassignment/", "icon": "assignment_ind"}
                 ],
@@ -465,6 +469,18 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'api.tasks.refresh_admin_dashboard_metrics',
         'schedule': crontab(minute=0, hour=20), 
     },
+
+    # Tarea 7: Delivery. Expira ofertas de 45 s sin respuesta y reintenta la auto-asignación (cada 30 s)
+    'delivery-expire-and-retry-offers-30s': {
+        'task': 'api.tasks.expire_and_retry_delivery_offers_task',
+        'schedule': timedelta(seconds=30),
+    },
+
+    # Tarea 8: Delivery. Borra trazas GPS con más de 30 días (Habeas Data). Todos los días a las 3:30 AM
+    'delivery-cleanup-expired-traces-nightly': {
+        'task': 'api.tasks.cleanup_expired_delivery_traces_task',
+        'schedule': crontab(minute=30, hour=3),
+    },
 }
 
 # CORREO
@@ -502,3 +518,17 @@ OPENROUTER_API_KEY = env_manager.OPENROUTER_API_KEY
 
 MAPBOX_APIKEY = env_manager.MAPBOX_APIKEY
 MAPBOX_STYLE_URL = env_manager.MAPBOX_STYLE_URL
+
+# RUTAS (OSRM propio en Docker, escuchando solo en 127.0.0.1). Opcionales: si no se definen en
+# variables.sh se usan los puertos por defecto de scripts/osrm/docker-compose.yml.
+OSRM_CAR_URL = (os.environ.get("OSRM_CAR_URL", "") or "http://127.0.0.1:5000").strip().rstrip("/")
+OSRM_BIKE_URL = (os.environ.get("OSRM_BIKE_URL", "") or "http://127.0.0.1:5001").strip().rstrip("/")
+OSRM_TIMEOUT_SECONDS = float(os.environ.get("OSRM_TIMEOUT_SECONDS", "") or 4)
+
+# DELIVERY EN TIEMPO REAL
+# Redis compartido con node_chat_server (estado caliente de entregas: dlv:{id}:meta / live / trace, rider:{emp}:loc).
+# Se usa la DB 2 (y NO la DB 1 de la caché) porque api/apps.py ejecuta cache.clear() (FLUSHDB) al arrancar el servidor.
+# node_chat_server usa por defecto exactamente la misma URL (REDIS_URL || redis://127.0.0.1:6379/2).
+REALTIME_REDIS_URL = (os.environ.get("REALTIME_REDIS_URL", "") or os.environ.get("REDIS_URL", "") or "redis://127.0.0.1:6379/2").strip()
+# UUID de 16 bits del Service Data BLE del repartidor (pendiente de confirmar/registrar antes de producción)
+DELIVERY_BLE_SERVICE_UUID16 = (os.environ.get("DELIVERY_BLE_SERVICE_UUID16", "") or "CA7E").strip().upper()

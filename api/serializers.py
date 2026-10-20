@@ -1,10 +1,19 @@
 import math
 from .utils import *
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
+from rest_framework_simplejwt.exceptions import AuthenticationFailed
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.tokens import RefreshToken
 from .models import *
+from api.core.workforce import (
+    CTX_CLAIM,
+    CTX_PERSONAL,
+    CTX_WORKER,
+    EMP_ID_CLAIM,
+    get_user_workspaces,
+    is_employee_active,
+)
 from api.core import *
 from django.contrib.gis.geos import Point
 from pgvector.django import CosineDistance
@@ -44,6 +53,7 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     def get_tokens(self, user):
         refresh = RefreshToken.for_user(user)
+        refresh['ctx'] = 'personal'
         return {
             'refresh': str(refresh),
             'access': str(refresh.access_token),
@@ -65,6 +75,8 @@ class CartMakerTokenSerializer(TokenObtainPairSerializer):
     @classmethod
     def get_token(cls, user):
         token = super().get_token(user)
+        # Contexto de sesión: el login normal siempre emite tokens de la cuenta personal
+        token[CTX_CLAIM] = CTX_PERSONAL
         return token
 
     def validate(self, attrs):
@@ -77,7 +89,29 @@ class CartMakerTokenSerializer(TokenObtainPairSerializer):
         data['email_verified'] = self.user.email_verified
         data['gender'] = self.user.gender
         data['preferred_category_ids'] = self.user.get_preferred_category_ids()
+        # Login bifurcado: cuenta personal + cada empleo activo (la app pregunta si hay más de uno)
+        data['ctx'] = CTX_PERSONAL
+        data['workspaces'] = get_user_workspaces(self.user)
         return data
+
+
+class WorkspaceTokenRefreshSerializer(TokenRefreshSerializer):
+    """
+    Refresh de SimpleJWT que conserva los claims de contexto (ctx, emp_id, company_id, role)
+    y rechaza refrescar tokens de trabajador cuyo empleo fue suspendido o revocado.
+    """
+
+    def validate(self, attrs):
+        incoming = RefreshToken(attrs['refresh'])
+        if incoming.payload.get(CTX_CLAIM) == CTX_WORKER:
+            emp_id = incoming.payload.get(EMP_ID_CLAIM)
+            user_id = incoming.payload.get('user_id')
+            if not emp_id or not is_employee_active(emp_id, user_id=user_id, use_cache=False):
+                raise AuthenticationFailed(
+                    "Tu acceso como trabajador fue suspendido o revocado.",
+                    code='worker_access_revoked',
+                )
+        return super().validate(attrs)
     
 class ClientLocationSerializer(serializers.ModelSerializer):
     latitude = serializers.FloatField(write_only=True)

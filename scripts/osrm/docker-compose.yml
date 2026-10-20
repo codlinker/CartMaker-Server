@@ -1,0 +1,39 @@
+# OSRM propio de CartMaker (rutas, matriz de tiempos y map matching).
+# Optimizado para instancias pequeñas (AWS EC2 t2.micro / t3.micro de 1 GB RAM):
+#   - Usa `--mmap` para mapear el grafo desde disco SSD sin cargarlo completo en RAM (~80-120 MB RAM).
+#   - Por defecto levanta `osrm-car` en :5000 (que sirve moto, carro y sirve de fallback para bici/pie).
+#   - Si tienes >= 2 GB RAM y deseas levantar también el contenedor dedicado de bici en :5001,
+#     usa: `docker compose --profile full up -d`.
+name: cartmaker-osrm
+
+services:
+  osrm-car:
+    image: ${OSRM_IMAGE:-ghcr.io/project-osrm/osrm-backend:v5.27.1}
+    container_name: cartmaker-osrm-car
+    command: >
+      osrm-routed --algorithm mld --mmap
+      --threads 2
+      --max-table-size 200
+      --max-matching-size 500
+      /data/car/venezuela-latest.osrm
+    ports:
+      - "127.0.0.1:5000:5000"
+    volumes:
+      - ./data:/data:ro
+    restart: unless-stopped
+
+  osrm-bike:
+    image: ${OSRM_IMAGE:-ghcr.io/project-osrm/osrm-backend:v5.27.1}
+    container_name: cartmaker-osrm-bike
+    profiles: ["full"]
+    command: >
+      osrm-routed --algorithm mld --mmap
+      --threads 2
+      --max-table-size 200
+      --max-matching-size 500
+      /data/bicycle/venezuela-latest.osrm
+    ports:
+      - "127.0.0.1:5001:5000"
+    volumes:
+      - ./data:/data:ro
+    restart: unless-stopped

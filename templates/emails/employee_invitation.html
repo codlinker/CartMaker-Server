@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Invitación para trabajar - CartMaker</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #F2F2FF; /* AppTheme.white */
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+        .email-container {
+            max-width: 480px;
+            margin: 40px auto;
+            background-color: #FFFFFF;
+            padding: 40px 30px;
+            border-radius: 16px;
+            box-shadow: 0 4px 12px rgba(49, 27, 146, 0.05);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .logo {
+            height: 50px;
+            width: auto;
+            display: inline-block;
+        }
+        .content {
+            text-align: center;
+            color: #212121; /* AppTheme.blackText */
+        }
+        h1 {
+            font-size: 22px;
+            font-weight: 700;
+            margin-top: 0;
+            margin-bottom: 10px;
+        }
+        p {
+            font-size: 14px;
+            line-height: 1.6;
+            color: #757575; /* AppTheme.darkGrey */
+            margin-top: 0;
+            margin-bottom: 24px;
+        }
+        .cta {
+            display: inline-block;
+            background-color: #6D49F2; /* AppTheme.primary */
+            color: #FFFFFF !important;
+            text-decoration: none;
+            font-weight: 700;
+            font-size: 15px;
+            padding: 14px 28px;
+            border-radius: 12px;
+            margin-bottom: 24px;
+        }
+        .code-box {
+            background-color: #E2DAF3; /* AppTheme.lightPurple */
+            padding: 16px 24px;
+            border-radius: 12px;
+            display: inline-block;
+            margin: 0 0 24px 0;
+            border: 1px solid rgba(109, 73, 242, 0.1);
+        }
+        .code {
+            font-size: 28px;
+            font-weight: 700;
+            letter-spacing: 6px;
+            color: #6D49F2;
+            margin: 0;
+            padding-left: 6px;
+            user-select: all;
+            -webkit-user-select: all;
+            -moz-user-select: all;
+            -ms-user-select: all;
+        }
+        .footer {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #D7D7D7; /* AppTheme.lightGrey */
+            text-align: center;
+            font-size: 12px;
+            color: #757575;
+        }
+    </style>
+</head>
+<body>
+    <div style="padding: 20px;">
+        <div class="email-container">
+            <div class="header">
+                <img src="cid:logo_cartmaker" alt="CartMaker" class="logo">
+            </div>
+            <div class="content">
+                <h1>Te invitaron a trabajar en {{ company_name }}</h1>
+                <p>{{ inviter_name }} quiere que formes parte de su equipo como <b>{{ role_label }}</b> en CartMaker.</p>
+
+                <a class="cta" href="{{ link }}">Aceptar invitación</a>
+
+                <p style="margin-bottom: 8px;">¿Prefieres escribirlo? Ingresa este código en la app:</p>
+                <div class="code-box">
+                    <h2 class="code">{{ short_code }}</h2>
+                </div>
+
+                <p style="font-size: 13px; margin-bottom: 0;">
+                    La invitación vence el {{ expires_at }}.<br>Si no esperabas este correo, ignora este mensaje.
+                </p>
+            </div>
+            <div class="footer">
+                &copy; 2026 CartMaker. Todos los derechos reservados.
+            </div>
+        </div>
+    </div>
+</body>
+</html>

@@ -717,3 +717,45 @@ def send_atlas_invoice_email_task(self, invoice_id: str):
     except Exception as exc:
         logger.warning(f"⚠️ Error despachando factura digital {invoice_id}: {exc}")
         raise self.retry(exc=exc)
+
+
+@shared_task(bind=True, ignore_result=True, max_retries=2, default_retry_delay=10)
+def send_employee_invitation_email_task(self, to_email: str, context: dict):
+    """Despacha el correo de invitación para trabajar en un comercio (sistema de trabajadores)."""
+    try:
+        from api.utils import _deliver_employee_invitation_email_sync
+        _deliver_employee_invitation_email_sync(to_email, context)
+    except Exception as exc:
+        logger.warning(f"⚠️ Error enviando invitación de trabajador a {to_email}: {exc}")
+        raise self.retry(exc=exc)
+
+
+@shared_task(ignore_result=True)
+def expire_and_retry_delivery_offers_task():
+    """Expira ofertas de 45 s sin respuesta y reintenta la auto-asignación cada 30 s."""
+    try:
+        from api.core.delivery import expire_and_retry_offers
+        expire_and_retry_offers()
+    except Exception as exc:
+        logger.warning(f"⚠️ Error en expire_and_retry_delivery_offers_task: {exc}")
+
+
+@shared_task(bind=True, ignore_result=True, max_retries=2, default_retry_delay=10)
+def persist_delivery_trace_task(self, delivery_id: int):
+    """Mueve el stream de Redis `dlv:{id}:trace` a `DeliveryTrace` (msgpack+gzip) al concluir la entrega."""
+    try:
+        from api.core.delivery import persist_delivery_trace
+        persist_delivery_trace(delivery_id)
+    except Exception as exc:
+        logger.warning(f"⚠️ Error persistiendo traza de delivery #{delivery_id}: {exc}")
+        raise self.retry(exc=exc)
+
+
+@shared_task(ignore_result=True)
+def cleanup_expired_delivery_traces_task():
+    """Borra las trazas GPS con más de 30 días de antigüedad (cumplimiento de Habeas Data, Art. 28)."""
+    try:
+        from api.core.delivery import cleanup_expired_traces
+        cleanup_expired_traces()
+    except Exception as exc:
+        logger.warning(f"⚠️ Error limpiando trazas vencidas de delivery: {exc}")
