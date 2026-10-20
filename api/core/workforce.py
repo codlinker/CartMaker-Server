@@ -1840,20 +1840,27 @@ def _record_worker_sabotage_strike(employee: Employee, reason: str) -> None:
         trigger_worker_circuit_breaker(employee, reason)
 
 
-def validate_worker_price_change(employee: Optional[Employee], old_price, new_price, item_label: str = '') -> None:
+def validate_worker_price_change(
+    employee: Optional[Employee],
+    old_price,
+    new_price,
+    item_label: str = '',
+    target_label: str = '',
+) -> None:
     """
     Impide que un asistente rebaje el precio de un producto/lote en más de un 30% o lo ponga en <= $0.
     Si es el dueño (`employee is None`), no aplica límite.
     """
     if employee is None or new_price is None:
         return
+    resolved_label = item_label or target_label or ''
     try:
         new_val = float(new_price)
         old_val = float(old_price) if old_price is not None else 0.0
     except (TypeError, ValueError):
         raise WorkforceError("El precio indicado no es válido.", status_code=400, code='invalid_price')
 
-    label_part = f" de '{item_label}'" if item_label else ""
+    label_part = f" de '{resolved_label}'" if resolved_label else ""
     if new_val <= 0:
         _record_worker_sabotage_strike(employee, f"intentos repetidos de poner precios en $0.00{label_part}")
         raise WorkforceError(
@@ -1876,10 +1883,16 @@ def validate_worker_price_change(employee: Optional[Employee], old_price, new_pr
             )
 
 
-def validate_worker_offer_percentage(employee: Optional[Employee], percentage, item_label: str = '') -> None:
+def validate_worker_offer_percentage(
+    employee: Optional[Employee],
+    percentage,
+    item_label: str = '',
+    target_label: str = '',
+) -> None:
     """ Impide que un asistente aplique ofertas superiores al 30% de descuento. """
     if employee is None:
         return
+    resolved_label = item_label or target_label or ''
     try:
         pct = int(percentage)
     except (TypeError, ValueError):
@@ -1889,7 +1902,7 @@ def validate_worker_offer_percentage(employee: Optional[Employee], percentage, i
         raise WorkforceError("El porcentaje de descuento debe estar entre 1% y 99%.", status_code=400, code='invalid_offer_percentage')
 
     if pct > int(WORKER_MAX_PRICE_DROP_RATIO * 100):
-        label_part = f" en '{item_label}'" if item_label else ""
+        label_part = f" en '{resolved_label}'" if resolved_label else ""
         _record_worker_sabotage_strike(employee, f"intentos repetidos de aplicar descuentos >30% ({pct}%{label_part})")
         raise WorkforceError(
             f"Por seguridad anti-sabotaje, un asistente no puede aplicar ofertas mayores al 30% de descuento{label_part}. "
@@ -1901,9 +1914,10 @@ def validate_worker_offer_percentage(employee: Optional[Employee], percentage, i
 
 def check_and_record_worker_catalog_mutation(
     employee: Optional[Employee],
-    target_type: str,
-    target_id,
+    target_type_or_key: str,
+    target_id=None,
     is_zero_stock_or_pause: bool = False,
+    zeroed_stock_or_paused: bool = False,
 ) -> None:
     """
     Evalúa la tasa de modificaciones en catálogo/inventario realizadas por el asistente en los últimos 3 minutos.
@@ -1914,7 +1928,8 @@ def check_and_record_worker_catalog_mutation(
         return
 
     now_ts = time.time()
-    target_key = f"{target_type}:{target_id}"
+    target_key = f"{target_type_or_key}:{target_id}" if target_id is not None else str(target_type_or_key)
+    zero_flag = bool(is_zero_stock_or_pause or zeroed_stock_or_paused)
     edits_cache_key = f"cartmaker:cb:edits:{employee.id}"
     zero_cache_key = f"cartmaker:cb:zero:{employee.id}"
 
@@ -1958,7 +1973,7 @@ def check_and_record_worker_catalog_mutation(
         )
 
     # 2. Ventana específica de vaciado de stock (stock -> 0) o pausado de lotes
-    if is_zero_stock_or_pause:
+    if zero_flag:
         zero_entries = []
         try:
             raw_zeros = cache.get(zero_cache_key)
@@ -2041,9 +2056,10 @@ def snapshot_video_story(story: CompanyVideoStory) -> dict:
 def record_employee_audit_log(
     employee: Optional[Employee],
     *,
-    action_type: str,
-    target_type: str,
-    target_id,
+    action_type: Optional[str] = None,
+    action: Optional[str] = None,
+    target_type: str = '',
+    target_id='',
     target_label: str = '',
     summary: str = '',
     before_snapshot: Optional[dict] = None,
@@ -2056,12 +2072,13 @@ def record_employee_audit_log(
     """
     if employee is None:
         return None
+    resolved_action = (action_type or action or 'catalog_updated').strip()[:40]
     try:
         return EmployeeAuditLog.objects.create(
             company_id=employee.company_id,
             employee=employee,
             user_id=employee.user_id,
-            action_type=action_type,
+            action_type=resolved_action,
             target_type=target_type,
             target_id=str(target_id),
             target_label=(target_label or '')[:255],
@@ -2080,6 +2097,7 @@ def list_employee_audit_logs(
     employee_id=None,
     hours: int = 168,
     only_reversible: bool = False,
+    limit: int = 100,
 ) -> dict:
     """
     Lista la bitácora de cambios realizados por un empleado (o todos los empleados del comercio).
@@ -2089,12 +2107,17 @@ def list_employee_audit_logs(
         hours_val = max(1, min(720, int(hours or 168)))
     except (TypeError, ValueError):
         hours_val = 168
+    try:
+        limit_val = max(1, min(250, int(limit or 100)))
+    except (TypeError, ValueError):
+        limit_val = 100
 
     cutoff = timezone.now() - timedelta(hours=hours_val)
     qs = (
         EmployeeAuditLog.objects.select_related('employee__user', 'user', 'reverted_by')
         .filter(company=company, created_at__gte=cutoff)
     )
+    emp_pk = None
     if employee_id not in (None, ''):
         emp_pk = _parse_int(employee_id, 'employee_id')
         if not Employee.objects.filter(pk=emp_pk, company=company).exists():
@@ -2104,24 +2127,34 @@ def list_employee_audit_logs(
     if only_reversible:
         qs = qs.filter(is_reversible=True, reverted_at__isnull=True)
 
-    logs = list(qs.order_by('-created_at')[:200])
+    logs = list(qs.order_by('-created_at')[:limit_val])
+    emp_filter_kwargs = {'employee_id': emp_pk} if emp_pk is not None else {}
+    pending_reversible_window = EmployeeAuditLog.objects.filter(
+        company=company,
+        is_reversible=True,
+        reverted_at__isnull=True,
+        created_at__gte=cutoff,
+        **emp_filter_kwargs,
+    ).count()
     pending_reversible_24h = EmployeeAuditLog.objects.filter(
         company=company,
         is_reversible=True,
         reverted_at__isnull=True,
         created_at__gte=timezone.now() - timedelta(hours=24),
-        **({'employee_id': int(employee_id)} if employee_id not in (None, '') else {}),
+        **emp_filter_kwargs,
     ).count()
     pending_reversible_7d = EmployeeAuditLog.objects.filter(
         company=company,
         is_reversible=True,
         reverted_at__isnull=True,
         created_at__gte=timezone.now() - timedelta(hours=168),
-        **({'employee_id': int(employee_id)} if employee_id not in (None, '') else {}),
+        **emp_filter_kwargs,
     ).count()
 
     return {
+        'employee_id': emp_pk,
         'hours': hours_val,
+        'reversible_count': pending_reversible_window,
         'reversible_count_24h': pending_reversible_24h,
         'reversible_count_7d': pending_reversible_7d,
         'logs': [log.get_json() for log in logs],
@@ -2181,10 +2214,16 @@ def rollback_employee_changes(
     logs_to_revert = list(qs.order_by('created_at', 'id'))
     if not logs_to_revert and not also_suspend:
         return {
+            'message': "No hay cambios pendientes por revertir en el rango seleccionado.",
+            'reverted_count': 0,
             'reverted_logs_count': 0,
+            'reverted_log_ids': [],
+            'skipped_count': 0,
+            'errors': [],
             'restored_products_count': 0,
             'restored_inventory_items_count': 0,
             'restored_stories_count': 0,
+            'employee': employee.get_json(),
             'employee_status': int(employee.status),
             'employee_status_label': str(employee.get_status_display()),
             'reverted_items': [],
@@ -2201,18 +2240,21 @@ def rollback_employee_changes(
     restored_products = 0
     restored_items = 0
     restored_stories = 0
+    skipped_count = 0
     reverted_items_summary = []
     affected_item_cache_ids = set()
 
     with transaction.atomic():
         for (target_type, target_id), first_log in earliest_by_target.items():
             snap = first_log.before_snapshot if isinstance(first_log.before_snapshot, dict) else {}
-            if not snap:
-                continue
 
             if target_type == 'product':
+                if not snap:
+                    skipped_count += 1
+                    continue
                 prod = Product.objects.select_for_update(of=('self',)).filter(id=target_id, company=company).first()
                 if prod is None:
+                    skipped_count += 1
                     continue
                 if 'name' in snap:
                     prod.name = snap['name']
@@ -2273,42 +2315,51 @@ def rollback_employee_changes(
                     .first()
                 )
                 if item is None:
+                    skipped_count += 1
                     continue
-                if 'stock' in snap and snap['stock'] is not None:
-                    item.stock = int(snap['stock'])
-                if 'custom_price' in snap:
-                    if snap['custom_price'] in (None, ''):
-                        item.custom_price = None
-                    else:
-                        try:
-                            item.custom_price = Decimal(str(snap['custom_price']))
-                        except (InvalidOperation, TypeError, ValueError):
-                            pass
-                if 'paused' in snap:
-                    item.paused = bool(snap['paused'])
-                if 'expiration_date' in snap:
-                    if not snap['expiration_date']:
-                        item.expiration_date = None
-                    else:
-                        parsed_dt = parse_datetime(str(snap['expiration_date']))
-                        if parsed_dt is not None:
-                            item.expiration_date = parsed_dt
-                item.save()
+                if not snap and first_log.action_type == 'inventory_item_created':
+                    # Si el asistente creó un lote desde cero y el dueño lo revierte, se pausa el lote
+                    item.paused = True
+                    item.save(update_fields=['paused'])
+                elif snap:
+                    if 'stock' in snap and snap['stock'] is not None:
+                        item.stock = int(snap['stock'])
+                    if 'custom_price' in snap:
+                        if snap['custom_price'] in (None, ''):
+                            item.custom_price = None
+                        else:
+                            try:
+                                item.custom_price = Decimal(str(snap['custom_price']))
+                            except (InvalidOperation, TypeError, ValueError):
+                                pass
+                    if 'paused' in snap:
+                        item.paused = bool(snap['paused'])
+                    if 'expiration_date' in snap:
+                        if not snap['expiration_date']:
+                            item.expiration_date = None
+                        else:
+                            parsed_dt = parse_datetime(str(snap['expiration_date']))
+                            if parsed_dt is not None:
+                                item.expiration_date = parsed_dt
+                    item.save()
 
-                if 'offer' in snap:
-                    offer_snap = snap.get('offer')
-                    if not offer_snap:
-                        InventoryItemOffer.objects.filter(product_item=item).delete()
-                    elif isinstance(offer_snap, dict):
-                        valid_dt = parse_datetime(str(offer_snap.get('valid_until') or ''))
-                        if valid_dt is not None and offer_snap.get('percentage') is not None:
-                            InventoryItemOffer.objects.update_or_create(
-                                product_item=item,
-                                defaults={
-                                    'percentage': int(offer_snap['percentage']),
-                                    'valid_until': valid_dt,
-                                },
-                            )
+                    if 'offer' in snap:
+                        offer_snap = snap.get('offer')
+                        if not offer_snap:
+                            InventoryItemOffer.objects.filter(product_item=item).delete()
+                        elif isinstance(offer_snap, dict):
+                            valid_dt = parse_datetime(str(offer_snap.get('valid_until') or ''))
+                            if valid_dt is not None and offer_snap.get('percentage') is not None:
+                                InventoryItemOffer.objects.update_or_create(
+                                    product_item=item,
+                                    defaults={
+                                        'percentage': int(offer_snap['percentage']),
+                                        'valid_until': valid_dt,
+                                    },
+                                )
+                else:
+                    skipped_count += 1
+                    continue
                 restored_items += 1
                 affected_item_cache_ids.add(str(item.id))
                 reverted_items_summary.append({
@@ -2318,13 +2369,17 @@ def rollback_employee_changes(
                     'summary': f"Lote de '{item.product.name}' ({item.store.name}) restaurado.",
                 })
 
-            elif target_type == 'story_video':
+            elif target_type in ('story_video', 'video_story'):
+                if not snap:
+                    skipped_count += 1
+                    continue
                 story = (
                     CompanyVideoStory.objects.select_for_update(of=('self',))
                     .filter(id=target_id, company=company)
                     .first()
                 )
                 if story is None:
+                    skipped_count += 1
                     continue
                 if 'title' in snap:
                     story.title = snap['title'] or ''
@@ -2345,7 +2400,7 @@ def rollback_employee_changes(
                 story.save()
                 restored_stories += 1
                 reverted_items_summary.append({
-                    'target_type': 'story_video',
+                    'target_type': 'video_story',
                     'target_id': str(story.id),
                     'target_label': story.title or f"Video #{story.id}",
                     'summary': f"Historia de video '{story.title or story.id}' restaurada.",
@@ -2370,11 +2425,19 @@ def rollback_employee_changes(
             )
             transaction.on_commit(lambda: cache.delete_many(keys_to_del))
 
+    employee.refresh_from_db()
+    total_reverted = len(grouped_log_ids)
     return {
-        'reverted_logs_count': len(grouped_log_ids),
+        'message': f"Se revirtieron exitosamente {total_reverted} cambio(s) realizados por el trabajador.",
+        'reverted_count': total_reverted,
+        'reverted_logs_count': total_reverted,
+        'reverted_log_ids': grouped_log_ids,
+        'skipped_count': skipped_count,
+        'errors': [],
         'restored_products_count': restored_products,
         'restored_inventory_items_count': restored_items,
         'restored_stories_count': restored_stories,
+        'employee': employee.get_json(),
         'employee_status': int(employee.status),
         'employee_status_label': str(employee.get_status_display()),
         'reverted_items': reverted_items_summary,

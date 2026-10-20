@@ -1741,16 +1741,34 @@ class EmployeeAuditLog(models.Model):
             f"{(emp_user.first_name or '').strip()} {(emp_user.last_name or '').strip()}".strip()
             or emp_user.email
         ) if emp_user else ''
+        action_labels = {
+            'product_created': 'Producto creado',
+            'product_updated': 'Producto editado',
+            'inventory_item_created': 'Lote de inventario creado',
+            'inventory_item_updated': 'Lote de inventario editado',
+            'inventory_item_restocked': 'Reposición de stock',
+            'offer_applied': 'Oferta aplicada',
+            'video_story_created': 'Historia de video publicada',
+            'video_story_updated': 'Historia de video editada',
+            'story_video_updated': 'Historia de video editada',
+            'order_shipped': 'Orden despachada',
+            'order_completed': 'Orden completada manualmente',
+            'circuit_breaker_triggered': 'Cortafuegos anti-sabotaje activado',
+        }
+        action_label = action_labels.get(self.action_type, self.action_type)
         return {
             'id': self.id,
             'company_id': str(self.company_id),
             'employee_id': self.employee_id,
             'employee_name': emp_name,
+            'user_id': str(self.user_id) if self.user_id else None,
+            'action': self.action_type,
             'action_type': self.action_type,
+            'action_label': action_label,
             'target_type': self.target_type,
             'target_id': self.target_id,
             'target_label': self.target_label,
-            'summary': self.summary,
+            'summary': self.summary or action_label,
             'before_snapshot': self.before_snapshot,
             'after_snapshot': self.after_snapshot,
             'is_reversible': bool(self.is_reversible),
