@@ -620,7 +620,7 @@ class FullPaySubscriptionWithWalletView(APIView):
 
                 return Response({
                     'success': True,
-                    'message': f'¡Atlas Plus activado usando tu saldo a favor! Factura digital {invoice.invoice_number} generada.',
+                    'message': f'¡Atlas Plus activado usando tu saldo a favor! Comprobante digital {invoice.invoice_number} generado.',
                     'data': {
                         'new_balance': float(wallet.balance),
                         'new_balance_formatted': format_ve_amount(wallet.balance, 2, "$", True),

@@ -96,7 +96,7 @@ class NotificationManager:
             if approved:
                 title = '¡Pago Validado!'
                 invoice_suffix = (
-                    f" Tu factura digital N° <b>{invoice_number}</b> ya está emitida."
+                    f" Tu comprobante digital de pago N° <b>{invoice_number}</b> ya está emitido."
                     if invoice_number else ""
                 )
                 if objective_type == 'atlas':
