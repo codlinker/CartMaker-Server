@@ -532,7 +532,8 @@ class ProductViewSet(viewsets.ModelViewSet):
                 dynamic_input = {}
                 for dyn_key in (
                     'selling_unit', 'unit_label', 'allow_fractional_quantity',
-                    'min_order_quantity', 'unit_step', 'attributes', 'variants', 'modifier_groups'
+                    'min_order_quantity', 'unit_step', 'attributes', 'variants', 'modifier_groups',
+                    'is_combo', 'combo_items', 'combo_summary', 'combo_regular_price',
                 ):
                     if dyn_key in d:
                         dynamic_input[dyn_key] = d[dyn_key]
@@ -673,7 +674,8 @@ class ProductViewSet(viewsets.ModelViewSet):
                 dynamic_input = {}
                 for dyn_key in (
                     'selling_unit', 'unit_label', 'allow_fractional_quantity',
-                    'min_order_quantity', 'unit_step', 'attributes', 'variants', 'modifier_groups'
+                    'min_order_quantity', 'unit_step', 'attributes', 'variants', 'modifier_groups',
+                    'is_combo', 'combo_items', 'combo_summary', 'combo_regular_price',
                 ):
                     if dyn_key in request.data:
                         dynamic_input[dyn_key] = d[dyn_key] if dyn_key in d else request.data.get(dyn_key)

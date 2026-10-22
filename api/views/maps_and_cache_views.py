@@ -720,7 +720,13 @@ class SearchCacheAPI(APIView):
         if (
             cached_data
             and isinstance(cached_data.get("categories"), list)
-            and (not cached_data["categories"] or "default_product_schema" in cached_data["categories"][0])
+            and (
+                not cached_data["categories"]
+                or (
+                    "default_product_schema" in cached_data["categories"][0]
+                    and cached_data["categories"][0]["default_product_schema"].get("schema_version") == 2
+                )
+            )
         ):
             return Response(cached_data, status=status.HTTP_200_OK)
 
@@ -757,7 +763,13 @@ class CategoriesListAPI(APIView):
         if (
             categories is None
             or not isinstance(categories, list)
-            or (categories and "default_product_schema" not in categories[0])
+            or (
+                categories
+                and (
+                    "default_product_schema" not in categories[0]
+                    or categories[0]["default_product_schema"].get("schema_version") != 2
+                )
+            )
         ):
             categories = [
                 category.get_json()
@@ -805,7 +817,13 @@ class CategoryProductSchemaAPI(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
-        from api.core.category_schemas import SELLING_UNITS_CATALOG, get_subcategory_schema
+        from api.core.category_schemas import (
+            DEFAULT_COMBO_CHOICE_PRESETS,
+            FOOD_COMBO_TEMPLATES,
+            SELLING_UNITS_CATALOG,
+            VENEZUELA_SIZING_PRESETS,
+            get_subcategory_schema,
+        )
 
         subcategory_id = request.query_params.get('subcategory_id') or request.query_params.get('sub_category_id')
         category_id = request.query_params.get('category_id')
@@ -821,6 +839,9 @@ class CategoryProductSchemaAPI(APIView):
                     "category_id": sub.parent_category_id,
                     "category_name": sub.parent_category.name if sub.parent_category_id else "",
                     "product_schema": sub.get_product_schema(),
+                    "venezuela_sizing_presets": VENEZUELA_SIZING_PRESETS,
+                    "combo_choice_presets": DEFAULT_COMBO_CHOICE_PRESETS,
+                    "food_combo_templates": FOOD_COMBO_TEMPLATES,
                 }, status=status.HTTP_200_OK)
             except (SubCategory.DoesNotExist, ValueError, TypeError):
                 return Response({"error": "Subcategoría no encontrada."}, status=status.HTTP_404_NOT_FOUND)
@@ -840,6 +861,9 @@ class CategoryProductSchemaAPI(APIView):
                         }
                         for s in cat.subcategories.all()
                     ],
+                    "venezuela_sizing_presets": VENEZUELA_SIZING_PRESETS,
+                    "combo_choice_presets": DEFAULT_COMBO_CHOICE_PRESETS,
+                    "food_combo_templates": FOOD_COMBO_TEMPLATES,
                 }, status=status.HTTP_200_OK)
             except (Category.DoesNotExist, ValueError, TypeError):
                 return Response({"error": "Categoría no encontrada."}, status=status.HTTP_404_NOT_FOUND)
@@ -853,6 +877,9 @@ class CategoryProductSchemaAPI(APIView):
                 "subcategory_name": subcategory_name,
                 "category_name": category_name,
                 "product_schema": schema,
+                "venezuela_sizing_presets": VENEZUELA_SIZING_PRESETS,
+                "combo_choice_presets": DEFAULT_COMBO_CHOICE_PRESETS,
+                "food_combo_templates": FOOD_COMBO_TEMPLATES,
             }, status=status.HTTP_200_OK)
 
         categories = [
@@ -861,6 +888,9 @@ class CategoryProductSchemaAPI(APIView):
         ]
         return Response({
             "selling_units_catalog": list(SELLING_UNITS_CATALOG.values()),
+            "venezuela_sizing_presets": VENEZUELA_SIZING_PRESETS,
+            "combo_choice_presets": DEFAULT_COMBO_CHOICE_PRESETS,
+            "food_combo_templates": FOOD_COMBO_TEMPLATES,
             "categories": categories,
         }, status=status.HTTP_200_OK)
 

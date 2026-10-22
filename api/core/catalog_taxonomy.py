@@ -1,4 +1,4 @@
-"""Taxonomía oficial de categorías de CartMaker (14 categorías y 68 subcategorías)
+"""Taxonomía oficial de categorías de CartMaker (15 categorías y 158 subcategorías)
 para el motor de deducción de Atlas.
 
 Sincronizado automáticamente con `CATALOGO_ESTRUCTURA` en `api/core/category_schemas.py`.

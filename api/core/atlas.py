@@ -1453,7 +1453,7 @@ Catálogo oficial (Categorías y Subcategorías):
     def _get_available_subcategories(self) -> List[Dict[str, Any]]:
         from api.core.category_schemas import get_subcategory_schema
 
-        cache_key = "cartmaker:global:atlas_subcategories_schema_v2"
+        cache_key = "cartmaker:global:atlas_subcategories_schema_v3"
         cached_items = cache.get(cache_key)
         if cached_items is not None:
             return cached_items
@@ -1473,8 +1473,10 @@ Catálogo oficial (Categorías y Subcategorías):
                 "default_unit": schema.get("default_selling_unit", "unit"),
                 "allowed_units": schema.get("allowed_selling_unit_codes", ["unit"]),
                 "attribute_keys": [f["key"] for f in schema.get("fields", []) if isinstance(f, dict) and f.get("key")],
+                "variant_axes": [ax["key"] for ax in schema.get("variant_axes", []) if isinstance(ax, dict) and ax.get("key")],
                 "supports_variants": bool(schema.get("supports_variants", True)),
                 "supports_modifier_groups": bool(schema.get("supports_modifier_groups", False)),
+                "supports_combos": bool(schema.get("supports_combos", True)),
             })
         cache.set(cache_key, items, timeout=600)
         return items
@@ -1550,6 +1552,11 @@ Catálogo oficial (Categorías y Subcategorías):
                     prod["attributes"] = dyn["attributes"]
                     prod["variants"] = dyn["variants"]
                     prod["modifier_groups"] = dyn["modifier_groups"]
+                    prod["is_combo"] = dyn["is_combo"]
+                    prod["combo_items"] = dyn["combo_items"]
+                    prod["combo_summary"] = dyn["combo_summary"]
+                    prod["combo_regular_price"] = dyn["combo_regular_price"]
+                    prod["combo_savings"] = dyn["combo_savings"]
                     prod["product_schema"] = get_subcategory_schema(
                         subcategory_name=sub_name,
                         parent_category_name=cat_name,
@@ -1562,9 +1569,9 @@ Catálogo oficial (Categorías y Subcategorías):
     def _build_vision_catalog_prompt(subcats_for_llm: List[Dict[str, Any]], multi_mode: bool = False) -> str:
         mode_instruction = (
             "Analiza la imagen comercial (estante, vitrina, menú, factura o foto con varios artículos) "
-            "y detecta TODOS los productos distintos visibles."
+            "y detecta TODOS los productos o combos distintos visibles."
             if multi_mode
-            else "Analiza la imagen comercial y extrae el producto o los productos visibles con el máximo nivel de detalle."
+            else "Analiza la imagen comercial y extrae el producto o combo visible con el máximo nivel de detalle."
         )
         return (
             f"{mode_instruction}\n"
@@ -1572,24 +1579,34 @@ Catálogo oficial (Categorías y Subcategorías):
             "1. Elige el `subcategory_id` exacto del catálogo oficial.\n"
             "2. Elige `selling_unit` dentro de las `allowed_units` de esa subcategoría "
             "(ej. 'kg' o 'g' para frutas/verduras/carnes/charcutería por peso; 'pair' para calzado; "
-            "'portion' o 'combo' para comida preparada; 'unit' o 'pack' para empaquetados).\n"
+            "'portion' para platos preparados; 'combo' si es un combo de varios ítems como Hamburguesa + Refresco + Ensalada; "
+            "'unit', 'pack' o 'dozen' para empaquetados).\n"
             "3. Completa `attributes` usando las claves de `attribute_keys` de esa subcategoría que puedas "
             "deducir visualmente del empaque, etiqueta o producto (ej. marca, contenido_neto, modelo, condicion, "
             "genero, tipo_prenda, tela_material, tipo_fresco, estado_conservacion, etc.).\n"
-            "4. Si en la foto se aprecian tallas, colores, capacidades o presentaciones con precios distintos, "
-            "inclúyelas en `variants` como `[{\"name\": \"...\", \"options\": {...}, \"price\": 0.0, \"stock\": null}]`.\n"
-            "5. Si es comida preparada, snacks, charcutería o frescos donde aplican opciones de preparación/corte/maduración "
+            "4. En ropa y accesorios usa nomenclatura venezolana de tallas (XS, S, M, L, XL, XXL, XXXL, Talla Única, "
+            "o numéricas 4-18 dama / 28-44 caballero) y en calzado numeración venezolana/europea (34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, o 18-33 infantil). "
+            "Si se aprecian tallas, colores, capacidades o presentaciones, inclúyelas en `variants` como "
+            "`[{\"name\": \"...\", \"options\": {...}, \"price\": 0.0, \"stock\": null}]`.\n"
+            "5. Si es un COMBO o PROMO (ej. '1 Hamburguesa + 1 Refresco + 1 Ensalada'), pon `is_combo: true`, "
+            "`selling_unit: \"combo\"`, y detalla cada componente en `combo_items` como "
+            "`[{\"name\": \"Hamburguesa\", \"quantity\": 1, \"unit\": \"und\", \"notes\": \"\"}, "
+            "{\"name\": \"Refresco\", \"quantity\": 1, \"unit\": \"und\", \"notes\": \"\"}]`. "
+            "Además, si el combo permite elegir sabor de bebida o contorno, sugiérelo en `modifier_groups`.\n"
+            "6. Si es comida preparada, snacks, charcutería o frescos donde aplican opciones de preparación/corte/maduración "
             "o contornos/extras visibles, puedes sugerirlos en `modifier_groups`.\n"
-            "6. Si el precio es visible en la imagen, colócalo en `price` (número); de lo contrario usa `0.0`.\n\n"
+            "7. Si el precio es visible en la imagen, colócalo en `price` (número); de lo contrario usa `0.0`.\n\n"
             "Responde ÚNICAMENTE con JSON válido bajo este formato exacto:\n"
             "{\n"
             "  \"products\": [\n"
             "    {\n"
-            "      \"name\": \"Nombre claro y comercial del producto\",\n"
+            "      \"name\": \"Nombre claro y comercial del producto o combo\",\n"
             "      \"description\": \"Descripción comercial atractiva y detallada\",\n"
             "      \"price\": 0.0,\n"
             "      \"subcategory_id\": 1,\n"
             "      \"selling_unit\": \"unit\",\n"
+            "      \"is_combo\": false,\n"
+            "      \"combo_items\": [],\n"
             "      \"attributes\": {},\n"
             "      \"variants\": [],\n"
             "      \"modifier_groups\": []\n"
@@ -1608,6 +1625,7 @@ Catálogo oficial (Categorías y Subcategorías):
                 "default_unit": s["default_unit"],
                 "allowed_units": s["allowed_units"],
                 "attribute_keys": s["attribute_keys"],
+                "variant_axes": s.get("variant_axes", []),
             }
             for s in subcats
         ]
@@ -1630,6 +1648,7 @@ Catálogo oficial (Categorías y Subcategorías):
                 "default_unit": s["default_unit"],
                 "allowed_units": s["allowed_units"],
                 "attribute_keys": s["attribute_keys"],
+                "variant_axes": s.get("variant_axes", []),
             }
             for s in subcats
         ]
@@ -1652,6 +1671,7 @@ Catálogo oficial (Categorías y Subcategorías):
                 "default_unit": s["default_unit"],
                 "allowed_units": s["allowed_units"],
                 "attribute_keys": s["attribute_keys"],
+                "variant_axes": s.get("variant_axes", []),
             }
             for s in subcats
         ]
@@ -1663,10 +1683,13 @@ Catálogo oficial (Categorías y Subcategorías):
             "2. Elige `selling_unit` dentro de las `allowed_units` de esa subcategoría.\n"
             "3. Extrae en `attributes` cualquier dato técnico o comercial usando las claves de `attribute_keys` "
             "de esa subcategoría (ej. marca, contenido_neto, modelo, condicion, talla, color, etc.).\n"
-            "4. Si la fila describe variantes (tallas/colores/pesos), inclúyelas en `variants`.\n"
+            "4. Si la fila describe variantes (tallas S/M/L/XL, tallas de calzado 34-46, colores, capacidades o pesos), "
+            "inclúyelas en `variants`.\n"
+            "5. Si la fila describe un combo (ej. 'Hamburguesa + Refresco + Ensalada'), marca `is_combo: true`, "
+            "`selling_unit: \"combo\"`, y desglosa los artículos en `combo_items`.\n"
             "Responde ÚNICAMENTE con JSON válido:\n"
             "{\"products\": [{\"name\": \"...\", \"description\": \"...\", \"price\": 0.0, \"subcategory_id\": 1, "
-            "\"selling_unit\": \"unit\", \"attributes\": {}, \"variants\": [], \"modifier_groups\": []}]}\n"
+            "\"selling_unit\": \"unit\", \"is_combo\": false, \"combo_items\": [], \"attributes\": {}, \"variants\": [], \"modifier_groups\": []}]}\n"
             f"Catálogo oficial: {json.dumps(subcats_for_llm, ensure_ascii=False)}"
         )
         res = await self.client.chat.completions.create(

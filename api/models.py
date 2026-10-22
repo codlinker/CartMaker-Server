@@ -2047,7 +2047,9 @@ class Product(models.Model):
     def get_json(self)->dict:
         from api.core.category_schemas import (
             SELLING_UNITS_CATALOG,
+            build_combo_summary,
             get_subcategory_schema,
+            normalize_combo_items,
             normalize_modifier_groups,
             normalize_variants,
         )
@@ -2080,7 +2082,21 @@ class Product(models.Model):
 
         normalized_variants = normalize_variants(self.variants, base_price=base_price)
         normalized_modifiers = normalize_modifier_groups(self.modifier_groups)
-        attrs = self.attributes if isinstance(self.attributes, dict) else {}
+        attrs = dict(self.attributes) if isinstance(self.attributes, dict) else {}
+
+        combo_items = normalize_combo_items(attrs.get("combo_items", []))
+        is_combo = bool(attrs.get("is_combo")) or bool(combo_items) or selling_unit_code == "combo"
+        combo_summary = str(attrs.get("combo_summary") or build_combo_summary(combo_items)).strip() if is_combo else ""
+        combo_regular_price = attrs.get("combo_regular_price")
+        combo_savings = attrs.get("combo_savings")
+        if is_combo and combo_regular_price is not None:
+            try:
+                combo_regular_price = round(float(combo_regular_price), 2)
+                if combo_regular_price > base_price:
+                    combo_savings = round(combo_regular_price - base_price, 2)
+            except (ValueError, TypeError):
+                combo_regular_price = None
+                combo_savings = None
 
         data = {
             "id": str(self.id),
@@ -2105,6 +2121,11 @@ class Product(models.Model):
             "modifier_groups": normalized_modifiers,
             "has_variants": len(normalized_variants) > 0,
             "has_modifier_groups": len(normalized_modifiers) > 0,
+            "is_combo": is_combo,
+            "combo_items": combo_items if is_combo else [],
+            "combo_summary": combo_summary,
+            "combo_regular_price": combo_regular_price if is_combo else None,
+            "combo_savings": combo_savings if is_combo else None,
             "order_notes_enabled": bool(schema.get("order_notes_enabled", True)),
             "order_notes_placeholder": schema.get("order_notes_placeholder", ""),
         }

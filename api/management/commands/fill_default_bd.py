@@ -218,21 +218,42 @@ class Command(BaseCommand):
             for sub in entry.get('subcategorias', [])
         }
 
+        # Mapa de nombres anteriores -> nuevos nombres para preservar IDs y productos asociados
+        legacy_sub_aliases = {
+            "Cholas, Sandalias y Tacones": ["Cholas, Zandalias y Tacones"],
+            "Plantas Eléctricas Domésticas e Inversores": ["Plantas Eléctricas, Inversores y Paneles"],
+            "Monitores y Seguridad para Bebé": ["Monitores de Bebé y Seguridad"],
+            "Juguetes de Exterior, Patinetas y Triciclos": [
+                "Patinetas, Patines y Monopatines",
+                "Juguetes de Exterior",
+            ],
+            "Guitarras y Bajos": ["Guitarras Criollas, Eléctricas y Acústicas"],
+            "Amplificadores": ["Bajos Eléctricos y Amplificadores"],
+            "Baterías y Percusión": ["Baterías Acústicas y Electrónicas"],
+            "Servicios Profesionales": ["Maquinarias y Equipos Comerciales"],
+            "Otros": ["Otras Categorías"],
+        }
+
         created_cats = 0
         renamed_cats = 0
         updated_cats = 0
         created_subs = 0
         renamed_subs = 0
         updated_subs = 0
+        missing_images = []
         official_categories_by_id = set()
         official_categories_list = []
         official_subcategories_by_id = set()
         official_subcategories_list = []
 
+        api_static_root = os.path.join(settings.BASE_DIR, 'api')
+
         # 1. Sincronizar todas las Categorías y Subcategorías definidas en CATALOGO_ESTRUCTURA
         for cat_entry in CATALOGO_ESTRUCTURA:
             cat_name = cat_entry['categoria']
             cat_img = cat_entry['imagen']
+            if not os.path.exists(os.path.join(api_static_root, *cat_img.split('/'))):
+                missing_images.append(cat_img)
             sub_names_in_entry = [s['nombre'] for s in cat_entry.get('subcategorias', [])]
 
             existing_cats = list(Category.objects.filter(name__iexact=cat_name).order_by('id'))
@@ -288,6 +309,8 @@ class Command(BaseCommand):
             for sub_entry in cat_entry['subcategorias']:
                 sub_name = sub_entry['nombre']
                 sub_img = sub_entry['imagen']
+                if not os.path.exists(os.path.join(api_static_root, *sub_img.split('/'))):
+                    missing_images.append(sub_img)
                 schema_cfg = get_subcategory_schema(
                     subcategory_name=sub_name,
                     parent_category_name=cat_name,
@@ -295,12 +318,22 @@ class Command(BaseCommand):
 
                 existing_subs = list(SubCategory.objects.filter(name__iexact=sub_name).order_by('id'))
                 if not existing_subs:
-                    candidate_sub = (
-                        SubCategory.objects.exclude(id__in=official_subcategories_by_id)
-                        .filter(img_url=sub_img)
-                        .order_by('id')
-                        .first()
-                    )
+                    alias_names = legacy_sub_aliases.get(sub_name, [])
+                    candidate_sub = None
+                    if alias_names:
+                        candidate_sub = (
+                            SubCategory.objects.exclude(id__in=official_subcategories_by_id)
+                            .filter(name__in=alias_names)
+                            .order_by('id')
+                            .first()
+                        )
+                    if not candidate_sub:
+                        candidate_sub = (
+                            SubCategory.objects.exclude(id__in=official_subcategories_by_id)
+                            .filter(img_url=sub_img)
+                            .order_by('id')
+                            .first()
+                        )
                     if candidate_sub and candidate_sub.name.strip().lower() not in official_sub_names_lower:
                         candidate_sub.name = sub_name
                         candidate_sub.parent_category = cat_obj
@@ -388,6 +421,12 @@ class Command(BaseCommand):
             "cartmaker:global:categories:v2",
             "cartmaker:global:search",
         ])
+        if missing_images:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"  [!] Imágenes estáticas no encontradas en disco ({len(missing_images)}): {', '.join(missing_images)}"
+                )
+            )
         self.stdout.write(
             self.style.SUCCESS(
                 f"  [+] Categorías listas (creadas: {created_cats}, renombradas: {renamed_cats}, "

@@ -1423,6 +1423,8 @@ class ProductSearchEngine:
                     badges.append('HAS_VIDEO_REEL')
                 if r.get('is_platinum'):
                     badges.append('PLATINUM_MERCHANT')
+                if (r.get('product') or {}).get('is_combo'):
+                    badges.append('COMBO_DEAL')
                 r['atlas_badges'] = badges
 
         return results
@@ -1452,10 +1454,12 @@ class ProductSearchEngine:
         offer = item._active_offer()
 
         if variants:
+            combo_summary_txt = (product.attributes or {}).get('__combo_summary') if isinstance(product.attributes, dict) else None
             matches_lexically = lexical_match(
                 [
                     product.name,
                     product.description,
+                    combo_summary_txt,
                     category.name if category else None,
                     parent_cat.name if parent_cat else None,
                     company.name,

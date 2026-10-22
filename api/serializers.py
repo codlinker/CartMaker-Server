@@ -514,6 +514,10 @@ class ProductSerializer(serializers.ModelSerializer):
     attributes = FlexibleJSONField(default_factory=dict, required=False)
     variants = FlexibleJSONField(default_factory=list, required=False)
     modifier_groups = FlexibleJSONField(default_factory=list, required=False)
+    is_combo = serializers.BooleanField(required=False, write_only=True)
+    combo_items = FlexibleJSONField(default_factory=list, required=False, write_only=True)
+    combo_summary = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    combo_regular_price = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True, write_only=True)
 
     class Meta:
         model = Product
@@ -532,6 +536,10 @@ class ProductSerializer(serializers.ModelSerializer):
             'attributes',
             'variants',
             'modifier_groups',
+            'is_combo',
+            'combo_items',
+            'combo_summary',
+            'combo_regular_price',
         ]
 
     def to_representation(self, instance):
