@@ -643,7 +643,7 @@ class UserCacheAPI(APIView):
             "email_verified": user.email_verified,
             "user_type": user.user_type,
             "profile_picture": user.get_profile_picture_url(),
-            "cedula_document_url": user.cedula_document if user.cedula_document else "",
+            "cedula_document_url": user.get_cedula_document_url(),
             "cedula_verified": user.cedula_verified,
             "cedula_number": user.cedula_number if user.cedula_number else "",
             "biometric_consent_accepted_at": (

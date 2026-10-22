@@ -50,8 +50,31 @@ class UserWalletAdmin(ModelAdmin):
 
 @admin.register(Company)
 class CompanyAdmin(ModelAdmin):
-    list_display = ("name", "owner", "category", "main_work_hours", "creation")
+    list_display = ("name", "owner", "category", "merchant_type", "rif_number", "kyb_ocr_verified", "creation")
+    readonly_fields = ("rif_document_url", "mercantil_document_url", "rif_document_preview", "mercantil_document_preview")
     inlines = [StoreInline]
+
+    @display(description="Documento RIF (Bucket Privado)")
+    def rif_document_preview(self, obj):
+        if obj.rif_document_url:
+            signed_url = storage_manager.get_url(obj.rif_document_url, is_private=True)
+            return mark_safe(
+                f'<a href="{signed_url}" target="_blank" rel="noopener noreferrer">'
+                f'<img src="{signed_url}" style="max-height: 260px; max-width: 240px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" />'
+                f'</a>'
+            )
+        return "Sin documento RIF"
+
+    @display(description="Registro Mercantil (Bucket Privado)")
+    def mercantil_document_preview(self, obj):
+        if obj.mercantil_document_url:
+            signed_url = storage_manager.get_url(obj.mercantil_document_url, is_private=True)
+            return mark_safe(
+                f'<a href="{signed_url}" target="_blank" rel="noopener noreferrer">'
+                f'<img src="{signed_url}" style="max-height: 260px; max-width: 240px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" />'
+                f'</a>'
+            )
+        return "Sin Registro Mercantil"
 
 @admin.register(CompanyStore)
 class CompanyStoreAdmin(ModelAdmin):

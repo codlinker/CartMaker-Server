@@ -443,8 +443,17 @@ class User(AbstractBaseUser, PermissionsMixin):
         """
         Retorna la URL publica de la foto de perfil del usuario.
         """
-        return self.profile_picture if self.profile_picture.startswith('http')\
-              else storage_manager.get_url(self.profile_picture)
+        if not self.profile_picture:
+            return ""
+        return storage_manager.get_url(self.profile_picture) or ""
+
+    def get_cedula_document_url(self) -> str:
+        """
+        Retorna la Presigned URL temporal del documento de identidad en el bucket privado.
+        """
+        if not self.cedula_document:
+            return ""
+        return storage_manager.get_url(self.cedula_document, is_private=True) or ""
 
     def get_preferred_category_ids(self) -> list:
         """
@@ -761,8 +770,8 @@ class Company(models.Model):
     )
     kyb_ocr_verified = models.BooleanField(default=False)
     kyb_confidence_score = models.PositiveSmallIntegerField(default=0)
-    rif_document_url = models.URLField(max_length=500, null=True, blank=True)
-    mercantil_document_url = models.URLField(max_length=500, null=True, blank=True)
+    rif_document_url = models.CharField(max_length=500, null=True, blank=True)
+    mercantil_document_url = models.CharField(max_length=500, null=True, blank=True)
     rif_image_sha256 = models.CharField(
         max_length=64,
         unique=True,
@@ -801,14 +810,14 @@ class Company(models.Model):
         if self.presentation_video_thumbnail:
             presentation_video_thumbnail = storage_manager.get_url(self.presentation_video_thumbnail)
         rif_doc_url = (
-            self.rif_document_url
-            if (self.rif_document_url and str(self.rif_document_url).startswith(("http://", "https://")))
-            else (storage_manager.get_url(self.rif_document_url) if self.rif_document_url else None)
+            storage_manager.get_url(self.rif_document_url, is_private=True)
+            if self.rif_document_url
+            else None
         )
         mercantil_doc_url = (
-            self.mercantil_document_url
-            if (self.mercantil_document_url and str(self.mercantil_document_url).startswith(("http://", "https://")))
-            else (storage_manager.get_url(self.mercantil_document_url) if self.mercantil_document_url else None)
+            storage_manager.get_url(self.mercantil_document_url, is_private=True)
+            if self.mercantil_document_url
+            else None
         )
         prefetched = getattr(self, '_prefetched_objects_cache', None)
         if prefetched and 'payment_methods' in prefetched:

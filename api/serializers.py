@@ -231,10 +231,16 @@ class UserSerializer(serializers.ModelSerializer):
             'biometric_consent_accepted_at', 'biometric_consent_version', 'biometric_suppressed_at',
         ]
         read_only_fields = [
-            'id', 'email', 'user_type', 'cedula_verified', 
+            'id', 'email', 'user_type', 'cedula_number', 'cedula_document', 'cedula_verified', 
             'email_verified', 'is_external_account', 'creation',
             'biometric_consent_accepted_at', 'biometric_consent_version', 'biometric_suppressed_at',
         ]
+
+    def to_representation(self, instance):
+        rep = super().to_representation(instance)
+        rep['profile_picture'] = instance.get_profile_picture_url()
+        rep['cedula_document'] = instance.get_cedula_document_url() or None
+        return rep
 
     def validate_first_name(self, value):
         return value.strip().title()

@@ -24,7 +24,10 @@ class EnviromentManager:
             que interactuan los usuarios.",
         "AWS_ACCESS_KEY_ID":"Acces key id del bucket de AWS.",
         "AWS_SECRET_ACCESS_KEY":"Secret key del bucket de AWS.",
-        "AWS_STORAGE_BUCKET_NAME":"Nombre del bucket de AWS.",
+        "AWS_STORAGE_BUCKET_NAME":"Nombre del bucket público de AWS S3 (alias compatible con AWS_PUBLIC_BUCKET_NAME).",
+        "AWS_PUBLIC_BUCKET_NAME":"Nombre del bucket público de AWS S3 (catálogo, historias, avatares y vitrinas).",
+        "AWS_PRIVATE_BUCKET_NAME":"Nombre del bucket privado de AWS S3 (documentos KYB/KYC, comprobantes de pago y adjuntos de chat/soporte).",
+        "AWS_PRIVATE_URL_EXPIRATION":"Tiempo de vida en segundos para las URLs pre-firmadas (Presigned URLs) del bucket privado.",
         "AWS_S3_REGION_NAME":"Region del bucket de AWS.",
         "AWS_MEDIACONVERT_ROLE_ARN":"ARN del rol de IAM asignado para AWS Elemental MediaConvert.",
         "CEDULAS_API_APP_ID":"App id de la api de consulta de cedulas.",
@@ -58,6 +61,9 @@ class EnviromentManager:
         self._aws_access_key_id = None
         self._aws_secret_access_key = None
         self._aws_storage_bucket_name = None
+        self._aws_public_bucket_name = None
+        self._aws_private_bucket_name = None
+        self._aws_private_url_expiration = 3600
         self._aws_s3_region_name = None
         self._aws_mediaconvert_role_arn = None
         self._cedulas_api_app_id = None
@@ -174,9 +180,30 @@ class EnviromentManager:
     @property
     def AWS_STORAGE_BUCKET_NAME(self) -> str:
         """
-        Nombre del bucket de AWS.
+        Nombre del bucket público de AWS (mantenido por retrocompatibilidad con AWS_PUBLIC_BUCKET_NAME).
         """
-        return self._aws_storage_bucket_name
+        return self._aws_public_bucket_name or self._aws_storage_bucket_name
+
+    @property
+    def AWS_PUBLIC_BUCKET_NAME(self) -> str:
+        """
+        Nombre del bucket público de AWS S3 (catálogo, fotos de productos, historias, tiendas y avatares).
+        """
+        return self._aws_public_bucket_name or self._aws_storage_bucket_name
+
+    @property
+    def AWS_PRIVATE_BUCKET_NAME(self) -> str:
+        """
+        Nombre del bucket privado de AWS S3 (cédulas/selfies KYC, RIF/Registro Mercantil KYB, comprobantes de pago, chats).
+        """
+        return self._aws_private_bucket_name or self._aws_public_bucket_name or self._aws_storage_bucket_name
+
+    @property
+    def AWS_PRIVATE_URL_EXPIRATION(self) -> int:
+        """
+        Segundos de validez de las Presigned URLs para archivos del bucket privado (por defecto 3600s = 1 hora).
+        """
+        return int(self._aws_private_url_expiration or 3600)
     
     @property
     def AWS_S3_REGION_NAME(self) -> str:
@@ -297,6 +324,20 @@ class EnviromentManager:
         ejecuta el chequeo de las mismas y llena
         las variables de la clase con sus valores correspondientes..
         """
+        raw_public_bucket = (
+            os.environ.get("AWS_PUBLIC_BUCKET_NAME")
+            or os.environ.get("AWS_STORAGE_BUCKET_NAME")
+        )
+        raw_private_bucket = (
+            os.environ.get("AWS_PRIVATE_BUCKET_NAME")
+            or raw_public_bucket
+        )
+        raw_private_exp = os.environ.get("AWS_PRIVATE_URL_EXPIRATION", "3600")
+        try:
+            parsed_private_exp = max(60, int(raw_private_exp))
+        except (TypeError, ValueError):
+            parsed_private_exp = 3600
+
         env_variables = {
             # Credenciales de BD
             "DB_NAME":os.environ.get('DB_NAME'),
@@ -316,7 +357,7 @@ class EnviromentManager:
             "STORAGE_TYPE":os.environ.get('STORAGE_TYPE'),
             "AWS_ACCESS_KEY_ID":os.environ.get("AWS_ACCESS_KEY_ID"),
             "AWS_SECRET_ACCESS_KEY":os.environ.get('AWS_SECRET_ACCESS_KEY'),
-            "AWS_STORAGE_BUCKET_NAME":os.environ.get("AWS_STORAGE_BUCKET_NAME"),
+            "AWS_STORAGE_BUCKET_NAME":raw_public_bucket,
             "AWS_S3_REGION_NAME":os.environ.get("AWS_S3_REGION_NAME"),
             "AWS_MEDIACONVERT_ROLE_ARN":os.environ.get("AWS_MEDIACONVERT_ROLE_ARN"),
             "CEDULAS_API_APP_ID":os.environ.get("CEDULAS_API_APP_ID"),
@@ -333,6 +374,11 @@ class EnviromentManager:
             "MAPBOX_STYLE_URL": os.environ.get("MAPBOX_STYLE_URL"),
         }
         self.__check_variables(env_variables)
+        if env_variables['STORAGE_TYPE'] == 'aws' and not os.environ.get("AWS_PRIVATE_BUCKET_NAME"):
+            print(
+                "⚠️ [ENVIROMENT MANAGER] Aviso: 'AWS_PRIVATE_BUCKET_NAME' aún no está definida en variables.sh. "
+                f"Usando '{raw_public_bucket}' como fallback temporal hasta que crees el bucket privado."
+            )
         self._db_name = env_variables['DB_NAME']
         self._db_user = env_variables['DB_USER']
         self._db_pass = env_variables['DB_PASSWORD']
@@ -349,7 +395,10 @@ class EnviromentManager:
         self._storage_type = env_variables['STORAGE_TYPE']
         self._aws_access_key_id = env_variables['AWS_ACCESS_KEY_ID']
         self._aws_secret_access_key = env_variables['AWS_SECRET_ACCESS_KEY']
-        self._aws_storage_bucket_name = env_variables['AWS_STORAGE_BUCKET_NAME']
+        self._aws_storage_bucket_name = raw_public_bucket
+        self._aws_public_bucket_name = raw_public_bucket
+        self._aws_private_bucket_name = raw_private_bucket
+        self._aws_private_url_expiration = parsed_private_exp
         self._aws_s3_region_name = env_variables['AWS_S3_REGION_NAME']
         self._aws_mediaconvert_role_arn = env_variables['AWS_MEDIACONVERT_ROLE_ARN']
         self._cedulas_api_app_id = env_variables['CEDULAS_API_APP_ID']

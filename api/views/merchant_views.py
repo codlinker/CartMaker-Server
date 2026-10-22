@@ -813,8 +813,9 @@ class CreateCompanyAPI(APIView):
                     {'error': 'Error al almacenar los documentos mercantiles en el servidor. Intente nuevamente.'},
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR
                 )
-            rif_doc_url = storage_manager.get_url(rif_rel_path)
-            mercantil_doc_url = storage_manager.get_url(mercantil_rel_path)
+            # Guardamos la clave relativa en BD para que Company.get_json() firme siempre una Presigned URL fresca
+            rif_doc_url = rif_rel_path
+            mercantil_doc_url = mercantil_rel_path
         with transaction.atomic():
             locked_user = User.objects.select_for_update().get(pk=user.pk)
             if locked_user.user_type == UserType.MERCHANT or Company.objects.filter(owner=locked_user).exists():
