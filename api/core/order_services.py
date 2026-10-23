@@ -27,6 +27,7 @@ from ..models import (
     OrderStatus,
     WithdrawalType,
     Notification,
+    Product,
     InventoryItem,
     InventoryItemTransaction,
     TransactionType,
@@ -139,7 +140,27 @@ def apply_order_completion_side_effects(order: Order) -> float:
         # 💡 EXTRAEMOS LA ETIQUETA DEL VIDEO DEL SNAPSHOT DE LA ORDEN
         source_video_id = item.get('source_video_id')
 
-        if inv_item_id and qty > 0:
+        if item.get('is_combo'):
+            # Si el combo descontó stock de componentes (deduct_component_stock=True),
+            # registramos las transacciones de egreso (OUTCOME) en cada lote componente
+            comp_deductions = item.get('component_stock_deductions') or []
+            if isinstance(comp_deductions, list):
+                for ded in comp_deductions:
+                    if not isinstance(ded, dict):
+                        continue
+                    comp_inv_id = ded.get('inventory_item_id')
+                    comp_units = int(ded.get('units', 0) or 0)
+                    if comp_inv_id and comp_units > 0:
+                        try:
+                            comp_inv = InventoryItem.objects.get(id=comp_inv_id)
+                            InventoryItemTransaction.objects.create(
+                                item=comp_inv,
+                                units=comp_units,
+                                transaction_type=TransactionType.OUTCOME,
+                            )
+                        except InventoryItem.DoesNotExist:
+                            pass
+        elif inv_item_id and qty > 0:
             try:
                 inv_item = InventoryItem.objects.get(id=inv_item_id)
                 InventoryItemTransaction.objects.create(
@@ -216,29 +237,55 @@ def apply_client_rating(order: Order, client_user, merchant_rating=0, product_ra
             rating=clamped_m_rating
         )
         rated_any = True
-    valid_product_ids = {str(item.get('product_id')) for item in cart_items if item.get('product_id')}
+    valid_product_ids = set()
+    combo_component_products_map = {}
+    for item in cart_items:
+        if not isinstance(item, dict):
+            continue
+        if item.get('is_combo'):
+            cid_str = str(item.get('combo_id') or item.get('product_id') or '')
+            comp_pids = []
+            for ci in (item.get('combo_items') or []):
+                if isinstance(ci, dict) and ci.get('product_id'):
+                    cpid = str(ci['product_id'])
+                    valid_product_ids.add(cpid)
+                    comp_pids.append(cpid)
+            if cid_str and comp_pids:
+                combo_component_products_map[cid_str] = comp_pids
+        elif item.get('product_id'):
+            valid_product_ids.add(str(item.get('product_id')))
+
     seen_product_ids = set()
     if isinstance(product_ratings, list):
         for pr in product_ratings:
             if not isinstance(pr, dict):
                 continue
-            product_id = pr.get('product_id')
+            product_id = pr.get('product_id') or pr.get('combo_id')
             pid_str = str(product_id) if product_id else ''
-            if not pid_str or pid_str in seen_product_ids or pid_str not in valid_product_ids:
+            if not pid_str:
                 continue
             try:
                 rating_val = float(pr.get('rating', 0) or 0)
             except (ValueError, TypeError):
                 rating_val = 0.0
-            if rating_val > 0:
-                seen_product_ids.add(pid_str)
-                clamped_p_rating = min(5.0, max(1.0, rating_val))
-                ProductCalification.objects.create(
-                    product_id=product_id,
-                    client=client_user,
-                    rating=clamped_p_rating
-                )
-                rated_any = True
+            if rating_val <= 0:
+                continue
+            clamped_p_rating = min(5.0, max(1.0, rating_val))
+            # Si el frontend envió el ID del combo como product_id, aplicamos la calificación a sus productos componentes
+            target_pids = combo_component_products_map.get(pid_str)
+            if target_pids is None:
+                target_pids = [pid_str] if pid_str in valid_product_ids else []
+            for t_pid in target_pids:
+                if t_pid in seen_product_ids:
+                    continue
+                if Product.objects.filter(id=t_pid).exists():
+                    seen_product_ids.add(t_pid)
+                    ProductCalification.objects.create(
+                        product_id=t_pid,
+                        client=client_user,
+                        rating=clamped_p_rating
+                    )
+                    rated_any = True
     if rated_any or not was_already_completed:
         cart_data['client_rated'] = True
         order.cart = cart_data

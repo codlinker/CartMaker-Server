@@ -687,18 +687,25 @@ class UniversalConversationViewSet(viewsets.ViewSet):
             return Response({'data': []}, status=200)
 
         item_ct = ContentType.objects.get_for_model(InventoryItem)
+        combo_ct = ContentType.objects.get_for_model(ProductsCombo)
         video_ct = ContentType.objects.get_for_model(CompanyVideoStory)
 
         # ==========================================
-        # 1. OBTENER TODO EL INVENTARIO Y SUS ALERTAS
+        # 1. OBTENER TODO EL INVENTARIO (LOTES + COMBOS) Y SUS ALERTAS
         # ==========================================
         items_qs = InventoryItem.objects.select_related('product').filter(
             store__company=company
         )
+        combos_qs = ProductsCombo.objects.prefetch_related('combo_items__product').filter(
+            store__company=company
+        )
         if allowed_store_ids is not None:
             items_qs = items_qs.filter(store_id__in=allowed_store_ids)
+            combos_qs = combos_qs.filter(store_id__in=allowed_store_ids)
         db_items = list(items_qs)
+        db_combos = list(combos_qs)
         items_ids_strs = [str(item.id) for item in db_items]
+        combos_ids_strs = [str(combo.id) for combo in db_combos]
 
         products_summary = UniversalComment.objects.filter(
             content_type=item_ct,
@@ -707,6 +714,14 @@ class UniversalConversationViewSet(viewsets.ViewSet):
             pending=Count('id', filter=Q(answer_text__isnull=True) | Q(answer_text__exact=''))
         )
         products_dict = {item['object_id']: item['pending'] for item in products_summary}
+
+        combos_summary = UniversalComment.objects.filter(
+            content_type=combo_ct,
+            object_id__in=combos_ids_strs
+        ).values('object_id').annotate(
+            pending=Count('id', filter=Q(answer_text__isnull=True) | Q(answer_text__exact=''))
+        )
+        combos_dict = {c['object_id']: c['pending'] for c in combos_summary}
 
         # ==========================================
         # 2. OBTENER TODAS LAS VIDEO HISTORIAS Y SUS ALERTAS
@@ -738,8 +753,23 @@ class UniversalConversationViewSet(viewsets.ViewSet):
                 "name": prod.name or 'Producto sin nombre',
                 "image": first_img,
                 "type": "product",
+                "is_combo": False,
                 "pending_questions_count": products_dict.get(item_id_str, 0),
                 "creation": item.creation # 💡 Inyectamos la fecha nativa para ordenar
+            })
+
+        # Mapeamos todos los combos
+        for combo in db_combos:
+            combo_id_str = str(combo.id)
+            c_imgs = combo.get_images()
+            data.append({
+                "id": combo_id_str,
+                "name": combo.name or 'Combo sin nombre',
+                "image": c_imgs[0] if c_imgs else '',
+                "type": "product",
+                "is_combo": True,
+                "pending_questions_count": combos_dict.get(combo_id_str, 0),
+                "creation": combo.creation,
             })
 
         # Mapeamos absolutamente todos los videos
@@ -754,6 +784,7 @@ class UniversalConversationViewSet(viewsets.ViewSet):
                 "name": clean_desc if len(clean_desc) <= 40 else clean_desc[:40] + "...",
                 "image": thumb_url, 
                 "type": "video",
+                "is_combo": False,
                 "pending_questions_count": videos_dict.get(vid_id_str, 0),
                 "creation": vid.creation # 💡 Inyectamos la fecha nativa para ordenar
             })
@@ -778,9 +809,11 @@ class UniversalConversationViewSet(viewsets.ViewSet):
         if not target_type or not target_id:
             return Response({'error': 'Faltan parámetros: target_type o target_id'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Mapeo de tipos hacia los modelos nativos
+        # Mapeo de tipos hacia los modelos nativos (con soporte transparente para ProductsCombo)
         model_map = {
             'product': 'inventoryitem',
+            'combo': 'productscombo',
+            'products_combo': 'productscombo',
             'video': 'companyvideostory'
         }
         
@@ -788,16 +821,23 @@ class UniversalConversationViewSet(viewsets.ViewSet):
         if not content_model:
             return Response({'error': 'Tipo de contenido no soportado.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        content_type_obj = ContentType.objects.get_for_model(
-            InventoryItem if content_model == 'inventoryitem' else CompanyVideoStory
-        )
-        
-        # Pre-resolvemos el objeto padre una sola vez con sus relaciones para evitar 60-80 N+1 GenericForeignKey queries
         target_obj = None
         if content_model == 'inventoryitem':
             target_obj = InventoryItem.objects.select_related('store__company', 'product').filter(id=target_id).first()
+            if target_obj is None:
+                target_obj = ProductsCombo.objects.select_related('store__company').filter(id=target_id).first()
+                if target_obj is not None:
+                    content_model = 'productscombo'
+        elif content_model == 'productscombo':
+            target_obj = ProductsCombo.objects.select_related('store__company').filter(id=target_id).first()
         else:
             target_obj = CompanyVideoStory.objects.select_related('company').filter(id=target_id).first()
+
+        model_cls = (
+            InventoryItem if content_model == 'inventoryitem'
+            else (ProductsCombo if content_model == 'productscombo' else CompanyVideoStory)
+        )
+        content_type_obj = ContentType.objects.get_for_model(model_cls)
 
         # Filtramos por el tipo y el ID
         comments = UniversalComment.objects.filter(
@@ -826,17 +866,22 @@ class UniversalConversationViewSet(viewsets.ViewSet):
 
         with transaction.atomic():
             try:
-                if target_type == 'product':
-                    target_obj = InventoryItem.objects.select_related('store__company__owner', 'product').get(id=target_id, paused=False)
-                    owner_id = target_obj.store.company.owner.id
-                    item_name = target_obj.product.name
+                if target_type in ('product', 'combo', 'products_combo'):
+                    target_obj = InventoryItem.objects.select_related('store__company__owner', 'product').filter(id=target_id, paused=False).first()
+                    if target_obj is not None:
+                        owner_id = target_obj.store.company.owner.id
+                        item_name = target_obj.product.name
+                    else:
+                        target_obj = ProductsCombo.objects.select_related('store__company__owner').get(id=target_id, paused=False)
+                        owner_id = target_obj.store.company.owner.id
+                        item_name = target_obj.name
                 elif target_type == 'video':
                     target_obj = CompanyVideoStory.objects.select_related('company__owner').get(id=target_id)
                     owner_id = target_obj.company.owner.id
                     item_name = "tu Video Historia"
                 else:
                     raise ValueError("Tipo inválido")
-            except (InventoryItem.DoesNotExist, CompanyVideoStory.DoesNotExist, ValueError):
+            except (InventoryItem.DoesNotExist, ProductsCombo.DoesNotExist, CompanyVideoStory.DoesNotExist, ValueError):
                 return Response({'error': 'El contenido no existe o fue retirado.'}, status=status.HTTP_404_NOT_FOUND)
 
             content_type_obj = ContentType.objects.get_for_model(target_obj)
@@ -884,6 +929,10 @@ class UniversalConversationViewSet(viewsets.ViewSet):
                 can_answer = user_can_manage_store(request, comment.content_object.store)
                 company_name = comment.content_object.store.company.name
                 item_name = comment.content_object.product.name
+            elif comment.content_type.model == 'productscombo' and comment.content_object is not None:
+                can_answer = user_can_manage_store(request, comment.content_object.store)
+                company_name = comment.content_object.store.company.name
+                item_name = comment.content_object.name
             elif comment.content_type.model == 'companyvideostory' and comment.content_object is not None:
                 can_answer = user_can_manage_company(request, comment.content_object.company)
                 company_name = comment.content_object.company.name
@@ -899,7 +948,7 @@ class UniversalConversationViewSet(viewsets.ViewSet):
             comment.answer_creation = timezone.now()
             comment.save()
 
-            item_type = 'product' if comment.content_type.model == 'inventoryitem' else 'video'
+            item_type = 'product' if comment.content_type.model in ('inventoryitem', 'productscombo') else 'video'
             client_id = comment.client_id
             obj_id = comment.object_id
             comment_json = comment.get_json()
@@ -919,7 +968,7 @@ class UniversalConversationViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['get'], url_path='single-feed-post')
     def single_feed_post(self, request):
         """
-        Recupera un solo elemento (Producto o Video) y lo empaqueta con el
+        Recupera un solo elemento (Producto, Combo o Video) y lo empaqueta con el
         formato exacto del Home Feed para inyecciones dinámicas en Flutter
         cuando el usuario entra desde una notificación push.
         """
@@ -930,19 +979,23 @@ class UniversalConversationViewSet(viewsets.ViewSet):
             return Response({'error': 'Faltan parámetros target_id o target_type.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            if target_type == 'product':
-                # 💡 Buscamos el ítem asegurándonos de que no esté pausado y precargando categoría/oferta
+            if target_type in ('product', 'combo', 'products_combo'):
                 item = InventoryItem.objects.select_related(
                     'product',
                     'product__category__parent_category',
                     'offer',
                     'store__company'
-                ).get(id=target_id, paused=False)
-                
-                # 💡 Empaquetamos igual que tu Feed
-                data = item.get_json()
-                data['feed_type'] = 'product' 
-                
+                ).filter(id=target_id, paused=False).first()
+                if item is not None:
+                    data = item.get_json()
+                    data['feed_type'] = 'product'
+                    return Response({'data': data}, status=status.HTTP_200_OK)
+
+                combo = ProductsCombo.objects.select_related(
+                    'store', 'store__company', 'category', 'category__parent_category'
+                ).prefetch_related('combo_items__product', 'combo_items__inventory_item').get(id=target_id, paused=False)
+                data = combo.get_json()
+                data['feed_type'] = 'product'
                 return Response({'data': data}, status=status.HTTP_200_OK)
 
             elif target_type == 'video':
@@ -960,8 +1013,8 @@ class UniversalConversationViewSet(viewsets.ViewSet):
             else:
                 return Response({'error': 'Tipo de contenido no soportado.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        except InventoryItem.DoesNotExist:
-            return Response({'error': 'El producto no existe o fue retirado.'}, status=status.HTTP_404_NOT_FOUND)
+        except (InventoryItem.DoesNotExist, ProductsCombo.DoesNotExist):
+            return Response({'error': 'El producto o combo no existe o fue retirado.'}, status=status.HTTP_404_NOT_FOUND)
         except CompanyVideoStory.DoesNotExist:
             return Response({'error': 'El video no existe o fue retirado.'}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:

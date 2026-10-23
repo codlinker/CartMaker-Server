@@ -509,7 +509,8 @@ class FlexibleJSONField(serializers.Field):
 
 
 class ProductSerializer(serializers.ModelSerializer):
-    category_id = serializers.IntegerField(write_only=True)
+    category_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
+    description = serializers.CharField(required=False, allow_blank=True, default='')
     # DRF convertirá los "true"/"false" de MultipartFormData a booleanos automáticamente
     discounts_by_tokens_active = serializers.BooleanField(default=False, required=False)
     selling_unit = serializers.CharField(max_length=32, required=False, allow_blank=True)
@@ -520,10 +521,6 @@ class ProductSerializer(serializers.ModelSerializer):
     attributes = FlexibleJSONField(default_factory=dict, required=False)
     variants = FlexibleJSONField(default_factory=list, required=False)
     modifier_groups = FlexibleJSONField(default_factory=list, required=False)
-    is_combo = serializers.BooleanField(required=False, write_only=True)
-    combo_items = FlexibleJSONField(default_factory=list, required=False, write_only=True)
-    combo_summary = serializers.CharField(required=False, allow_blank=True, write_only=True)
-    combo_regular_price = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True, write_only=True)
 
     class Meta:
         model = Product
@@ -542,14 +539,46 @@ class ProductSerializer(serializers.ModelSerializer):
             'attributes',
             'variants',
             'modifier_groups',
-            'is_combo',
-            'combo_items',
-            'combo_summary',
-            'combo_regular_price',
         ]
 
     def to_representation(self, instance):
         # Delegamos la serialización de salida al método del modelo
+        return instance.get_json()
+
+
+class ProductsComboSerializer(serializers.ModelSerializer):
+    store_id = serializers.UUIDField(required=False)
+    category_id = serializers.IntegerField(required=False, allow_null=True)
+    description = serializers.CharField(required=False, allow_blank=True, default='')
+    stock = serializers.IntegerField(required=False, default=1)
+    deduct_component_stock = serializers.BooleanField(required=False, default=False)
+    paused = serializers.BooleanField(required=False, default=False)
+    expiration_date = serializers.DateTimeField(required=False, allow_null=True)
+    discounts_by_tokens_active = serializers.BooleanField(required=False, default=False)
+    discounts_data = FlexibleJSONField(default_factory=dict, required=False)
+    combo_items = FlexibleJSONField(default_factory=list, required=False)
+    items = FlexibleJSONField(default_factory=list, required=False, write_only=True)
+
+    class Meta:
+        model = ProductsCombo
+        fields = [
+            'id',
+            'store_id',
+            'category_id',
+            'name',
+            'description',
+            'price',
+            'stock',
+            'deduct_component_stock',
+            'paused',
+            'expiration_date',
+            'discounts_by_tokens_active',
+            'discounts_data',
+            'combo_items',
+            'items',
+        ]
+
+    def to_representation(self, instance):
         return instance.get_json()
 
 class CompanyVideoStorySerializer(serializers.ModelSerializer):

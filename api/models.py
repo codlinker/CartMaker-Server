@@ -1756,6 +1756,9 @@ class EmployeeAuditLog(models.Model):
             'inventory_item_created': 'Lote de inventario creado',
             'inventory_item_updated': 'Lote de inventario editado',
             'inventory_item_restocked': 'Reposición de stock',
+            'products_combo_created': 'Combo creado',
+            'products_combo_updated': 'Combo editado',
+            'products_combo_restocked': 'Reposición de stock de combo',
             'offer_applied': 'Oferta aplicada',
             'video_story_created': 'Historia de video publicada',
             'video_story_updated': 'Historia de video editada',
@@ -2056,9 +2059,7 @@ class Product(models.Model):
     def get_json(self)->dict:
         from api.core.category_schemas import (
             SELLING_UNITS_CATALOG,
-            build_combo_summary,
             get_subcategory_schema,
-            normalize_combo_items,
             normalize_modifier_groups,
             normalize_variants,
         )
@@ -2093,20 +2094,6 @@ class Product(models.Model):
         normalized_modifiers = normalize_modifier_groups(self.modifier_groups)
         attrs = dict(self.attributes) if isinstance(self.attributes, dict) else {}
 
-        combo_items = normalize_combo_items(attrs.get("combo_items", []))
-        is_combo = bool(attrs.get("is_combo")) or bool(combo_items) or selling_unit_code == "combo"
-        combo_summary = str(attrs.get("combo_summary") or build_combo_summary(combo_items)).strip() if is_combo else ""
-        combo_regular_price = attrs.get("combo_regular_price")
-        combo_savings = attrs.get("combo_savings")
-        if is_combo and combo_regular_price is not None:
-            try:
-                combo_regular_price = round(float(combo_regular_price), 2)
-                if combo_regular_price > base_price:
-                    combo_savings = round(combo_regular_price - base_price, 2)
-            except (ValueError, TypeError):
-                combo_regular_price = None
-                combo_savings = None
-
         data = {
             "id": str(self.id),
             "name": self.name,
@@ -2130,11 +2117,11 @@ class Product(models.Model):
             "modifier_groups": normalized_modifiers,
             "has_variants": len(normalized_variants) > 0,
             "has_modifier_groups": len(normalized_modifiers) > 0,
-            "is_combo": is_combo,
-            "combo_items": combo_items if is_combo else [],
-            "combo_summary": combo_summary,
-            "combo_regular_price": combo_regular_price if is_combo else None,
-            "combo_savings": combo_savings if is_combo else None,
+            "is_combo": False,
+            "combo_items": [],
+            "combo_summary": "",
+            "combo_regular_price": None,
+            "combo_savings": None,
             "order_notes_enabled": bool(schema.get("order_notes_enabled", True)),
             "order_notes_placeholder": schema.get("order_notes_placeholder", ""),
         }
@@ -2230,9 +2217,12 @@ class InventoryItem(models.Model):
         if is_close is None:
             is_close = (dist_m is not None and 600.0 <= dist_m <= 1200.0)
 
+        product_json = self.product.get_json()
+
         return {
             "id": str(self.id),
-            "product": self.product.get_json(),
+            "item_type": "inventory_item",
+            "product": product_json,
             "stock": self.stock,
             "store_id": self.store_id,
             "store_name": self.store.name,
@@ -2247,6 +2237,13 @@ class InventoryItem(models.Model):
             "offer_percentage": int(offer.percentage) if offer else 0,
             "list_price": round(list_price, 2),
             "effective_price": effective_price,
+            "selling_unit": product_json.get("selling_unit", "unit"),
+            "unit_label": product_json.get("unit_label", "und"),
+            "is_combo": False,
+            "combo_items": [],
+            "combo_summary": "",
+            "combo_regular_price": None,
+            "combo_savings": None,
             "avg_rating": round(float(getattr(self, 'avg_rating', 0.0)), 2),
             "rating_count": int(getattr(self, 'rating_count', 0)),
             "merchant_avg_rating": round(float(getattr(self, 'merchant_avg_rating', 0.0)), 2),
@@ -2298,6 +2295,355 @@ class InventoryItemTransaction(models.Model):
     units = models.IntegerField()
     transaction_type = models.IntegerField(choices=TransactionType.choices)
     creation = models.DateTimeField(auto_now_add=True)
+
+
+class ProductsCombo(models.Model):
+    """
+    Combo comercial o paquete promocional puesto a la venta en una sucursal (`CompanyStore`).
+    Agrupa múltiples productos reales del catálogo maestro (`Product`) de la compañía a través
+    de `ProductsComboItem`, con un precio especial de paquete y control de existencias.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='combos')
+    store = models.ForeignKey(CompanyStore, on_delete=models.CASCADE, related_name='combos')
+    category = models.ForeignKey(
+        SubCategory,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='combos',
+    )
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default='')
+    price = models.DecimalField(max_digits=12, decimal_places=2)
+    custom_images = models.JSONField(default=list, blank=True)
+    stock = models.IntegerField(default=0)
+    deduct_component_stock = models.BooleanField(
+        default=False,
+        help_text=(
+            "Si es True y los productos que integran el combo tienen lote activo en la misma "
+            "sucursal, al vender o cancelar un combo también se descuenta/reintegra su stock individual."
+        ),
+    )
+    paused = models.BooleanField(default=False)
+    creation = models.DateTimeField(auto_now_add=True, db_index=True)
+    sold_out_time = models.DateTimeField(null=True, blank=True)
+    expiration_date = models.DateTimeField(null=True, blank=True)
+    discounts_by_tokens_active = models.BooleanField(default=False)
+    discounts_data = models.JSONField(default=dict, blank=True)
+    cached_popularity_score = models.FloatField(
+        default=0.0,
+        db_index=True,
+        help_text="Puntuación precalculada de interacciones del combo para el motor de búsqueda.",
+    )
+
+    class Meta:
+        ordering = ['-creation']
+        indexes = [
+            models.Index(fields=['store', 'paused', 'stock'], name='combo_store_paused_stock_idx'),
+            models.Index(fields=['company', '-creation'], name='combo_company_creation_idx'),
+            GinIndex(
+                name='combo_name_gin_idx',
+                fields=['name'],
+                opclasses=['gin_trgm_ops'],
+            ),
+            GinIndex(
+                name='combo_desc_gin_idx',
+                fields=['description'],
+                opclasses=['gin_trgm_ops'],
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"[Combo] {self.name} - {self.store.name}"
+
+    def _get_items_list(self) -> list:
+        prefetched = getattr(self, '_prefetched_objects_cache', None)
+        if prefetched and 'combo_items' in prefetched:
+            return list(prefetched['combo_items'])
+        return list(
+            self.combo_items.select_related('product', 'inventory_item').order_by('position', 'id')
+        )
+
+    def get_regular_price(self) -> float:
+        total = 0.0
+        for item in self._get_items_list():
+            total += item.get_unit_price() * max(1, int(item.quantity or 1))
+        if total <= 0:
+            return round(float(self.price), 2)
+        return round(total, 2)
+
+    def get_effective_price(self) -> float:
+        return round(float(self.price), 2)
+
+    def get_savings(self) -> float:
+        reg = self.get_regular_price()
+        eff = self.get_effective_price()
+        return round(reg - eff, 2) if reg > eff else 0.0
+
+    def get_savings_percentage(self) -> int:
+        reg = self.get_regular_price()
+        eff = self.get_effective_price()
+        if reg > 0 and reg > eff:
+            return max(0, min(99, int(round(((reg - eff) / reg) * 100))))
+        return 0
+
+    def get_effective_stock(self) -> int:
+        base_stock = max(0, int(self.stock or 0))
+        if not self.deduct_component_stock:
+            return base_stock
+        caps = [base_stock]
+        for item in self._get_items_list():
+            inv = item.inventory_item if item.inventory_item_id else None
+            if inv is not None:
+                if inv.paused:
+                    caps.append(0)
+                else:
+                    qty = max(1, int(item.quantity or 1))
+                    caps.append(max(0, int(inv.stock or 0)) // qty)
+        return min(caps) if caps else 0
+
+    def get_combo_summary(self) -> str:
+        parts = []
+        for item in self._get_items_list():
+            qty = max(1, int(item.quantity or 1))
+            prod_name = (item.product.name or '').strip()
+            if prod_name:
+                parts.append(f"{qty}x {prod_name}")
+        return " + ".join(parts)
+
+    def get_images(self) -> list:
+        resolved = []
+        for raw_img in (self.custom_images or []):
+            if raw_img:
+                url = storage_manager.get_url(raw_img)
+                if url and url not in resolved:
+                    resolved.append(url)
+        if resolved:
+            return resolved
+        for item in self._get_items_list():
+            prod_imgs = item.product.images if item.product_id else []
+            if isinstance(prod_imgs, list) and prod_imgs:
+                url = storage_manager.get_url(prod_imgs[0])
+                if url and url not in resolved:
+                    resolved.append(url)
+        return resolved
+
+    def _distance_meters_value(self):
+        for attr in ('real_distance_meters', 'distance_to_user'):
+            distance = getattr(self, attr, None)
+            if distance is None:
+                continue
+            try:
+                meters = float(distance.m) if hasattr(distance, 'm') else float(distance)
+                return round(meters, 1)
+            except (TypeError, ValueError, AttributeError):
+                continue
+        return None
+
+    def get_json(self) -> dict:
+        items_list = self._get_items_list()
+        serialized_items = [it.get_json() for it in items_list]
+        regular_price = self.get_regular_price()
+        effective_price = self.get_effective_price()
+        savings = self.get_savings()
+        savings_pct = self.get_savings_percentage()
+        effective_stock = self.get_effective_stock()
+        combo_summary = self.get_combo_summary()
+        images = self.get_images()
+
+        category = self.category
+        if category is None and items_list and items_list[0].product_id and items_list[0].product.category_id:
+            category = items_list[0].product.category
+
+        if category is None:
+            category_data = {
+                "id": None,
+                "name": "Combos",
+                "parent_category_id": None,
+                "parent_category_name": "General",
+            }
+        else:
+            parent_cat = category.parent_category if category.parent_category_id else None
+            category_data = {
+                "id": category.id,
+                "name": category.name,
+                "parent_category_id": category.parent_category_id,
+                "parent_category_name": parent_cat.name if parent_cat else "",
+            }
+
+        dist_m = self._distance_meters_value()
+        is_very_close = getattr(self, 'is_very_close', None)
+        if is_very_close is None:
+            is_very_close = (dist_m is not None and dist_m < 600.0)
+        is_close = getattr(self, 'is_close', None)
+        if is_close is None:
+            is_close = (dist_m is not None and 600.0 <= dist_m <= 1200.0)
+
+        tokens_active = bool(self.discounts_by_tokens_active) and bool(self.company.gamification_enabled)
+        creation_local = timezone.localtime(self.creation) if self.creation else None
+
+        synthesized_product = {
+            "id": str(self.id),
+            "name": self.name,
+            "price": effective_price,
+            "creation": creation_local,
+            "category": category_data,
+            "category_archetype": "combo",
+            "description": self.description or combo_summary,
+            "discounts_by_tokens_active": tokens_active,
+            "discounts_data": self.discounts_data,
+            "company_id": self.company_id,
+            "images": images,
+            "selling_unit": "combo",
+            "unit_label": "combo",
+            "price_label": "Precio del combo",
+            "allow_fractional_quantity": False,
+            "min_order_quantity": 1.0,
+            "unit_step": 1.0,
+            "attributes": {},
+            "variants": [],
+            "modifier_groups": [],
+            "has_variants": False,
+            "has_modifier_groups": False,
+            "is_combo": True,
+            "combo_items": serialized_items,
+            "combo_summary": combo_summary,
+            "combo_regular_price": regular_price,
+            "combo_savings": savings if savings > 0 else None,
+            "order_notes_enabled": True,
+            "order_notes_placeholder": "Indicaciones adicionales para tu combo...",
+        }
+
+        return {
+            "id": str(self.id),
+            "combo_id": str(self.id),
+            "item_type": "combo",
+            "is_combo": True,
+            "name": self.name,
+            "description": self.description or combo_summary,
+            "price": effective_price,
+            "list_price": regular_price,
+            "effective_price": effective_price,
+            "regular_price": regular_price,
+            "combo_regular_price": regular_price,
+            "savings": savings,
+            "combo_savings": savings if savings > 0 else None,
+            "savings_percentage": savings_pct,
+            "offer": None,
+            "offer_percentage": savings_pct,
+            "stock": effective_stock,
+            "combo_stock": int(self.stock or 0),
+            "deduct_component_stock": bool(self.deduct_component_stock),
+            "paused": bool(self.paused),
+            "images": images,
+            "custom_images": [storage_manager.get_url(img) for img in (self.custom_images or []) if img],
+            "combo_summary": combo_summary,
+            "combo_items": serialized_items,
+            "items_count": sum(int(it.get("quantity", 1)) for it in serialized_items),
+            "products_count": len(serialized_items),
+            "product": synthesized_product,
+            "category": category_data,
+            "store_id": self.store_id,
+            "store_name": self.store.name,
+            "company_id": self.company_id,
+            "company_name": self.company.name,
+            "company_image": storage_manager.get_url(self.company.image),
+            "creation": creation_local,
+            "sold_out_time": timezone.localtime(self.sold_out_time) if self.sold_out_time else None,
+            "expiration_date": timezone.localtime(self.expiration_date) if self.expiration_date else None,
+            "custom_price": None,
+            "selling_unit": "combo",
+            "unit_label": "combo",
+            "discounts_by_tokens_active": tokens_active,
+            "discounts_data": self.discounts_data,
+            "avg_rating": round(float(getattr(self, 'avg_rating', 0.0)), 2),
+            "rating_count": int(getattr(self, 'rating_count', 0)),
+            "merchant_avg_rating": round(float(getattr(self, 'merchant_avg_rating', 0.0)), 2),
+            "merchant_rating_count": int(getattr(self, 'merchant_rating_count', 0)),
+            "is_platinum": bool(getattr(self.company, 'is_platinum', False)),
+            "is_very_close": bool(is_very_close),
+            "is_close": bool(is_close),
+            "is_liked": bool(getattr(self, 'is_liked', False)),
+            "likes_count": getattr(self, 'likes_count', 0),
+            "work_hours": self.store.effective_work_hours,
+            "work_days": self.store.effective_work_days,
+            "is_open_now": self.store.is_currently_open,
+            "distance_meters": dist_m,
+        }
+
+
+class ProductsComboItem(models.Model):
+    """
+    Ítem componente de un `ProductsCombo`. Vincula relacionalmente el combo con un `Product`
+    real del catálogo del comercio (y opcionalmente con su lote `InventoryItem` en esa sucursal).
+    """
+    combo = models.ForeignKey(ProductsCombo, on_delete=models.CASCADE, related_name='combo_items')
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='combo_occurrences')
+    inventory_item = models.ForeignKey(
+        InventoryItem,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='combo_usages',
+    )
+    quantity = models.PositiveIntegerField(default=1)
+    selected_variant_id = models.CharField(max_length=100, blank=True, default='')
+    notes = models.CharField(max_length=255, blank=True, default='')
+    position = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ['position', 'id']
+        indexes = [
+            models.Index(fields=['combo', 'position'], name='comboitem_combo_pos_idx'),
+            models.Index(fields=['product'], name='comboitem_product_idx'),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.quantity}x {self.product.name} ({self.combo.name})"
+
+    def get_selected_variant_dict(self) -> Optional[dict]:
+        if not self.selected_variant_id:
+            return None
+        variants = self.product.variants if (self.product_id and isinstance(self.product.variants, list)) else []
+        for v in variants:
+            if isinstance(v, dict) and str(v.get('id')) == str(self.selected_variant_id):
+                return v
+        return None
+
+    def get_unit_price(self) -> float:
+        var_dict = self.get_selected_variant_dict()
+        if isinstance(var_dict, dict) and var_dict.get('price') is not None:
+            try:
+                return float(var_dict['price'])
+            except (TypeError, ValueError):
+                pass
+        if self.inventory_item_id and self.inventory_item is not None:
+            return self.inventory_item.get_list_price()
+        return float(self.product.price)
+
+    def get_json(self) -> dict:
+        qty = max(1, int(self.quantity or 1))
+        unit_price = self.get_unit_price()
+        prod_imgs = self.product.images if (self.product_id and isinstance(self.product.images, list)) else []
+        img_url = storage_manager.get_url(prod_imgs[0]) if prod_imgs else ""
+        sel_var = self.get_selected_variant_dict()
+        return {
+            "id": self.id,
+            "product_id": str(self.product_id),
+            "inventory_item_id": str(self.inventory_item_id) if self.inventory_item_id else None,
+            "name": self.product.name,
+            "quantity": qty,
+            "unit_price": round(unit_price, 2),
+            "subtotal": round(unit_price * qty, 2),
+            "selling_unit": self.product.selling_unit or "unit",
+            "unit_label": self.product.unit_label or "und",
+            "image_url": img_url,
+            "selected_variant_id": self.selected_variant_id or None,
+            "selected_variant": sel_var,
+            "notes": self.notes or "",
+            "position": int(self.position or 0),
+        }
 
 
 # ==========================================

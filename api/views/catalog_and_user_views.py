@@ -12,6 +12,7 @@ from ..core.workforce import (
     check_and_record_worker_catalog_mutation,
     snapshot_product,
     snapshot_inventory_item,
+    snapshot_products_combo,
     record_employee_audit_log,
 )
 
@@ -25,6 +26,116 @@ def _catalog_workforce_error_response(err: WorkforceError) -> Response:
     if err.code:
         payload['code'] = err.code
     return Response(payload, status=err.status_code)
+
+
+def _safe_delete_combo_own_images(combo: ProductsCombo) -> None:
+    """
+    Elimina del storage únicamente las imágenes personalizadas subidas para `combo.id`
+    (`combo_pictures/<combo.id>/...`). Jamás toca las fotos de los `Product` individuales.
+    """
+    combo_id_str = str(combo.id)
+    for img in (combo.custom_images or []):
+        if not img or combo_id_str not in str(img):
+            continue
+        try:
+            storage_manager.delete_file(img)
+        except Exception as e:
+            print(f"Error borrando imagen propia de combo {combo_id_str}: {e}")
+
+
+def _resolve_and_validate_combo_items(company: Company, store: CompanyStore, raw_combo_items) -> tuple:
+    """
+    Valida y resuelve relacionalmente la lista `combo_items` contra los modelos `Product`
+    e `InventoryItem` del comercio y sucursal.
+    Retorna `(resolved_specs, first_subcategory)` donde cada elemento de `resolved_specs` es:
+    `{'product': Product, 'inventory_item': InventoryItem | None, 'quantity': int, 'selected_variant_id': str, 'notes': str, 'position': int}`
+    """
+    if isinstance(raw_combo_items, str):
+        raw_str = raw_combo_items.strip()
+        if not raw_str:
+            raw_combo_items = []
+        else:
+            try:
+                raw_combo_items = json.loads(raw_str)
+            except Exception:
+                raise ValueError("El formato JSON de combo_items es inválido.")
+
+    if not isinstance(raw_combo_items, list) or not raw_combo_items:
+        raise ValueError("Debes seleccionar los productos que conforman el combo en 'combo_items'.")
+
+    product_ids = set()
+    inv_item_ids = set()
+    for entry in raw_combo_items:
+        if not isinstance(entry, dict):
+            continue
+        pid = entry.get('product_id') or entry.get('product')
+        iid = entry.get('inventory_item_id') or entry.get('item_id')
+        if pid:
+            product_ids.add(str(pid).strip())
+        if iid:
+            inv_item_ids.add(str(iid).strip())
+
+    inv_by_id = {}
+    if inv_item_ids:
+        for inv in InventoryItem.objects.select_related('product__category__parent_category').filter(
+            id__in=inv_item_ids, store__company=company
+        ):
+            inv_by_id[str(inv.id)] = inv
+            product_ids.add(str(inv.product_id))
+
+    products_by_id = {}
+    if product_ids:
+        for prod in Product.objects.select_related('category__parent_category').filter(
+            id__in=product_ids, company=company
+        ):
+            products_by_id[str(prod.id)] = prod
+
+    store_inv_by_product = {
+        str(inv.product_id): inv
+        for inv in InventoryItem.objects.filter(store=store, product_id__in=list(products_by_id.keys()))
+    }
+
+    resolved_specs = []
+    first_subcategory = None
+    total_units = 0
+
+    for idx, entry in enumerate(raw_combo_items):
+        if not isinstance(entry, dict):
+            continue
+        pid = str(entry.get('product_id') or entry.get('product') or '').strip()
+        iid = str(entry.get('inventory_item_id') or entry.get('item_id') or '').strip()
+
+        inv_obj = inv_by_id.get(iid) if iid else None
+        prod_obj = products_by_id.get(pid) if pid else (inv_obj.product if inv_obj is not None else None)
+
+        if prod_obj is None:
+            raise ValueError("Uno o más productos seleccionados para el combo no existen o no pertenecen a tu comercio.")
+
+        if inv_obj is None or inv_obj.store_id != store.id:
+            inv_obj = store_inv_by_product.get(str(prod_obj.id))
+
+        try:
+            qty = max(1, int(float(entry.get('quantity') or 1)))
+        except (TypeError, ValueError):
+            qty = 1
+
+        total_units += qty
+        if first_subcategory is None and prod_obj.category is not None:
+            first_subcategory = prod_obj.category
+
+        resolved_specs.append({
+            'product': prod_obj,
+            'inventory_item': inv_obj,
+            'quantity': qty,
+            'selected_variant_id': str(entry.get('selected_variant_id') or entry.get('variant_id') or '').strip()[:100],
+            'notes': str(entry.get('notes') or '').strip()[:255],
+            'position': idx,
+        })
+
+    if not resolved_specs or total_units < 2:
+        raise ValueError("Un combo debe incluir al menos 2 unidades de productos del catálogo (ej. 2 productos distintos o 2 unidades).")
+
+    return resolved_specs, first_subcategory
 
 
 class InventoryItemViewSet(viewsets.ModelViewSet):
@@ -42,6 +153,14 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         return qs.order_by('-creation')
 
     def create(self, request, *args, **kwargs):
+        if (
+            not request.data.get('product_id')
+            and (
+                str(request.data.get('is_combo', '')).strip().lower() in ('true', '1', 'yes')
+                or 'combo_items' in request.data
+            )
+        ):
+            return self.combos(request)
         try:
             store_id = request.data.get('store_id')
             product_id = request.data.get('product_id')
@@ -94,13 +213,17 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
                         is_reversible=True,
                     )
 
-                return Response({'success': True, 'data': item.get_json()}, status=status.HTTP_201_CREATED)
+                item_json = item.get_json()
+                return Response({'success': True, 'id': str(item.id), 'data': item_json}, status=status.HTTP_201_CREATED)
         except WorkforceError as e:
             return _catalog_workforce_error_response(e)
         except Exception as e:
             return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def update(self, request, *args, **kwargs):
+        pk = kwargs.get('pk')
+        if pk and not InventoryItem.objects.filter(pk=pk).exists() and ProductsCombo.objects.filter(pk=pk).exists():
+            return self.combos(request, item_id=str(pk))
         item_ref = self.get_object()
         try:
             _company, emp, _allowed = resolve_merchant_actor(request, target_company_id=item_ref.store.company_id)
@@ -202,6 +325,12 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def toggle_pause(self, request, pk=None):
+        if pk and not InventoryItem.objects.filter(pk=pk).exists() and ProductsCombo.objects.filter(pk=pk).exists():
+            combo_view = ProductsComboViewSet()
+            combo_view.request = request
+            combo_view.action = 'toggle_pause'
+            combo_view.kwargs = {'pk': pk}
+            return combo_view.toggle_pause(request, pk=pk)
         item = self.get_object()
         desired_paused = request.data.get('paused')
         if desired_paused is None:
@@ -264,6 +393,12 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         
     @action(detail=True, methods=['post'])
     def restock(self, request, pk=None):
+        if pk and not InventoryItem.objects.filter(pk=pk).exists() and ProductsCombo.objects.filter(pk=pk).exists():
+            combo_view = ProductsComboViewSet()
+            combo_view.request = request
+            combo_view.action = 'restock'
+            combo_view.kwargs = {'pk': pk}
+            return combo_view.restock(request, pk=pk)
         item = self.get_object()
         units_raw = request.data.get('units')
 
@@ -310,11 +445,56 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({'success': False, 'error': {'error': str(e)}}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    @action(
+        detail=False,
+        methods=['get', 'post', 'put', 'patch', 'delete'],
+        url_path='combos',
+        parser_classes=[parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser],
+    )
+    def combos(self, request, item_id=None):
+        """
+        Alias en `InventoryItemViewSet` que delega al controlador relacional `ProductsComboViewSet`.
+        """
+        combo_view = ProductsComboViewSet()
+        combo_view.request = request
+        combo_view.format_kwarg = getattr(self, 'format_kwarg', None)
+        target_id = (
+            item_id
+            or request.data.get('combo_id')
+            or request.data.get('inventory_item_id')
+            or request.data.get('item_id')
+            or (request.data.get('id') if request.method in ('PUT', 'PATCH', 'DELETE') else None)
+            or (request.query_params.get('combo_id') if request.method == 'DELETE' else None)
+            or (request.query_params.get('item_id') if request.method == 'DELETE' else None)
+        )
+        if request.method == 'GET':
+            if target_id:
+                combo_view.action = 'retrieve'
+                combo_view.kwargs = {'pk': target_id}
+                return combo_view.retrieve(request, pk=target_id)
+            combo_view.action = 'list'
+            combo_view.kwargs = {}
+            return combo_view.list(request)
+        if request.method == 'DELETE':
+            combo_view.action = 'destroy'
+            combo_view.kwargs = {'pk': target_id}
+            return combo_view.destroy(request, pk=target_id)
+        if target_id or request.method in ('PUT', 'PATCH'):
+            combo_view.action = 'partial_update' if request.method == 'PATCH' else 'update'
+            combo_view.kwargs = {'pk': target_id}
+            return combo_view.update(request, pk=target_id)
+        combo_view.action = 'create'
+        combo_view.kwargs = {}
+        return combo_view.create(request)
+
     def destroy(self, request, *args, **kwargs):
         try:
             require_owner_for_destructive_action(request, resource_label='lotes de inventario')
         except WorkforceError as e:
             return _catalog_workforce_error_response(e)
+        pk = kwargs.get('pk')
+        if pk and not InventoryItem.objects.filter(pk=pk).exists() and ProductsCombo.objects.filter(pk=pk).exists():
+            return self.combos(request, item_id=str(pk))
         item = self.get_object()
         try:
             with transaction.atomic():
@@ -326,6 +506,480 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             return Response(status=status.HTTP_204_NO_CONTENT)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ProductsComboViewSet(viewsets.ModelViewSet):
+    """
+    Controlador REST dedicado para el modelo relacional `ProductsCombo` y sus `ProductsComboItem`.
+    Rutas:
+    - GET    /api/v1/products-combos/?store_id=<uuid>
+    - POST   /api/v1/products-combos/
+    - GET    /api/v1/products-combos/<id>/
+    - PUT    /api/v1/products-combos/<id>/
+    - PATCH  /api/v1/products-combos/<id>/
+    - DELETE /api/v1/products-combos/<id>/
+    - POST   /api/v1/products-combos/<id>/toggle_pause/
+    - POST   /api/v1/products-combos/<id>/restock/
+    """
+    serializer_class = ProductsComboSerializer
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'actions'
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser]
+
+    def get_queryset(self):
+        company, _emp, allowed_store_ids = resolve_merchant_actor(self.request)
+        if company is None:
+            return ProductsCombo.objects.none()
+        qs = (
+            ProductsCombo.objects.select_related(
+                'company',
+                'store',
+                'store__company',
+                'category',
+                'category__parent_category',
+            )
+            .prefetch_related(
+                Prefetch(
+                    'combo_items',
+                    queryset=ProductsComboItem.objects.select_related('product', 'inventory_item').order_by('position', 'id'),
+                )
+            )
+            .filter(company=company)
+        )
+        if allowed_store_ids is not None:
+            qs = qs.filter(store_id__in=allowed_store_ids)
+        store_id = self.request.query_params.get('store_id')
+        if store_id:
+            qs = qs.filter(store_id=store_id)
+        return qs.order_by('-creation')
+
+    def list(self, request, *args, **kwargs):
+        qs = self.get_queryset()
+        combos_json = [c.get_json() for c in qs]
+        return Response(
+            {
+                'success': True,
+                'combos': combos_json,
+                'items': combos_json,
+                'data': combos_json,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def retrieve(self, request, *args, **kwargs):
+        combo = self.get_object()
+        combo_json = combo.get_json()
+        return Response(
+            {
+                'success': True,
+                'combo': combo_json,
+                'item': combo_json,
+                'data': combo_json,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def _save_combo(self, request, existing_combo: Optional[ProductsCombo] = None):
+        try:
+            store_id = (
+                request.data.get('store_id')
+                or (existing_combo.store_id if existing_combo is not None else None)
+            )
+            if not store_id:
+                return Response(
+                    {'success': False, 'error': 'store_id es requerido para guardar el combo en la sucursal.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            store = CompanyStore.objects.select_related('company').get(id=store_id)
+            if not user_can_manage_store(request, store):
+                return Response(
+                    {'success': False, 'error': 'No tienes permisos operativos sobre esta sucursal.', 'code': 'store_not_allowed'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            company, emp, _allowed = resolve_merchant_actor(request, target_company_id=store.company_id)
+            if emp is not None:
+                require_employee_permission(emp, 'can_edit_products')
+
+            raw_combo_items = request.data.get('combo_items')
+            if raw_combo_items is None and 'items' in request.data:
+                raw_combo_items = request.data.get('items')
+
+            resolved_specs = None
+            first_subcat = None
+            if raw_combo_items is not None or existing_combo is None:
+                try:
+                    resolved_specs, first_subcat = _resolve_and_validate_combo_items(
+                        company, store, raw_combo_items
+                    )
+                except ValueError as ve:
+                    return Response({'success': False, 'error': str(ve)}, status=status.HTTP_400_BAD_REQUEST)
+
+            raw_price = (
+                request.data.get('price')
+                if request.data.get('price') not in (None, '')
+                else request.data.get('custom_price')
+            )
+            if raw_price in (None, '') and existing_combo is not None:
+                raw_price = existing_combo.price
+            try:
+                combo_price = Decimal(str(round(float(raw_price), 2)))
+                if combo_price <= Decimal('0.00'):
+                    raise ValueError()
+            except (TypeError, ValueError, InvalidOperation):
+                return Response(
+                    {'success': False, 'error': 'El precio del combo debe ser mayor a 0.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            raw_stock = request.data.get('stock')
+            if raw_stock in (None, '') and existing_combo is not None:
+                stock_val = int(existing_combo.stock or 0)
+            else:
+                try:
+                    stock_val = max(0, int(float(raw_stock if raw_stock not in (None, '') else 1)))
+                except (TypeError, ValueError):
+                    stock_val = 1
+
+            combo_name = str(
+                request.data.get('name')
+                if request.data.get('name') not in (None, '')
+                else (existing_combo.name if existing_combo is not None else 'Combo Especial')
+            ).strip()
+            if not combo_name:
+                return Response(
+                    {'success': False, 'error': 'El nombre del combo es obligatorio.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            combo_desc = str(
+                request.data.get('description')
+                if request.data.get('description') is not None
+                else (existing_combo.description if existing_combo is not None else '')
+            ).strip()
+
+            raw_deduct = request.data.get('deduct_component_stock')
+            if raw_deduct is None and existing_combo is not None:
+                deduct_val = bool(existing_combo.deduct_component_stock)
+            elif isinstance(raw_deduct, bool):
+                deduct_val = raw_deduct
+            elif raw_deduct is not None:
+                deduct_val = str(raw_deduct).strip().lower() in ('1', 'true', 'yes', 'si', 'sí')
+            else:
+                deduct_val = False
+
+            raw_paused = request.data.get('paused')
+            if raw_paused is None and existing_combo is not None:
+                paused_val = bool(existing_combo.paused)
+            elif isinstance(raw_paused, bool):
+                paused_val = raw_paused
+            elif raw_paused is not None:
+                paused_val = str(raw_paused).strip().lower() in ('1', 'true', 'yes', 'si', 'sí')
+            else:
+                paused_val = False
+
+            exp_datetime = existing_combo.expiration_date if existing_combo is not None else None
+            if 'expiration_date' in request.data:
+                exp_raw = request.data.get('expiration_date')
+                if exp_raw in (None, ''):
+                    exp_datetime = None
+                else:
+                    parsed_date = parse_flexible_date(exp_raw)
+                    if parsed_date:
+                        exp_datetime = timezone.make_aware(
+                            datetime.combine(parsed_date.date(), datetime.max.time())
+                        )
+
+            category = existing_combo.category if existing_combo is not None else None
+            raw_cat_id = request.data.get('category_id')
+            if raw_cat_id not in (None, ''):
+                try:
+                    category = SubCategory.objects.select_related('parent_category').filter(id=int(raw_cat_id)).first()
+                except (TypeError, ValueError):
+                    pass
+            if category is None and first_subcat is not None:
+                category = first_subcat
+
+            tokens_active = existing_combo.discounts_by_tokens_active if existing_combo is not None else False
+            if 'discounts_by_tokens_active' in request.data:
+                raw_tok = request.data.get('discounts_by_tokens_active')
+                tokens_active = (
+                    raw_tok
+                    if isinstance(raw_tok, bool)
+                    else str(raw_tok).strip().lower() in ('1', 'true', 'yes', 'si', 'sí')
+                )
+
+            discounts_data = existing_combo.discounts_data if existing_combo is not None else {}
+            if 'discounts_data' in request.data:
+                raw_disc = request.data.get('discounts_data')
+                if isinstance(raw_disc, str) and raw_disc.strip():
+                    try:
+                        discounts_data = json.loads(raw_disc)
+                    except Exception:
+                        discounts_data = {}
+                elif isinstance(raw_disc, (dict, list)):
+                    discounts_data = raw_disc
+
+            if emp is not None:
+                ref_price = existing_combo.price if existing_combo is not None else None
+                validate_worker_price_change(emp, ref_price, combo_price, target_label=combo_name)
+                if existing_combo is not None:
+                    zeroed_or_paused = (paused_val and not existing_combo.paused) or (stock_val <= 0 and existing_combo.stock > 0)
+                    check_and_record_worker_catalog_mutation(
+                        emp,
+                        f"combo:{existing_combo.id}",
+                        zeroed_stock_or_paused=zeroed_or_paused,
+                    )
+
+            with transaction.atomic():
+                created_new = existing_combo is None
+                if existing_combo is not None:
+                    combo = (
+                        ProductsCombo.objects.select_for_update(of=('self',))
+                        .select_related('company', 'store')
+                        .get(pk=existing_combo.pk)
+                    )
+                    before_snap = snapshot_products_combo(combo)
+                    combo.store = store
+                    combo.category = category
+                    combo.name = combo_name
+                    combo.description = combo_desc
+                    combo.price = combo_price
+                    combo.stock = stock_val
+                    combo.deduct_component_stock = deduct_val
+                    combo.paused = paused_val
+                    combo.expiration_date = exp_datetime
+                    combo.discounts_by_tokens_active = tokens_active
+                    combo.discounts_data = discounts_data
+                    if stock_val > 0 and combo.sold_out_time is not None:
+                        combo.sold_out_time = None
+                else:
+                    before_snap = {}
+                    combo = ProductsCombo.objects.create(
+                        company=company,
+                        store=store,
+                        category=category,
+                        name=combo_name,
+                        description=combo_desc,
+                        price=combo_price,
+                        custom_images=[],
+                        stock=stock_val,
+                        deduct_component_stock=deduct_val,
+                        paused=paused_val,
+                        expiration_date=exp_datetime,
+                        discounts_by_tokens_active=tokens_active,
+                        discounts_data=discounts_data,
+                    )
+
+                # Imágenes personalizadas opcionales (si no se envían, get_images() usa las de los productos reales)
+                if any(k in request.data for k in ('image_order', 'custom_images', 'images')) or request.FILES:
+                    raw_img_order = (
+                        request.data.get('image_order')
+                        if 'image_order' in request.data
+                        else (request.data.get('custom_images') if 'custom_images' in request.data else request.data.get('images'))
+                    )
+                    if isinstance(raw_img_order, str):
+                        try:
+                            image_order = json.loads(raw_img_order)
+                        except Exception:
+                            image_order = [raw_img_order] if raw_img_order.strip() else []
+                    elif isinstance(raw_img_order, list):
+                        image_order = raw_img_order
+                    else:
+                        image_order = list(request.FILES.keys())
+
+                    custom_imgs = []
+                    dtnow_str = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
+                    for idx, img_entry in enumerate(image_order):
+                        if not isinstance(img_entry, str) or not img_entry.strip():
+                            continue
+                        img_entry = img_entry.strip()
+                        if img_entry in request.FILES:
+                            file = request.FILES[img_entry]
+                            extension = file.name.rsplit('.', 1)[-1].lower() if '.' in getattr(file, 'name', '') else ''
+                            if extension not in ('jpg', 'jpeg', 'png', 'webp'):
+                                return Response(
+                                    {'success': False, 'error': f"Formato de imagen no permitido ({file.name})."},
+                                    status=status.HTTP_400_BAD_REQUEST,
+                                )
+                            file_name = f"combo_{combo.id}_{idx}_{dtnow_str}.{extension}"
+                            folder = f"combo_pictures/{combo.id}"
+                            rel_path = storage_manager.save_file(file, folder, file_name)
+                            if rel_path:
+                                custom_imgs.append(rel_path)
+                        else:
+                            norm_img = storage_manager.normalize_path(img_entry)
+                            if norm_img and norm_img not in custom_imgs:
+                                custom_imgs.append(norm_img)
+                    combo.custom_images = custom_imgs
+
+                combo.save()
+
+                if resolved_specs is not None:
+                    combo.combo_items.all().delete()
+                    ProductsComboItem.objects.bulk_create([
+                        ProductsComboItem(
+                            combo=combo,
+                            product=spec['product'],
+                            inventory_item=spec['inventory_item'],
+                            quantity=spec['quantity'],
+                            selected_variant_id=spec['selected_variant_id'],
+                            notes=spec['notes'],
+                            position=spec['position'],
+                        )
+                        for spec in resolved_specs
+                    ])
+
+                if emp is not None:
+                    record_employee_audit_log(
+                        emp,
+                        action='products_combo_created' if created_new else 'products_combo_updated',
+                        target_type='products_combo',
+                        target_id=combo.id,
+                        target_label=f"{combo.name} ({store.name})",
+                        before_snapshot=before_snap,
+                        after_snapshot=snapshot_products_combo(combo),
+                        is_reversible=True,
+                    )
+
+            combo = self.get_queryset().get(pk=combo.pk)
+            combo_json = combo.get_json()
+            return Response(
+                {
+                    'success': True,
+                    'id': str(combo.id),
+                    'combo_id': str(combo.id),
+                    'combo': combo_json,
+                    'item': combo_json,
+                    'data': combo_json,
+                },
+                status=status.HTTP_201_CREATED if created_new else status.HTTP_200_OK,
+            )
+        except CompanyStore.DoesNotExist:
+            return Response({'success': False, 'error': 'Sucursal no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+        except WorkforceError as e:
+            return _catalog_workforce_error_response(e)
+        except Exception as e:
+            return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def create(self, request, *args, **kwargs):
+        return self._save_combo(request, existing_combo=None)
+
+    def update(self, request, *args, **kwargs):
+        pk = kwargs.get('pk') or request.data.get('combo_id') or request.data.get('id') or request.data.get('item_id')
+        combo = self.get_queryset().filter(pk=pk).first() if pk else None
+        if combo is None:
+            return Response({'success': False, 'error': 'Combo no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        return self._save_combo(request, existing_combo=combo)
+
+    def partial_update(self, request, *args, **kwargs):
+        return self.update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        try:
+            require_owner_for_destructive_action(request, resource_label='combos')
+        except WorkforceError as e:
+            return _catalog_workforce_error_response(e)
+        pk = (
+            kwargs.get('pk')
+            or request.data.get('combo_id')
+            or request.data.get('id')
+            or request.data.get('item_id')
+            or request.query_params.get('combo_id')
+            or request.query_params.get('item_id')
+        )
+        combo = self.get_queryset().filter(pk=pk).first() if pk else None
+        if combo is None:
+            return Response({'success': False, 'error': 'Combo no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            with transaction.atomic():
+                _safe_delete_combo_own_images(combo)
+                combo.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except Exception as e:
+            return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=['post'])
+    def toggle_pause(self, request, pk=None):
+        combo = self.get_object()
+        desired_paused = request.data.get('paused')
+        if desired_paused is None:
+            desired_paused = not combo.paused
+        elif not isinstance(desired_paused, bool):
+            desired_paused = str(desired_paused).strip().lower() in ('1', 'true', 'yes', 'si', 'sí')
+
+        try:
+            _company, emp, _allowed = resolve_merchant_actor(request, target_company_id=combo.company_id)
+            if emp is not None:
+                require_employee_permission(emp, 'can_edit_products')
+                check_and_record_worker_catalog_mutation(
+                    emp,
+                    f"combo:{combo.id}",
+                    zeroed_stock_or_paused=bool(desired_paused and not combo.paused),
+                )
+            with transaction.atomic():
+                locked_combo = ProductsCombo.objects.select_for_update(of=('self',)).select_related('store').get(pk=combo.pk)
+                before_snap = snapshot_products_combo(locked_combo)
+                locked_combo.paused = bool(desired_paused)
+                locked_combo.save(update_fields=['paused'])
+                if emp is not None:
+                    record_employee_audit_log(
+                        emp,
+                        action='products_combo_updated',
+                        target_type='products_combo',
+                        target_id=locked_combo.id,
+                        target_label=f"{locked_combo.name} ({locked_combo.store.name})",
+                        before_snapshot=before_snap,
+                        after_snapshot=snapshot_products_combo(locked_combo),
+                        is_reversible=True,
+                    )
+            combo = self.get_queryset().get(pk=combo.pk)
+            return Response({'success': True, 'data': combo.get_json()}, status=status.HTTP_200_OK)
+        except WorkforceError as e:
+            return _catalog_workforce_error_response(e)
+        except Exception as e:
+            return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=['post'])
+    def restock(self, request, pk=None):
+        combo = self.get_object()
+        units_raw = request.data.get('units')
+        try:
+            units = int(units_raw)
+            if units <= 0:
+                return Response({'error': {'error': 'La cantidad a reponer debe ser mayor a cero.'}}, status=status.HTTP_400_BAD_REQUEST)
+        except (ValueError, TypeError):
+            return Response({'error': {'error': 'Cantidad inválida.'}}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            _company, emp, _allowed = resolve_merchant_actor(request, target_company_id=combo.company_id)
+            with transaction.atomic():
+                locked_combo = ProductsCombo.objects.select_for_update(of=('self',)).select_related('store').get(pk=combo.pk)
+                before_snap = snapshot_products_combo(locked_combo)
+                locked_combo.stock += units
+                locked_combo.sold_out_time = None
+                locked_combo.save(update_fields=['stock', 'sold_out_time'])
+                if emp is not None:
+                    record_employee_audit_log(
+                        emp,
+                        action='products_combo_restocked',
+                        target_type='products_combo',
+                        target_id=locked_combo.id,
+                        target_label=f"{locked_combo.name} ({locked_combo.store.name})",
+                        before_snapshot=before_snap,
+                        after_snapshot=snapshot_products_combo(locked_combo),
+                        is_reversible=False,
+                    )
+            combo = self.get_queryset().get(pk=combo.pk)
+            return Response({'success': True, 'data': combo.get_json()}, status=status.HTTP_200_OK)
+        except WorkforceError as e:
+            return _catalog_workforce_error_response(e)
+        except Exception as e:
+            return Response({'success': False, 'error': {'error': str(e)}}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+InventoryItemComboViewSet = ProductsComboViewSet
 
 class ProductViewSet(viewsets.ModelViewSet):
     serializer_class = ProductSerializer
@@ -341,7 +995,12 @@ class ProductViewSet(viewsets.ModelViewSet):
         company, _emp, _allowed_store_ids = resolve_merchant_actor(self.request)
         if company is None:
             return Product.objects.none()
-        return Product.objects.select_related('company', 'category__parent_category').filter(company=company).order_by('-creation')
+        qs = Product.objects.select_related('company', 'category__parent_category').filter(company=company)
+        if getattr(self, 'action', None) == 'list':
+            include_combos = str(self.request.query_params.get('include_combos', '')).strip().lower() in ('true', '1', 'yes')
+            if not include_combos:
+                qs = qs.exclude(Q(selling_unit='combo') | Q(attributes__is_combo=True))
+        return qs.order_by('-creation')
 
     @action(detail=False, methods=['get'], url_path='schema', permission_classes=[AllowAny])
     def schema(self, request):
@@ -520,7 +1179,28 @@ class ProductViewSet(viewsets.ModelViewSet):
                 validate_worker_price_change(emp, None, d.get('price'), target_label=d.get('name', 'Producto'))
 
             with transaction.atomic():
-                category = SubCategory.objects.select_related('parent_category').get(id=d['category_id'])
+                dynamic_input = {}
+                for dyn_key in (
+                    'selling_unit', 'unit_label', 'allow_fractional_quantity',
+                    'min_order_quantity', 'unit_step', 'attributes', 'variants', 'modifier_groups',
+                ):
+                    if dyn_key in d:
+                        dynamic_input[dyn_key] = d[dyn_key]
+                    elif dyn_key in request.data:
+                        dynamic_input[dyn_key] = request.data.get(dyn_key)
+
+                cat_id = d.get('category_id')
+                category = None
+                if cat_id not in (None, ''):
+                    category = SubCategory.objects.select_related('parent_category').get(id=cat_id)
+                else:
+                    category = (
+                        SubCategory.objects.select_related('parent_category')
+                        .filter(product__company=company)
+                        .first()
+                        or SubCategory.objects.select_related('parent_category').first()
+                    )
+
                 raw_discounts = request.data.get('discounts_data')
                 if isinstance(raw_discounts, str) and raw_discounts.strip():
                     discounts_data = json.loads(raw_discounts)
@@ -529,21 +1209,10 @@ class ProductViewSet(viewsets.ModelViewSet):
                 else:
                     discounts_data = []
 
-                dynamic_input = {}
-                for dyn_key in (
-                    'selling_unit', 'unit_label', 'allow_fractional_quantity',
-                    'min_order_quantity', 'unit_step', 'attributes', 'variants', 'modifier_groups',
-                    'is_combo', 'combo_items', 'combo_summary', 'combo_regular_price',
-                ):
-                    if dyn_key in d:
-                        dynamic_input[dyn_key] = d[dyn_key]
-                    elif dyn_key in request.data:
-                        dynamic_input[dyn_key] = request.data.get(dyn_key)
-
                 dynamic_data = validate_and_normalize_product_dynamic_data(
                     dynamic_input,
-                    subcategory_name=category.name,
-                    category_name=category.parent_category.name if category.parent_category_id else None,
+                    subcategory_name=category.name if category else None,
+                    category_name=category.parent_category.name if (category and category.parent_category_id) else None,
                     base_price=float(d.get('price', 0.0) or 0.0),
                 )
 
@@ -551,7 +1220,7 @@ class ProductViewSet(viewsets.ModelViewSet):
                     company=company,
                     name=d['name'],
                     price=d['price'],
-                    description=d['description'],
+                    description=d.get('description') or '',
                     category=category,
                     discounts_by_tokens_active=d.get('discounts_by_tokens_active', False),
                     discounts_data=discounts_data,
@@ -576,6 +1245,9 @@ class ProductViewSet(viewsets.ModelViewSet):
                 dtnow_str = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
                 
                 for index, item in enumerate(image_order):
+                    if not isinstance(item, str) or not item.strip():
+                        continue
+                    item = item.strip()
                     # Si el string dice "new_image_X", buscamos el archivo y lo subimos
                     if item.startswith('new_image_') and item in request.FILES:
                         file = request.FILES[item]
@@ -593,8 +1265,11 @@ class ProductViewSet(viewsets.ModelViewSet):
                         else:
                             raise Exception(f"Error guardando la imagen {file.name}.")
                     else:
-                        # Si no es un archivo nuevo, asumimos que es una URL existente
-                        final_images.append(item)
+                        # Si no es un archivo nuevo, normalizamos la ruta/URL existente
+                        norm_img = storage_manager.normalize_path(item)
+                        if norm_img:
+                            final_images.append(norm_img)
+
                 product.images = final_images
                 product.save()
 
@@ -610,7 +1285,8 @@ class ProductViewSet(viewsets.ModelViewSet):
                         is_reversible=False,
                     )
 
-                return Response({'success': True, 'data': product.get_json()}, status=status.HTTP_201_CREATED)
+                prod_json = product.get_json()
+                return Response({'success': True, 'id': str(product.id), 'data': prod_json}, status=status.HTTP_201_CREATED)
 
         except WorkforceError as e:
             return _catalog_workforce_error_response(e)
@@ -622,7 +1298,7 @@ class ProductViewSet(viewsets.ModelViewSet):
 
         product_ref = self.get_object()
         try:
-            _company, emp, _allowed = resolve_merchant_actor(request, target_company_id=product_ref.company_id)
+            company, emp, _allowed = resolve_merchant_actor(request, target_company_id=product_ref.company_id)
             if emp is not None:
                 require_employee_permission(emp, 'can_edit_products')
         except WorkforceError as e:
@@ -664,7 +1340,7 @@ class ProductViewSet(viewsets.ModelViewSet):
                 product.description = d.get('description', product.description)
                 product.discounts_by_tokens_active = d.get('discounts_by_tokens_active', product.discounts_by_tokens_active)
                 
-                if 'category_id' in d:
+                if d.get('category_id') not in (None, ''):
                     product.category = SubCategory.objects.select_related('parent_category').get(id=d['category_id'])
 
                 raw_discounts = request.data.get('discounts_data')
@@ -675,7 +1351,6 @@ class ProductViewSet(viewsets.ModelViewSet):
                 for dyn_key in (
                     'selling_unit', 'unit_label', 'allow_fractional_quantity',
                     'min_order_quantity', 'unit_step', 'attributes', 'variants', 'modifier_groups',
-                    'is_combo', 'combo_items', 'combo_summary', 'combo_regular_price',
                 ):
                     if dyn_key in request.data:
                         dynamic_input[dyn_key] = d[dyn_key] if dyn_key in d else request.data.get(dyn_key)
@@ -709,6 +1384,9 @@ class ProductViewSet(viewsets.ModelViewSet):
 
                     # 1. TRADUCIR URLs ABSOLUTAS A RELATIVAS
                     for item in image_order_from_frontend:
+                        if not isinstance(item, str) or not item.strip():
+                            continue
+                        item = item.strip()
                         if item.startswith('new_image_'):
                             processed_image_order.append(item)
                         else:
@@ -720,14 +1398,15 @@ class ProductViewSet(viewsets.ModelViewSet):
                                     break
                             
                             if not found:
-                                clean_path = item.split('/media/')[-1] if '/media/' in item else item
-                                processed_image_order.append(clean_path)
+                                clean_path = storage_manager.normalize_path(item)
+                                if clean_path:
+                                    processed_image_order.append(clean_path)
                     
-                    # 2. BORRAR IMÁGENES DESCARTADAS (Solo si edita el dueño; si edita un asistente
-                    #    conservamos las imágenes anteriores en storage para permitir Rollback en 1 toque).
+                    # 2. BORRAR IMÁGENES DESCARTADAS PROPIAS (Solo si edita el dueño y la foto pertenece a este product.id)
                     if emp is None:
+                        prod_id_str = str(product.id)
                         for old_url in product.images:
-                            if old_url not in processed_image_order:
+                            if old_url not in processed_image_order and prod_id_str in str(old_url):
                                 try:
                                     storage_manager.delete_file(old_url)
                                 except Exception as e:
@@ -756,6 +1435,13 @@ class ProductViewSet(viewsets.ModelViewSet):
                         else:
                             final_images.append(item)
 
+                    if not final_images and dynamic_data.get('is_combo') and component_products:
+                        for comp_prod in component_products:
+                            for c_img in (comp_prod.images or [])[:1]:
+                                norm_c = storage_manager.normalize_path(c_img)
+                                if norm_c and norm_c not in final_images:
+                                    final_images.append(norm_c)
+
                     product.images = final_images
 
                 product.save()
@@ -773,7 +1459,9 @@ class ProductViewSet(viewsets.ModelViewSet):
                         is_reversible=True,
                     )
 
-            return Response({'success': True, 'data': product.get_json()}, status=status.HTTP_200_OK)
+                prod_json = product.get_json()
+
+            return Response({'success': True, 'id': str(product.id), 'data': prod_json}, status=status.HTTP_200_OK)
 
         except WorkforceError as e:
             return _catalog_workforce_error_response(e)
@@ -797,12 +1485,8 @@ class ProductViewSet(viewsets.ModelViewSet):
                         associated_item=None
                     )
 
-                # Primero borramos las imágenes del storage
-                for img in product.images:
-                    try:
-                        storage_manager.delete_file(img)
-                    except Exception as e:
-                        print(f"Error borrando imagen al eliminar producto: {e}")
+                # Primero borramos únicamente las imágenes propias del producto en el storage
+                _safe_delete_product_own_images(product)
                 
                 # Luego eliminamos el registro de la DB
                 product.delete()
@@ -851,13 +1535,9 @@ class ProductViewSet(viewsets.ModelViewSet):
                         associated_item=None
                     )
                 
-                # Borramos las imágenes del storage iterando la consulta evaluada
+                # Borramos únicamente las imágenes propias de cada producto en el storage
                 for product in products_to_delete:
-                    for img in product.images:
-                        try:
-                            storage_manager.delete_file(img)
-                        except Exception as e:
-                            print(f"Error borrando imagen en bulk_delete: {e}")
+                    _safe_delete_product_own_images(product)
                 
                 # Eliminación masiva a nivel de BD
                 deleted_count, _ = products_to_delete.delete()

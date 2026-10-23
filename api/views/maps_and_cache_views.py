@@ -204,16 +204,41 @@ class CartMakerMapViewSet(viewsets.ViewSet):
             subcategory_id = request.query_params.get('subcategory_id') or 'all'
             min_price = request.query_params.get('min_price') or 'none'
             max_price = request.query_params.get('max_price') or 'none'
+            is_combo_param = request.query_params.get('is_combo')
 
             # 1. Definir llave única estructural para esta combinación exacta de filtros en la sucursal
-            struct_cache_key = f"cartmaker:struct:map_products:{store_id}:{subcategory_id}:{min_price}:{max_price}"
+            struct_cache_key = f"cartmaker:struct:map_products:v2:{store_id}:{subcategory_id}:{min_price}:{max_price}"
             structural_data = cache.get(struct_cache_key)
 
             # =========================================================================
-            # CACHE MISS ESTRUCTURAL: CONSULTA OPTIMIZADA A POSTGRESQL
+            # CACHE MISS ESTRUCTURAL: CONSULTA OPTIMIZADA A POSTGRESQL (ITEMS + COMBOS)
             # =========================================================================
             if structural_data is None:
-                # Recuperamos el QuerySet base con todas sus relaciones cargadas
+                # A) Combos activos de la sucursal (ProductsCombo)
+                combos_qs = ProductsCombo.objects.select_related(
+                    'store', 'store__company', 'category', 'category__parent_category'
+                ).prefetch_related(
+                    Prefetch(
+                        'combo_items',
+                        queryset=ProductsComboItem.objects.select_related(
+                            'product', 'product__category', 'inventory_item'
+                        ).order_by('sort_order', 'id'),
+                    )
+                ).filter(
+                    store_id=store_id,
+                    paused=False,
+                    stock__gt=0,
+                )
+                if request.query_params.get('subcategory_id'):
+                    combos_qs = combos_qs.filter(category_id=request.query_params.get('subcategory_id'))
+                if request.query_params.get('min_price'):
+                    combos_qs = combos_qs.filter(price__gte=float(request.query_params.get('min_price')))
+                if request.query_params.get('max_price'):
+                    combos_qs = combos_qs.filter(price__lte=float(request.query_params.get('max_price')))
+
+                combos_struct = [c.get_json() for c in combos_qs.order_by('-creation')[:25]]
+
+                # B) Lotes individuales de inventario (InventoryItem)
                 queryset = InventoryItem.objects.select_related(
                     'product',
                     'product__category',
@@ -263,9 +288,9 @@ class CartMakerMapViewSet(viewsets.ViewSet):
 
                 # Evaluamos los primeros 50 ítems del catálogo de la tienda
                 items = queryset[:50]
-                
-                # CRÍTICO: Mantenemos el método get_json() original del modelo con todos sus campos extendidos
-                structural_data = [item.get_json() for item in items]
+                items_struct = [item.get_json() for item in items]
+
+                structural_data = combos_struct + items_struct
                 
                 # Almacenamos el esqueleto en RAM por 10 minutos
                 cache.set(struct_cache_key, structural_data, timeout=600)
@@ -274,9 +299,9 @@ class CartMakerMapViewSet(viewsets.ViewSet):
             # REAL-TIME STITCHING: FUSIÓN DE VOLATILIDAD DIRECTA EN LA VISTA
             # =========================================================================
             if not structural_data:
-                return Response({'data': []}, status=status.HTTP_200_OK)
+                return Response({'data': [], 'combos': []}, status=status.HTTP_200_OK)
 
-            # Extraemos los IDs de los ítems del caché estructural
+            # Extraemos los IDs de los ítems y combos del caché estructural
             item_ids = [item["id"] for item in structural_data]
             
             # Ejecutamos un MGET nativo por tubería mapeando las llaves volátiles generadas en signals.py
@@ -284,6 +309,10 @@ class CartMakerMapViewSet(viewsets.ViewSet):
             cached_states = cache.get_many(volatile_keys_map.keys())
 
             final_realtime_data = []
+            final_combos_data = []
+            filter_combo_only = None
+            if is_combo_param is not None and str(is_combo_param).strip() != '':
+                filter_combo_only = str(is_combo_param).strip().lower() in ('true', '1', 'yes')
             
             for item_data in structural_data:
                 item_id = item_data["id"]
@@ -307,11 +336,20 @@ class CartMakerMapViewSet(viewsets.ViewSet):
                 item_data["stock"] = state["stock"]
                 item_data["paused"] = state["paused"]
                 item_data["custom_price"] = state["custom_price"]
+
+                is_combo_entry = bool(item_data.get("is_combo", False))
+                if is_combo_entry:
+                    final_combos_data.append(item_data)
+
+                if filter_combo_only is True and not is_combo_entry:
+                    continue
+                if filter_combo_only is False and is_combo_entry:
+                    continue
                 
                 final_realtime_data.append(item_data)
 
-            # Retornamos la firma de respuesta idéntica a la original {'data': [...]}
-            return Response({'data': final_realtime_data}, status=status.HTTP_200_OK)
+            # Retornamos la firma de respuesta idéntica a la original {'data': [...]} + 'combos'
+            return Response({'data': final_realtime_data, 'combos': final_combos_data}, status=status.HTTP_200_OK)
 
         except Exception as e:
             return Response({'error': f'Error interno: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -724,7 +762,7 @@ class SearchCacheAPI(APIView):
                 not cached_data["categories"]
                 or (
                     "default_product_schema" in cached_data["categories"][0]
-                    and cached_data["categories"][0]["default_product_schema"].get("schema_version") == 2
+                    and cached_data["categories"][0]["default_product_schema"].get("schema_version") == 3
                 )
             )
         ):
@@ -757,7 +795,7 @@ class CategoriesListAPI(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
-        cache_key = "cartmaker:global:categories:v2"
+        cache_key = "cartmaker:global:categories:v3"
         categories = cache.get(cache_key)
 
         if (
@@ -767,7 +805,7 @@ class CategoriesListAPI(APIView):
                 categories
                 and (
                     "default_product_schema" not in categories[0]
-                    or categories[0]["default_product_schema"].get("schema_version") != 2
+                    or categories[0]["default_product_schema"].get("schema_version") != 3
                 )
             )
         ):

@@ -34,12 +34,20 @@ class CompanyMainBranchViewSet(APIView):
             ).select_related('product'),
             to_attr='active_items'
         )
+        active_combos_prefetch = Prefetch(
+            'store_combos',
+            queryset=ProductsCombo.objects.filter(
+                paused=False,
+                stock__gt=0
+            ).prefetch_related('combo_items__product'),
+            to_attr='active_combos'
+        )
 
         # 2. Obtenemos las tiendas que le pertenecen a la compañía (filtradas por sucursales permitidas para asistentes)
         stores_qs = CompanyStore.objects.filter(company=company)
         if allowed_store_ids is not None:
             stores_qs = stores_qs.filter(id__in=allowed_store_ids)
-        stores = stores_qs.prefetch_related(active_inventory_prefetch)
+        stores = stores_qs.prefetch_related(active_inventory_prefetch, active_combos_prefetch)
 
         data = []
 
@@ -68,6 +76,19 @@ class CompanyMainBranchViewSet(APIView):
                 # Sumamos 1 al contador de items (lotes) activos para este producto
                 product_map[prod_id]["active_inventory_count"] += 1
 
+            active_combos_list = getattr(store, 'active_combos', []) or []
+            combos_summary = []
+            for combo in active_combos_list:
+                combo_imgs = combo.get_images()
+                combos_summary.append({
+                    "id": str(combo.id),
+                    "name": combo.name,
+                    "image": combo_imgs[0] if combo_imgs else None,
+                    "price": float(combo.price),
+                    "stock": combo.get_effective_stock(),
+                    "is_combo": True,
+                })
+
             # Formateamos la foto de la sucursal
             store_image = None
             if store.store_img_url:
@@ -79,7 +100,9 @@ class CompanyMainBranchViewSet(APIView):
                 "name": store.name,
                 "image": store_image,
                 "is_main_store": store.is_main_store,
-                "products": list(product_map.values()) # Convertimos el dict agrupado a lista
+                "products": list(product_map.values()), # Convertimos el dict agrupado a lista
+                "combos": combos_summary,
+                "active_combos_count": len(combos_summary),
             })
 
         return Response({'data': data}, status=status.HTTP_200_OK)
@@ -133,23 +156,21 @@ class GetCompanyProducts(APIView):
 
     def get(self, request, company_id=None):
         """
-        Devuelve el catálogo maestro de productos paginado + las categorías de la empresa.
+        Devuelve el catálogo maestro de productos individuales paginado + las categorías de la empresa.
+        (Los combos viven en el modelo dedicado ProductsCombo por sucursal).
         """
         try:
             company = Company.objects.get(id=company_id)
             if not user_can_manage_company(request, company):
                 return Response({'error': 'Usted no tiene permisos sobre esta compañía.'}, status=status.HTTP_406_NOT_ACCEPTABLE)
-            
-            # Categorías globales de la empresa (siempre se devuelven todas)
+
             company_categories = SubCategory.objects.filter(
                 product__company=company
             ).distinct().values('id', 'name')
             
-            # 💡 NUEVO: Recibimos el parámetro del frontend
             category_id = request.GET.get('category_id')
             page = request.GET.get('page', 1)
             
-            # 💡 NUEVO: Filtramos el queryset si viene el category_id
             products_query = company.products.select_related(
                 'category', 'category__parent_category', 'company'
             ).all()
@@ -197,7 +218,6 @@ class GetCompanySubCategories(APIView):
             if not user_can_manage_company(request, company):
                 return Response({'error': 'No autorizado.'}, status=status.HTTP_406_NOT_ACCEPTABLE)
             
-            # ORM Mágico: Filtra las subcategorías cruzándolas con los productos de esta empresa
             company_categories = SubCategory.objects.filter(
                 product__company=company
             ).distinct().values('id', 'name')
@@ -220,16 +240,97 @@ class GetStoreInventoryItems(APIView):
             if not user_can_manage_store(request, store):
                 return Response({'error': 'No tiene permisos para esta sucursal.'}, status=status.HTTP_406_NOT_ACCEPTABLE)
 
-            # 1. Categorías únicas del inventario de esta sucursal
+            # 1. Categorías únicas del inventario (lotes individuales + combos) de esta sucursal
             store_categories = SubCategory.objects.filter(
-                product__inventory_items__store=store
+                Q(product__inventory_items__store=store) | Q(combos__store=store)
             ).distinct().values('id', 'name')
 
             category_id = request.GET.get('category_id')
             page = request.GET.get('page', 1)
             out_of_stock = request.GET.get('out_of_stock') == 'true'
+            is_combo_param = request.GET.get('is_combo')
 
-            # 2. QuerySet base optimizado con select_related
+            combo_only = (
+                is_combo_param is not None
+                and str(is_combo_param).strip().lower() in ('true', '1', 'yes')
+            )
+
+            # 2A. Si el frontend pide explícitamente is_combo=true, paginamos ProductsCombo
+            if combo_only:
+                combos_query = ProductsCombo.objects.filter(store=store).select_related(
+                    'store', 'store__company', 'category', 'category__parent_category'
+                ).prefetch_related(
+                    Prefetch(
+                        'combo_items',
+                        queryset=ProductsComboItem.objects.select_related(
+                            'product', 'product__category', 'inventory_item'
+                        ).order_by('sort_order', 'id'),
+                    )
+                )
+                if category_id:
+                    combos_query = combos_query.filter(category_id=category_id)
+                if out_of_stock:
+                    combos_query = combos_query.filter(stock=0)
+                combos_query = combos_query.order_by('-creation')
+
+                paginator = Paginator(combos_query, 10)
+                try:
+                    current_combos = paginator.page(page)
+                except PageNotAnInteger:
+                    current_combos = paginator.page(1)
+                except EmptyPage:
+                    current_combos = []
+
+                current_combos_list = list(current_combos)
+                combo_ids_str = [str(c.id) for c in current_combos_list]
+                combo_ct = ContentType.objects.get_for_model(ProductsCombo)
+                likes_qs = UniversalLike.objects.filter(
+                    content_type=combo_ct,
+                    object_id__in=combo_ids_str,
+                ).values('object_id').annotate(total_likes=Count('id'))
+                likes_map = {l['object_id']: l['total_likes'] for l in likes_qs}
+
+                comments_qs = UniversalComment.objects.filter(
+                    content_type=combo_ct,
+                    object_id__in=combo_ids_str,
+                ).values('object_id').annotate(total_comments=Count('id'))
+                comments_map = {c['object_id']: c['total_comments'] for c in comments_qs}
+
+                combos_json = []
+                for combo in current_combos_list:
+                    c_json = combo.get_json()
+                    c_str = str(combo.id)
+                    likes_count = likes_map.get(c_str, 0)
+                    questions_count = comments_map.get(c_str, 0)
+                    metrics = {
+                        'views_count': 0,
+                        'units_sold': 0,
+                        'sales_count': 0,
+                        'revenue': 0.0,
+                        'likes_count': likes_count,
+                        'questions_count': questions_count,
+                    }
+                    c_json['metrics'] = metrics
+                    c_json['views_count'] = 0
+                    c_json['units_sold'] = 0
+                    c_json['revenue'] = 0.0
+                    c_json['likes_count'] = likes_count
+                    c_json['questions_count'] = questions_count
+                    combos_json.append(c_json)
+
+                return Response({
+                    'items': combos_json,
+                    'combos': combos_json,
+                    'combos_count': paginator.count,
+                    'store_categories': list(store_categories),
+                    'pagination': {
+                        'has_next': current_combos.has_next() if current_combos else False,
+                        'current_page': int(page),
+                        'total_pages': paginator.num_pages
+                    }
+                }, status=status.HTTP_200_OK)
+
+            # 2B. Flujo estándar de InventoryItem (productos individuales)
             items_query = InventoryItem.objects.filter(store=store).select_related(
                 'product',
                 'product__category',
@@ -334,8 +435,27 @@ class GetStoreInventoryItems(APIView):
                 
                 items.append(item_json)
 
+            # Incluimos la lista de combos de la sucursal para que el panel pueda pintarlos directamente
+            store_combos_qs = ProductsCombo.objects.filter(store=store).select_related(
+                'store', 'store__company', 'category', 'category__parent_category'
+            ).prefetch_related(
+                Prefetch(
+                    'combo_items',
+                    queryset=ProductsComboItem.objects.select_related(
+                        'product', 'product__category', 'inventory_item'
+                    ).order_by('sort_order', 'id'),
+                )
+            )
+            if category_id:
+                store_combos_qs = store_combos_qs.filter(category_id=category_id)
+            if out_of_stock:
+                store_combos_qs = store_combos_qs.filter(stock=0)
+            store_combos_list = [c.get_json() for c in store_combos_qs.order_by('-creation')]
+
             return Response({
                 'items': items,
+                'combos': store_combos_list,
+                'combos_count': len(store_combos_list),
                 'store_categories': list(store_categories),
                 'pagination': {
                     'has_next': current_items.has_next() if current_items else False,
@@ -1666,10 +1786,15 @@ class ClientCompanyViewSet(viewsets.ViewSet):
             total_sales = sales_aggr['units__sum'] or 0
             formatted_sales = f"{total_sales // 1000}k" if total_sales >= 1000 else str(total_sales)
 
-            # C) Categorías disponibles para esta compañía
+            # C) Categorías disponibles para esta compañía (incluye combos activos)
             available_categories = SubCategory.objects.filter(
-                product__inventory_items__store__company=company,
-                product__inventory_items__paused=False
+                Q(
+                    product__inventory_items__store__company=company,
+                    product__inventory_items__paused=False,
+                ) | Q(
+                    combos__store__company=company,
+                    combos__paused=False,
+                )
             ).distinct().values('id', 'name')
 
             available_stores_qs = CompanyStore.objects.select_related(
@@ -1714,13 +1839,13 @@ class ClientCompanyViewSet(viewsets.ViewSet):
 class GamificationViewSet(viewsets.ViewSet):
     """
     API dedicada al motor de gamificación del comerciante.
-    Maneja la activación global y por producto.
+    Maneja la activación global y por producto o combo.
     """
     permission_classes = [IsAuthenticated]
 
     @action(detail=False, methods=['get'])
     def status(self, request):
-        """ Obtiene el estado actual de la empresa y la lista de sus productos. """
+        """ Obtiene el estado actual de la empresa y la lista de sus productos y combos. """
         company = Company.objects.filter(owner=request.user).first()
         if not company:
             return Response({'error': 'No se encontró la empresa del comerciante.'}, status=status.HTTP_404_NOT_FOUND)
@@ -1738,13 +1863,27 @@ class GamificationViewSet(viewsets.ViewSet):
                 'id': str(p.id),
                 'name': p.name,
                 'image': image_url,
+                'is_combo': False,
                 'discounts_by_tokens_active': p.discounts_by_tokens_active
+            })
+
+        combos = ProductsCombo.objects.filter(store__company=company).prefetch_related('combo_items__product').order_by('-creation')
+        combos_data = []
+        for c in combos:
+            c_imgs = c.get_images()
+            combos_data.append({
+                'id': str(c.id),
+                'name': c.name,
+                'image': c_imgs[0] if c_imgs else "",
+                'is_combo': True,
+                'discounts_by_tokens_active': c.discounts_by_tokens_active,
             })
 
         return Response({
             'gamification_enabled': company.gamification_enabled,
             'gamification_tokens_per_dollar': company.gamification_tokens_per_dollar,
-            'products': products_data
+            'products': products_data,
+            'combos': combos_data,
         }, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['patch'])
@@ -1776,21 +1915,27 @@ class GamificationViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['patch'])
     def toggle_product(self, request):
-        """ Activa o desactiva la gamificación para un producto individual. """
-        product_id = request.data.get('product_id')
+        """ Activa o desactiva la gamificación para un producto individual o un combo. """
+        product_id = request.data.get('product_id') or request.data.get('combo_id')
         active = request.data.get('active')
 
         if product_id is None or active is None:
             return Response({'error': 'Faltan parámetros.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            # Aseguramos que el producto le pertenezca a la empresa del usuario
-            product = Product.objects.get(id=product_id, company__owner=request.user)
-            product.discounts_by_tokens_active = bool(active)
-            product.save(update_fields=['discounts_by_tokens_active'])
-            return Response({'success': True}, status=status.HTTP_200_OK)
-        except Product.DoesNotExist:
-            return Response({'error': 'Producto no encontrado o no tienes permisos.'}, status=status.HTTP_404_NOT_FOUND)
+            product = Product.objects.filter(id=product_id, company__owner=request.user).first()
+            if product is not None:
+                product.discounts_by_tokens_active = bool(active)
+                product.save(update_fields=['discounts_by_tokens_active'])
+                return Response({'success': True}, status=status.HTTP_200_OK)
+            combo = ProductsCombo.objects.filter(id=product_id, store__company__owner=request.user).first()
+            if combo is not None:
+                combo.discounts_by_tokens_active = bool(active)
+                combo.save(update_fields=['discounts_by_tokens_active', 'updated_at'])
+                return Response({'success': True}, status=status.HTTP_200_OK)
+            return Response({'error': 'Producto o combo no encontrado o no tienes permisos.'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception:
+            return Response({'error': 'Producto o combo no encontrado o no tienes permisos.'}, status=status.HTTP_404_NOT_FOUND)
 
 
 class MerchantPaymentMethodViewSet(viewsets.ViewSet):

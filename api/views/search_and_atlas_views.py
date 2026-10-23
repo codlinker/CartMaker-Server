@@ -278,7 +278,7 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
     # ------------------------------------------------------------------------
     @action(detail=False, methods=['get'])
     def item_details(self, request):
-        item_id = request.query_params.get('item_id')
+        item_id = request.query_params.get('item_id') or request.query_params.get('combo_id')
 
         if not item_id:
             return Response({'error': 'Falta el parámetro obligatorio: item_id'}, status=status.HTTP_400_BAD_REQUEST)
@@ -294,20 +294,36 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
             ).prefetch_related('product__califications').annotate(
                 avg_rating=Round(Coalesce(Avg('product__califications__rating'), 0.0), 1),
                 rating_count=Count('product__califications')
-            ).get(id=item_id, paused=False)
-            
-            data = item.get_json()
-            data['is_owner'] = item.product.company.id == request.user.company.id \
-                if (request.user.is_authenticated and hasattr(request.user, 'company')) else False
-            
-            
+            ).filter(id=item_id, paused=False).first()
+
+            if item is not None:
+                data = item.get_json()
+                data['is_owner'] = item.product.company.id == request.user.company.id \
+                    if (request.user.is_authenticated and hasattr(request.user, 'company')) else False
+                target_company = item.store.company
+            else:
+                combo = ProductsCombo.objects.select_related(
+                    'store', 'store__company', 'category', 'category__parent_category'
+                ).prefetch_related(
+                    Prefetch(
+                        'combo_items',
+                        queryset=ProductsComboItem.objects.select_related(
+                            'product', 'product__category', 'inventory_item'
+                        ).order_by('sort_order', 'id'),
+                    )
+                ).get(id=item_id, paused=False)
+                data = combo.get_json()
+                data['is_owner'] = combo.store.company.id == request.user.company.id \
+                    if (request.user.is_authenticated and hasattr(request.user, 'company')) else False
+                target_company = combo.store.company
+
             user_tokens = 0
             if request.user.is_authenticated:
                 try:
                     from api.models import TokenWallet
                     wallet = TokenWallet.objects.only('balance').get(
                         user=request.user, 
-                        company=item.store.company
+                        company=target_company
                     )
                     user_tokens = wallet.balance
                 except TokenWallet.DoesNotExist:
@@ -317,8 +333,8 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
             
             return Response({'success': True, 'data': data}, status=status.HTTP_200_OK)
             
-        except InventoryItem.DoesNotExist:
-            return Response({'error': 'El producto no existe o fue retirado.'}, status=status.HTTP_404_NOT_FOUND)
+        except (InventoryItem.DoesNotExist, ProductsCombo.DoesNotExist):
+            return Response({'error': 'El producto o combo no existe o fue retirado.'}, status=status.HTTP_404_NOT_FOUND)
 
     # ------------------------------------------------------------------------
     # MÉTODOS SIN PAGINACIÓN (Item Details y Toggle Universal Like)
@@ -332,13 +348,15 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
             return Response({'error': 'Faltan parámetros: target_type, target_id'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            if target_type == 'product':
-                target_obj = InventoryItem.objects.get(id=target_id, paused=False)
+            if target_type in ('product', 'combo', 'products_combo'):
+                target_obj = InventoryItem.objects.filter(id=target_id, paused=False).first()
+                if target_obj is None:
+                    target_obj = ProductsCombo.objects.get(id=target_id, paused=False)
             elif target_type == 'video':
                 target_obj = CompanyVideoStory.objects.get(id=target_id)
             else:
                 return Response({'error': 'Tipo no soportado.'}, status=status.HTTP_400_BAD_REQUEST)
-        except (InventoryItem.DoesNotExist, CompanyVideoStory.DoesNotExist):
+        except (InventoryItem.DoesNotExist, ProductsCombo.DoesNotExist, CompanyVideoStory.DoesNotExist):
             return Response({'error': 'El contenido no existe.'}, status=status.HTTP_404_NOT_FOUND)
 
         content_type_obj = ContentType.objects.get_for_model(target_obj)

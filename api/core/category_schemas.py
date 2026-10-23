@@ -469,89 +469,11 @@ VENEZUELA_SIZING_PRESETS: Dict[str, List[str]] = {
 }
 
 
-# Presets de grupos de elección para combos (ej. elegir bebida, contorno o agrandar combo)
-DEFAULT_COMBO_CHOICE_PRESETS: List[Dict[str, Any]] = [
-    {
-        "name": "Elige la Bebida del Combo",
-        "required": True,
-        "min_selections": 1,
-        "max_selections": 1,
-        "options": [
-            {"name": "Coca-Cola", "price_delta": 0.0},
-            {"name": "Pepsi", "price_delta": 0.0},
-            {"name": "Kolita / Frescolita", "price_delta": 0.0},
-            {"name": "Chinotto / 7Up", "price_delta": 0.0},
-            {"name": "Malta", "price_delta": 0.0},
-            {"name": "Nestea / Té Frío", "price_delta": 0.0},
-            {"name": "Agua Mineral", "price_delta": 0.0},
-        ],
-    },
-    {
-        "name": "Elige tu Contorno / Acompañante",
-        "required": True,
-        "min_selections": 1,
-        "max_selections": 1,
-        "options": [
-            {"name": "Papas Fritas", "price_delta": 0.0},
-            {"name": "Ensalada César / Fresca", "price_delta": 0.0},
-            {"name": "Ensalada Rallada (Coleslaw)", "price_delta": 0.0},
-            {"name": "Yuca Frita / Sancochada", "price_delta": 0.0},
-            {"name": "Arepitas con Nata / Hallaquitas", "price_delta": 0.0},
-            {"name": "Tostones / Tajadas", "price_delta": 0.0},
-        ],
-    },
-    {
-        "name": "Agrandar o Mejorar tu Combo (Opcional)",
-        "required": False,
-        "min_selections": 0,
-        "max_selections": 4,
-        "options": [
-            {"name": "Agrandar Bebida a 1.5 Litros", "price_delta": 1.5},
-            {"name": "Doble Ración de Contorno / Papas", "price_delta": 1.5},
-            {"name": "Extra Queso / Tocineta", "price_delta": 1.5},
-            {"name": "Salsas Adicionales (Ajo, Tártara, Guasacaca)", "price_delta": 0.5},
-        ],
-    },
-]
+# Presets de grupos de elección para combos (desactivados en creación de productos individuales;
+# los combos se crean en Administrar inventario -> A la venta -> Combos agrupando productos reales)
+DEFAULT_COMBO_CHOICE_PRESETS: List[Dict[str, Any]] = []
 
-FOOD_COMBO_TEMPLATES: List[Dict[str, Any]] = [
-    {
-        "name": "Combo Hamburguesa + Refresco + Ensalada",
-        "description": "1 Hamburguesa + 1 Refresco + 1 Ensalada fresca.",
-        "combo_items": [
-            {"name": "Hamburguesa", "quantity": 1, "unit": "und", "notes": "Con queso, vegetales y salsas"},
-            {"name": "Refresco", "quantity": 1, "unit": "und", "notes": "355 ml bien frío"},
-            {"name": "Ensalada", "quantity": 1, "unit": "porción", "notes": "Porción individual"},
-        ],
-    },
-    {
-        "name": "Combo Hamburguesa + Papas Fritas + Refresco",
-        "description": "1 Hamburguesa + 1 Ración de Papas Fritas + 1 Refresco.",
-        "combo_items": [
-            {"name": "Hamburguesa Clásica", "quantity": 1, "unit": "und", "notes": ""},
-            {"name": "Papas Fritas", "quantity": 1, "unit": "porción", "notes": "Porción mediana"},
-            {"name": "Refresco 355ml", "quantity": 1, "unit": "und", "notes": ""},
-        ],
-    },
-    {
-        "name": "Combo Dúo (2 Principales + 2 Bebidas + 2 Contornos)",
-        "description": "Ideal para compartir en pareja.",
-        "combo_items": [
-            {"name": "Plato / Hamburguesa Principal", "quantity": 2, "unit": "und", "notes": ""},
-            {"name": "Contorno (Papas o Ensalada)", "quantity": 2, "unit": "porción", "notes": ""},
-            {"name": "Bebida 355ml", "quantity": 2, "unit": "und", "notes": ""},
-        ],
-    },
-    {
-        "name": "Combo Familiar + Refresco 1.5L",
-        "description": "Combo para 4 personas con contornos y bebida familiar.",
-        "combo_items": [
-            {"name": "Porción / Unidad Principal", "quantity": 4, "unit": "und", "notes": ""},
-            {"name": "Ración Familiar de Contorno / Ensalada", "quantity": 1, "unit": "porción", "notes": ""},
-            {"name": "Refresco Familiar 1.5L o 2L", "quantity": 1, "unit": "botella", "notes": ""},
-        ],
-    },
-]
+FOOD_COMBO_TEMPLATES: List[Dict[str, Any]] = []
 
 
 def _units(*codes: str) -> List[Dict[str, Any]]:
@@ -559,7 +481,7 @@ def _units(*codes: str) -> List[Dict[str, Any]]:
 
 
 # ==============================================================================
-# 3. ARQUETIPOS BASE DE ESQUEMAS DINÁMICOS Y COMBOS
+# 3. ARQUETIPOS BASE DE ESQUEMAS DINÁMICOS DE PRODUCTOS INDIVIDUALES
 # ==============================================================================
 
 def _build_schema(
@@ -573,18 +495,24 @@ def _build_schema(
     variant_config: Optional[Dict[str, Any]] = None,
     supports_modifier_groups: bool = False,
     modifier_group_presets: Optional[List[Dict[str, Any]]] = None,
-    supports_combos: bool = True,
-    combo_item_placeholder: str = "Ej: 1 Hamburguesa, 1 Refresco 355ml, 1 Ensalada...",
+    supports_combos: bool = False,
+    combo_item_placeholder: str = "",
     combo_templates: Optional[List[Dict[str, Any]]] = None,
     combo_choice_presets: Optional[List[Dict[str, Any]]] = None,
     order_notes_enabled: bool = True,
     order_notes_placeholder: str = "Indicaciones adicionales para este producto (opcional)",
     fields: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    effective_units = list(dict.fromkeys(list(allowed_units) + (["combo"] if supports_combos else [])))
+    # Los productos del catálogo maestro son siempre productos individuales;
+    # la unidad 'combo' se reserva exclusivamente para lotes de combos por sucursal.
+    effective_units = [u for u in dict.fromkeys(list(allowed_units)) if u != "combo"]
+    if not effective_units:
+        effective_units = ["unit"]
+    if default_unit == "combo" or default_unit not in effective_units:
+        default_unit = "pack" if "pack" in effective_units else effective_units[0]
     default_unit_info = SELLING_UNITS_CATALOG.get(default_unit, SELLING_UNITS_CATALOG["unit"])
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "archetype": archetype,
         "ui_hint": ui_hint,
         "buyer_ui_hint": buyer_ui_hint,
@@ -600,23 +528,19 @@ def _build_schema(
             "label": "Variantes / Presentaciones",
             "axes": [],
         },
-        "supports_modifier_groups": True if supports_combos else supports_modifier_groups,
+        "supports_modifier_groups": bool(supports_modifier_groups),
         "modifier_group_presets": modifier_group_presets or [],
-        "supports_combos": supports_combos,
+        "supports_combos": False,
         "combo_config": {
-            "enabled": supports_combos,
+            "enabled": False,
             "label": "Armar como Combo / Promoción",
-            "helper_text": (
-                "Activa el modo Combo para detallar todos los productos incluidos por un mismo precio "
-                "(ej. 1 Hamburguesa + 1 Refresco + 1 Ensalada) y agrega grupos de elección si el cliente "
-                "debe escoger bebida o contorno."
-            ),
+            "helper_text": "",
             "min_items": 2,
             "max_items": 25,
-            "item_placeholder": combo_item_placeholder,
-            "unit_options": ["und", "porción", "lata", "botella", "vaso", "paq", "docena", "kg", "g", "L", "ml", "par", "set"],
-            "suggested_templates": combo_templates or [],
-            "choice_group_presets": combo_choice_presets or DEFAULT_COMBO_CHOICE_PRESETS,
+            "item_placeholder": "",
+            "unit_options": [],
+            "suggested_templates": [],
+            "choice_group_presets": [],
         },
         "order_notes_enabled": order_notes_enabled,
         "order_notes_placeholder": order_notes_placeholder,
@@ -5036,6 +4960,19 @@ def get_subcategory_schema(
         if custom_override.get("is_custom_override"):
             result.update(custom_override)
 
+    # Garantizar siempre que los esquemas de creación de productos individuales no expongan la unidad 'combo'
+    raw_codes = result.get("allowed_selling_unit_codes") or ["unit"]
+    clean_codes = [c for c in raw_codes if c != "combo"] or ["unit"]
+    result["allowed_selling_unit_codes"] = clean_codes
+    result["allowed_selling_units"] = _units(*clean_codes)
+    if result.get("default_selling_unit") == "combo" or result.get("default_selling_unit") not in clean_codes:
+        result["default_selling_unit"] = "pack" if "pack" in clean_codes else clean_codes[0]
+    result["supports_combos"] = False
+    if isinstance(result.get("combo_config"), dict):
+        result["combo_config"]["enabled"] = False
+        result["combo_config"]["suggested_templates"] = []
+        result["combo_config"]["choice_group_presets"] = []
+
     result["subcategory_name"] = subcategory_name or ""
     result["parent_category_name"] = parent_category_name or ""
 
@@ -5089,13 +5026,12 @@ def _to_bool(val: Any, default: bool) -> bool:
 
 def normalize_combo_items(raw_combo_items: Any) -> List[Dict[str, Any]]:
     """
-    Normaliza la lista de componentes incluidos en un Combo / Promoción:
-    Ejemplo: [{"quantity": 1, "name": "Hamburguesa Clásica"}, {"quantity": 1, "name": "Refresco 355 ml"}, {"quantity": 1, "name": "Ensalada César"}]
-    Acepta tanto lista de diccionarios como lista de strings (ej. ["1 Hamburguesa", "1 Refresco", "1 Ensalada"]).
+    Normaliza la lista de componentes incluidos en un Combo / Promoción de sucursal:
+    Soporta vinculación con productos reales del catálogo de la compañía mediante `product_id` (UUID string),
+    `unit_price`, `image_url`, `quantity`, `unit`, `notes`, `is_optional` y `choices`.
     """
     parsed = _parse_json_or_value(raw_combo_items, [])
     if isinstance(parsed, str):
-        # Permitir texto separado por '+' o ',' (ej. "1 Hamburguesa + 1 Refresco + 1 Ensalada")
         sep = "+" if "+" in parsed else ("," if "," in parsed else "\n")
         parsed = [p.strip() for p in parsed.split(sep) if p.strip()]
     if not isinstance(parsed, list):
@@ -5120,13 +5056,22 @@ def normalize_combo_items(raw_combo_items: Any) -> List[Dict[str, Any]]:
             qty_out: Any = int(qty_val) if float(qty_val).is_integer() else round(qty_val, 2)
             normalized.append({
                 "id": f"cmb_item_{idx + 1}",
+                "product_id": None,
                 "name": name_val,
                 "quantity": qty_out,
                 "unit": "und",
-                "product_id": None,
+                "unit_price": 0.0,
+                "image_url": "",
                 "notes": "",
+                "is_optional": False,
+                "choices": [],
             })
         elif isinstance(item, dict):
+            prod_id_raw = item.get("product_id") or item.get("id_producto")
+            prod_id_str: Optional[str] = None
+            if prod_id_raw not in (None, ""):
+                prod_id_str = str(prod_id_raw).strip() or None
+
             name_val = str(
                 item.get("name")
                 or item.get("title")
@@ -5135,27 +5080,32 @@ def normalize_combo_items(raw_combo_items: Any) -> List[Dict[str, Any]]:
                 or item.get("product_name")
                 or ""
             ).strip()
-            if not name_val:
+            if not name_val and not prod_id_str:
                 continue
+
             qty_float = max(0.01, _to_float(item.get("quantity", item.get("qty", item.get("cantidad", 1))), 1.0))
             qty_out = int(qty_float) if float(qty_float).is_integer() else round(qty_float, 2)
-            unit_val = str(item.get("unit") or item.get("unidad") or "und").strip() or "und"
-            prod_id = item.get("product_id") or item.get("id_producto")
-            prod_id_int: Optional[int] = None
-            if prod_id not in (None, ""):
-                try:
-                    prod_id_int = int(prod_id)
-                except (ValueError, TypeError):
-                    prod_id_int = None
+            unit_val = str(item.get("unit") or item.get("unidad") or item.get("unit_label") or "und").strip() or "und"
+            raw_unit_price = item.get("unit_price", item.get("price", item.get("precio_unitario", 0.0)))
+            unit_price_val = round(max(0.0, _to_float(raw_unit_price, 0.0)), 2)
+            image_url_val = str(item.get("image_url") or item.get("image") or item.get("img_url") or "").strip()
             item_id = str(item.get("id") or f"cmb_item_{idx + 1}")
             notes_val = str(item.get("notes") or item.get("nota") or item.get("description") or "").strip()
+            is_opt = _to_bool(item.get("is_optional", False), False)
+            raw_choices = item.get("choices")
+            choices_list = [str(c).strip() for c in raw_choices if str(c).strip()] if isinstance(raw_choices, list) else []
+
             normalized.append({
                 "id": item_id,
+                "product_id": prod_id_str,
                 "name": name_val,
                 "quantity": qty_out,
                 "unit": unit_val,
-                "product_id": prod_id_int,
+                "unit_price": unit_price_val,
+                "image_url": image_url_val,
                 "notes": notes_val,
+                "is_optional": is_opt,
+                "choices": choices_list,
             })
 
     return normalized
@@ -5164,7 +5114,7 @@ def normalize_combo_items(raw_combo_items: Any) -> List[Dict[str, Any]]:
 def build_combo_summary(combo_items: List[Dict[str, Any]]) -> str:
     """
     Construye un resumen legible para mostrar en tarjetas de catálogo, carrito y órdenes:
-    Ej: '1x Hamburguesa + 1x Refresco + 1x Ensalada'
+    Ej: '1x Base Líquida Mate + 2x Labial Larga Duración'
     """
     if not combo_items:
         return ""
@@ -5178,7 +5128,7 @@ def build_combo_summary(combo_items: List[Dict[str, Any]]) -> str:
         qty = item.get("quantity", 1)
         unit = str(item.get("unit") or "und").strip().lower()
         if unit in ("und", "unidad", "unidades", "unit", ""):
-            parts.append(f"{qty} {name}")
+            parts.append(f"{qty}x {name}")
         else:
             parts.append(f"{qty} {unit} {name}")
     return " + ".join(parts)
@@ -5519,9 +5469,12 @@ def validate_and_normalize_product_dynamic_data(
         min_order_quantity = unit_meta["default_min"]
 
     # 6. Persistir metadatos de Combo dentro de `attributes` para no requerir migración de esquema SQL
-    combo_summary = build_combo_summary(combo_items) if combo_items else str(
-        data.get("combo_summary") or attributes.get("combo_summary") or ""
-    ).strip()
+    explicit_summary = str(data.get("combo_summary") or "").strip()
+    combo_summary = explicit_summary or (
+        build_combo_summary(combo_items)
+        if combo_items
+        else str(attributes.get("combo_summary") or "").strip()
+    )
 
     raw_reg_price = data.get("combo_regular_price", attributes.get("combo_regular_price"))
     combo_regular_price: Optional[float] = None
@@ -5530,8 +5483,21 @@ def validate_and_normalize_product_dynamic_data(
         reg_val = round(max(0.0, _to_float(raw_reg_price, 0.0)), 2)
         if reg_val > 0:
             combo_regular_price = reg_val
-            if base_price > 0 and reg_val > base_price:
-                combo_savings = round(reg_val - base_price, 2)
+
+    if combo_regular_price is None and combo_items:
+        computed_sum = round(
+            sum(
+                max(0.0, _to_float(it.get("unit_price"), 0.0)) * max(0.01, _to_float(it.get("quantity"), 1.0))
+                for it in combo_items
+                if isinstance(it, dict)
+            ),
+            2,
+        )
+        if computed_sum > 0:
+            combo_regular_price = computed_sum
+
+    if combo_regular_price is not None and base_price > 0 and combo_regular_price > base_price:
+        combo_savings = round(combo_regular_price - base_price, 2)
 
     if is_combo:
         attributes["is_combo"] = True
@@ -5542,6 +5508,8 @@ def validate_and_normalize_product_dynamic_data(
             attributes["combo_regular_price"] = combo_regular_price
         if combo_savings is not None:
             attributes["combo_savings"] = combo_savings
+        else:
+            attributes.pop("combo_savings", None)
     else:
         for cmb_k in ("is_combo", "combo_items", "combo_summary", "combo_regular_price", "combo_savings"):
             attributes.pop(cmb_k, None)

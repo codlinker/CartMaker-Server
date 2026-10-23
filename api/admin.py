@@ -14,6 +14,11 @@ class InventoryItemInline(StackedInline): # Stacked para ver mejor los detalles 
     model = InventoryItem
     extra = 0
 
+class ProductsComboItemInline(TabularInline):
+    model = ProductsComboItem
+    extra = 0
+    fields = ("product", "inventory_item", "quantity", "selected_variant_id", "notes", "position")
+
 class OrderTransactionInline(TabularInline):
     model = TokenWalletTransaction
     extra = 0
@@ -96,6 +101,15 @@ class InventoryItemAdmin(ModelAdmin):
     list_display = ("product", "stock", "custom_price", "paused", "expiration_date")
     list_editable = ("stock", "paused")
     list_filter = ("paused", "product__company")
+
+
+@admin.register(ProductsCombo)
+class ProductsComboAdmin(ModelAdmin):
+    list_display = ("name", "company", "store", "price", "stock", "paused", "deduct_component_stock", "creation")
+    list_editable = ("stock", "paused")
+    list_filter = ("paused", "company", "store", "deduct_component_stock")
+    search_fields = ("name", "description", "company__name", "store__name")
+    inlines = [ProductsComboItemInline]
 
 @admin.register(Employee)
 class EmployeeAdmin(ModelAdmin):

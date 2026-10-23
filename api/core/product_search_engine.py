@@ -171,11 +171,12 @@ class ProductSearchEngine:
 
         # 3. Bulk fetch de Likes (Conteos y Estado del Usuario) restringido a los IDs de esta página
         product_ct = ContentType.objects.get_for_model(InventoryItem)
+        combo_ct = ContentType.objects.get_for_model(ProductsCombo)
         video_ct = ContentType.objects.get_for_model(CompanyVideoStory)
         
         like_filter = Q()
         if product_ids:
-            like_filter |= Q(content_type=product_ct, object_id__in=product_ids)
+            like_filter |= Q(content_type__in=[product_ct, combo_ct], object_id__in=product_ids)
         if video_ids:
             like_filter |= Q(content_type=video_ct, object_id__in=video_ids)
 
@@ -195,9 +196,15 @@ class ProductSearchEngine:
         for item_data in structural_results:
             feed_type = item_data.get("feed_type")
             item_id = str(item_data.get("id"))
+            is_combo_entry = bool(item_data.get("is_combo", False))
             
             # Determinar el ContentType actual
-            ct_id = product_ct.id if feed_type == "product" else video_ct.id
+            if feed_type == "video":
+                ct_id = video_ct.id
+            elif is_combo_entry:
+                ct_id = combo_ct.id
+            else:
+                ct_id = product_ct.id
 
             # Inyectar likes
             item_data["is_liked"] = (ct_id, item_id) in user_likes_set
@@ -2084,9 +2091,10 @@ class ProductSearchEngine:
         liked = set()
         if product_ids:
             product_ct = ContentType.objects.get_for_model(InventoryItem)
+            combo_ct = ContentType.objects.get_for_model(ProductsCombo)
             liked = set(UniversalLike.objects.filter(
                 user=self.user,
-                content_type=product_ct,
+                content_type__in=[product_ct, combo_ct],
                 object_id__in=product_ids,
             ).values_list('object_id', flat=True))
         for item in items:
@@ -2102,10 +2110,35 @@ class ProductSearchEngine:
                 pass
         return ""
 
-    def _get_cached_structural_feed(self, base_cache_key: str, queryset, page: int, page_size: int) -> list:
+    def _get_base_active_combos_queryset(self):
+        qs = ProductsCombo.objects.select_related(
+            'store',
+            'store__company',
+            'category',
+            'category__parent_category',
+        ).prefetch_related(
+            Prefetch(
+                'combo_items',
+                queryset=ProductsComboItem.objects.select_related(
+                    'product', 'product__category', 'inventory_item'
+                ).order_by('sort_order', 'id'),
+            )
+        ).filter(
+            paused=False,
+            stock__gt=0,
+            store__is_active=True,
+        )
+        if self.user and self.user.is_authenticated:
+            try:
+                qs = qs.exclude(store__company_id=self.user.company.id)
+            except Company.DoesNotExist:
+                pass
+        return qs
+
+    def _get_cached_structural_feed(self, base_cache_key: str, queryset, page: int, page_size: int, extra_combos_qs=None) -> list:
         """
         Abstracción DRY para resolver el Nivel Estructural de CUALQUIER feed.
-        Hace el corte de paginación directo en PostgreSQL.
+        Hace el corte de paginación directo en PostgreSQL e incluye combos activos en la página 1.
         """
         # Le pegamos el alcance de exclusión de comercio (si aplica), la página y el tamaño a la llave para aislar la memoria
         cache_key = f"{base_cache_key}{self._get_merchant_exclusion_scope()}:p_{page}:sz_{page_size}"
@@ -2119,7 +2152,14 @@ class ProductSearchEngine:
             
             # 2. Slicing en SQL e INYECCIÓN del feed_type
             structural_feed = []
-            for item in queryset[start:end]:
+            if page == 1 and extra_combos_qs is not None:
+                for combo in extra_combos_qs[:min(8, page_size)]:
+                    combo_data = combo.get_json()
+                    combo_data["feed_type"] = "product"
+                    structural_feed.append(combo_data)
+
+            remaining_slots = max(0, page_size - len(structural_feed)) if page == 1 else page_size
+            for item in queryset[start:start + remaining_slots]:
                 item_data = item.get_json()
                 item_data["feed_type"] = "product"
                 structural_feed.append(item_data)
@@ -2138,7 +2178,7 @@ class ProductSearchEngine:
         approx_lat = round(self.user_location.y, 3)
         approx_lng = round(self.user_location.x, 3)
         
-        base_cache_key = f"cartmaker:struct:cat:{sub_category_id}:{approx_lat}:{approx_lng}:{sort_by}:{price_order}"
+        base_cache_key = f"cartmaker:struct:cat:v2:{sub_category_id}:{approx_lat}:{approx_lng}:{sort_by}:{price_order}"
         
         qs = self._get_base_active_queryset()
         qs = self._annotate_proximity_flag(qs)
@@ -2147,8 +2187,13 @@ class ProductSearchEngine:
             store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters))
         )
         qs = self._apply_feed_sorting(qs, sort_by, price_order)
+
+        combos_qs = self._get_base_active_combos_queryset().filter(
+            category_id=sub_category_id,
+            store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters)),
+        ).order_by('price' if price_order == 'asc' else ('-price' if price_order == 'desc' else '-creation'))
         
-        return self._get_cached_structural_feed(base_cache_key, qs, page, page_size)
+        return self._get_cached_structural_feed(base_cache_key, qs, page, page_size, extra_combos_qs=combos_qs)
 
     def get_offers_feed(self, page: int = 1, page_size: int = 20, sort_by: str = 'relevance', price_order: str = None, max_distance_meters: float = 10000) -> list:
         now = timezone.now()
@@ -2156,7 +2201,7 @@ class ProductSearchEngine:
         approx_lng = round(self.user_location.x, 3)
         affinity_hash = self._get_affinity_hash() if (sort_by == 'relevance' and not price_order) else "global"
         
-        base_cache_key = f"cartmaker:struct:offers:{approx_lat}:{approx_lng}:{affinity_hash}:{sort_by}:{price_order}"
+        base_cache_key = f"cartmaker:struct:offers:v2:{approx_lat}:{approx_lng}:{affinity_hash}:{sort_by}:{price_order}"
         
         qs = self._get_base_active_queryset()
         qs = self._annotate_proximity_flag(qs)
@@ -2166,45 +2211,62 @@ class ProductSearchEngine:
             store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters))
         )
         qs = self._apply_feed_sorting(qs, sort_by, price_order)
+
+        combos_qs = self._get_base_active_combos_queryset().filter(
+            offer_percentage__isnull=False,
+            offer_percentage__gt=0,
+            offer_valid_until__gte=now,
+            store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters)),
+        ).order_by('price' if price_order == 'asc' else ('-price' if price_order == 'desc' else '-creation'))
         
-        return self._get_cached_structural_feed(base_cache_key, qs, page, page_size)
+        return self._get_cached_structural_feed(base_cache_key, qs, page, page_size, extra_combos_qs=combos_qs)
 
     def get_store_feed(self, page: int = 1, page_size: int = 20, store_id: str = None, company_id: str = None, category_id: int = None, price_order: str = None) -> list:
         approx_lat = round(self.user_location.y, 3)
         approx_lng = round(self.user_location.x, 3)
         
-        base_cache_key = f"cartmaker:struct:store:{store_id}:{company_id}:{category_id}:{approx_lat}:{approx_lng}:{price_order}"
+        base_cache_key = f"cartmaker:struct:store:v2:{store_id}:{company_id}:{category_id}:{approx_lat}:{approx_lng}:{price_order}"
         
         qs = self._get_base_active_queryset()
         qs = self._annotate_proximity_flag(qs)
+        combos_qs = self._get_base_active_combos_queryset()
         
         if store_id:
             qs = qs.filter(store_id=store_id)
+            combos_qs = combos_qs.filter(store_id=store_id)
         elif company_id:
             qs = qs.filter(store__company_id=company_id)
+            combos_qs = combos_qs.filter(store__company_id=company_id)
             
         if category_id:
             qs = qs.filter(product__category_id=category_id)
+            combos_qs = combos_qs.filter(category_id=category_id)
         
         if price_order in ['asc', 'desc']:
             qs = qs.annotate(effective_price=Coalesce('custom_price', 'product__price'))
             qs = qs.order_by('effective_price' if price_order == 'asc' else '-effective_price')
+            combos_qs = combos_qs.order_by('price' if price_order == 'asc' else '-price')
         else:
             qs = qs.annotate(ranking_score=F('cached_popularity_score'))
             qs = qs.order_by('-ranking_score')
+            combos_qs = combos_qs.order_by('-creation')
             
-        return self._get_cached_structural_feed(base_cache_key, qs, page, page_size)
+        return self._get_cached_structural_feed(base_cache_key, qs, page, page_size, extra_combos_qs=combos_qs)
         
     def get_text_search_feed(self, search_query: str, page: int = 1, page_size: int = 20, sort_by: str = 'relevance', price_order: str = None, max_distance_meters: float = 10000) -> list:
         approx_lat = round(self.user_location.y, 3)
         approx_lng = round(self.user_location.x, 3)
         
         query_hash = hashlib.md5(search_query.strip().lower().encode()).hexdigest() if search_query else "empty"
-        base_cache_key = f"cartmaker:struct:search:{query_hash}:{approx_lat}:{approx_lng}:{sort_by}:{price_order}"
+        base_cache_key = f"cartmaker:struct:search:v2:{query_hash}:{approx_lat}:{approx_lng}:{sort_by}:{price_order}"
         
         qs = self._get_base_active_queryset()
         qs = self._annotate_proximity_flag(qs)
         qs = qs.filter(
+            store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters))
+        )
+
+        combos_qs = self._get_base_active_combos_queryset().filter(
             store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters))
         )
 
@@ -2214,6 +2276,7 @@ class ProductSearchEngine:
 
             search_terms = search_query.strip().split()
             word_queries = []
+            combo_word_queries = []
             
             # 🕵️ DEBUG 3: Ver los términos exactos que exige la consulta SQL
             print(f"🔍 ENGINE SQL -> Buscando coincidencia ESTRICTA (AND) para las palabras: {search_terms}")
@@ -2227,13 +2290,24 @@ class ProductSearchEngine:
                         Q(product__company__name__icontains=term)
                     )
                     word_queries.append(term_filter)
+                    combo_term_filter = (
+                        Q(name__icontains=term) |
+                        Q(description__icontains=term) |
+                        Q(category__name__icontains=term) |
+                        Q(store__company__name__icontains=term) |
+                        Q(combo_items__product__name__icontains=term)
+                    )
+                    combo_word_queries.append(combo_term_filter)
             
             if word_queries:
                 global_search_filter = reduce(operator.and_, word_queries)
                 qs = qs.filter(global_search_filter).distinct()
+            if combo_word_queries:
+                combos_qs = combos_qs.filter(reduce(operator.and_, combo_word_queries)).distinct()
 
         qs = self._apply_feed_sorting(qs, sort_by, price_order)
-        return self._get_cached_structural_feed(base_cache_key, qs, page, page_size)
+        combos_qs = combos_qs.order_by('price' if price_order == 'asc' else ('-price' if price_order == 'desc' else '-creation'))
+        return self._get_cached_structural_feed(base_cache_key, qs, page, page_size, extra_combos_qs=combos_qs)
     
     def get_home_feed(self, page: int = 1, page_size: int = 20, max_distance_meters: float = 15000) -> dict:
         """
@@ -2380,16 +2454,21 @@ class ProductSearchEngine:
                 return []
             return self._stitch_and_filter_results([dict(item) for item in cached])
         
-        # 1. Obtenemos el ContentType de InventoryItem
+        # 1. Obtenemos el ContentType de InventoryItem y ProductsCombo
         product_ct = ContentType.objects.get_for_model(InventoryItem)
+        combo_ct = ContentType.objects.get_for_model(ProductsCombo)
         
         # 💡 FIX: Consultamos UniversalLike directamente.
         liked_ids = list(UniversalLike.objects.filter(
             user=self.user,
             content_type=product_ct
         ).values_list('object_id', flat=True))
+        liked_combo_ids = list(UniversalLike.objects.filter(
+            user=self.user,
+            content_type=combo_ct
+        ).values_list('object_id', flat=True))
 
-        if not liked_ids:
+        if not liked_ids and not liked_combo_ids:
             cache.set(cache_key, [], timeout=600)
             return []
 
@@ -2420,8 +2499,15 @@ class ProductSearchEngine:
             ).order_by('-like_date')
         else:
             qs = self._apply_feed_sorting(qs, sort_by, price_order)
+
+        combos_qs = None
+        if liked_combo_ids:
+            combos_qs = self._get_base_active_combos_queryset().filter(
+                id__in=liked_combo_ids,
+                store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters)),
+            ).order_by('-creation')
             
-        return self._get_cached_structural_feed(base_cache_key, qs, page, page_size)
+        return self._get_cached_structural_feed(base_cache_key, qs, page, page_size, extra_combos_qs=combos_qs)
     
     def get_stores_with_tokens_feed(self, page: int = 1, page_size: int = 20, max_distance_meters: float = 10000) -> list:
         if not self.user or not self.user.is_authenticated:

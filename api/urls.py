@@ -15,6 +15,8 @@ router.register(r'client-contact-methods', ClientContactMethodViewSet, basename=
 router.register(r'notifications', NotificationViewSet, basename='notifications')
 router.register(r'products', ProductViewSet, basename='products')
 router.register(r'inventory-items', InventoryItemViewSet, basename='inventory-items')
+router.register(r'products-combos', ProductsComboViewSet, basename='products-combos')
+router.register(r'combos', ProductsComboViewSet, basename='combos')
 router.register(r'atlas', AtlasViewSet, basename='atlas')
 router.register(r'search-engine', ProductSearchEngineViewSet, basename='search-engine')
 router.register(r'cartmaker-map', CartMakerMapViewSet, basename='cartmaker_map')
@@ -154,6 +156,11 @@ urlpatterns = [
     path('v1/delivery/internal/meta/<int:delivery_id>/', DeliveryInternalMetaAPI.as_view(), name='delivery_internal_meta'),
     path('v1/delivery/internal/node-event/', DeliveryInternalNodeEventAPI.as_view(), name='delivery_internal_node_event'),
     path('v1/delivery/internal/company-access/<str:company_id>/<str:user_id>/', DeliveryInternalCompanyAccessAPI.as_view(), name='delivery_internal_company_access'),
+    # Gestión dedicada de Combos por sucursal (Administrar inventario -> A la venta -> Combos)
+    path('v1/inventory-items/combos/', InventoryItemViewSet.as_view({'get': 'combos', 'post': 'combos', 'put': 'combos', 'patch': 'combos', 'delete': 'combos'}), name='inventory_items_combos_slash'),
+    path('v1/inventory-items/combos', InventoryItemViewSet.as_view({'get': 'combos', 'post': 'combos', 'put': 'combos', 'patch': 'combos', 'delete': 'combos'}), name='inventory_items_combos'),
+    path('v1/inventory-items/combos/<str:item_id>/', InventoryItemViewSet.as_view({'get': 'combos', 'post': 'combos', 'put': 'combos', 'patch': 'combos', 'delete': 'combos'}), name='inventory_items_combo_detail_slash'),
+    path('v1/inventory-items/combos/<str:item_id>', InventoryItemViewSet.as_view({'get': 'combos', 'post': 'combos', 'put': 'combos', 'patch': 'combos', 'delete': 'combos'}), name='inventory_items_combo_detail'),
     # CRUD de modelos (viewsets)
     path('v1/', include(router.urls)),
 ]

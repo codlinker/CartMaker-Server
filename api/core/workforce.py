@@ -2042,6 +2042,34 @@ def snapshot_inventory_item(item: InventoryItem) -> dict:
     }
 
 
+def snapshot_products_combo(combo: ProductsCombo) -> dict:
+    """ Captura el estado serializable completo de un `ProductsCombo` y sus `ProductsComboItem` para revertir en 1 toque. """
+    items_snap = []
+    for it in combo.combo_items.select_related('product', 'inventory_item').order_by('position', 'id'):
+        items_snap.append({
+            'product_id': str(it.product_id),
+            'inventory_item_id': str(it.inventory_item_id) if it.inventory_item_id else None,
+            'quantity': int(it.quantity or 1),
+            'selected_variant_id': it.selected_variant_id or '',
+            'notes': it.notes or '',
+            'position': int(it.position or 0),
+        })
+    return {
+        'name': combo.name,
+        'description': combo.description,
+        'price': str(combo.price),
+        'custom_images': list(combo.custom_images or []),
+        'stock': int(combo.stock),
+        'deduct_component_stock': bool(combo.deduct_component_stock),
+        'paused': bool(combo.paused),
+        'expiration_date': combo.expiration_date.isoformat() if combo.expiration_date else None,
+        'category_id': combo.category_id,
+        'discounts_by_tokens_active': bool(combo.discounts_by_tokens_active),
+        'discounts_data': combo.discounts_data,
+        'combo_items': items_snap,
+    }
+
+
 def snapshot_video_story(story: CompanyVideoStory) -> dict:
     """ Captura el estado editable de un `CompanyVideoStory`. """
     return {
@@ -2367,6 +2395,86 @@ def rollback_employee_changes(
                     'target_id': str(item.id),
                     'target_label': item.product.name,
                     'summary': f"Lote de '{item.product.name}' ({item.store.name}) restaurado.",
+                })
+
+            elif target_type == 'products_combo':
+                combo = (
+                    ProductsCombo.objects.select_for_update(of=('self',))
+                    .select_related('store')
+                    .filter(id=target_id, company=company)
+                    .first()
+                )
+                if combo is None:
+                    skipped_count += 1
+                    continue
+                if not snap and first_log.action_type == 'products_combo_created':
+                    combo.paused = True
+                    combo.save(update_fields=['paused'])
+                elif snap:
+                    if 'name' in snap:
+                        combo.name = snap['name']
+                    if 'description' in snap:
+                        combo.description = snap['description']
+                    if 'price' in snap and snap['price'] is not None:
+                        try:
+                            combo.price = Decimal(str(snap['price']))
+                        except (InvalidOperation, TypeError, ValueError):
+                            pass
+                    if 'custom_images' in snap and isinstance(snap['custom_images'], list):
+                        combo.custom_images = snap['custom_images']
+                    if 'stock' in snap and snap['stock'] is not None:
+                        combo.stock = int(snap['stock'])
+                    if 'deduct_component_stock' in snap:
+                        combo.deduct_component_stock = bool(snap['deduct_component_stock'])
+                    if 'paused' in snap:
+                        combo.paused = bool(snap['paused'])
+                    if 'expiration_date' in snap:
+                        if not snap['expiration_date']:
+                            combo.expiration_date = None
+                        else:
+                            parsed_dt = parse_datetime(str(snap['expiration_date']))
+                            if parsed_dt is not None:
+                                combo.expiration_date = parsed_dt
+                    if 'category_id' in snap and snap['category_id']:
+                        if SubCategory.objects.filter(id=snap['category_id']).exists():
+                            combo.category_id = snap['category_id']
+                    if 'discounts_by_tokens_active' in snap:
+                        combo.discounts_by_tokens_active = bool(snap['discounts_by_tokens_active'])
+                    if 'discounts_data' in snap:
+                        combo.discounts_data = snap['discounts_data']
+                    combo.save()
+                    if 'combo_items' in snap and isinstance(snap['combo_items'], list):
+                        combo.combo_items.all().delete()
+                        for pos_idx, raw_it in enumerate(snap['combo_items']):
+                            if not isinstance(raw_it, dict) or not raw_it.get('product_id'):
+                                continue
+                            prod_obj = Product.objects.filter(id=raw_it['product_id'], company=company).first()
+                            if prod_obj is None:
+                                continue
+                            inv_obj = None
+                            if raw_it.get('inventory_item_id'):
+                                inv_obj = InventoryItem.objects.filter(
+                                    id=raw_it['inventory_item_id'], store=combo.store
+                                ).first()
+                            ProductsComboItem.objects.create(
+                                combo=combo,
+                                product=prod_obj,
+                                inventory_item=inv_obj,
+                                quantity=max(1, int(raw_it.get('quantity') or 1)),
+                                selected_variant_id=str(raw_it.get('selected_variant_id') or '')[:100],
+                                notes=str(raw_it.get('notes') or '')[:255],
+                                position=int(raw_it.get('position', pos_idx)),
+                            )
+                else:
+                    skipped_count += 1
+                    continue
+                restored_items += 1
+                affected_item_cache_ids.add(str(combo.id))
+                reverted_items_summary.append({
+                    'target_type': 'products_combo',
+                    'target_id': str(combo.id),
+                    'target_label': combo.name,
+                    'summary': f"Combo '{combo.name}' ({combo.store.name}) restaurado.",
                 })
 
             elif target_type in ('story_video', 'video_story'):

@@ -376,6 +376,55 @@ def update_item_volatile_cache(sender, instance: InventoryItem, **kwargs):
     # Este sí se puede dejar directo porque escribe datos literales (no leídos de otra tabla conflictiva)
     transaction.on_commit(lambda: cache.set(cache_key, state, timeout=86400))
 
+
+@receiver(post_save, sender=ProductsCombo)
+def update_combo_volatile_cache(sender, instance: ProductsCombo, **kwargs):
+    def _sync_combo_cache():
+        eff_stock = instance.get_effective_stock()
+        state = {
+            "stock": eff_stock,
+            "paused": bool(instance.paused),
+            "custom_price": None,
+        }
+        cache.set(f"cartmaker:volatile:item:{instance.id}", state, timeout=86400)
+        cache.set(f"cartmaker:volatile:combo:{instance.id}", state, timeout=86400)
+        cache.delete(f"cartmaker:struct:item:{instance.id}")
+        cache.delete(f"cartmaker:struct:combo:{instance.id}")
+        try:
+            if hasattr(cache, 'delete_pattern'):
+                cache.delete_pattern(f"cartmaker:struct:store_products:{instance.store_id}:*")
+            location = instance.store.location
+            if location and location.coordinates:
+                approx_lat = round(location.coordinates.y, 3)
+                approx_lng = round(location.coordinates.x, 3)
+                if hasattr(cache, 'delete_pattern'):
+                    cache.delete_pattern(f"cartmaker:struct:home:{approx_lat}:{approx_lng}:*")
+        except Exception:
+            pass
+    transaction.on_commit(_sync_combo_cache)
+
+
+@receiver(post_delete, sender=ProductsCombo)
+def delete_combo_volatile_cache(sender, instance: ProductsCombo, **kwargs):
+    def _finalize_combo_deletion():
+        cache.delete(f"cartmaker:volatile:item:{instance.id}")
+        cache.delete(f"cartmaker:volatile:combo:{instance.id}")
+        cache.delete(f"cartmaker:struct:item:{instance.id}")
+        cache.delete(f"cartmaker:struct:combo:{instance.id}")
+        try:
+            if hasattr(cache, 'delete_pattern'):
+                cache.delete_pattern(f"cartmaker:struct:store_products:{instance.store_id}:*")
+            location = instance.store.location
+            if location and location.coordinates:
+                approx_lat = round(location.coordinates.y, 3)
+                approx_lng = round(location.coordinates.x, 3)
+                if hasattr(cache, 'delete_pattern'):
+                    cache.delete_pattern(f"cartmaker:struct:home:{approx_lat}:{approx_lng}:*")
+        except Exception:
+            pass
+    transaction.on_commit(_finalize_combo_deletion)
+
+
 @receiver(post_delete, sender=InventoryItem)
 def delete_item_volatile_cache(sender, instance: InventoryItem, **kwargs):
     def finalize_item_deletion():
@@ -398,9 +447,18 @@ def invalidate_structural_cache_on_product_change(sender, instance: Product, **k
                 'id', 'store__location__coordinates'
             )
         )
-        if not rows:
-            return
-        cache.delete_many([f"cartmaker:struct:item:{uid}" for uid, _ in rows])
+        combo_rows = list(
+            ProductsCombo.objects.filter(combo_items__product=instance)
+            .select_related('store__location')
+            .values_list('id', 'store_id', 'store__location__coordinates')
+            .distinct()
+        )
+        keys_to_del = [f"cartmaker:struct:item:{uid}" for uid, _ in rows]
+        for cid, _, _ in combo_rows:
+            keys_to_del.append(f"cartmaker:struct:item:{cid}")
+            keys_to_del.append(f"cartmaker:struct:combo:{cid}")
+        if keys_to_del:
+            cache.delete_many(keys_to_del)
         seen_coords = set()
         for _, coords in rows:
             if not coords:
@@ -412,6 +470,18 @@ def invalidate_structural_cache_on_product_change(sender, instance: Product, **k
             try:
                 if hasattr(cache, 'delete_pattern'):
                     cache.delete_pattern(f"cartmaker:struct:home:{key_pair[0]}:{key_pair[1]}:*")
+            except Exception:
+                continue
+        for _, store_id, coords in combo_rows:
+            try:
+                if hasattr(cache, 'delete_pattern'):
+                    cache.delete_pattern(f"cartmaker:struct:store_products:{store_id}:*")
+                if coords:
+                    key_pair = (round(coords.y, 3), round(coords.x, 3))
+                    if key_pair not in seen_coords:
+                        seen_coords.add(key_pair)
+                        if hasattr(cache, 'delete_pattern'):
+                            cache.delete_pattern(f"cartmaker:struct:home:{key_pair[0]}:{key_pair[1]}:*")
             except Exception:
                 continue
     transaction.on_commit(clear_structure_cache)
@@ -437,6 +507,7 @@ def invalidate_search_cache(sender, instance, **kwargs):
         cache.delete("cartmaker:global:search")
         cache.delete("cartmaker:global:categories")
         cache.delete("cartmaker:global:categories:v2")
+        cache.delete("cartmaker:global:categories:v3")
     transaction.on_commit(_clear_categories_caches)
 
 # ON CREATED

@@ -618,11 +618,37 @@ class OrderViewSet(viewsets.ViewSet):
                 # =============================================================
                 cart_items = order.cart.get('items', [])
                 restored_item_ids = []
+                restored_combo_ids = []
                 for item in cart_items:
                     inv_item_id = item.get('inventory_item_id')
+                    combo_id = item.get('combo_id') or (inv_item_id if item.get('is_combo') else None)
                     raw_qty = float(item.get('quantity', 0) or 0)
                     stock_units = int(item.get('stock_units_deducted') or (max(1, math.ceil(raw_qty)) if raw_qty > 0 else 0))
-                    if inv_item_id and stock_units > 0:
+                    if item.get('is_combo') and combo_id and stock_units > 0:
+                        try:
+                            combo_obj = ProductsCombo.objects.select_for_update(of=('self',)).get(id=combo_id)
+                            combo_obj.stock += stock_units
+                            combo_obj.save(update_fields=['stock', 'updated_at'])
+                            restored_combo_ids.append(combo_obj.id)
+                        except ProductsCombo.DoesNotExist:
+                            pass
+                        # Reintegrar también el stock descontado de los lotes componentes si aplica
+                        comp_deductions = item.get('component_stock_deductions') or []
+                        if isinstance(comp_deductions, list):
+                            for ded in comp_deductions:
+                                if not isinstance(ded, dict):
+                                    continue
+                                comp_inv_id = ded.get('inventory_item_id')
+                                comp_units = int(ded.get('units', 0) or 0)
+                                if comp_inv_id and comp_units > 0:
+                                    try:
+                                        comp_inv = InventoryItem.objects.select_for_update(of=('self',)).get(id=comp_inv_id)
+                                        comp_inv.stock += comp_units
+                                        comp_inv.save(update_fields=['stock'])
+                                        restored_item_ids.append(comp_inv.id)
+                                    except InventoryItem.DoesNotExist:
+                                        pass
+                    elif inv_item_id and stock_units > 0:
                         try:
                             inv_item = InventoryItem.objects.select_for_update(of=('self',)).get(id=inv_item_id)
                             inv_item.stock += stock_units
@@ -694,6 +720,10 @@ class OrderViewSet(viewsets.ViewSet):
                 cache_keys_to_del = (
                     [f"cartmaker:volatile:item:{iid}" for iid in restored_item_ids]
                     + [f"cartmaker:struct:item:{iid}" for iid in restored_item_ids]
+                    + [f"cartmaker:volatile:item:{cid}" for cid in restored_combo_ids]
+                    + [f"cartmaker:struct:item:{cid}" for cid in restored_combo_ids]
+                    + [f"cartmaker:volatile:combo:{cid}" for cid in restored_combo_ids]
+                    + [f"cartmaker:struct:combo:{cid}" for cid in restored_combo_ids]
                 )
 
                 def _post_cancel_commit():
@@ -1013,28 +1043,57 @@ class CartViewSet(viewsets.ViewSet):
         missing_ids = [uid for key, uid in struct_keys.items() if key not in cached_structs]
         struct_data_map = {uid: cached_structs[f"cartmaker:struct:item:{uid}"] for uid in item_ids if f"cartmaker:struct:item:{uid}" in cached_structs}
 
-        # RESOLUCIÓN DE CACHE MISS (Solo va a BD por los productos que no están en RAM)
+        # RESOLUCIÓN DE CACHE MISS (Solo va a BD por los productos o combos que no están en RAM)
         if missing_ids:
             qs = InventoryItem.objects.select_related(
                 'product', 'product__category__parent_category', 'offer', 'store__company'
             ).filter(id__in=missing_ids)
             
             new_structs_to_cache = {}
+            found_missing_ids = set()
             for item in qs:
                 item_json = item.get_json()
                 
                 # 💡 Inyección Táctica: Ponemos los datos de la empresa a mano 
                 # para que el frontend de Flutter no tenga que escarbar en el JSON
                 company = item.store.company
-                print(f"IMAGEN DE LAA COMPNY {company}: {company.image}")
                 item_json['company_info'] = {
                     'id': str(company.id),
                     'name': company.name,
                     'image': storage_manager.get_url(company.image) if company.image else None
                 }
 
-                struct_data_map[str(item.id)] = item_json
+                uid_str = str(item.id)
+                found_missing_ids.add(uid_str)
+                struct_data_map[uid_str] = item_json
                 new_structs_to_cache[f"cartmaker:struct:item:{item.id}"] = item_json
+
+            # Si quedan IDs que no son InventoryItem, buscamos en ProductsCombo
+            remaining_combo_ids = [uid for uid in missing_ids if str(uid) not in found_missing_ids]
+            if remaining_combo_ids:
+                combos_qs = ProductsCombo.objects.select_related(
+                    'store', 'store__company', 'category', 'category__parent_category'
+                ).prefetch_related(
+                    Prefetch(
+                        'combo_items',
+                        queryset=ProductsComboItem.objects.select_related(
+                            'product', 'product__category', 'inventory_item'
+                        ).order_by('sort_order', 'id'),
+                    )
+                ).filter(id__in=remaining_combo_ids)
+
+                for combo in combos_qs:
+                    combo_json = combo.get_json()
+                    company = combo.store.company
+                    combo_json['company_info'] = {
+                        'id': str(company.id),
+                        'name': company.name,
+                        'image': storage_manager.get_url(company.image) if company.image else None
+                    }
+                    cid_str = str(combo.id)
+                    struct_data_map[cid_str] = combo_json
+                    new_structs_to_cache[f"cartmaker:struct:item:{combo.id}"] = combo_json
+                    new_structs_to_cache[f"cartmaker:struct:combo:{combo.id}"] = combo_json
             
             if new_structs_to_cache:
                 cache.set_many(new_structs_to_cache, timeout=86400) # Estructura cacheada por 24h
@@ -1066,6 +1125,8 @@ class CartViewSet(viewsets.ViewSet):
             item_data["stock"] = state["stock"]
             item_data["paused"] = state["paused"]
             item_data["custom_price"] = state["custom_price"]
+            if item_data.get("is_combo") and isinstance(item_data.get("product"), dict):
+                item_data["price"] = state["custom_price"] if state["custom_price"] is not None else item_data.get("price")
 
             final_data.append(item_data)
 
@@ -1100,7 +1161,8 @@ class CartViewSet(viewsets.ViewSet):
         item_discount_map = {}
         items_lines_by_id = {}
         for item_entry in items_data:
-            if not isinstance(item_entry, dict) or not item_entry.get('id'):
+            raw_entry_id = item_entry.get('id') or item_entry.get('combo_id') if isinstance(item_entry, dict) else None
+            if not isinstance(item_entry, dict) or not raw_entry_id:
                 return Response({"error": "Formato de productos inválido."}, status=status.HTTP_400_BAD_REQUEST)
             try:
                 qty_val = float(item_entry.get('quantity', 0))
@@ -1110,7 +1172,7 @@ class CartViewSet(viewsets.ViewSet):
                 return Response({
                     "error": "La cantidad de cada producto debe ser mayor a cero."
                 }, status=status.HTTP_400_BAD_REQUEST)
-            entry_id = str(item_entry['id'])
+            entry_id = str(raw_entry_id)
             item_qty_map[entry_id] = round(item_qty_map.get(entry_id, 0.0) + qty_val, 3)
             items_lines_by_id.setdefault(entry_id, []).append(item_entry)
             if item_entry.get('selected_discount'):
@@ -1184,7 +1246,7 @@ class CartViewSet(viewsets.ViewSet):
                 }, status=status.HTTP_400_BAD_REQUEST)
 
         # =========================================================================
-        # 2. BLOQUEO ATÓMICO Y HARD RESERVATION
+        # 2. BLOQUEO ATÓMICO Y HARD RESERVATION (INVENTORY ITEMS + COMBOS)
         # =========================================================================
         try:
             with transaction.atomic():
@@ -1194,15 +1256,26 @@ class CartViewSet(viewsets.ViewSet):
                     .select_related('product', 'product__category', 'offer')
                     .filter(id__in=item_ids, store=store)
                 )
+                found_inv_ids = {str(item.id) for item in inventory_items}
+                remaining_combo_ids = [uid for uid in item_ids if uid not in found_inv_ids]
 
-                # 💡 CASO 1: Un producto fue borrado de la BD o no pertenece a la tienda
-                if len(inventory_items) != len(item_ids):
-                    found_ids = set(str(item.id) for item in inventory_items)
-                    missing_ids = set(item_ids) - found_ids
+                combo_items_objs = []
+                if remaining_combo_ids:
+                    combo_items_objs = list(
+                        ProductsCombo.objects.select_for_update(of=('self',))
+                        .select_related('store', 'store__company', 'category', 'category__parent_category')
+                        .filter(id__in=remaining_combo_ids, store=store)
+                    )
+                found_combo_ids = {str(c.id) for c in combo_items_objs}
+                found_all_ids = found_inv_ids | found_combo_ids
+
+                # 💡 CASO 1: Un producto o combo fue borrado de la BD o no pertenece a la tienda
+                if len(found_all_ids) != len(item_ids):
+                    missing_ids = set(item_ids) - found_all_ids
                     return Response({
                         "error": "PRODUCTO_ELIMINADO",
                         "product_id": list(missing_ids)[0],
-                        "message": "Uno de los productos en tu carrito fue retirado del catálogo por el vendedor. Hemos actualizado tu carrito."
+                        "message": "Uno de los productos o combos en tu carrito fue retirado del catálogo por el vendedor. Hemos actualizado tu carrito."
                     }, status=status.HTTP_404_NOT_FOUND)
 
                 # Bloqueamos también las filas de Product para evitar race conditions al descontar stock en Product.variants (JSON)
@@ -1216,7 +1289,7 @@ class CartViewSet(viewsets.ViewSet):
                     if it.product_id in locked_products_by_id:
                         it.product = locked_products_by_id[it.product_id]
 
-                # Validamos en servidor los descuentos por tokens contra item.product.discounts_data real en BD
+                # Validamos en servidor los descuentos por tokens contra item.product.discounts_data o combo.discounts_data
                 validated_discount_map = {}
                 total_tokens_needed = 0
                 for item in inventory_items:
@@ -1259,6 +1332,46 @@ class CartViewSet(viewsets.ViewSet):
                     validated_discount_map[item_id_str] = matched_tier
                     total_tokens_needed += matched_tier['tokens']
 
+                for combo in combo_items_objs:
+                    combo_id_str = str(combo.id)
+                    req_discount = item_discount_map.get(combo_id_str)
+                    if not req_discount:
+                        continue
+                    if not isinstance(req_discount, dict):
+                        return Response({"error": "Formato de descuento inválido."}, status=status.HTTP_400_BAD_REQUEST)
+                    if not store.company.gamification_enabled or not combo.discounts_by_tokens_active:
+                        return Response({
+                            "error": "DESCUENTO_NO_DISPONIBLE",
+                            "message": f"Los descuentos por tokens no están habilitados para '{combo.name}'."
+                        }, status=status.HTTP_409_CONFLICT)
+                    try:
+                        req_tokens = int(req_discount.get('tokens', 0))
+                        req_pct = float(req_discount.get('percentage', 0))
+                    except (ValueError, TypeError):
+                        return Response({"error": "Valores de descuento inválidos."}, status=status.HTTP_400_BAD_REQUEST)
+
+                    matched_tier = None
+                    for tier in (combo.discounts_data or []):
+                        if not isinstance(tier, dict):
+                            continue
+                        try:
+                            tier_tokens = int(tier.get('tokens', -1))
+                            tier_pct = float(tier.get('percentage', -1))
+                        except (ValueError, TypeError):
+                            continue
+                        if tier_tokens == req_tokens and abs(tier_pct - req_pct) < 0.01 and tier_tokens > 0 and 0 < tier_pct <= 100:
+                            matched_tier = {'tokens': tier_tokens, 'percentage': tier_pct}
+                            break
+
+                    if not matched_tier:
+                        return Response({
+                            "error": "DESCUENTO_INVALIDO",
+                            "message": f"El descuento por tokens seleccionado para '{combo.name}' ya no es válido."
+                        }, status=status.HTTP_409_CONFLICT)
+
+                    validated_discount_map[combo_id_str] = matched_tier
+                    total_tokens_needed += matched_tier['tokens']
+
                 # 💡 BLOQUEO ATÓMICO 1: Validamos que el cliente SÍ tenga los tokens en esta compañía
                 token_wallet = None
                 if total_tokens_needed > 0:
@@ -1277,6 +1390,7 @@ class CartViewSet(viewsets.ViewSet):
 
                 cart_snapshot = []
                 total_price = 0.0
+                extra_modified_item_ids = []
 
                 for item in inventory_items:
                     item_id_str = str(item.id)
@@ -1403,9 +1517,9 @@ class CartViewSet(viewsets.ViewSet):
                             "stock_units_deducted": line_stock_units,
                             "selling_unit": selection_meta["selling_unit"],
                             "unit_label": selection_meta["unit_label"],
-                            "is_combo": selection_meta.get("is_combo", False),
-                            "combo_items": selection_meta.get("combo_items", []),
-                            "combo_summary": selection_meta.get("combo_summary", ""),
+                            "is_combo": False,
+                            "combo_items": [],
+                            "combo_summary": "",
                             "unit_price": round(line_base_unit_price, 2),
                             "subtotal": subtotal,
                             "product_image": img_url,
@@ -1422,6 +1536,167 @@ class CartViewSet(viewsets.ViewSet):
 
                     if product_variants_modified:
                         item.product.save(update_fields=['variants'])
+
+                # =============================================================
+                # 2B. PROCESAMIENTO DE COMBOS (ProductsCombo)
+                # =============================================================
+                for combo in combo_items_objs:
+                    combo_id_str = str(combo.id)
+                    requested_qty_total = item_qty_map[combo_id_str]
+                    stock_units_to_deduct = max(1, int(math.ceil(requested_qty_total)))
+
+                    if combo.paused:
+                        return Response({
+                            "error": "PRODUCTO_PAUSADO",
+                            "product_id": combo_id_str,
+                            "combo_id": combo_id_str,
+                            "message": f"El vendedor acaba de pausar la venta del combo '{combo.name}'. Por favor, retíralo de tu carrito para continuar."
+                        }, status=status.HTTP_409_CONFLICT)
+
+                    if combo.stock < stock_units_to_deduct:
+                        if combo.stock == 0:
+                            msg = f"¡Ups! Alguien más acaba de comprar el último combo '{combo.name}'. Lo hemos retirado de tu carrito."
+                        else:
+                            msg = f"Hemos ajustado tu pedido de '{combo.name}' de {requested_qty_total:g} a {combo.stock} combos, que es el stock disponible actualmente."
+                        return Response({
+                            "error": "STOCK_INSUFICIENTE",
+                            "product_id": combo_id_str,
+                            "combo_id": combo_id_str,
+                            "available_stock": combo.stock,
+                            "message": msg
+                        }, status=status.HTTP_409_CONFLICT)
+
+                    combo_lines = list(
+                        ProductsComboItem.objects.select_related('product', 'product__category', 'inventory_item')
+                        .filter(combo=combo)
+                        .order_by('sort_order', 'id')
+                    )
+
+                    component_stock_deductions = []
+                    if combo.deduct_component_stock and combo_lines:
+                        for ci in combo_lines:
+                            comp_qty_needed = max(1, int(ci.quantity or 1)) * stock_units_to_deduct
+                            comp_inv = None
+                            if ci.inventory_item_id:
+                                comp_inv = (
+                                    InventoryItem.objects.select_for_update(of=('self',))
+                                    .filter(id=ci.inventory_item_id, store=store)
+                                    .first()
+                                )
+                            if comp_inv is None:
+                                comp_inv = (
+                                    InventoryItem.objects.select_for_update(of=('self',))
+                                    .filter(store=store, product_id=ci.product_id, paused=False)
+                                    .order_by('-stock')
+                                    .first()
+                                )
+                            if comp_inv is None or comp_inv.paused or comp_inv.stock < comp_qty_needed:
+                                max_possible_combos = 0
+                                if comp_inv and not comp_inv.paused and ci.quantity > 0:
+                                    max_possible_combos = comp_inv.stock // int(ci.quantity)
+                                avail_combos = min(combo.stock, max_possible_combos)
+                                return Response({
+                                    "error": "STOCK_INSUFICIENTE",
+                                    "product_id": combo_id_str,
+                                    "combo_id": combo_id_str,
+                                    "available_stock": avail_combos,
+                                    "message": f"El componente '{ci.product.name}' del combo '{combo.name}' no tiene suficiente inventario disponible en esta sucursal."
+                                }, status=status.HTTP_409_CONFLICT)
+
+                            comp_inv.stock -= comp_qty_needed
+                            if comp_inv.stock <= 0:
+                                comp_inv.sold_out_time = timezone.now()
+                                if comp_inv.stock < 0:
+                                    comp_inv.stock = 0
+                            comp_inv.save(update_fields=['stock', 'sold_out_time'])
+                            extra_modified_item_ids.append(comp_inv.id)
+                            component_stock_deductions.append({
+                                "inventory_item_id": str(comp_inv.id),
+                                "product_id": str(ci.product_id),
+                                "units": comp_qty_needed,
+                            })
+
+                    combo.stock -= stock_units_to_deduct
+                    if combo.stock <= 0:
+                        combo.sold_out_time = timezone.now()
+                        if combo.stock < 0:
+                            combo.stock = 0
+                    combo.save(update_fields=['stock', 'sold_out_time', 'updated_at'])
+
+                    combo_offer_pct = int(combo.offer_percentage) if combo.is_offer_active() else None
+                    applied_token_discount = validated_discount_map.get(combo_id_str)
+                    if combo_offer_pct and applied_token_discount:
+                        return Response({
+                            "error": "OFERTAS_NO_ACUMULABLES",
+                            "message": f"El combo '{combo.name}' ya tiene una oferta de la tienda, por lo que no es acumulable con descuentos por tokens."
+                        }, status=status.HTTP_409_CONFLICT)
+
+                    combo_imgs = combo.get_images()
+                    combo_img_url = combo_imgs[0] if combo_imgs else ""
+                    combo_items_snapshot = [ci.get_json() for ci in combo_lines]
+                    combo_summary_text = combo.get_combo_summary()
+                    combo_regular_price = combo.get_regular_price()
+                    combo_effective_unit_price = combo.get_effective_price()
+                    combo_savings_amt = combo.get_savings()
+                    combo_savings_pct = combo.get_savings_percentage()
+
+                    token_discount_already_applied_for_combo = False
+                    deductions_attached = False
+
+                    for req_line in items_lines_by_id.get(combo_id_str, []):
+                        line_qty_float = float(req_line.get('quantity', 1))
+                        line_qty = max(1, int(math.ceil(line_qty_float)))
+                        line_stock_units = line_qty
+
+                        line_base_unit_price = combo_effective_unit_price
+                        subtotal = round(line_base_unit_price * line_qty, 2)
+
+                        line_token_discount = None
+                        if applied_token_discount and not token_discount_already_applied_for_combo:
+                            pct = float(applied_token_discount['percentage'])
+                            ahorro = line_base_unit_price * (pct / 100.0)
+                            subtotal = round(max(0.0, subtotal - ahorro), 2)
+                            line_token_discount = applied_token_discount
+                            token_discount_already_applied_for_combo = True
+
+                        source_video_id = req_line.get('source_video_id')
+                        is_from_atlas = req_line.get('isFromAtlas', False)
+                        raw_notes = req_line.get('customer_notes') or req_line.get('notes') or ''
+                        customer_notes = str(raw_notes).strip()[:300] if raw_notes else ''
+
+                        line_deductions = component_stock_deductions if not deductions_attached else []
+                        deductions_attached = True
+
+                        cart_snapshot.append({
+                            "is_combo": True,
+                            "combo_id": combo_id_str,
+                            "product_id": combo_id_str,
+                            "inventory_item_id": combo_id_str,
+                            "name": combo.name,
+                            "display_name": combo.name,
+                            "quantity": line_qty,
+                            "stock_units_deducted": line_stock_units,
+                            "selling_unit": "combo",
+                            "unit_label": "combo",
+                            "combo_items": combo_items_snapshot,
+                            "combo_summary": combo_summary_text,
+                            "component_stock_deductions": line_deductions,
+                            "regular_price": combo_regular_price,
+                            "savings_amount": combo_savings_amt,
+                            "savings_percentage": combo_savings_pct,
+                            "unit_price": round(line_base_unit_price, 2),
+                            "subtotal": subtotal,
+                            "product_image": combo_img_url,
+                            "selected_variant": None,
+                            "selected_modifiers": [],
+                            "selected_options": req_line.get('selected_options') if isinstance(req_line.get('selected_options'), dict) else {},
+                            "customer_notes": customer_notes,
+                            "standard_offer_applied": combo_offer_pct,
+                            "token_discount_applied": line_token_discount,
+                            "source_video_id": source_video_id,
+                            "is_from_atlas": is_from_atlas,
+                        })
+                        total_price = round(total_price + subtotal, 2)
 
                 # 3. Creamos la orden oficial
                 order = Order.objects.create(
@@ -1446,8 +1721,17 @@ class CartViewSet(viewsets.ViewSet):
                     )
                 
                 # Invalidamos caché volátil y notificamos tras commit exitoso
-                volatile_keys_to_del = [f"cartmaker:volatile:item:{item.id}" for item in inventory_items]
-                struct_keys_to_del = [f"cartmaker:struct:item:{item.id}" for item in inventory_items]
+                all_inv_ids = [item.id for item in inventory_items] + extra_modified_item_ids
+                volatile_keys_to_del = (
+                    [f"cartmaker:volatile:item:{iid}" for iid in all_inv_ids]
+                    + [f"cartmaker:volatile:item:{c.id}" for c in combo_items_objs]
+                    + [f"cartmaker:volatile:combo:{c.id}" for c in combo_items_objs]
+                )
+                struct_keys_to_del = (
+                    [f"cartmaker:struct:item:{iid}" for iid in all_inv_ids]
+                    + [f"cartmaker:struct:item:{c.id}" for c in combo_items_objs]
+                    + [f"cartmaker:struct:combo:{c.id}" for c in combo_items_objs]
+                )
                 merchant_id = store.company.owner_id
                 final_order_id = order.id
                 final_store_name = store.name
