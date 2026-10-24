@@ -215,28 +215,33 @@ class CartMakerMapViewSet(viewsets.ViewSet):
             # =========================================================================
             if structural_data is None:
                 # A) Combos activos de la sucursal (ProductsCombo)
-                combos_qs = ProductsCombo.objects.select_related(
-                    'store', 'store__company', 'category', 'category__parent_category'
-                ).prefetch_related(
-                    Prefetch(
-                        'combo_items',
-                        queryset=ProductsComboItem.objects.select_related(
-                            'product', 'product__category', 'inventory_item'
-                        ).order_by('sort_order', 'id'),
+                combos_struct = []
+                try:
+                    combos_qs = ProductsCombo.objects.select_related(
+                        'company', 'store', 'store__company', 'category', 'category__parent_category'
+                    ).prefetch_related(
+                        Prefetch(
+                            'combo_items',
+                            queryset=ProductsComboItem.objects.select_related(
+                                'product', 'product__category', 'inventory_item'
+                            ).order_by('position', 'id'),
+                        )
+                    ).filter(
+                        store_id=store_id,
+                        paused=False,
+                        stock__gt=0,
                     )
-                ).filter(
-                    store_id=store_id,
-                    paused=False,
-                    stock__gt=0,
-                )
-                if request.query_params.get('subcategory_id'):
-                    combos_qs = combos_qs.filter(category_id=request.query_params.get('subcategory_id'))
-                if request.query_params.get('min_price'):
-                    combos_qs = combos_qs.filter(price__gte=float(request.query_params.get('min_price')))
-                if request.query_params.get('max_price'):
-                    combos_qs = combos_qs.filter(price__lte=float(request.query_params.get('max_price')))
+                    if request.query_params.get('subcategory_id'):
+                        combos_qs = combos_qs.filter(category_id=request.query_params.get('subcategory_id'))
+                    if request.query_params.get('min_price'):
+                        combos_qs = combos_qs.filter(price__gte=float(request.query_params.get('min_price')))
+                    if request.query_params.get('max_price'):
+                        combos_qs = combos_qs.filter(price__lte=float(request.query_params.get('max_price')))
 
-                combos_struct = [c.get_json() for c in combos_qs.order_by('-creation')[:25]]
+                    combos_struct = [c.get_json() for c in combos_qs.order_by('-creation')[:25]]
+                except Exception as combo_err:
+                    logger.warning(f"No se pudieron cargar combos en store_products ({store_id}): {combo_err}")
+                    combos_struct = []
 
                 # B) Lotes individuales de inventario (InventoryItem)
                 queryset = InventoryItem.objects.select_related(

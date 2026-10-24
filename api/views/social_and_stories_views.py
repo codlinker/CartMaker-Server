@@ -992,8 +992,15 @@ class UniversalConversationViewSet(viewsets.ViewSet):
                     return Response({'data': data}, status=status.HTTP_200_OK)
 
                 combo = ProductsCombo.objects.select_related(
-                    'store', 'store__company', 'category', 'category__parent_category'
-                ).prefetch_related('combo_items__product', 'combo_items__inventory_item').get(id=target_id, paused=False)
+                    'company', 'store', 'store__company', 'category', 'category__parent_category'
+                ).prefetch_related(
+                    Prefetch(
+                        'combo_items',
+                        queryset=ProductsComboItem.objects.select_related(
+                            'product', 'product__category', 'inventory_item'
+                        ).order_by('position', 'id'),
+                    )
+                ).get(id=target_id, paused=False)
                 data = combo.get_json()
                 data['feed_type'] = 'product'
                 return Response({'data': data}, status=status.HTTP_200_OK)

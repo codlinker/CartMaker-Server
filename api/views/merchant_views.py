@@ -35,11 +35,16 @@ class CompanyMainBranchViewSet(APIView):
             to_attr='active_items'
         )
         active_combos_prefetch = Prefetch(
-            'store_combos',
+            'combos',
             queryset=ProductsCombo.objects.filter(
                 paused=False,
                 stock__gt=0
-            ).prefetch_related('combo_items__product'),
+            ).select_related('company', 'store').prefetch_related(
+                Prefetch(
+                    'combo_items',
+                    queryset=ProductsComboItem.objects.select_related('product', 'inventory_item').order_by('position', 'id'),
+                )
+            ),
             to_attr='active_combos'
         )
 
@@ -258,13 +263,13 @@ class GetStoreInventoryItems(APIView):
             # 2A. Si el frontend pide explícitamente is_combo=true, paginamos ProductsCombo
             if combo_only:
                 combos_query = ProductsCombo.objects.filter(store=store).select_related(
-                    'store', 'store__company', 'category', 'category__parent_category'
+                    'company', 'store', 'store__company', 'category', 'category__parent_category'
                 ).prefetch_related(
                     Prefetch(
                         'combo_items',
                         queryset=ProductsComboItem.objects.select_related(
                             'product', 'product__category', 'inventory_item'
-                        ).order_by('sort_order', 'id'),
+                        ).order_by('position', 'id'),
                     )
                 )
                 if category_id:
@@ -437,13 +442,13 @@ class GetStoreInventoryItems(APIView):
 
             # Incluimos la lista de combos de la sucursal para que el panel pueda pintarlos directamente
             store_combos_qs = ProductsCombo.objects.filter(store=store).select_related(
-                'store', 'store__company', 'category', 'category__parent_category'
+                'company', 'store', 'store__company', 'category', 'category__parent_category'
             ).prefetch_related(
                 Prefetch(
                     'combo_items',
                     queryset=ProductsComboItem.objects.select_related(
                         'product', 'product__category', 'inventory_item'
-                    ).order_by('sort_order', 'id'),
+                    ).order_by('position', 'id'),
                 )
             )
             if category_id:
@@ -1931,7 +1936,7 @@ class GamificationViewSet(viewsets.ViewSet):
             combo = ProductsCombo.objects.filter(id=product_id, store__company__owner=request.user).first()
             if combo is not None:
                 combo.discounts_by_tokens_active = bool(active)
-                combo.save(update_fields=['discounts_by_tokens_active', 'updated_at'])
+                combo.save(update_fields=['discounts_by_tokens_active'])
                 return Response({'success': True}, status=status.HTTP_200_OK)
             return Response({'error': 'Producto o combo no encontrado o no tienes permisos.'}, status=status.HTTP_404_NOT_FOUND)
         except Exception:

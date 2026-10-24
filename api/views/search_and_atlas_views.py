@@ -303,13 +303,13 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
                 target_company = item.store.company
             else:
                 combo = ProductsCombo.objects.select_related(
-                    'store', 'store__company', 'category', 'category__parent_category'
+                    'company', 'store', 'store__company', 'category', 'category__parent_category'
                 ).prefetch_related(
                     Prefetch(
                         'combo_items',
                         queryset=ProductsComboItem.objects.select_related(
                             'product', 'product__category', 'inventory_item'
-                        ).order_by('sort_order', 'id'),
+                        ).order_by('position', 'id'),
                     )
                 ).get(id=item_id, paused=False)
                 data = combo.get_json()

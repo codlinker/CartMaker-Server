@@ -2112,6 +2112,7 @@ class ProductSearchEngine:
 
     def _get_base_active_combos_queryset(self):
         qs = ProductsCombo.objects.select_related(
+            'company',
             'store',
             'store__company',
             'category',
@@ -2121,7 +2122,7 @@ class ProductSearchEngine:
                 'combo_items',
                 queryset=ProductsComboItem.objects.select_related(
                     'product', 'product__category', 'inventory_item'
-                ).order_by('sort_order', 'id'),
+                ).order_by('position', 'id'),
             )
         ).filter(
             paused=False,
@@ -2153,10 +2154,13 @@ class ProductSearchEngine:
             # 2. Slicing en SQL e INYECCIÓN del feed_type
             structural_feed = []
             if page == 1 and extra_combos_qs is not None:
-                for combo in extra_combos_qs[:min(8, page_size)]:
-                    combo_data = combo.get_json()
-                    combo_data["feed_type"] = "product"
-                    structural_feed.append(combo_data)
+                try:
+                    for combo in extra_combos_qs[:min(8, page_size)]:
+                        combo_data = combo.get_json()
+                        combo_data["feed_type"] = "product"
+                        structural_feed.append(combo_data)
+                except Exception:
+                    pass
 
             remaining_slots = max(0, page_size - len(structural_feed)) if page == 1 else page_size
             for item in queryset[start:start + remaining_slots]:
@@ -2213,9 +2217,6 @@ class ProductSearchEngine:
         qs = self._apply_feed_sorting(qs, sort_by, price_order)
 
         combos_qs = self._get_base_active_combos_queryset().filter(
-            offer_percentage__isnull=False,
-            offer_percentage__gt=0,
-            offer_valid_until__gte=now,
             store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters)),
         ).order_by('price' if price_order == 'asc' else ('-price' if price_order == 'desc' else '-creation'))
         

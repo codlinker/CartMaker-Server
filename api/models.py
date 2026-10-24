@@ -2480,7 +2480,16 @@ class ProductsCombo(models.Model):
         if is_close is None:
             is_close = (dist_m is not None and 600.0 <= dist_m <= 1200.0)
 
-        tokens_active = bool(self.discounts_by_tokens_active) and bool(self.company.gamification_enabled)
+        company_obj = (
+            self.company
+            if 'company' in self._state.fields_cache
+            else (
+                self.store.company
+                if ('store' in self._state.fields_cache and 'company' in self.store._state.fields_cache)
+                else self.company
+            )
+        )
+        tokens_active = bool(self.discounts_by_tokens_active) and bool(company_obj.gamification_enabled)
         creation_local = timezone.localtime(self.creation) if self.creation else None
 
         synthesized_product = {
@@ -2547,8 +2556,8 @@ class ProductsCombo(models.Model):
             "store_id": self.store_id,
             "store_name": self.store.name,
             "company_id": self.company_id,
-            "company_name": self.company.name,
-            "company_image": storage_manager.get_url(self.company.image),
+            "company_name": company_obj.name,
+            "company_image": storage_manager.get_url(company_obj.image),
             "creation": creation_local,
             "sold_out_time": timezone.localtime(self.sold_out_time) if self.sold_out_time else None,
             "expiration_date": timezone.localtime(self.expiration_date) if self.expiration_date else None,
@@ -2561,7 +2570,7 @@ class ProductsCombo(models.Model):
             "rating_count": int(getattr(self, 'rating_count', 0)),
             "merchant_avg_rating": round(float(getattr(self, 'merchant_avg_rating', 0.0)), 2),
             "merchant_rating_count": int(getattr(self, 'merchant_rating_count', 0)),
-            "is_platinum": bool(getattr(self.company, 'is_platinum', False)),
+            "is_platinum": bool(getattr(company_obj, 'is_platinum', False)),
             "is_very_close": bool(is_very_close),
             "is_close": bool(is_close),
             "is_liked": bool(getattr(self, 'is_liked', False)),

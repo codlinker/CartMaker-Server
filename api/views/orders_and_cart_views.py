@@ -628,7 +628,7 @@ class OrderViewSet(viewsets.ViewSet):
                         try:
                             combo_obj = ProductsCombo.objects.select_for_update(of=('self',)).get(id=combo_id)
                             combo_obj.stock += stock_units
-                            combo_obj.save(update_fields=['stock', 'updated_at'])
+                            combo_obj.save(update_fields=['stock'])
                             restored_combo_ids.append(combo_obj.id)
                         except ProductsCombo.DoesNotExist:
                             pass
@@ -1072,13 +1072,13 @@ class CartViewSet(viewsets.ViewSet):
             remaining_combo_ids = [uid for uid in missing_ids if str(uid) not in found_missing_ids]
             if remaining_combo_ids:
                 combos_qs = ProductsCombo.objects.select_related(
-                    'store', 'store__company', 'category', 'category__parent_category'
+                    'company', 'store', 'store__company', 'category', 'category__parent_category'
                 ).prefetch_related(
                     Prefetch(
                         'combo_items',
                         queryset=ProductsComboItem.objects.select_related(
                             'product', 'product__category', 'inventory_item'
-                        ).order_by('sort_order', 'id'),
+                        ).order_by('position', 'id'),
                     )
                 ).filter(id__in=remaining_combo_ids)
 
@@ -1263,7 +1263,7 @@ class CartViewSet(viewsets.ViewSet):
                 if remaining_combo_ids:
                     combo_items_objs = list(
                         ProductsCombo.objects.select_for_update(of=('self',))
-                        .select_related('store', 'store__company', 'category', 'category__parent_category')
+                        .select_related('company', 'store', 'store__company', 'category', 'category__parent_category')
                         .filter(id__in=remaining_combo_ids, store=store)
                     )
                 found_combo_ids = {str(c.id) for c in combo_items_objs}
@@ -1569,7 +1569,7 @@ class CartViewSet(viewsets.ViewSet):
                     combo_lines = list(
                         ProductsComboItem.objects.select_related('product', 'product__category', 'inventory_item')
                         .filter(combo=combo)
-                        .order_by('sort_order', 'id')
+                        .order_by('position', 'id')
                     )
 
                     component_stock_deductions = []
@@ -1621,9 +1621,9 @@ class CartViewSet(viewsets.ViewSet):
                         combo.sold_out_time = timezone.now()
                         if combo.stock < 0:
                             combo.stock = 0
-                    combo.save(update_fields=['stock', 'sold_out_time', 'updated_at'])
+                    combo.save(update_fields=['stock', 'sold_out_time'])
 
-                    combo_offer_pct = int(combo.offer_percentage) if combo.is_offer_active() else None
+                    combo_offer_pct = None
                     applied_token_discount = validated_discount_map.get(combo_id_str)
                     if combo_offer_pct and applied_token_discount:
                         return Response({
