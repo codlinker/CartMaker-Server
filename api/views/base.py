@@ -50,6 +50,7 @@ from django.db.models import (
     Subquery, OuterRef, Prefetch, UUIDField, IntegerField, FloatField, BooleanField, CharField,
 )
 from django.contrib.gis.measure import D
+from django.contrib.gis.db.models.functions import Distance
 import operator
 from functools import reduce
 from django.utils.dateparse import parse_datetime

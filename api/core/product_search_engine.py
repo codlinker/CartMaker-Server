@@ -7,7 +7,7 @@ from django.utils import timezone
 from django.contrib.gis.geos import Point
 from django.contrib.gis.db.models.functions import Distance
 from django.contrib.postgres.search import TrigramSimilarity
-from django.db.models import F, Q, CharField, Exists, FloatField, ExpressionWrapper, Avg, OuterRef, Subquery
+from django.db.models import F, Q, CharField, Exists, FloatField, ExpressionWrapper, Avg, OuterRef, Subquery, Prefetch
 from django.db.models.expressions import Window
 from django.db.models.functions import Cast, RowNumber, Coalesce, Power, Extract, Ln, Greatest
 from django.db.models.functions import Now
@@ -1763,6 +1763,10 @@ class ProductSearchEngine:
                     if len(cv) < 2:
                         continue
                     pat = word_boundary_regex(cv) if is_short_term(cv) else substring_regex(cv)
+                    item_match_sub = ProductsComboItem.objects.filter(
+                        combo_id=OuterRef('pk'),
+                        product__name__iregex=pat,
+                    )
                     combo_text_q |= (
                         Q(name__iregex=pat)
                         | Q(description__iregex=pat)
@@ -1770,10 +1774,10 @@ class ProductSearchEngine:
                         | Q(category__parent_category__name__iregex=pat)
                         | Q(store__company__name__iregex=pat)
                         | Q(store__name__iregex=pat)
-                        | Q(combo_items__product__name__iregex=pat)
+                        | Exists(item_match_sub)
                     )
                 if combo_text_q:
-                    combos_qs = combos_qs.filter(combo_text_q).distinct()
+                    combos_qs = combos_qs.filter(combo_text_q)
 
             for combo_obj in combos_qs.order_by('real_distance_meters', '-cached_popularity_score', 'price')[:25]:
                 cid = str(combo_obj.id)
@@ -2323,6 +2327,17 @@ class ProductSearchEngine:
         structural_feed = [dict(item) for item in structural_feed]
         return self._stitch_and_filter_results(structural_feed)
 
+    def _order_combos_for_feed(self, combos_qs, sort_by: str = 'relevance', price_order: str = None):
+        if price_order == 'asc':
+            return combos_qs.order_by('price', 'id')
+        if price_order == 'desc':
+            return combos_qs.order_by('-price', 'id')
+        if sort_by == 'distance':
+            return combos_qs.order_by('real_distance_meters', 'id')
+        if sort_by == 'rating':
+            return combos_qs.order_by('-merchant_avg_rating', '-cached_popularity_score', 'id')
+        return combos_qs.order_by('-cached_popularity_score', '-creation', 'id')
+
     def get_category_feed(self, sub_category_id: int, page: int = 1, page_size: int = 20, sort_by: str = 'relevance', price_order: str = None, max_distance_meters: float = 10000) -> list:
         approx_lat = round(self.user_location.y, 3)
         approx_lng = round(self.user_location.x, 3)
@@ -2340,7 +2355,8 @@ class ProductSearchEngine:
         combos_qs = self._get_base_active_combos_queryset().filter(
             category_id=sub_category_id,
             store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters)),
-        ).order_by('price' if price_order == 'asc' else ('-price' if price_order == 'desc' else '-creation'))
+        )
+        combos_qs = self._order_combos_for_feed(combos_qs, sort_by, price_order)
         
         return self._get_cached_structural_feed(base_cache_key, qs, page, page_size, extra_combos_qs=combos_qs)
 
@@ -2363,7 +2379,8 @@ class ProductSearchEngine:
 
         combos_qs = self._get_base_active_combos_queryset().filter(
             store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters)),
-        ).order_by('price' if price_order == 'asc' else ('-price' if price_order == 'desc' else '-creation'))
+        )
+        combos_qs = self._order_combos_for_feed(combos_qs, sort_by, price_order)
         
         return self._get_cached_structural_feed(base_cache_key, qs, page, page_size, extra_combos_qs=combos_qs)
 
@@ -2444,23 +2461,27 @@ class ProductSearchEngine:
                         Q(product__company__name__icontains=term)
                     )
                     word_queries.append(term_filter)
+                    combo_item_sub = ProductsComboItem.objects.filter(
+                        combo_id=OuterRef('pk'),
+                        product__name__icontains=term,
+                    )
                     combo_term_filter = (
                         Q(name__icontains=term) |
                         Q(description__icontains=term) |
                         Q(category__name__icontains=term) |
                         Q(store__company__name__icontains=term) |
-                        Q(combo_items__product__name__icontains=term)
+                        Exists(combo_item_sub)
                     )
                     combo_word_queries.append(combo_term_filter)
             
             if word_queries:
                 global_search_filter = reduce(operator.and_, word_queries)
-                qs = qs.filter(global_search_filter).distinct()
+                qs = qs.filter(global_search_filter)
             if combo_word_queries:
-                combos_qs = combos_qs.filter(reduce(operator.and_, combo_word_queries)).distinct()
+                combos_qs = combos_qs.filter(reduce(operator.and_, combo_word_queries))
 
         qs = self._apply_feed_sorting(qs, sort_by, price_order)
-        combos_qs = combos_qs.order_by('price' if price_order == 'asc' else ('-price' if price_order == 'desc' else '-creation'))
+        combos_qs = self._order_combos_for_feed(combos_qs, sort_by, price_order)
         return self._get_cached_structural_feed(base_cache_key, qs, page, page_size, extra_combos_qs=combos_qs)
     
     def get_home_feed(self, page: int = 1, page_size: int = 20, max_distance_meters: float = 15000) -> dict:
