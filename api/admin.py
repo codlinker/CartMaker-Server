@@ -372,7 +372,7 @@ class MallAdmin(GISModelAdmin, ModelAdmin):
         }
     }
 
-    list_display = ("name", 'floors_quantity', "coordinates", 'img_url')
+    list_display = ("name", 'floors_quantity', "coordinates")
     search_fields = ('name',)
     
     class Media:

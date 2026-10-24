@@ -646,20 +646,12 @@ class Mall(models.Model):
     name = models.CharField(max_length=60)
     coordinates = gis_models.PointField()
     floors_quantity = models.IntegerField(default=1)
-    img_url = models.CharField(default="static/img/no_image.jpg")
 
     class Meta:
         indexes = [
             # Esto crea el índice GIST sobre la columna de coordenadas
             models.Index(fields=['coordinates'], name='mall_location_gis_idx', opclasses=['gist_geometry_ops_2d']),
         ]
-
-    def get_img_url(self) -> str:
-        """
-        Retorna la URL publica de la imagen del centro comercial.
-        """
-        return self.img_url if self.img_url.startswith('http')\
-              else f"{settings.DOMAIN}/{self.img_url}"
 
     def get_json(self) -> dict:
         prefetched = getattr(self, '_prefetched_objects_cache', None)
@@ -674,8 +666,7 @@ class Mall(models.Model):
             'lng': self.coordinates.x,
             # Solo devolvemos los IDs de las ubicaciones asociadas
             'store_location_ids': store_ids,
-            'floors_quantity':self.floors_quantity,
-            'img_url':self.get_img_url()
+            'floors_quantity': self.floors_quantity,
         }
     
 class CompanyCategory(models.Model):

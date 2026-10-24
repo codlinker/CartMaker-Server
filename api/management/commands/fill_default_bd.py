@@ -534,7 +534,6 @@ class Command(BaseCommand):
                                     name=mall['name'],
                                     coordinates=ubicacion,
                                     floors_quantity=mall['floors_quantity'],
-                                    img_url=mall['img_url']
                                 )
                             )
                         except (ValueError, TypeError):
@@ -546,3 +545,4 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(f'  [+] Se crearon {len(malls_to_create)} registros en Mall.'))
         else:
             self.stdout.write(self.style.WARNING('  [-] Sin cambios en Mall. Los registros ya existen o no tienen coordenadas válidas.'))
+        cache.delete("cartmaker:global:malls")

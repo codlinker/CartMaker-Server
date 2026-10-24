@@ -459,7 +459,11 @@ class GetMallsCache(APIView):
         cache_key = "cartmaker:global:malls"
         cached_data = cache.get(cache_key)
 
-        if cached_data is not None:
+        if (
+            cached_data is not None
+            and isinstance(cached_data, dict)
+            and not (cached_data.get('malls') and 'img_url' in cached_data['malls'][0])
+        ):
             return Response(cached_data, status=status.HTTP_200_OK)
 
         # Cache Miss
