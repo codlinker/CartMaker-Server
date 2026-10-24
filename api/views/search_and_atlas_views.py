@@ -254,8 +254,15 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
         print(f"🚀 [ENDPOINT HOME] Request -> Page: {page} | Semilla recibida: {seed}")
         print(f"=======================================================")
 
-        # 💡 Le pasamos la semilla al motor
-        engine = ProductSearchEngine(lat, lng, user=request.user, seed=seed)
+        # 💡 Le pasamos la semilla y las categorías preferidas explícitas al motor
+        preferred_categories = request.query_params.get('preferred_categories', '')
+        engine = ProductSearchEngine(
+            lat,
+            lng,
+            user=request.user,
+            seed=seed,
+            preferred_category_ids=preferred_categories,
+        )
         data_list = engine.get_home_feed(page=page, page_size=page_size)
         
         return self._respond_pre_sliced_data(data_list, request, page, page_size)

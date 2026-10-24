@@ -2100,6 +2100,8 @@ class Product(models.Model):
             "price": base_price,
             "creation": timezone.localtime(self.creation),
             "category": category_data,
+            "sub_category_id": category_data.get("id"),
+            "parent_category_id": category_data.get("parent_category_id"),
             "category_archetype": schema.get("archetype", "general"),
             "description": self.description,
             "discounts_by_tokens_active": self.discounts_by_tokens_active if self.company.gamification_enabled else False,
@@ -2498,6 +2500,8 @@ class ProductsCombo(models.Model):
             "price": effective_price,
             "creation": creation_local,
             "category": category_data,
+            "sub_category_id": category_data.get("id"),
+            "parent_category_id": category_data.get("parent_category_id"),
             "category_archetype": "combo",
             "description": self.description or combo_summary,
             "discounts_by_tokens_active": tokens_active,
@@ -2521,9 +2525,19 @@ class ProductsCombo(models.Model):
             "combo_summary": combo_summary,
             "combo_regular_price": regular_price,
             "combo_savings": savings if savings > 0 else None,
+            "savings_amount": savings,
             "order_notes_enabled": True,
             "order_notes_placeholder": "Indicaciones adicionales para tu combo...",
         }
+
+        combo_offer_obj = (
+            {
+                "percentage": savings_pct,
+                "valid_until": timezone.localtime(self.expiration_date) if self.expiration_date else None,
+            }
+            if savings_pct > 0
+            else None
+        )
 
         return {
             "id": str(self.id),
@@ -2539,9 +2553,10 @@ class ProductsCombo(models.Model):
             "regular_price": regular_price,
             "combo_regular_price": regular_price,
             "savings": savings,
+            "savings_amount": savings,
             "combo_savings": savings if savings > 0 else None,
             "savings_percentage": savings_pct,
-            "offer": None,
+            "offer": combo_offer_obj,
             "offer_percentage": savings_pct,
             "stock": effective_stock,
             "combo_stock": int(self.stock or 0),

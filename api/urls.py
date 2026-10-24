@@ -43,8 +43,11 @@ urlpatterns = [
     path('docs/', SpectacularSwaggerView.as_view(url_name='schema', permission_classes=[IsAdminUser]), name='swagger_ui'),
     # Rutas para la obtencion de datos
     path('v1/cache/user', UserCacheAPI.as_view(), name="user_cache"),
+    path('v1/cache/user/', UserCacheAPI.as_view(), name="user_cache_slash"),
     path('v1/cache/home', HomeCacheAPI.as_view(), name="home_cache"),
+    path('v1/cache/home/', HomeCacheAPI.as_view(), name="home_cache_slash"),
     path('v1/cache/search', SearchCacheAPI.as_view(), name="search_cache"),
+    path('v1/cache/search/', SearchCacheAPI.as_view(), name="search_cache_slash"),
     path('v1/categories/', CategoriesListAPI.as_view(), name="categories_list_slash"),
     path('v1/categories', CategoriesListAPI.as_view(), name="categories_list"),
     path('v1/categories/product-schema/', CategoryProductSchemaAPI.as_view(), name="category_product_schema_slash"),

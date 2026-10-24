@@ -723,38 +723,125 @@ class HomeCacheAPI(APIView):
     throttle_scope = 'navigation'
     permission_classes = [AllowAny]
 
+    def _resolve_coordinates(self, request) -> tuple:
+        raw_lat = request.query_params.get('lat') or request.query_params.get('latitude')
+        raw_lng = request.query_params.get('lng') or request.query_params.get('lon') or request.query_params.get('longitude')
+        if raw_lat is not None and raw_lng is not None:
+            try:
+                lat_val = float(raw_lat)
+                lng_val = float(raw_lng)
+                if -90.0 <= lat_val <= 90.0 and -180.0 <= lng_val <= 180.0:
+                    return lat_val, lng_val
+            except (TypeError, ValueError):
+                pass
+
+        if request.user and request.user.is_authenticated:
+            try:
+                client_loc = request.user.locations.order_by('-is_default', '-id').first()
+                if client_loc and client_loc.coordinates:
+                    return float(client_loc.coordinates.y), float(client_loc.coordinates.x)
+            except Exception:
+                pass
+            try:
+                store_loc = StoreLocation.objects.filter(
+                    store__company__owner=request.user,
+                    store__is_active=True,
+                ).first()
+                if store_loc and store_loc.coordinates:
+                    return float(store_loc.coordinates.y), float(store_loc.coordinates.x)
+            except Exception:
+                pass
+
+        # Fallback por defecto (Caracas)
+        return 10.4806, -66.9036
+
+    def _get_categories_tree(self) -> list:
+        cat_cache_key = "cartmaker:global:categories:v3"
+        categories = cache.get(cat_cache_key)
+        if not (
+            categories
+            and isinstance(categories, list)
+            and "default_product_schema" in categories[0]
+            and categories[0]["default_product_schema"].get("schema_version") == 3
+        ):
+            categories = [
+                cat.get_json()
+                for cat in Category.objects.prefetch_related('subcategories').order_by('id')
+            ]
+            cache.set(cat_cache_key, categories, timeout=86400)
+        return categories
+
     def get(self, request):
-        cache_key = "cartmaker:global:home"
-        cached_data = cache.get(cache_key)
+        static_cache_key = "cartmaker:global:home"
+        static_data = cache.get(static_cache_key)
 
-        if cached_data is not None:
-            return Response(cached_data, status=status.HTTP_200_OK)
+        if not isinstance(static_data, dict) or "announcements" not in static_data:
+            announcements = [
+                announcement.get_json()
+                for announcement in Announcement.objects.filter(active=True).order_by('-creation')
+            ]
+            company_categories = [cat.get_json() for cat in CompanyCategory.objects.all()]
+            company_section_images = {
+                "administrar_inventario": storage_manager.get_url('static/img/company_section_buttons/administrar_inventario.jpg', True),
+                "administrar_suscripcion": storage_manager.get_url('static/img/company_section_buttons/administrar_suscripcion.jpg', True),
+                "analiticas": storage_manager.get_url('static/img/company_section_buttons/analiticas.jpg', True),
+                "empleados": storage_manager.get_url('static/img/company_section_buttons/empleados.jpg', True),
+                "gamificacion": storage_manager.get_url('static/img/company_section_buttons/gamificacion.jpg', True),
+                "mi_tienda": storage_manager.get_url('static/img/company_section_buttons/mi_tienda.jpg', True),
+                "pedidos": storage_manager.get_url('static/img/company_section_buttons/pedidos.jpg', True),
+                "preguntas_de_clientes": storage_manager.get_url('static/img/company_section_buttons/preguntas_de_clientes.jpg', True),
+            }
+            static_data = {
+                "announcements": announcements,
+                "company_categories": company_categories,
+                "company_section_images": company_section_images,
+            }
+            cache.set(static_cache_key, static_data, timeout=86400)
 
-        # Cache Miss
-        announcements = [announcement.get_json() for announcement in Announcement.objects.filter(active=True).order_by('-creation')]
-        
-        # 👈 AQUÍ: aseguramos la iteración limpia usando el modelo Category
-        company_categories = [cat.get_json() for cat in CompanyCategory.objects.all()]
-        
-        company_section_images = {
-            "administrar_inventario": storage_manager.get_url('static/img/company_section_buttons/administrar_inventario.jpg', True),
-            "administrar_suscripcion": storage_manager.get_url('static/img/company_section_buttons/administrar_suscripcion.jpg', True),
-            "analiticas": storage_manager.get_url('static/img/company_section_buttons/analiticas.jpg', True),
-            "empleados": storage_manager.get_url('static/img/company_section_buttons/empleados.jpg', True),
-            "gamificacion": storage_manager.get_url('static/img/company_section_buttons/gamificacion.jpg', True),
-            "mi_tienda": storage_manager.get_url('static/img/company_section_buttons/mi_tienda.jpg', True),
-            "pedidos": storage_manager.get_url('static/img/company_section_buttons/pedidos.jpg', True),
-            "preguntas_de_clientes": storage_manager.get_url('static/img/company_section_buttons/preguntas_de_clientes.jpg', True),
+        categories = self._get_categories_tree()
+        lat, lng = self._resolve_coordinates(request)
+        seed = request.query_params.get('seed', 'home_cache_v1')
+        preferred_categories = request.query_params.get('preferred_categories', '')
+        try:
+            radius_m = float(request.query_params.get('radius') or 15000.0)
+        except (TypeError, ValueError):
+            radius_m = 15000.0
+
+        engine = ProductSearchEngine(
+            lat=lat,
+            lng=lng,
+            user=request.user,
+            seed=seed,
+            preferred_category_ids=preferred_categories,
+        )
+        home_bundle = engine.get_home_cache_sections(max_distance_meters=radius_m)
+        sections = dict(home_bundle.get("sections", {}))
+        sections["departments"] = categories
+
+        payload = {
+            "announcements": static_data["announcements"],
+            "company_categories": static_data["company_categories"],
+            "company_section_images": static_data["company_section_images"],
+            "categories": categories,
+            "departments": categories,
+            "zone_radar": home_bundle.get("zone_radar", {}),
+            "stories": home_bundle.get("stories", []),
+            "sections": sections,
+            # Espejo de secciones en el nivel raíz para compatibilidad directa
+            "selected_for_you": sections.get("selected_for_you", []),
+            "zone_combos": sections.get("zone_combos", []),
+            "flash_offers": sections.get("flash_offers", []),
+            "offers": sections.get("offers", []),
+            "token_stores": sections.get("token_stores", []),
+            "local_merchants_and_tokens": sections.get("local_merchants_and_tokens", []),
+            "very_close_products": sections.get("very_close_products", []),
+            "dynamic_subcategory_sections": sections.get("dynamic_subcategory_sections", []),
+            "favorites": sections.get("favorites", []),
+            "under_25_products": sections.get("under_25_products", []),
+            "top_rated_products": sections.get("top_rated_products", []),
+            "more_to_explore": sections.get("more_to_explore", []),
         }
-        
-        data = {
-            "announcements": announcements,
-            'company_categories': company_categories,
-            'company_section_images': company_section_images,
-        }
-        
-        cache.set(cache_key, data, timeout=86400) # 24h
-        return Response(data, status=status.HTTP_200_OK)
+        return Response(payload, status=status.HTTP_200_OK)
 
 class SearchCacheAPI(APIView):
     throttle_classes = [ScopedRateThrottle]

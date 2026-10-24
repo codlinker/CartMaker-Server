@@ -34,13 +34,30 @@ class ProductSearchEngine:
     y filtrado basado en contenido (afinidad del usuario) en tiempo real.
     """
 
-    def __init__(self, lat: float, lng: float, user=None, seed: str = 'default'):
+    def __init__(self, lat: float, lng: float, user=None, seed: str = 'default', preferred_category_ids: list = None):
         self.user_location = Point(lng, lat, srid=4326)
         # id de InventoryItem -> {'zone', 'address', 'proximity', 'mall_name', 'mall_floor'} de los finalistas de Atlas.
         # Vive fuera del payload para no alterar el JSON que consume Flutter.
         self.purchase_places = {}
         self.user = user
         self.seed = str(seed)
+
+        parsed_pref_ids = []
+        if preferred_category_ids:
+            if isinstance(preferred_category_ids, str):
+                raw_parts = [p.strip() for p in preferred_category_ids.split(',') if p.strip()]
+            elif isinstance(preferred_category_ids, (list, tuple, set)):
+                raw_parts = list(preferred_category_ids)
+            else:
+                raw_parts = []
+            for p in raw_parts:
+                try:
+                    val = int(p)
+                    if val > 0 and val not in parsed_pref_ids:
+                        parsed_pref_ids.append(val)
+                except (ValueError, TypeError):
+                    continue
+        self._explicit_preferred_category_ids = parsed_pref_ids
 
         # Carga perezosa (Lazy) + Caché en Redis del perfil híbrido de intereses:
         # Evita disparar 11 consultas SQL en endpoints que no usan afinidad (ej. stores_with_tokens, favorites)
@@ -55,8 +72,8 @@ class ProductSearchEngine:
             return
         self._affinity_loaded = True
         if not self.user or not self.user.is_authenticated:
-            self._user_onboarding_category_ids = []
-            self._onboarding_weight = 0.0
+            self._user_onboarding_category_ids = list(self._explicit_preferred_category_ids)
+            self._onboarding_weight = 1.0 if self._user_onboarding_category_ids else 0.0
             self._user_top_categories = []
             return
 
@@ -64,20 +81,28 @@ class ProductSearchEngine:
         cached = cache.get(cache_key)
         if isinstance(cached, dict):
             self._user_top_categories = cached.get('top_categories', [])
-            self._user_onboarding_category_ids = cached.get('onboarding_ids', [])
+            self._user_onboarding_category_ids = list(cached.get('onboarding_ids', []))
             self._onboarding_weight = float(cached.get('onboarding_weight', 0.0))
-            return
+        else:
+            self._user_top_categories = self._build_user_affinity_profile()
+            cache.set(
+                cache_key,
+                {
+                    'top_categories': self._user_top_categories,
+                    'onboarding_ids': self._user_onboarding_category_ids,
+                    'onboarding_weight': self._onboarding_weight,
+                },
+                timeout=180,
+            )
 
-        self._user_top_categories = self._build_user_affinity_profile()
-        cache.set(
-            cache_key,
-            {
-                'top_categories': self._user_top_categories,
-                'onboarding_ids': self._user_onboarding_category_ids,
-                'onboarding_weight': self._onboarding_weight,
-            },
-            timeout=180,
-        )
+        if self._explicit_preferred_category_ids:
+            merged = list(self._user_onboarding_category_ids)
+            for cid in self._explicit_preferred_category_ids:
+                if cid not in merged:
+                    merged.append(cid)
+            self._user_onboarding_category_ids = merged
+            if self._onboarding_weight <= 0.0 and self._user_onboarding_category_ids:
+                self._onboarding_weight = 1.0
 
     @property
     def user_top_categories(self) -> list:
@@ -274,8 +299,8 @@ class ProductSearchEngine:
 
     def _get_stories_feed(self, max_distance_meters: float) -> list:
         now = timezone.now()
-        # 1. Obtenemos los videos vigentes de tiendas cercanas
-        qs_videos = CompanyVideoStory.objects.select_related(
+        # 1. Obtenemos los videos vigentes de tiendas cercanas (con fallback global si no hay en el radio)
+        base_qs = CompanyVideoStory.objects.select_related(
             'company',
             'associated_item',
             'associated_item__product',
@@ -288,9 +313,12 @@ class ProductSearchEngine:
         ).filter(
             expires_at__gt=now,
             video_file__isnull=False,
+            company__stores__is_active=True,
+        )
+
+        qs_videos = base_qs.filter(
             company__stores__is_main_store=True,
             company__stores__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters)),
-            company__stores__is_active=True,
         ).distinct()
 
         # 2. Verificamos si el usuario ya vio el video usando el log de engagement
@@ -303,7 +331,18 @@ class ProductSearchEngine:
         else:
             qs_videos = qs_videos.annotate(is_viewed=Value(False, output_field=BooleanField()))
 
-        videos = list(qs_videos.order_by('-creation'))
+        videos = list(qs_videos.order_by('-creation')[:60])
+        if not videos:
+            qs_fallback = base_qs.distinct()
+            if self.user and self.user.is_authenticated:
+                is_viewed_subquery = VideoEngagementLog.objects.filter(
+                    client=self.user,
+                    video=OuterRef('pk'),
+                )
+                qs_fallback = qs_fallback.annotate(is_viewed=Exists(is_viewed_subquery))
+            else:
+                qs_fallback = qs_fallback.annotate(is_viewed=Value(False, output_field=BooleanField()))
+            videos = list(qs_fallback.order_by('-creation')[:40])
         
         behavioral_set = set(self.user_top_categories or [])
         onboarding_set = set(self.user_onboarding_category_ids or [])
@@ -313,12 +352,17 @@ class ProductSearchEngine:
         for v in videos:
             cid = str(v.company_id)
             if cid not in companies_map:
+                img_url = storage_manager.get_url(v.company.image) if v.company.image else ""
                 companies_map[cid] = {
                     "store_id": cid,
+                    "company_id": cid,
                     "store_name": v.company.name,
-                    "profile_picture_img_url": storage_manager.get_url(v.company.image) if v.company.image else "",
+                    "company_name": v.company.name,
+                    "profile_picture_img_url": img_url,
+                    "company_image": img_url,
                     "new_stories": [],
                     "watched_stories": [],
+                    "stories": [],
                     "_affinity_score": 0.0,
                 }
             
@@ -337,6 +381,8 @@ class ProductSearchEngine:
 
             vid_data = v.get_json()
             vid_data["feed_type"] = "video"
+            vid_data["thumbnail"] = vid_data.get("thumbnail_url") or ""
+            vid_data["is_viewed"] = bool(getattr(v, 'is_viewed', False))
             
             if getattr(v, 'is_viewed', False):
                 companies_map[cid]["watched_stories"].append(vid_data)
@@ -358,6 +404,7 @@ class ProductSearchEngine:
         )
         for comp in companies_list:
             comp.pop("_affinity_score", None)
+            comp["stories"] = comp["new_stories"] + comp["watched_stories"]
         
         return companies_list
     
@@ -2779,3 +2826,462 @@ class ProductSearchEngine:
             })
             
         return results
+
+    def get_home_cache_sections(self, max_distance_meters: float = 15000.0) -> dict:
+        """
+        Construye en un único viaje el bloque completo de secciones dinámicas del Home
+        para `GET /api/v1/cache/home`:
+        - Usa caché estructural en Redis bajo el prefijo `cartmaker:struct:home:{approx_lat}:{approx_lng}:sections:v1:...`
+          para que `api/signals.py` (`_invalidate_store_catalog_caches`) lo invalide automáticamente
+          en tiempo real al crear/editar cualquier `InventoryItem`, `ProductsCombo` o `Product`.
+        - Rehidrata en 1 solo batch (`_stitch_and_filter_results`) el stock volátil, precios y `is_liked`
+          del usuario actual.
+        """
+        now = timezone.now()
+        approx_lat = round(self.user_location.y, 3)
+        approx_lng = round(self.user_location.x, 3)
+        affinity_hash = self._get_affinity_hash()
+        excl_scope = self._get_merchant_exclusion_scope()
+
+        struct_cache_key = (
+            f"cartmaker:struct:home:{approx_lat}:{approx_lng}:sections:v1:{affinity_hash}{excl_scope}"
+        )
+        structural_bundle = cache.get(struct_cache_key)
+
+        if not isinstance(structural_bundle, dict):
+            def _serialize_item(obj):
+                d = obj.get_json()
+                d["feed_type"] = "product"
+                return d
+
+            base_items_qs = self._annotate_merchant_rating(
+                self._annotate_proximity_flag(self._get_base_active_queryset())
+            )
+            local_items_qs = base_items_qs.filter(
+                store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters))
+            )
+            items_source_qs = local_items_qs if local_items_qs.exists() else base_items_qs
+
+            base_combos_qs = self._get_base_active_combos_queryset()
+            local_combos_qs = base_combos_qs.filter(
+                store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters))
+            )
+            combos_source_qs = local_combos_qs if local_combos_qs.exists() else base_combos_qs
+
+            # 1. SELECTED FOR YOU (4 a 8 ítems priorizando preferred_categories y afinidad conductual)
+            selected_for_you = []
+            seen_selected_ids = set()
+            pref_parent_ids = list(self.user_onboarding_category_ids or [])
+            top_sub_ids = list(self.user_top_categories or [])
+
+            if pref_parent_ids or top_sub_ids:
+                pref_q = Q()
+                if pref_parent_ids:
+                    pref_q |= Q(product__category__parent_category_id__in=pref_parent_ids)
+                if top_sub_ids:
+                    pref_q |= Q(product__category_id__in=top_sub_ids)
+                pref_ranked_qs = self._apply_monopoly_prevention(
+                    self._annotate_ranking_score(items_source_qs.filter(pref_q))
+                )
+                for it in pref_ranked_qs[:8]:
+                    s_data = _serialize_item(it)
+                    selected_for_you.append(s_data)
+                    seen_selected_ids.add(str(it.id))
+
+            if len(selected_for_you) < 8:
+                fallback_ranked_qs = self._apply_monopoly_prevention(
+                    self._annotate_ranking_score(items_source_qs.exclude(id__in=list(seen_selected_ids)))
+                )
+                for it in fallback_ranked_qs[: (8 - len(selected_for_you))]:
+                    s_data = _serialize_item(it)
+                    selected_for_you.append(s_data)
+                    seen_selected_ids.add(str(it.id))
+
+            # 2. ZONE COMBOS (Hasta 12 combos activos en la zona)
+            ordered_combos = list(
+                combos_source_qs.order_by('-cached_popularity_score', 'real_distance_meters', '-creation')[:12]
+            )
+            zone_combos = [_serialize_item(c) for c in ordered_combos]
+
+            # 3. FLASH OFFERS (Hasta 15 ofertas relámpago + combos con ahorro > 0)
+            offers_local_qs = local_items_qs.filter(
+                offer__isnull=False,
+                offer__valid_until__gte=now,
+                offer__percentage__gt=0,
+            )
+            offers_qs = offers_local_qs if offers_local_qs.exists() else base_items_qs.filter(
+                offer__isnull=False,
+                offer__valid_until__gte=now,
+                offer__percentage__gt=0,
+            )
+            flash_offers = [
+                _serialize_item(it)
+                for it in offers_qs.order_by('-offer__percentage', '-cached_popularity_score', 'real_distance_meters')[:12]
+            ]
+            for c_dict in zone_combos:
+                if float(c_dict.get('savings') or 0.0) > 0 and len(flash_offers) < 15:
+                    flash_offers.append(dict(c_dict))
+
+            # 4. VERY CLOSE PRODUCTS (4 a 8 productos/combos de las tiendas más cercanas)
+            closest_items = [
+                _serialize_item(it)
+                for it in items_source_qs.order_by('real_distance_meters', '-cached_popularity_score', 'id')[:8]
+            ]
+            closest_combos = [
+                _serialize_item(c)
+                for c in combos_source_qs.order_by('real_distance_meters', '-cached_popularity_score', 'id')[:3]
+            ]
+            very_close_combined = closest_items + closest_combos
+            very_close_combined.sort(
+                key=lambda x: (
+                    float(x.get('distance_meters')) if x.get('distance_meters') is not None else 9999999.0,
+                    -float(x.get('avg_rating') or 0.0),
+                )
+            )
+            very_close_products = very_close_combined[:8]
+
+            # 5. DYNAMIC SUBCATEGORY SECTIONS (Hasta 4 bloques de subcategorías con stock activo)
+            subcat_counts = list(
+                items_source_qs.values(
+                    'product__category_id',
+                    'product__category__name',
+                    'product__category__parent_category_id',
+                    'product__category__parent_category__name',
+                )
+                .annotate(total_items=Count('id'))
+                .filter(product__category_id__isnull=False, total_items__gt=0)
+            )
+            pref_parent_set = set(pref_parent_ids)
+            top_sub_set = set(top_sub_ids)
+
+            def _subcat_sort_key(entry):
+                sub_id = entry['product__category_id']
+                parent_id = entry['product__category__parent_category_id']
+                is_top_sub = 1 if sub_id in top_sub_set else 0
+                is_pref_parent = 1 if parent_id in pref_parent_set else 0
+                return (is_top_sub, is_pref_parent, entry['total_items'], -int(sub_id or 0))
+
+            subcat_counts.sort(key=_subcat_sort_key, reverse=True)
+
+            # Diversificamos eligiendo primero 1 subcategoría por categoría padre antes de repetir padre
+            chosen_subcats = []
+            used_parents = set()
+            for entry in subcat_counts:
+                if len(chosen_subcats) >= 4:
+                    break
+                p_id = entry['product__category__parent_category_id']
+                if p_id not in used_parents:
+                    chosen_subcats.append(entry)
+                    used_parents.add(p_id)
+            if len(chosen_subcats) < 4:
+                chosen_ids = {e['product__category_id'] for e in chosen_subcats}
+                for entry in subcat_counts:
+                    if len(chosen_subcats) >= 4:
+                        break
+                    if entry['product__category_id'] not in chosen_ids:
+                        chosen_subcats.append(entry)
+                        chosen_ids.add(entry['product__category_id'])
+
+            dynamic_subcategory_sections = []
+            for entry in chosen_subcats:
+                sub_id = entry['product__category_id']
+                sub_items_qs = self._apply_monopoly_prevention(
+                    self._annotate_ranking_score(items_source_qs.filter(product__category_id=sub_id))
+                )
+                sub_items = [_serialize_item(it) for it in sub_items_qs[:8]]
+                sub_combos = [
+                    _serialize_item(c)
+                    for c in combos_source_qs.filter(category_id=sub_id).order_by('-cached_popularity_score', '-creation')[:2]
+                ]
+                merged_sub_items = sub_combos + sub_items
+                if merged_sub_items:
+                    dynamic_subcategory_sections.append({
+                        "sub_category_id": sub_id,
+                        "parent_category_id": entry['product__category__parent_category_id'],
+                        "parent_category_name": entry['product__category__parent_category__name'] or "",
+                        "name": entry['product__category__name'] or "",
+                        "items": merged_sub_items[:10],
+                    })
+
+            # 6. UNDER $25 PRODUCTS (4 a 8 productos/combos con precio efectivo <= $25)
+            under_25_candidates = []
+            base_price_qs = items_source_qs.annotate(
+                raw_list_price=Cast(Coalesce('custom_price', 'product__price'), output_field=FloatField())
+            ).filter(raw_list_price__lte=35.0).order_by('-cached_popularity_score', 'real_distance_meters', 'id')
+            for it in base_price_qs[:20]:
+                if it.get_effective_price() <= 25.0:
+                    under_25_candidates.append(_serialize_item(it))
+                    if len(under_25_candidates) >= 7:
+                        break
+            for c_dict in zone_combos:
+                if float(c_dict.get('effective_price') or c_dict.get('price') or 999.0) <= 25.0 and len(under_25_candidates) < 8:
+                    under_25_candidates.append(dict(c_dict))
+            under_25_products = under_25_candidates[:8]
+
+            # 7. TOP RATED PRODUCTS (Hasta 12 productos mejor valorados)
+            top_rated_products = [
+                _serialize_item(it)
+                for it in items_source_qs.order_by(
+                    '-avg_rating',
+                    '-merchant_avg_rating',
+                    '-cached_popularity_score',
+                    'real_distance_meters',
+                    'id',
+                )[:12]
+            ]
+
+            # 8. MORE TO EXPLORE (12 a 20 productos/combos variados)
+            explore_qs = self._apply_monopoly_prevention(
+                self._annotate_ranking_score(items_source_qs.exclude(id__in=list(seen_selected_ids)))
+            )
+            more_to_explore = [_serialize_item(it) for it in explore_qs[:16]]
+            if len(more_to_explore) < 12:
+                extra_explore_qs = self._apply_monopoly_prevention(
+                    self._annotate_ranking_score(items_source_qs)
+                )
+                existing_exp_ids = {str(x.get('id')) for x in more_to_explore}
+                for it in extra_explore_qs[:20]:
+                    if str(it.id) not in existing_exp_ids:
+                        more_to_explore.append(_serialize_item(it))
+                        existing_exp_ids.add(str(it.id))
+                    if len(more_to_explore) >= 16:
+                        break
+            for c_dict in zone_combos[:4]:
+                if len(more_to_explore) < 20:
+                    more_to_explore.append(dict(c_dict))
+
+            # 9. LOCAL STORES & ZONE RADAR
+            merchant_avg_sub = MerchantCalification.objects.filter(
+                merchant_id=OuterRef('company_id')
+            ).values('merchant_id').annotate(avg=Avg('rating')).values('avg')[:1]
+
+            stores_base_qs = CompanyStore.objects.select_related(
+                'company', 'company__category', 'location'
+            ).filter(
+                is_active=True,
+                location__isnull=False,
+            ).annotate(
+                real_distance_meters=Distance('location__coordinates', self.user_location, spheroid=True),
+                company_avg_rating=Coalesce(
+                    Subquery(merchant_avg_sub, output_field=FloatField()),
+                    Value(0.0),
+                    output_field=FloatField(),
+                ),
+            )
+            if self.user and self.user.is_authenticated:
+                try:
+                    stores_base_qs = stores_base_qs.exclude(company_id=self.user.company.id)
+                except Company.DoesNotExist:
+                    pass
+
+            stores_local_qs = stores_base_qs.filter(
+                location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters))
+            )
+            active_stores_count = stores_local_qs.count()
+            stores_target_qs = stores_local_qs if active_stores_count > 0 else stores_base_qs
+            if active_stores_count == 0:
+                active_stores_count = stores_base_qs.count()
+
+            local_stores = []
+            seen_company_ids = set()
+            for st in stores_target_qs.order_by(
+                '-company__gamification_enabled',
+                '-company__is_platinum',
+                'real_distance_meters',
+                'id',
+            )[:20]:
+                comp = st.company
+                cid_str = str(comp.id)
+                if cid_str in seen_company_ids:
+                    continue
+                seen_company_ids.add(cid_str)
+                dist_obj = getattr(st, 'real_distance_meters', None)
+                dist_m = round(float(dist_obj.m), 1) if (dist_obj is not None and hasattr(dist_obj, 'm')) else None
+                img_url = storage_manager.get_url(comp.image) if comp.image else (
+                    storage_manager.get_url(st.store_img_url) if st.store_img_url else ""
+                )
+                avg_r = round(float(getattr(st, 'company_avg_rating', 0.0) or 0.0), 2)
+                local_stores.append({
+                    "store_id": str(st.id),
+                    "company_id": cid_str,
+                    "company_name": comp.name,
+                    "storeName": comp.name,
+                    "branch_name": st.name,
+                    "profile_pic": img_url,
+                    "storeProfilePictureUrl": img_url,
+                    "category": comp.category.name if comp.category else "Comercio",
+                    "is_platinum": bool(comp.is_platinum),
+                    "isPlatinium": bool(comp.is_platinum),
+                    "gamification_enabled": bool(comp.gamification_enabled),
+                    "gamification_tokens_per_dollar": int(comp.gamification_tokens_per_dollar or 0),
+                    "user_tokens": 0,
+                    "tokens": 0,
+                    "distance_meters": dist_m,
+                    "distance_km": round(dist_m / 1000.0, 2) if dist_m is not None else None,
+                    "calification": avg_r,
+                    "avg_rating": avg_r,
+                    "is_open_now": bool(st.is_currently_open),
+                })
+                if len(local_stores) >= 15:
+                    break
+
+            structural_bundle = {
+                "active_stores_count": active_stores_count,
+                "selected_for_you": selected_for_you,
+                "zone_combos": zone_combos,
+                "flash_offers": flash_offers,
+                "very_close_products": very_close_products,
+                "dynamic_subcategory_sections": dynamic_subcategory_sections,
+                "under_25_products": under_25_products,
+                "top_rated_products": top_rated_products,
+                "more_to_explore": more_to_explore,
+                "local_stores": local_stores,
+            }
+            cache.set(struct_cache_key, structural_bundle, timeout=600)
+
+        # =========================================================================
+        # HIDRATACIÓN VOLÁTIL UNIFICADA (1 solo MGET a Redis + 1 consulta a UniversalLike)
+        # =========================================================================
+        section_keys = (
+            "selected_for_you",
+            "zone_combos",
+            "flash_offers",
+            "very_close_products",
+            "under_25_products",
+            "top_rated_products",
+            "more_to_explore",
+        )
+        unique_items_map = {}
+        for sk in section_keys:
+            for item in structural_bundle.get(sk, []):
+                if isinstance(item, dict) and item.get("id"):
+                    key = (str(item["id"]), bool(item.get("is_combo", False)))
+                    if key not in unique_items_map:
+                        unique_items_map[key] = dict(item)
+
+        for block in structural_bundle.get("dynamic_subcategory_sections", []):
+            for item in block.get("items", []):
+                if isinstance(item, dict) and item.get("id"):
+                    key = (str(item["id"]), bool(item.get("is_combo", False)))
+                    if key not in unique_items_map:
+                        unique_items_map[key] = dict(item)
+
+        stitched_list = self._stitch_and_filter_results(list(unique_items_map.values()))
+        stitched_lookup = {
+            (str(it["id"]), bool(it.get("is_combo", False))): it
+            for it in stitched_list
+        }
+
+        def _hydrate_list(raw_list):
+            hydrated = []
+            for it in (raw_list or []):
+                if not isinstance(it, dict) or not it.get("id"):
+                    continue
+                key = (str(it["id"]), bool(it.get("is_combo", False)))
+                live_item = stitched_lookup.get(key)
+                if live_item is not None:
+                    hydrated.append(dict(live_item))
+            return hydrated
+
+        hydrated_sections = {
+            sk: _hydrate_list(structural_bundle.get(sk, []))
+            for sk in section_keys
+        }
+
+        hydrated_subcat_blocks = []
+        for block in structural_bundle.get("dynamic_subcategory_sections", []):
+            live_items = _hydrate_list(block.get("items", []))
+            if live_items:
+                hydrated_subcat_blocks.append({
+                    "sub_category_id": block.get("sub_category_id"),
+                    "parent_category_id": block.get("parent_category_id"),
+                    "parent_category_name": block.get("parent_category_name", ""),
+                    "name": block.get("name", ""),
+                    "items": live_items,
+                })
+        hydrated_sections["dynamic_subcategory_sections"] = hydrated_subcat_blocks
+
+        # Hidratación de `token_stores` con saldo de tokens del usuario autenticado
+        token_stores = [dict(st) for st in structural_bundle.get("local_stores", [])]
+        if self.user and self.user.is_authenticated:
+            user_wallets = list(
+                TokenWallet.objects.select_related('company', 'company__category').filter(
+                    user=self.user,
+                    balance__gt=0,
+                )
+            )
+            wallet_by_company = {str(w.company_id): int(w.balance) for w in user_wallets}
+            existing_company_ids = set()
+            for st_dict in token_stores:
+                cid = str(st_dict.get("company_id"))
+                existing_company_ids.add(cid)
+                bal = wallet_by_company.get(cid, 0)
+                st_dict["user_tokens"] = bal
+                st_dict["tokens"] = bal
+
+            for w in user_wallets:
+                cid = str(w.company_id)
+                if cid not in existing_company_ids:
+                    comp = w.company
+                    img_url = storage_manager.get_url(comp.image) if comp.image else ""
+                    token_stores.append({
+                        "store_id": None,
+                        "company_id": cid,
+                        "company_name": comp.name,
+                        "storeName": comp.name,
+                        "branch_name": comp.name,
+                        "profile_pic": img_url,
+                        "storeProfilePictureUrl": img_url,
+                        "category": comp.category.name if comp.category else "Comercio",
+                        "is_platinum": bool(comp.is_platinum),
+                        "isPlatinium": bool(comp.is_platinum),
+                        "gamification_enabled": bool(comp.gamification_enabled),
+                        "gamification_tokens_per_dollar": int(comp.gamification_tokens_per_dollar or 0),
+                        "user_tokens": int(w.balance),
+                        "tokens": int(w.balance),
+                        "distance_meters": None,
+                        "distance_km": None,
+                        "calification": 0.0,
+                        "avg_rating": 0.0,
+                        "is_open_now": True,
+                    })
+
+        token_stores.sort(
+            key=lambda s: (
+                0 if int(s.get("user_tokens") or 0) > 0 else 1,
+                0 if bool(s.get("gamification_enabled")) else 1,
+                0 if bool(s.get("is_platinum")) else 1,
+                float(s.get("distance_meters")) if s.get("distance_meters") is not None else 9999999.0,
+            )
+        )
+        hydrated_sections["token_stores"] = token_stores
+        hydrated_sections["local_merchants_and_tokens"] = token_stores
+        hydrated_sections["offers"] = hydrated_sections["flash_offers"]
+
+        # Favoritos del usuario autenticado (con fallback global si no están dentro del radio inmediato)
+        if self.user and self.user.is_authenticated:
+            favs = self.get_favorites_feed(page=1, page_size=12, max_distance_meters=max_distance_meters)
+            if not favs:
+                favs = self.get_favorites_feed(page=1, page_size=12, max_distance_meters=5000000.0)
+            hydrated_sections["favorites"] = favs
+        else:
+            hydrated_sections["favorites"] = []
+
+        stories = self._get_stories_feed(max_distance_meters)
+        active_stores_count = int(structural_bundle.get("active_stores_count") or len(token_stores))
+
+        zone_radar = {
+            "image_background": storage_manager.get_url('static/img/tiendas_en_la_zona_background.jpg', True),
+            "atlas_message": (
+                f"Detecto {active_stores_count} comercios activos y productos con entrega inmediata cerca de ti."
+                if active_stores_count > 0
+                else "Detecto comercios activos y productos con entrega inmediata cerca de ti."
+            ),
+            "active_stores_count": active_stores_count,
+        }
+
+        return {
+            "zone_radar": zone_radar,
+            "stories": stories,
+            "sections": hydrated_sections,
+        }
