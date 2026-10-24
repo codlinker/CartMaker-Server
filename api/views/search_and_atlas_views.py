@@ -79,12 +79,18 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
             'results': paginated_data
         }, status=status.HTTP_200_OK)
 
-    def _respond_pre_sliced_data(self, data_list: list, request, page: int, page_size: int) -> Response:
+    def _respond_pre_sliced_data(self, data_list, request, page: int, page_size: int) -> Response:
         """
         Paginador optimizado para feeds.
         Asume que la lista ya fue rebanada nativamente en SQL (Limit/Offset).
         """
-        has_next = len(data_list) == page_size
+        if isinstance(data_list, dict):
+            actual_items = data_list.get('results', [])
+            has_next = len(actual_items) >= page_size
+            combos_list = data_list.get('combos', [])
+        else:
+            has_next = len(data_list) == page_size
+            combos_list = [x for x in data_list if isinstance(x, dict) and x.get('is_combo')]
         has_previous = page > 1
 
         url = request.build_absolute_uri()
@@ -103,7 +109,8 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
         return Response({
             'next': next_url,
             'previous': prev_url,
-            'results': data_list
+            'results': data_list,
+            'combos': combos_list,
         }, status=status.HTTP_200_OK)
 
     # ------------------------------------------------------------------------
@@ -282,8 +289,12 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
 
         if not item_id:
             return Response({'error': 'Falta el parámetro obligatorio: item_id'}, status=status.HTTP_400_BAD_REQUEST)
+
+        lat, lng = self._get_coordinates(request)
+        user_point = Point(float(lng), float(lat), srid=4326) if (lat is not None and lng is not None) else None
+
         try:
-            item = InventoryItem.objects.select_related(
+            item_qs = InventoryItem.objects.select_related(
                 'product',
                 'product__category',
                 'product__category__parent_category',
@@ -294,15 +305,30 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
             ).prefetch_related('product__califications').annotate(
                 avg_rating=Round(Coalesce(Avg('product__califications__rating'), 0.0), 1),
                 rating_count=Count('product__califications')
-            ).filter(id=item_id, paused=False).first()
+            )
+            if user_point is not None:
+                item_qs = item_qs.annotate(
+                    real_distance_meters=Distance('store__location__coordinates', user_point, spheroid=True)
+                )
+
+            item = item_qs.filter(id=item_id).first()
+            is_owner = False
+            if item is not None:
+                is_owner = (
+                    item.product.company.id == request.user.company.id
+                    if (request.user.is_authenticated and hasattr(request.user, 'company'))
+                    else False
+                )
+                if item.paused and not is_owner:
+                    item = None
 
             if item is not None:
                 data = item.get_json()
-                data['is_owner'] = item.product.company.id == request.user.company.id \
-                    if (request.user.is_authenticated and hasattr(request.user, 'company')) else False
+                data['is_owner'] = is_owner
                 target_company = item.store.company
+                target_ct = ContentType.objects.get_for_model(InventoryItem)
             else:
-                combo = ProductsCombo.objects.select_related(
+                combo_qs = ProductsCombo.objects.select_related(
                     'company', 'store', 'store__company', 'category', 'category__parent_category'
                 ).prefetch_related(
                     Prefetch(
@@ -311,11 +337,37 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
                             'product', 'product__category', 'inventory_item'
                         ).order_by('position', 'id'),
                     )
-                ).get(id=item_id, paused=False)
+                )
+                if user_point is not None:
+                    combo_qs = combo_qs.annotate(
+                        real_distance_meters=Distance('store__location__coordinates', user_point, spheroid=True)
+                    )
+                combo = combo_qs.get(id=item_id)
+                is_owner = (
+                    combo.store.company.id == request.user.company.id
+                    if (request.user.is_authenticated and hasattr(request.user, 'company'))
+                    else False
+                )
+                if combo.paused and not is_owner:
+                    raise ProductsCombo.DoesNotExist()
                 data = combo.get_json()
-                data['is_owner'] = combo.store.company.id == request.user.company.id \
-                    if (request.user.is_authenticated and hasattr(request.user, 'company')) else False
+                data['is_owner'] = is_owner
                 target_company = combo.store.company
+                target_ct = ContentType.objects.get_for_model(ProductsCombo)
+
+            data['likes_count'] = UniversalLike.objects.filter(
+                content_type=target_ct,
+                object_id=str(item_id),
+            ).count()
+            data['is_liked'] = (
+                UniversalLike.objects.filter(
+                    user=request.user,
+                    content_type=target_ct,
+                    object_id=str(item_id),
+                ).exists()
+                if request.user.is_authenticated
+                else False
+            )
 
             user_tokens = 0
             if request.user.is_authenticated:

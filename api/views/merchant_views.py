@@ -224,7 +224,7 @@ class GetCompanySubCategories(APIView):
                 return Response({'error': 'No autorizado.'}, status=status.HTTP_406_NOT_ACCEPTABLE)
             
             company_categories = SubCategory.objects.filter(
-                product__company=company
+                Q(product__company=company) | Q(combos__company=company)
             ).distinct().values('id', 'name')
             
             return Response({'categories': list(company_categories)}, status=status.HTTP_200_OK)
@@ -237,13 +237,18 @@ class GetCompanySubCategories(APIView):
 class GetStoreInventoryItems(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'actions'
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request, store_id=None):
         try:
             store = CompanyStore.objects.select_related('company').get(id=store_id)
-            if not user_can_manage_store(request, store):
-                return Response({'error': 'No tiene permisos para esta sucursal.'}, status=status.HTTP_406_NOT_ACCEPTABLE)
+            is_store_manager = bool(
+                getattr(request, 'user', None)
+                and request.user.is_authenticated
+                and user_can_manage_store(request, store)
+            )
+            active_only = str(request.GET.get('active_only', '')).strip().lower() in ('1', 'true', 'yes')
+            public_mode = (not is_store_manager) or active_only
 
             # 1. Categorías únicas del inventario (lotes individuales + combos) de esta sucursal
             store_categories = SubCategory.objects.filter(
@@ -272,9 +277,11 @@ class GetStoreInventoryItems(APIView):
                         ).order_by('position', 'id'),
                     )
                 )
+                if public_mode:
+                    combos_query = combos_query.filter(paused=False, stock__gt=0)
                 if category_id:
                     combos_query = combos_query.filter(category_id=category_id)
-                if out_of_stock:
+                if out_of_stock and not public_mode:
                     combos_query = combos_query.filter(stock=0)
                 combos_query = combos_query.order_by('-creation')
 
@@ -345,11 +352,13 @@ class GetStoreInventoryItems(APIView):
                 'store',
                 'store__company',
             )
+            if public_mode:
+                items_query = items_query.filter(paused=False, stock__gt=0)
             
             if category_id:
                 items_query = items_query.filter(product__category_id=category_id)
                 
-            if out_of_stock:
+            if out_of_stock and not public_mode:
                 items_query = items_query.filter(stock=0)
                 
             items_query = items_query.order_by('-creation')
@@ -440,7 +449,7 @@ class GetStoreInventoryItems(APIView):
                 
                 items.append(item_json)
 
-            # Incluimos la lista de combos de la sucursal para que el panel pueda pintarlos directamente
+            # Incluimos la lista de combos de la sucursal para que el panel o la vitrina puedan pintarlos directamente
             store_combos_qs = ProductsCombo.objects.filter(store=store).select_related(
                 'company', 'store', 'store__company', 'category', 'category__parent_category'
             ).prefetch_related(
@@ -451,9 +460,11 @@ class GetStoreInventoryItems(APIView):
                     ).order_by('position', 'id'),
                 )
             )
+            if public_mode:
+                store_combos_qs = store_combos_qs.filter(paused=False, stock__gt=0)
             if category_id:
                 store_combos_qs = store_combos_qs.filter(category_id=category_id)
-            if out_of_stock:
+            if out_of_stock and not public_mode:
                 store_combos_qs = store_combos_qs.filter(stock=0)
             store_combos_list = [c.get_json() for c in store_combos_qs.order_by('-creation')]
 

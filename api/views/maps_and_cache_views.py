@@ -105,10 +105,13 @@ class CartMakerMapViewSet(viewsets.ViewSet):
 
             if filters_dict['p_cat'] or filters_dict['p_sub'] or filters_dict['min_p'] or filters_dict['max_p']:
                 inventory_query = Q(store__product_items__paused=False, store__product_items__stock__gt=0)
+                combo_query = Q(store__combos__paused=False, store__combos__stock__gt=0)
                 if filters_dict['p_sub']:
                     inventory_query &= Q(store__product_items__product__category_id=filters_dict['p_sub'])
+                    combo_query &= Q(store__combos__category_id=filters_dict['p_sub'])
                 elif filters_dict['p_cat']:
                     inventory_query &= Q(store__product_items__product__category__parent_category_id=filters_dict['p_cat'])
+                    combo_query &= Q(store__combos__category__parent_category_id=filters_dict['p_cat'])
 
                 if filters_dict['min_p']:
                     min_val = float(filters_dict['min_p'])
@@ -116,13 +119,15 @@ class CartMakerMapViewSet(viewsets.ViewSet):
                         Q(store__product_items__custom_price__isnull=False, store__product_items__custom_price__gte=min_val) |
                         Q(store__product_items__custom_price__isnull=True, store__product_items__product__price__gte=min_val)
                     )
+                    combo_query &= Q(store__combos__price__gte=min_val)
                 if filters_dict['max_p']:
                     max_val = float(filters_dict['max_p'])
                     inventory_query &= (
                         Q(store__product_items__custom_price__isnull=False, store__product_items__custom_price__lte=max_val) |
                         Q(store__product_items__custom_price__isnull=True, store__product_items__product__price__lte=max_val)
                     )
-                queryset = queryset.filter(inventory_query).distinct()
+                    combo_query &= Q(store__combos__price__lte=max_val)
+                queryset = queryset.filter(inventory_query | combo_query).distinct()
 
             if filters_dict['q']:
                 search_terms = filters_dict['q'].split()
@@ -134,7 +139,10 @@ class CartMakerMapViewSet(viewsets.ViewSet):
                         Q(store__company__category__name__icontains=term) |
                         Q(store__product_items__product__name__icontains=term, store__product_items__paused=False, store__product_items__stock__gt=0) |
                         Q(store__product_items__product__category__name__icontains=term, store__product_items__paused=False, store__product_items__stock__gt=0) |
-                        Q(store__product_items__product__category__parent_category__name__icontains=term, store__product_items__paused=False, store__product_items__stock__gt=0)
+                        Q(store__product_items__product__category__parent_category__name__icontains=term, store__product_items__paused=False, store__product_items__stock__gt=0) |
+                        Q(store__combos__name__icontains=term, store__combos__paused=False, store__combos__stock__gt=0) |
+                        Q(store__combos__category__name__icontains=term, store__combos__paused=False, store__combos__stock__gt=0) |
+                        Q(store__combos__category__parent_category__name__icontains=term, store__combos__paused=False, store__combos__stock__gt=0)
                     )
                     word_queries.append(term_filter)
                 global_search_filter = reduce(operator.and_, word_queries)

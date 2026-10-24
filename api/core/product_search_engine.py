@@ -649,7 +649,7 @@ class ProductSearchEngine:
 
         return top_5_category_ids
 
-    def _get_base_active_queryset(self):
+    def _get_base_active_queryset(self, exclude_own_company: bool = True):
         prod_cal_sub = ProductCalification.objects.filter(
             product_id=OuterRef('product_id')
         ).values('product_id')
@@ -684,13 +684,15 @@ class ProductSearchEngine:
                 is_viewed=Exists(is_viewed_subquery)
             )
             
-            # Un comerciante con compañía no compra su propio inventario.
-            try:
-                self.user.company
-            except Company.DoesNotExist:
-                pass
-            else:
-                qs = qs.exclude(store__company__owner=self.user)
+            # Un comerciante con compañía no compra su propio inventario en feeds generales,
+            # pero sí puede inspeccionar su tienda en "Ver como cliente" (exclude_own_company=False).
+            if exclude_own_company:
+                try:
+                    self.user.company
+                except Company.DoesNotExist:
+                    pass
+                else:
+                    qs = qs.exclude(store__company__owner=self.user)
         else:
             qs = qs.annotate(
                 is_liked=Value(False, output_field=BooleanField()),
@@ -1452,7 +1454,60 @@ class ProductSearchEngine:
         Registro liviano (dict en memoria) con solo los campos que consumen
         _score_purchase_payloads y _diversify_purchase_results. Requiere que el
         item venga con select_related completo para no disparar queries lazy.
+        Soporta tanto `InventoryItem` como `ProductsCombo`.
         """
+        if isinstance(item, ProductsCombo):
+            store = item.store
+            company = store.company if store else item.company
+            category = item.category
+            parent_cat = category.parent_category if (category and category.parent_category_id) else None
+            combo_items_list = list(item.combo_items.all())
+            orig_total = 0.0
+            items_names = []
+            for ci in combo_items_list:
+                prod = getattr(ci, 'product', None)
+                if prod:
+                    items_names.append(prod.name)
+                inv = getattr(ci, 'inventory_item', None)
+                unit_p = float(inv.custom_price) if (inv and inv.custom_price is not None) else (float(prod.price) if prod else 0.0)
+                orig_total += unit_p * float(ci.quantity or 1.0)
+            eff_price = item.get_effective_price()
+            savings_pct = int(round(((orig_total - eff_price) / orig_total) * 100.0)) if orig_total > eff_price and orig_total > 0 else 10
+
+            if variants:
+                matches_lexically = lexical_match(
+                    [
+                        item.name,
+                        item.description,
+                        " ".join(items_names),
+                        category.name if category else None,
+                        parent_cat.name if parent_cat else None,
+                        company.name if company else None,
+                        store.name if store else None,
+                    ],
+                    variants,
+                )
+            else:
+                matches_lexically = True
+
+            return {
+                '_item': item,
+                'id': str(item.id),
+                'effective_price': eff_price,
+                'distance_meters': item._distance_meters_value(),
+                'avg_rating': 0.0,
+                'rating_count': 0,
+                'merchant_avg_rating': round(float(getattr(item, 'merchant_avg_rating', 0.0) or 0.0), 2),
+                'merchant_rating_count': int(getattr(item, 'merchant_rating_count', 0) or 0),
+                'offer_percentage': savings_pct,
+                'is_open_now': store.is_currently_open if store else True,
+                'is_platinum': bool(getattr(company, 'is_platinum', False)),
+                'match_sim': float(getattr(item, 'match_sim', 0.0) or 0.0),
+                'lexical_match': matches_lexically,
+                'company_name': company.name if company else '',
+                'product': {'company_id': company.id if company else None},
+            }
+
         product = item.product
         store = item.store
         company = store.company
@@ -1649,6 +1704,85 @@ class ProductSearchEngine:
                 continue
             seen.add(item_id)
             pool.append(self._build_purchase_light_record(item, variants))
+
+        # --- POOL DE COMBOS (ProductsCombo) PARA ATLAS 2.0 ---
+        try:
+            combos_qs = self._get_base_active_combos_queryset()
+            combos_qs = self._annotate_proximity_flag(combos_qs)
+            combos_qs = self._annotate_merchant_rating(combos_qs)
+            combos_qs = combos_qs.select_related(
+                'company',
+                'store',
+                'store__location',
+                'store__location__mall',
+                'store__company',
+                'category',
+                'category__parent_category',
+            ).filter(
+                store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters))
+            )
+            if min_distance_meters and min_distance_meters > 0:
+                combos_qs = combos_qs.filter(
+                    store__location__coordinates__distance_gt=(self.user_location, D(m=min_distance_meters))
+                )
+            if category_query and str(category_query).strip():
+                cat_pat = substring_regex(str(category_query).strip())
+                combos_qs = combos_qs.filter(
+                    Q(category__name__iregex=cat_pat)
+                    | Q(category__parent_category__name__iregex=cat_pat)
+                    | Q(store__company__category__name__iregex=cat_pat)
+                )
+            if company_or_store_query and str(company_or_store_query).strip():
+                comp_pat = substring_regex(str(company_or_store_query).strip())
+                combos_qs = combos_qs.filter(
+                    Q(store__company__name__iregex=comp_pat)
+                    | Q(store__name__iregex=comp_pat)
+                    | Q(store__location__mall__name__iregex=comp_pat)
+                )
+            if only_token_discounts:
+                combos_qs = combos_qs.filter(
+                    store__company__gamification_enabled=True,
+                    discounts_by_tokens_active=True,
+                )
+            if mall_only:
+                combos_qs = combos_qs.filter(store__location__mall__isnull=False)
+            if min_price is not None:
+                try:
+                    combos_qs = combos_qs.filter(price__gte=float(min_price))
+                except (ValueError, TypeError):
+                    pass
+            if max_price is not None:
+                try:
+                    combos_qs = combos_qs.filter(price__lte=float(max_price))
+                except (ValueError, TypeError):
+                    pass
+            if effective_query and variants:
+                combo_text_q = Q()
+                for v in variants:
+                    cv = v.strip()
+                    if len(cv) < 2:
+                        continue
+                    pat = word_boundary_regex(cv) if is_short_term(cv) else substring_regex(cv)
+                    combo_text_q |= (
+                        Q(name__iregex=pat)
+                        | Q(description__iregex=pat)
+                        | Q(category__name__iregex=pat)
+                        | Q(category__parent_category__name__iregex=pat)
+                        | Q(store__company__name__iregex=pat)
+                        | Q(store__name__iregex=pat)
+                        | Q(combo_items__product__name__iregex=pat)
+                    )
+                if combo_text_q:
+                    combos_qs = combos_qs.filter(combo_text_q).distinct()
+
+            for combo_obj in combos_qs.order_by('real_distance_meters', '-cached_popularity_score', 'price')[:25]:
+                cid = str(combo_obj.id)
+                if cid in seen:
+                    continue
+                seen.add(cid)
+                pool.append(self._build_purchase_light_record(combo_obj, variants))
+        except Exception:
+            pass
 
         # Si hay filtro de solo abiertos ahora, filtramos (con fallback inteligente si ninguno está abierto a esa hora)
         if only_open_now:
@@ -2110,7 +2244,7 @@ class ProductSearchEngine:
                 pass
         return ""
 
-    def _get_base_active_combos_queryset(self):
+    def _get_base_active_combos_queryset(self, exclude_own_company: bool = True):
         qs = ProductsCombo.objects.select_related(
             'company',
             'store',
@@ -2129,20 +2263,31 @@ class ProductSearchEngine:
             stock__gt=0,
             store__is_active=True,
         )
-        if self.user and self.user.is_authenticated:
+        qs = self._annotate_proximity_flag(qs)
+        qs = self._annotate_merchant_rating(qs)
+        if exclude_own_company and self.user and self.user.is_authenticated:
             try:
                 qs = qs.exclude(store__company_id=self.user.company.id)
             except Company.DoesNotExist:
                 pass
         return qs
 
-    def _get_cached_structural_feed(self, base_cache_key: str, queryset, page: int, page_size: int, extra_combos_qs=None) -> list:
+    def _get_cached_structural_feed(
+        self,
+        base_cache_key: str,
+        queryset,
+        page: int,
+        page_size: int,
+        extra_combos_qs=None,
+        include_merchant_exclusion_scope: bool = True,
+    ) -> list:
         """
         Abstracción DRY para resolver el Nivel Estructural de CUALQUIER feed.
         Hace el corte de paginación directo en PostgreSQL e incluye combos activos en la página 1.
         """
         # Le pegamos el alcance de exclusión de comercio (si aplica), la página y el tamaño a la llave para aislar la memoria
-        cache_key = f"{base_cache_key}{self._get_merchant_exclusion_scope()}:p_{page}:sz_{page_size}"
+        excl_scope = self._get_merchant_exclusion_scope() if include_merchant_exclusion_scope else ""
+        cache_key = f"{base_cache_key}{excl_scope}:p_{page}:sz_{page_size}"
         
         structural_feed = cache.get(cache_key)
         
@@ -2228,9 +2373,10 @@ class ProductSearchEngine:
         
         base_cache_key = f"cartmaker:struct:store:v2:{store_id}:{company_id}:{category_id}:{approx_lat}:{approx_lng}:{price_order}"
         
-        qs = self._get_base_active_queryset()
+        # Al consultar una tienda específica ("Ver como cliente" o vitrina pública), NO excluimos al dueño
+        qs = self._get_base_active_queryset(exclude_own_company=False)
         qs = self._annotate_proximity_flag(qs)
-        combos_qs = self._get_base_active_combos_queryset()
+        combos_qs = self._get_base_active_combos_queryset(exclude_own_company=False)
         
         if store_id:
             qs = qs.filter(store_id=store_id)
@@ -2252,7 +2398,14 @@ class ProductSearchEngine:
             qs = qs.order_by('-ranking_score')
             combos_qs = combos_qs.order_by('-creation')
             
-        return self._get_cached_structural_feed(base_cache_key, qs, page, page_size, extra_combos_qs=combos_qs)
+        return self._get_cached_structural_feed(
+            base_cache_key,
+            qs,
+            page,
+            page_size,
+            extra_combos_qs=combos_qs,
+            include_merchant_exclusion_scope=False,
+        )
         
     def get_text_search_feed(self, search_query: str, page: int = 1, page_size: int = 20, sort_by: str = 'relevance', price_order: str = None, max_distance_meters: float = 10000) -> list:
         approx_lat = round(self.user_location.y, 3)
@@ -2313,14 +2466,18 @@ class ProductSearchEngine:
     def get_home_feed(self, page: int = 1, page_size: int = 20, max_distance_meters: float = 15000) -> dict:
         """
         Orquesta el feed mixto dinámicamente por página.
-        Soporta escalabilidad infinita y compensación por falta de contenido multimedia.
+        Soporta escalabilidad infinita, compensación por falta de contenido multimedia
+        e inyección nativa de combos (`ProductsCombo`) tanto entrelazados en `results`
+        como en la llave dedicada `combos`.
         """
         approx_lat = round(self.user_location.y, 3)
         approx_lng = round(self.user_location.x, 3)
         affinity_hash = self._get_affinity_hash()
+        excl_scope = self._get_merchant_exclusion_scope()
         
         # Llave de Redis aislada por página y alcance de comerciante
-        cache_key = f"cartmaker:struct:home:{approx_lat}:{approx_lng}:{affinity_hash}{self._get_merchant_exclusion_scope()}:seed_{self.seed}:p_{page}:sz_{page_size}"
+        cache_key = f"cartmaker:struct:home:{approx_lat}:{approx_lng}:{affinity_hash}{excl_scope}:seed_{self.seed}:p_{page}:sz_{page_size}"
+        combos_cache_key = f"cartmaker:struct:home:{approx_lat}:{approx_lng}:combos{excl_scope}"
         structural_page_feed = cache.get(cache_key)
 
         # 🕵️ ESPÍA 2: ¿Qué llave estamos buscando?
@@ -2353,12 +2510,8 @@ class ProductSearchEngine:
             
             videos_list = list(qs_videos[v_start:v_end])
             
-            # 2. EVALUAMOS PRODUCTOS
-            # ¿Cuántos items EN TOTAL se mostraron en páginas anteriores? -> (page - 1) * page_size
-            # Como sabemos matemáticamente que 'v_start' de esos items fueron videos, el resto fueron obligatoriamente productos.
+            # 2. EVALUAMOS PRODUCTOS Y COMBOS ACTIVOS
             p_start = ((page - 1) * page_size) - v_start
-            
-            # ¿Cuántos productos necesitamos AHORA para completar esta página a tope?
             products_needed = page_size - len(videos_list)
             p_end = p_start + products_needed
 
@@ -2385,9 +2538,20 @@ class ProductSearchEngine:
             if len(products_list) < products_needed:
                 products_list = list(qs_products_local[p_start:p_end])
 
-            # Fallback 2: Si en el radio local (15km) no hay absolutamente ningún video ni producto
+            # 2.B EVALUAMOS COMBOS ACTIVOS (ProductsCombo) EN EL RADIO LOCAL
+            combos_list = []
+            if page == 1:
+                try:
+                    qs_combos_local = self._get_base_active_combos_queryset().filter(
+                        store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters))
+                    ).order_by('-cached_popularity_score', '-creation')
+                    combos_list = list(qs_combos_local[:12])
+                except Exception:
+                    combos_list = []
+
+            # Fallback 2: Si en el radio local (15km) no hay absolutamente ningún video, producto ni combo
             # en la página 1, abrimos el radio para no dejar jamás el feed en blanco.
-            if page == 1 and not videos_list and not products_list:
+            if page == 1 and not videos_list and not products_list and not combos_list:
                 qs_fallback_videos = self._get_base_video_queryset().filter(
                     company__stores__is_main_store=True,
                     company__stores__is_active=True,
@@ -2400,6 +2564,39 @@ class ProductSearchEngine:
                 qs_fallback_products = self._annotate_ranking_score(qs_products_base)
                 qs_fallback_products = self._apply_monopoly_prevention(qs_fallback_products)
                 products_list = list(qs_fallback_products[:fallback_products_needed])
+                try:
+                    combos_list = list(
+                        self._get_base_active_combos_queryset().order_by('-cached_popularity_score', '-creation')[:8]
+                    )
+                except Exception:
+                    combos_list = []
+
+            # Intercalamos combos activos dentro de products_list en la página 1 para que aparezcan en `results`
+            if page == 1 and combos_list:
+                combos_struct_for_cache = []
+                for c_obj in combos_list:
+                    try:
+                        c_json = c_obj.get_json()
+                        c_json["feed_type"] = "product"
+                        combos_struct_for_cache.append(c_json)
+                    except Exception:
+                        continue
+                cache.set(combos_cache_key, combos_struct_for_cache, timeout=600)
+
+                merged_products = []
+                c_idx = 0
+                max_inline_combos = min(len(combos_list), max(2, products_needed // 2))
+                for idx_p, prod_obj in enumerate(products_list):
+                    if idx_p % 2 == 0 and c_idx < max_inline_combos:
+                        merged_products.append(combos_list[c_idx])
+                        c_idx += 1
+                    merged_products.append(prod_obj)
+                while c_idx < max_inline_combos and len(merged_products) < max(products_needed, len(combos_list)):
+                    merged_products.append(combos_list[c_idx])
+                    c_idx += 1
+                products_list = merged_products[:max(products_needed, 1)]
+            elif page == 1:
+                cache.set(combos_cache_key, [], timeout=600)
             
             # ==========================================
             # 💡 DEBUG: AUDITORÍA DE RANKING DE PRODUCTOS
@@ -2407,7 +2604,7 @@ class ProductSearchEngine:
             print(f"\n📦 --- AUDITORÍA DE PRODUCTOS (Página {page}) ---")
             for idx, p in enumerate(products_list):
                 score = round(getattr(p, 'ranking_score', 0.0), 4)
-                prod_name = p.product.name if getattr(p, 'product', None) else "Desconocido"
+                prod_name = p.product.name if getattr(p, 'product', None) else getattr(p, 'name', "Desconocido")
                 is_viewed = getattr(p, 'is_viewed', False)
                 jitter_val = round(getattr(p, 'debug_jitter', 0.0), 4)
                 pop_score = getattr(p, 'cached_popularity_score', 0.0)
@@ -2420,7 +2617,7 @@ class ProductSearchEngine:
             
             if not videos_list and not products_list:
                 cache.set(cache_key, [], timeout=600)
-                return {"results": []}
+                return {"results": [], "combos": []}
 
             # 3. ENTRELAZAMOS
             structural_page_feed = self._interleave_feeds(videos_list, products_list, v_ratio=3, p_ratio=1)
@@ -2431,7 +2628,21 @@ class ProductSearchEngine:
         # 4. STITCHING VOLÁTIL (incluye inyección de is_liked y likes_count)
         final_feed = self._stitch_and_filter_results([dict(item) for item in structural_page_feed]) if structural_page_feed else []
         
-        response_data = {"results": final_feed}
+        combos_feed = [item for item in final_feed if isinstance(item, dict) and item.get("is_combo")]
+        if page == 1:
+            cached_combos_struct = cache.get(combos_cache_key)
+            if cached_combos_struct:
+                stitched_combos = self._stitch_and_filter_results([dict(c) for c in cached_combos_struct])
+                seen_cids = {str(c.get("id")) for c in combos_feed if c.get("id")}
+                for sc in stitched_combos:
+                    if str(sc.get("id")) not in seen_cids:
+                        combos_feed.append(sc)
+                        seen_cids.add(str(sc.get("id")))
+
+        response_data = {
+            "results": final_feed,
+            "combos": combos_feed,
+        }
         
         # Solo calculamos la barra de historias (StoryViewer) si es la primera página
         if page == 1:

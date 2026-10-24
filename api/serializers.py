@@ -625,7 +625,14 @@ class CompanyVideoStorySerializer(serializers.ModelSerializer):
                 item = InventoryItem.objects.get(id=item_id, store__company=company)
                 validated_data['associated_item'] = item
             except InventoryItem.DoesNotExist:
-                raise serializers.ValidationError({"associated_item_id": "El producto seleccionado no existe o no te pertenece."})
+                combo = ProductsCombo.objects.filter(id=item_id, store__company=company).first()
+                if combo is not None:
+                    validated_data['associated_item'] = None
+                    meta = dict(validated_data.get('metadata') or {})
+                    meta['associated_combo_id'] = str(combo.id)
+                    validated_data['metadata'] = meta
+                else:
+                    raise serializers.ValidationError({"associated_item_id": "El producto o combo seleccionado no existe o no te pertenece."})
         else:
             validated_data['associated_item'] = None
 

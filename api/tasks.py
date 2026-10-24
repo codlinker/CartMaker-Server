@@ -458,11 +458,11 @@ def process_analytics_batch():
         return parsed
 
     # ==========================================
-    # 0. PRODUCT VIEWS (Bulk Create + Popularity Recalc)
+    # 0. PRODUCT VIEWS (Bulk Create + Popularity Recalc + Combos Popularity)
     # ==========================================
     if raw_products:
-        product_logs = []
-        affected_item_ids = set()
+        parsed_events = []
+        candidate_ids = set()
         for item_bytes in raw_products:
             try:
                 data = json.loads(item_bytes.decode('utf-8'))
@@ -473,9 +473,37 @@ def process_analytics_batch():
                 origin_src = data.get('origin_source') or 'organic'
                 if origin_src not in ('organic', 'atlas'):
                     origin_src = 'organic'
+                parsed_events.append((str(inv_item_id), start_dt, origin_src, data))
+                candidate_ids.add(str(inv_item_id))
+            except Exception as e:
+                logger.warning(f"⚠️ Error parseando log de ProductViewLog (se omitirá): {e}")
+
+        valid_inv_ids = set()
+        valid_combo_ids = set()
+        if candidate_ids:
+            try:
+                valid_inv_ids = {
+                    str(uid)
+                    for uid in InventoryItem.objects.filter(id__in=candidate_ids).values_list('id', flat=True)
+                }
+            except Exception:
+                valid_inv_ids = set()
+            try:
+                valid_combo_ids = {
+                    str(uid)
+                    for uid in ProductsCombo.objects.filter(id__in=candidate_ids).values_list('id', flat=True)
+                }
+            except Exception:
+                valid_combo_ids = set()
+
+        product_logs = []
+        affected_item_ids = set()
+        combo_score_deltas = {}
+        for item_id_str, start_dt, origin_src, data in parsed_events:
+            if item_id_str in valid_inv_ids:
                 product_logs.append(ProductViewLog(
                     client_id=data['client_id'],
-                    inventory_item_id=inv_item_id,
+                    inventory_item_id=item_id_str,
                     added_to_cart=bool(data.get('added_to_cart', False)),
                     bought=bool(data.get('bought', False)),
                     start_time=start_dt,
@@ -485,13 +513,21 @@ def process_analytics_batch():
                     ai_keywords=data.get('ai_keywords'),
                     atlas_message_id=data.get('atlas_message_id'),
                 ))
-                affected_item_ids.add(str(inv_item_id))
-            except Exception as e:
-                logger.warning(f"⚠️ Error parseando log de ProductViewLog (se omitirá): {e}")
+                affected_item_ids.add(item_id_str)
+            elif item_id_str in valid_combo_ids:
+                pts = 6.0 if data.get('bought') else (4.0 if data.get('added_to_cart') else 1.0)
+                combo_score_deltas[item_id_str] = combo_score_deltas.get(item_id_str, 0.0) + pts
 
         try:
             if product_logs:
                 ProductViewLog.objects.bulk_create(product_logs, batch_size=500)
+            for combo_id_str, delta_pts in combo_score_deltas.items():
+                try:
+                    ProductsCombo.objects.filter(id=combo_id_str).update(
+                        cached_popularity_score=F('cached_popularity_score') + float(delta_pts)
+                    )
+                except Exception:
+                    pass
             redis_conn.ltrim("telemetry:product_views", len(raw_products), -1)
             for item_id_str in affected_item_ids:
                 try:

@@ -77,17 +77,18 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
     @classmethod
     def _resolve_story_associated_item(cls, company, data):
         """
-        Resuelve el InventoryItem vinculado a partir de `associated_item_id` o `tagged_products`.
-        Retorna: (should_update: bool, item: InventoryItem | None, error_msg: str | None)
+        Resuelve el InventoryItem o ProductsCombo vinculado a partir de `associated_item_id`,
+        `associated_combo_id` o `tagged_products`.
+        Retorna: (should_update: bool, item: InventoryItem | None, combo: ProductsCombo | None, error_msg: str | None)
         """
-        has_assoc_key = 'associated_item_id' in data
+        has_assoc_key = 'associated_item_id' in data or 'associated_combo_id' in data
         has_tagged_key = 'tagged_products' in data
         if not has_assoc_key and not has_tagged_key:
-            return False, None, None
+            return False, None, None, None
 
         candidate_id = None
         if has_assoc_key:
-            raw_id = data.get('associated_item_id')
+            raw_id = data.get('associated_item_id') or data.get('associated_combo_id')
             if raw_id is not None:
                 cleaned = str(raw_id).strip()
                 if cleaned and cleaned.lower() not in ('null', 'none', '[]'):
@@ -103,19 +104,24 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
             if isinstance(parsed_list, list) and len(parsed_list) > 0:
                 first_entry = parsed_list[0]
                 if isinstance(first_entry, dict):
-                    candidate_id = str(first_entry.get('id') or first_entry.get('item_id') or '').strip()
+                    candidate_id = str(first_entry.get('id') or first_entry.get('item_id') or first_entry.get('combo_id') or '').strip()
                 elif first_entry is not None:
                     candidate_id = str(first_entry).strip()
 
         if not candidate_id:
-            return True, None, None
+            return True, None, None, None
 
         item = InventoryItem.objects.filter(id=candidate_id, store__company=company).first()
         if not item:
             item = InventoryItem.objects.filter(product_id=candidate_id, store__company=company).first()
-        if not item:
-            return False, None, "El producto vinculado no existe o no te pertenece."
-        return True, item, None
+        if item:
+            return True, item, None, None
+
+        combo = ProductsCombo.objects.filter(id=candidate_id, store__company=company).first()
+        if combo:
+            return True, None, combo, None
+
+        return False, None, None, "El producto o combo vinculado no existe o no te pertenece."
 
     @staticmethod
     def _invalidate_story_caches(company, item_ids=None):
@@ -217,13 +223,20 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
             update_fields.add('applied_filter_matrix')
             filter_changed = True
 
-        # 4. Producto etiquetado / vinculado (associated_item_id o tagged_products)
-        should_update_item, resolved_item, item_err = self._resolve_story_associated_item(company, request.data)
+        # 4. Producto o combo etiquetado / vinculado (associated_item_id, associated_combo_id o tagged_products)
+        should_update_item, resolved_item, resolved_combo, item_err = self._resolve_story_associated_item(company, request.data)
         if item_err:
             return Response({"error": item_err}, status=status.HTTP_400_BAD_REQUEST)
         if should_update_item:
             instance.associated_item = resolved_item
             update_fields.add('associated_item')
+            meta_dict = dict(instance.metadata or {})
+            if resolved_combo is not None:
+                meta_dict['associated_combo_id'] = str(resolved_combo.id)
+            else:
+                meta_dict.pop('associated_combo_id', None)
+            instance.metadata = meta_dict
+            update_fields.add('metadata')
 
         # 5. Reemplazo opcional de archivos multimedia (video_file y/o thumbnail)
         video_obj = request.FILES.get('video_file')
@@ -340,8 +353,8 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def available_items(self, request):
         """
-        Retorna todos los InventoryItems agrupados por sucursal.
-        Indica si el ítem ya tiene un video vigente.
+        Retorna todos los InventoryItems y ProductsCombo activos agrupados por sucursal.
+        Indica si el ítem o combo ya tiene un video vigente.
         """
         company, _emp, allowed_store_ids = resolve_merchant_actor(request)
         if not company:
@@ -358,15 +371,41 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
             queryset=InventoryItem.objects.filter(paused=False, stock__gt=0).select_related('product').prefetch_related(active_stories_prefetch),
             to_attr='active_product_items'
         )
+        active_combos_prefetch = Prefetch(
+            'combos',
+            queryset=ProductsCombo.objects.filter(paused=False, stock__gt=0).prefetch_related(
+                Prefetch(
+                    'combo_items',
+                    queryset=ProductsComboItem.objects.select_related('product').order_by('position', 'id'),
+                )
+            ),
+            to_attr='active_store_combos',
+        )
         stores_qs = company.stores.filter(is_active=True)
         if allowed_store_ids is not None:
             stores_qs = stores_qs.filter(id__in=allowed_store_ids)
-        stores = stores_qs.prefetch_related(active_items_prefetch)
+        stores = stores_qs.prefetch_related(active_items_prefetch, active_combos_prefetch)
+
+        # Mapa de combos con historias activas
+        combo_story_exp_map = {}
+        try:
+            active_company_stories = CompanyVideoStory.objects.filter(
+                company=company, expires_at__gt=now, video_file__isnull=False
+            ).only('metadata', 'expires_at')
+            for st in active_company_stories:
+                if isinstance(st.metadata, dict) and st.metadata.get('associated_combo_id'):
+                    cid_str = str(st.metadata['associated_combo_id'])
+                    if cid_str not in combo_story_exp_map:
+                        combo_story_exp_map[cid_str] = timezone.localtime(st.expires_at).isoformat()
+        except Exception:
+            pass
         
         data = []
         for store in stores:
             items_data = []
+            combos_data = []
             inventory_items = getattr(store, 'active_product_items', [])
+            store_combos = getattr(store, 'active_store_combos', [])
             
             for item in inventory_items:
                 active_stories = getattr(item, 'active_linked_stories', [])
@@ -380,13 +419,30 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
                     "id": str(item.id),
                     "product_name": item.product.name,
                     "image": img_url,
+                    "is_combo": False,
+                    "record_type": "inventory_item",
                     "active_video_expiration": timezone.localtime(active_story.expires_at).isoformat() if active_story else None
                 })
+
+            for combo in store_combos:
+                c_imgs = combo.get_images()
+                img_url = c_imgs[0] if c_imgs else ""
+                combo_entry = {
+                    "id": str(combo.id),
+                    "product_name": combo.name,
+                    "image": img_url,
+                    "is_combo": True,
+                    "record_type": "products_combo",
+                    "active_video_expiration": combo_story_exp_map.get(str(combo.id)),
+                }
+                items_data.append(combo_entry)
+                combos_data.append(combo_entry)
             
             data.append({
                 "store_id": str(store.id),
                 "store_name": store.name,
-                "items": items_data
+                "items": items_data,
+                "combos": combos_data,
             })
             
         return Response({"data": data}, status=status.HTTP_200_OK)
@@ -584,10 +640,12 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
             if getattr(thumb_obj, 'size', 0) > 10 * 1024 * 1024:
                 return Response({"error": "La miniatura excede el tamaño máximo permitido (10 MB)."}, status=status.HTTP_400_BAD_REQUEST)
 
-            # 3. Validar el producto vinculado (associated_item_id o tagged_products)
-            _, associated_item, item_err = self._resolve_story_associated_item(company, request.data)
+            # 3. Validar el producto o combo vinculado (associated_item_id, associated_combo_id o tagged_products)
+            _, associated_item, associated_combo, item_err = self._resolve_story_associated_item(company, request.data)
             if item_err:
                 return Response({"error": item_err}, status=status.HTTP_400_BAD_REQUEST)
+            if associated_combo is not None:
+                metadata_parsed['associated_combo_id'] = str(associated_combo.id)
 
             # 4. Transacción Atómica y Guardado Físico
             with transaction.atomic():

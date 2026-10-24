@@ -527,10 +527,12 @@ class ProductsComboViewSet(viewsets.ModelViewSet):
     throttle_scope = 'actions'
     parser_classes = [parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser]
 
+    def get_permissions(self):
+        if getattr(self, 'action', None) in ('list', 'retrieve'):
+            return [AllowAny()]
+        return [IsAuthenticated()]
+
     def get_queryset(self):
-        company, _emp, allowed_store_ids = resolve_merchant_actor(self.request)
-        if company is None:
-            return ProductsCombo.objects.none()
         qs = (
             ProductsCombo.objects.select_related(
                 'company',
@@ -545,11 +547,64 @@ class ProductsComboViewSet(viewsets.ModelViewSet):
                     queryset=ProductsComboItem.objects.select_related('product', 'inventory_item').order_by('position', 'id'),
                 )
             )
-            .filter(company=company)
         )
+
+        store_id = self.request.query_params.get('store_id')
+        company_id = self.request.query_params.get('company_id')
+        category_id = self.request.query_params.get('category_id') or self.request.query_params.get('subcategory_id')
+        active_only_raw = str(self.request.query_params.get('active_only', '')).strip().lower()
+        active_only = active_only_raw in ('1', 'true', 'yes')
+
+        company, _emp, allowed_store_ids = (None, None, None)
+        if getattr(self.request, 'user', None) and self.request.user.is_authenticated:
+            try:
+                company, _emp, allowed_store_ids = resolve_merchant_actor(self.request)
+            except Exception:
+                company, _emp, allowed_store_ids = (None, None, None)
+
+        if getattr(self, 'action', None) == 'list':
+            if store_id:
+                qs = qs.filter(store_id=store_id)
+            if company_id:
+                qs = qs.filter(store__company_id=company_id)
+            if category_id:
+                qs = qs.filter(category_id=category_id)
+
+            if not store_id and not company_id:
+                if company is not None and not active_only:
+                    qs = qs.filter(company=company)
+                    if allowed_store_ids is not None:
+                        qs = qs.filter(store_id__in=allowed_store_ids)
+                else:
+                    qs = qs.filter(paused=False, stock__gt=0, store__is_active=True)
+            else:
+                is_own_catalog = False
+                if company is not None and not active_only:
+                    if company_id and str(company.id) == str(company_id):
+                        is_own_catalog = True
+                    elif store_id and CompanyStore.objects.filter(id=store_id, company=company).exists():
+                        is_own_catalog = True
+
+                if is_own_catalog:
+                    if allowed_store_ids is not None:
+                        qs = qs.filter(store_id__in=allowed_store_ids)
+                else:
+                    qs = qs.filter(paused=False, stock__gt=0, store__is_active=True)
+
+            return qs.order_by('-creation')
+
+        if getattr(self, 'action', None) == 'retrieve':
+            if company is not None and not active_only:
+                qs = qs.filter(Q(company=company) | Q(paused=False, stock__gt=0, store__is_active=True))
+            else:
+                qs = qs.filter(paused=False, stock__gt=0, store__is_active=True)
+            return qs
+
+        if company is None:
+            return ProductsCombo.objects.none()
+        qs = qs.filter(company=company)
         if allowed_store_ids is not None:
             qs = qs.filter(store_id__in=allowed_store_ids)
-        store_id = self.request.query_params.get('store_id')
         if store_id:
             qs = qs.filter(store_id=store_id)
         return qs.order_by('-creation')
@@ -562,6 +617,7 @@ class ProductsComboViewSet(viewsets.ModelViewSet):
                 'success': True,
                 'combos': combos_json,
                 'items': combos_json,
+                'results': combos_json,
                 'data': combos_json,
             },
             status=status.HTTP_200_OK,
@@ -570,6 +626,23 @@ class ProductsComboViewSet(viewsets.ModelViewSet):
     def retrieve(self, request, *args, **kwargs):
         combo = self.get_object()
         combo_json = combo.get_json()
+        target_company = combo.store.company if combo.store else combo.company
+        is_owner = False
+        user_tokens = 0
+        if getattr(request, 'user', None) and request.user.is_authenticated:
+            if hasattr(request.user, 'company') and target_company:
+                is_owner = (target_company.id == request.user.company.id)
+            if target_company:
+                try:
+                    wallet = TokenWallet.objects.only('balance').get(
+                        user=request.user,
+                        company=target_company,
+                    )
+                    user_tokens = wallet.balance
+                except TokenWallet.DoesNotExist:
+                    user_tokens = 0
+        combo_json['is_owner'] = is_owner
+        combo_json['user_wallet_balance'] = user_tokens
         return Response(
             {
                 'success': True,

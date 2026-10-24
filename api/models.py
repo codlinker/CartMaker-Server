@@ -2516,6 +2516,7 @@ class ProductsCombo(models.Model):
             "has_variants": False,
             "has_modifier_groups": False,
             "is_combo": True,
+            "record_type": "products_combo",
             "combo_items": serialized_items,
             "combo_summary": combo_summary,
             "combo_regular_price": regular_price,
@@ -2527,6 +2528,7 @@ class ProductsCombo(models.Model):
         return {
             "id": str(self.id),
             "combo_id": str(self.id),
+            "record_type": "products_combo",
             "item_type": "combo",
             "is_combo": True,
             "name": self.name,
@@ -4980,6 +4982,8 @@ class UniversalComment(models.Model):
         company = None
         if ct_model == 'inventoryitem' and resolved_target:
             company = resolved_target.store.company
+        elif ct_model == 'productscombo' and resolved_target:
+            company = resolved_target.store.company if getattr(resolved_target, 'store', None) else getattr(resolved_target, 'company', None)
         elif ct_model == 'companyvideostory' and resolved_target:
             company = resolved_target.company
 
@@ -4994,6 +4998,8 @@ class UniversalComment(models.Model):
         item_name = "Artículo no disponible"
         if ct_model == 'inventoryitem' and resolved_target:
             item_name = resolved_target.product.name
+        elif ct_model == 'productscombo' and resolved_target:
+            item_name = resolved_target.name
         elif ct_model == 'companyvideostory' and resolved_target:
             item_name = "Video Promocional"
 
@@ -5083,6 +5089,31 @@ class CompanyVideoStory(models.Model):
 
     def get_json(self) -> dict:
         associated_json = self.associated_item.get_json() if self.associated_item else None
+        associated_id = str(self.associated_item_id) if self.associated_item_id else None
+        if associated_json is None and isinstance(self.metadata, dict):
+            combo_id = self.metadata.get('associated_combo_id')
+            if combo_id:
+                try:
+                    combo_obj = (
+                        ProductsCombo.objects.select_related(
+                            'company', 'store', 'store__company', 'category', 'category__parent_category'
+                        )
+                        .prefetch_related(
+                            models.Prefetch(
+                                'combo_items',
+                                queryset=ProductsComboItem.objects.select_related(
+                                    'product', 'product__category', 'inventory_item'
+                                ).order_by('position', 'id'),
+                            )
+                        )
+                        .filter(id=combo_id)
+                        .first()
+                    )
+                    if combo_obj is not None:
+                        associated_json = combo_obj.get_json()
+                        associated_id = str(combo_obj.id)
+                except Exception:
+                    pass
         return {
             'id': str(self.id),
             'company_id': str(self.company_id),
@@ -5097,7 +5128,7 @@ class CompanyVideoStory(models.Model):
             'metadata': self.metadata or {},
             'applied_filter_matrix': self.applied_filter_matrix,
             'associated_item': associated_json,
-            'associated_item_id': str(self.associated_item_id) if self.associated_item_id else None,
+            'associated_item_id': associated_id,
             'tagged_products': [associated_json] if associated_json else [],
             'creation': self.creation.isoformat(),
             'updated_at': self.updated_at.isoformat() if self.updated_at else self.creation.isoformat(),
