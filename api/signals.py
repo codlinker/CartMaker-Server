@@ -563,17 +563,42 @@ def invalidate_user_relations_cache(sender, instance, **kwargs):
 @receiver(post_save, sender=Company)
 @receiver(post_save, sender=CompanyStore)
 @receiver(post_delete, sender=CompanyStore)
+@receiver(post_save, sender=StoreLocation)
+@receiver(post_delete, sender=StoreLocation)
 def invalidate_company_cache(sender, instance, **kwargs):
-    company_id = instance.id if isinstance(instance, Company) else instance.company.id
-    owner_id = instance.owner_id if isinstance(instance, Company) else instance.company.owner_id
-    
+    try:
+        if isinstance(instance, Company):
+            company_id = instance.id
+            owner_id = instance.owner_id
+        elif isinstance(instance, CompanyStore):
+            company_id = instance.company_id
+            owner_id = getattr(instance.company, 'owner_id', None) if 'company' in instance._state.fields_cache else (
+                Company.objects.filter(id=company_id).values_list('owner_id', flat=True).first()
+            )
+        else:
+            store_obj = getattr(instance, 'store', None) if 'store' in instance._state.fields_cache else (
+                CompanyStore.objects.filter(id=instance.store_id).select_related('company').first()
+            )
+            company_id = getattr(store_obj, 'company_id', None)
+            owner_id = getattr(getattr(store_obj, 'company', None), 'owner_id', None)
+    except Exception:
+        company_id = None
+        owner_id = None
+
     def finalize_company_cache():
-        cache.delete(f"cartmaker:tenant:{owner_id}:company")
-        item_ids = list(InventoryItem.objects.filter(store__company_id=company_id).values_list('id', flat=True))
-        keys_to_delete = [f"cartmaker:struct:item:{uid}" for uid in item_ids]
-        if keys_to_delete:
-            cache.delete_many(keys_to_delete)
-            
+        if owner_id:
+            cache.delete(f"cartmaker:tenant:{owner_id}:company")
+        if hasattr(cache, 'delete_pattern'):
+            try:
+                cache.delete_pattern("map:grid:*")
+            except Exception:
+                pass
+        if company_id:
+            item_ids = list(InventoryItem.objects.filter(store__company_id=company_id).values_list('id', flat=True))
+            keys_to_delete = [f"cartmaker:struct:item:{uid}" for uid in item_ids]
+            if keys_to_delete:
+                cache.delete_many(keys_to_delete)
+
     transaction.on_commit(finalize_company_cache)
 
 @receiver(post_save, sender=UserWallet)

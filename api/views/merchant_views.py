@@ -1531,27 +1531,147 @@ class UpdateStoreAPI(APIView):
     permission_classes = [IsAuthenticated]
 
     def delete(self, request, store_id=None):
+        target_store_id = store_id or request.query_params.get('store_id') or request.data.get('store_id')
+        if not target_store_id:
+            return Response({"error": "El parámetro store_id es requerido."}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
-            store = CompanyStore.objects.prefetch_related('company__owner').only('id', 'company', 'is_main_store').get(id=store_id)
-            
-            if request.user.id != store.company.owner_id:
-                return Response({"error": "Usted no tiene permisos para eliminar esta tienda."}, status=status.HTTP_406_NOT_ACCEPTABLE)
-            
-            is_main = store.is_main_store
-            company = store.company
-            
-            with transaction.atomic():
-                store.delete()
-                if is_main:
-                    oldest_remaining = CompanyStore.objects.filter(company=company).order_by('creation').first()
-                    if oldest_remaining:
-                        oldest_remaining.is_main_store = True
-                        oldest_remaining.save(update_fields=['is_main_store'])
-                        
-            return Response(status=status.HTTP_204_NO_CONTENT)
-            
-        except CompanyStore.DoesNotExist:
+            store = CompanyStore.objects.select_related('company', 'location').get(id=target_store_id)
+        except (CompanyStore.DoesNotExist, ValueError, ValidationError):
+            user_company = Company.objects.filter(owner=request.user).first()
+            if user_company and str(user_company.id) == str(target_store_id):
+                return Response(
+                    {"error": "Enviaste el ID de la compañía en lugar del ID de la sucursal (store_id)."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if user_company:
+                # Si la sucursal ya fue eliminada en una petición previa pero el caché de la app seguía mostrándola,
+                # limpiamos el caché de compañía/mapa y respondemos de forma idempotente con las sucursales actuales.
+                cache.delete(f"cartmaker:tenant:{request.user.id}:company")
+                if hasattr(cache, 'delete_pattern'):
+                    try:
+                        cache.delete_pattern("map:grid:*")
+                        cache.delete_pattern(f"cartmaker:struct:map_products:v2:{target_store_id}:*")
+                        cache.delete_pattern(f"cartmaker:struct:store_products:{target_store_id}:*")
+                        cache.delete_pattern(f"cartmaker:struct:store:v2:{target_store_id}:*")
+                        cache.delete_pattern(f"cartmaker:struct:store:v2:*:{user_company.id}:*")
+                    except Exception:
+                        pass
+                remaining_stores = [
+                    s.get_json()
+                    for s in CompanyStore.objects.filter(company=user_company)
+                    .select_related('location', 'location__mall', 'company')
+                    .prefetch_related('contact_methods')
+                    .order_by('-is_main_store', 'creation')
+                ]
+                return Response(
+                    {
+                        "success": True,
+                        "already_deleted": True,
+                        "deleted_store_id": str(target_store_id),
+                        "message": "La sucursal ya había sido eliminada.",
+                        "stores": remaining_stores,
+                    },
+                    status=status.HTTP_200_OK,
+                )
             return Response({"error": "La tienda que tratas de eliminar no existe."}, status=status.HTTP_404_NOT_FOUND)
+
+        if request.user.id != store.company.owner_id:
+            return Response({"error": "Usted no tiene permisos para eliminar esta tienda."}, status=status.HTTP_403_FORBIDDEN)
+
+        company = store.company
+        total_company_stores = CompanyStore.objects.filter(company=company).count()
+        if total_company_stores <= 1:
+            return Response(
+                {"error": "No puedes eliminar tu única sucursal. Toda compañía debe mantener al menos una sucursal activa."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        is_main = store.is_main_store
+        deleted_store_id_str = str(store.id)
+        company_id_str = str(company.id)
+        owner_id = company.owner_id
+        store_img_url = store.store_img_url
+
+        loc_coords = None
+        try:
+            if hasattr(store, 'location') and store.location and store.location.coordinates:
+                loc_coords = (round(store.location.coordinates.y, 3), round(store.location.coordinates.x, 3))
+        except Exception:
+            loc_coords = None
+
+        item_ids = [str(uid) for uid in InventoryItem.objects.filter(store=store).values_list('id', flat=True)]
+        combo_ids = [str(cid) for cid in ProductsCombo.objects.filter(store=store).values_list('id', flat=True)]
+
+        with transaction.atomic():
+            if is_main:
+                store.is_main_store = False
+                store.save(update_fields=['is_main_store'])
+                oldest_remaining = (
+                    CompanyStore.objects.filter(company=company)
+                    .exclude(id=store.id)
+                    .order_by('creation')
+                    .first()
+                )
+                if oldest_remaining:
+                    oldest_remaining.is_main_store = True
+                    oldest_remaining.save(update_fields=['is_main_store'])
+
+            store.delete()
+
+            def _cleanup_deleted_store_caches():
+                if store_img_url:
+                    try:
+                        storage_manager.delete_file(store_img_url)
+                    except Exception:
+                        pass
+                cache.delete(f"cartmaker:tenant:{owner_id}:company")
+                keys_to_del = []
+                for uid in item_ids:
+                    keys_to_del.append(f"cartmaker:volatile:item:{uid}")
+                    keys_to_del.append(f"cartmaker:struct:item:{uid}")
+                for cid in combo_ids:
+                    keys_to_del.append(f"cartmaker:volatile:item:{cid}")
+                    keys_to_del.append(f"cartmaker:volatile:combo:{cid}")
+                    keys_to_del.append(f"cartmaker:struct:item:{cid}")
+                    keys_to_del.append(f"cartmaker:struct:combo:{cid}")
+                if keys_to_del:
+                    cache.delete_many(keys_to_del)
+
+                if hasattr(cache, 'delete_pattern'):
+                    try:
+                        cache.delete_pattern("map:grid:*")
+                        cache.delete_pattern(f"cartmaker:struct:map_products:v2:{deleted_store_id_str}:*")
+                        cache.delete_pattern(f"cartmaker:struct:store_products:{deleted_store_id_str}:*")
+                        cache.delete_pattern(f"cartmaker:struct:store:v2:{deleted_store_id_str}:*")
+                        cache.delete_pattern(f"cartmaker:struct:store:v2:*:{company_id_str}:*")
+                        if loc_coords:
+                            approx_lat, approx_lng = loc_coords
+                            cache.delete_pattern(f"cartmaker:struct:home:{approx_lat}:{approx_lng}:*")
+                            cache.delete_pattern(f"cartmaker:struct:cat:v2:*:{approx_lat}:{approx_lng}:*")
+                            cache.delete_pattern(f"cartmaker:struct:offers:v2:{approx_lat}:{approx_lng}:*")
+                            cache.delete_pattern(f"cartmaker:struct:search:v2:*:{approx_lat}:{approx_lng}:*")
+                    except Exception:
+                        pass
+
+            transaction.on_commit(_cleanup_deleted_store_caches)
+
+        remaining_stores = [
+            s.get_json()
+            for s in CompanyStore.objects.filter(company=company)
+            .select_related('location', 'location__mall', 'company')
+            .prefetch_related('contact_methods')
+            .order_by('-is_main_store', 'creation')
+        ]
+        return Response(
+            {
+                "success": True,
+                "deleted_store_id": deleted_store_id_str,
+                "message": "Sucursal eliminada exitosamente.",
+                "stores": remaining_stores,
+            },
+            status=status.HTTP_200_OK,
+        )
 
     def post(self, request, store_id=None):
         serializer = UpdateStoreSerializer(data=request.data)
