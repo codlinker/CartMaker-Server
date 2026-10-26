@@ -258,7 +258,7 @@ class OrderViewSet(viewsets.ViewSet):
             
             return Response({'data': dict(payload), **payload}, status=status.HTTP_200_OK)
 
-        except Order.DoesNotExist:
+        except (Order.DoesNotExist, ValidationError, ValueError, TypeError):
             return Response(
                 {"error": "La orden no existe o no tienes permisos para verla."}, 
                 status=status.HTTP_404_NOT_FOUND
@@ -386,7 +386,10 @@ class OrderViewSet(viewsets.ViewSet):
 
         store_filter = request.query_params.get('store_id')
         if store_filter:
-            orders_qs = orders_qs.filter(store_id=store_filter)
+            try:
+                orders_qs = orders_qs.filter(store_id=uuid.UUID(str(store_filter).strip()))
+            except (ValueError, TypeError, AttributeError):
+                return Response({'data': []}, status=status.HTTP_200_OK)
 
         orders = orders_qs.order_by('-creation')
         
@@ -465,11 +468,16 @@ class OrderViewSet(viewsets.ViewSet):
         (`picked_up`) para que el cliente vea el mapa en vivo; sin repartidor aceptado no se puede despachar.
         """
         order_id = request.data.get('order_id')
+        try:
+            order_id = int(order_id) if order_id is not None else None
+        except (ValueError, TypeError):
+            return Response({"error": "Identificador de orden inválido."}, status=status.HTTP_400_BAD_REQUEST)
+        if not order_id:
+            return Response({"error": "El campo 'order_id' es obligatorio."}, status=status.HTTP_400_BAD_REQUEST)
         assignment = (
             DeliveryAssignment.objects.select_related('order__store__company')
             .filter(order_id=order_id)
             .first()
-            if order_id else None
         )
         if assignment is not None:
             if not user_can_manage_store(request, assignment.order.store):
@@ -741,7 +749,7 @@ class OrderViewSet(viewsets.ViewSet):
                 transaction.on_commit(_post_cancel_commit)
 
             return Response({"success": True, "message": "Orden cancelada exitosamente y stock/tokens devueltos."}, status=status.HTTP_200_OK)
-        except Order.DoesNotExist:
+        except (Order.DoesNotExist, ValidationError, ValueError, TypeError):
             return Response({"error": "La orden no existe."}, status=status.HTTP_404_NOT_FOUND)
 
     # =========================================================================
@@ -751,6 +759,10 @@ class OrderViewSet(viewsets.ViewSet):
     def complete_order(self, request):
         """ Endpoint unificado de finalización con lógica de cross-notification """
         order_id = request.data.get('order_id')
+        try:
+            order_id = int(order_id)
+        except (ValueError, TypeError):
+            return Response({"error": "Identificador de orden inválido."}, status=status.HTTP_400_BAD_REQUEST)
         merchant_rating = request.data.get('merchant_rating', 0)
         product_ratings = request.data.get('product_ratings', [])
 
@@ -1027,11 +1039,22 @@ class CartViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['post'])
     def details(self, request):
-        item_ids = request.data.get('item_ids', [])
+        raw_item_ids = request.data.get('item_ids', [])
+        if not raw_item_ids or not isinstance(raw_item_ids, list):
+            return Response({'data': []}, status=status.HTTP_200_OK)
 
-        print("ITEM IDS: ", item_ids)
-        
-        if not item_ids or not isinstance(item_ids, list):
+        item_ids = []
+        seen_ids = set()
+        for raw_uid in raw_item_ids:
+            try:
+                norm_uid = str(uuid.UUID(str(raw_uid).strip()))
+            except (ValueError, TypeError, AttributeError):
+                continue
+            if norm_uid not in seen_ids:
+                seen_ids.add(norm_uid)
+                item_ids.append(norm_uid)
+
+        if not item_ids:
             return Response({'data': []}, status=status.HTTP_200_OK)
 
         # =========================================================================
@@ -1041,7 +1064,7 @@ class CartViewSet(viewsets.ViewSet):
         cached_structs = cache.get_many(struct_keys.keys())
 
         missing_ids = [uid for key, uid in struct_keys.items() if key not in cached_structs]
-        struct_data_map = {uid: cached_structs[f"cartmaker:struct:item:{uid}"] for uid in item_ids if f"cartmaker:struct:item:{uid}" in cached_structs}
+        struct_data_map = {uid: dict(cached_structs[f"cartmaker:struct:item:{uid}"]) for uid in item_ids if f"cartmaker:struct:item:{uid}" in cached_structs}
 
         # RESOLUCIÓN DE CACHE MISS (Solo va a BD por los productos o combos que no están en RAM)
         if missing_ids:

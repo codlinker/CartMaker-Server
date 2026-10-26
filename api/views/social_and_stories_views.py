@@ -111,13 +111,19 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
         if not candidate_id:
             return True, None, None, None
 
-        item = InventoryItem.objects.filter(id=candidate_id, store__company=company).first()
-        if not item:
-            item = InventoryItem.objects.filter(product_id=candidate_id, store__company=company).first()
+        try:
+            item = InventoryItem.objects.filter(id=candidate_id, store__company=company).first()
+            if not item:
+                item = InventoryItem.objects.filter(product_id=candidate_id, store__company=company).first()
+        except (ValidationError, ValueError, TypeError):
+            item = None
         if item:
             return True, item, None, None
 
-        combo = ProductsCombo.objects.filter(id=candidate_id, store__company=company).first()
+        try:
+            combo = ProductsCombo.objects.filter(id=candidate_id, store__company=company).first()
+        except (ValidationError, ValueError, TypeError):
+            combo = None
         if combo:
             return True, None, combo, None
 
@@ -880,16 +886,19 @@ class UniversalConversationViewSet(viewsets.ViewSet):
             return Response({'error': 'Tipo de contenido no soportado.'}, status=status.HTTP_400_BAD_REQUEST)
 
         target_obj = None
-        if content_model == 'inventoryitem':
-            target_obj = InventoryItem.objects.select_related('store__company', 'product').filter(id=target_id).first()
-            if target_obj is None:
+        try:
+            if content_model == 'inventoryitem':
+                target_obj = InventoryItem.objects.select_related('store__company', 'product').filter(id=target_id).first()
+                if target_obj is None:
+                    target_obj = ProductsCombo.objects.select_related('store__company').filter(id=target_id).first()
+                    if target_obj is not None:
+                        content_model = 'productscombo'
+            elif content_model == 'productscombo':
                 target_obj = ProductsCombo.objects.select_related('store__company').filter(id=target_id).first()
-                if target_obj is not None:
-                    content_model = 'productscombo'
-        elif content_model == 'productscombo':
-            target_obj = ProductsCombo.objects.select_related('store__company').filter(id=target_id).first()
-        else:
-            target_obj = CompanyVideoStory.objects.select_related('company').filter(id=target_id).first()
+            else:
+                target_obj = CompanyVideoStory.objects.select_related('company').filter(id=target_id).first()
+        except (ValidationError, ValueError, TypeError):
+            target_obj = None
 
         model_cls = (
             InventoryItem if content_model == 'inventoryitem'
@@ -939,7 +948,7 @@ class UniversalConversationViewSet(viewsets.ViewSet):
                     item_name = "tu Video Historia"
                 else:
                     raise ValueError("Tipo inválido")
-            except (InventoryItem.DoesNotExist, ProductsCombo.DoesNotExist, CompanyVideoStory.DoesNotExist, ValueError):
+            except (InventoryItem.DoesNotExist, ProductsCombo.DoesNotExist, CompanyVideoStory.DoesNotExist, ValidationError, ValueError, TypeError):
                 return Response({'error': 'El contenido no existe o fue retirado.'}, status=status.HTTP_404_NOT_FOUND)
 
             content_type_obj = ContentType.objects.get_for_model(target_obj)
@@ -975,7 +984,7 @@ class UniversalConversationViewSet(viewsets.ViewSet):
         with transaction.atomic():
             try:
                 comment = UniversalComment.objects.select_for_update().get(id=question_id)
-            except UniversalComment.DoesNotExist:
+            except (UniversalComment.DoesNotExist, ValidationError, ValueError, TypeError):
                 return Response({'error': 'La pregunta no existe.'}, status=status.HTTP_404_NOT_FOUND)
 
             # Validamos permisos operativos (dueño del comercio o asistente asignado)
@@ -1078,7 +1087,7 @@ class UniversalConversationViewSet(viewsets.ViewSet):
             else:
                 return Response({'error': 'Tipo de contenido no soportado.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        except (InventoryItem.DoesNotExist, ProductsCombo.DoesNotExist):
+        except (InventoryItem.DoesNotExist, ProductsCombo.DoesNotExist, ValidationError, ValueError, TypeError):
             return Response({'error': 'El producto o combo no existe o fue retirado.'}, status=status.HTTP_404_NOT_FOUND)
         except CompanyVideoStory.DoesNotExist:
             return Response({'error': 'El video no existe o fue retirado.'}, status=status.HTTP_404_NOT_FOUND)

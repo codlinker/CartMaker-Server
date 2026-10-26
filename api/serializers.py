@@ -43,7 +43,7 @@ class RegisterSerializer(serializers.ModelSerializer):
                 password=validated_data['password'],
                 first_name=validated_data.get('first_name', ''),
                 last_name=validated_data.get('last_name', ''),
-                gender=validated_data['gender']
+                gender=validated_data.get('gender', UserGender.MALE)
             )
             if raw_category_ids is not None:
                 valid_cats = Category.objects.filter(id__in=raw_category_ids)
@@ -142,12 +142,12 @@ class ClientLocationSerializer(serializers.ModelSerializer):
             )
         elif locations_count == 0:
             validated_data['is_default'] = True
-        default_location = None
-        if client_locations_qs.filter(is_default=True).exists():
-            default_location = client_locations_qs.get(is_default=True)
-        if validated_data['is_default'] and default_location != None:
-            default_location.is_default = False
-            default_location.save()
+        else:
+            validated_data['is_default'] = bool(validated_data.get('is_default', False))
+
+        if validated_data['is_default']:
+            client_locations_qs.filter(is_default=True).update(is_default=False)
+
         lat = validated_data.pop('latitude')
         lon = validated_data.pop('longitude')
         validated_data['coordinates'] = Point(lon, lat, srid=4326)
@@ -158,6 +158,8 @@ class ClientLocationSerializer(serializers.ModelSerializer):
         lon = validated_data.pop('longitude', None)
         if lat is not None and lon is not None:
             validated_data['coordinates'] = Point(lon, lat, srid=4326)
+        if validated_data.get('is_default') is True and instance.user_id:
+            ClientLocation.objects.filter(user_id=instance.user_id, is_default=True).exclude(pk=instance.pk).update(is_default=False)
         return super().update(instance, validated_data)
 
     def to_representation(self, instance):
@@ -369,7 +371,7 @@ class UploadSubscriptionPaymentSerializer(serializers.Serializer):
     payment_date = serializers.DateField(format="%d/%m/%Y", input_formats=['%d/%m/%Y'], required=True)
     amount_sended = serializers.FloatField(required=True)
     subscription_type = serializers.IntegerField(required=True)
-    subscription_id = serializers.IntegerField(required=True)
+    subscription_id = serializers.IntegerField(required=False, allow_null=True)
     payment_proof = serializers.ImageField(required=True, validators=[validate_image_size])
     dollar_bcv_tax = serializers.FloatField(required=True)
 
@@ -621,11 +623,15 @@ class CompanyVideoStorySerializer(serializers.ModelSerializer):
         validated_data['company'] = company
         
         if item_id and str(item_id).strip():
+            clean_item_id = str(item_id).strip()
             try:
-                item = InventoryItem.objects.get(id=item_id, store__company=company)
+                item = InventoryItem.objects.get(id=clean_item_id, store__company=company)
                 validated_data['associated_item'] = item
-            except InventoryItem.DoesNotExist:
-                combo = ProductsCombo.objects.filter(id=item_id, store__company=company).first()
+            except (InventoryItem.DoesNotExist, DjangoValidationError, ValueError, TypeError):
+                try:
+                    combo = ProductsCombo.objects.filter(id=clean_item_id, store__company=company).first()
+                except (DjangoValidationError, ValueError, TypeError):
+                    combo = None
                 if combo is not None:
                     validated_data['associated_item'] = None
                     meta = dict(validated_data.get('metadata') or {})

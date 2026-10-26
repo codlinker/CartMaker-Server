@@ -180,7 +180,10 @@ class GetCompanyProducts(APIView):
                 'category', 'category__parent_category', 'company'
             ).all()
             if category_id:
-                products_query = products_query.filter(category_id=category_id)
+                try:
+                    products_query = products_query.filter(category_id=int(category_id))
+                except (ValueError, TypeError):
+                    pass
                 
             products_query = products_query.order_by('-creation')
             
@@ -188,10 +191,16 @@ class GetCompanyProducts(APIView):
             
             try:
                 current_products = paginator.page(page)
+                resolved_page_num = current_products.number
             except PageNotAnInteger:
                 current_products = paginator.page(1)
+                resolved_page_num = 1
             except EmptyPage:
                 current_products = []
+                try:
+                    resolved_page_num = int(page)
+                except (ValueError, TypeError):
+                    resolved_page_num = 1
 
             products = [product.get_json() for product in current_products]
             
@@ -200,11 +209,11 @@ class GetCompanyProducts(APIView):
                 'company_categories': list(company_categories),
                 'pagination': {
                     'has_next': current_products.has_next() if current_products else False,
-                    'current_page': int(page),
+                    'current_page': resolved_page_num,
                     'total_pages': paginator.num_pages
                 }
             }, status=status.HTTP_200_OK)
-        except Company.DoesNotExist:
+        except (Company.DoesNotExist, ValidationError, ValueError, TypeError):
             return Response({'error': 'No existe la compania especificada.'}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({'error': f'Error interno: {e}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -256,6 +265,16 @@ class GetStoreInventoryItems(APIView):
             ).distinct().values('id', 'name')
 
             category_id = request.GET.get('category_id')
+            parsed_category_id = None
+            if category_id not in (None, ''):
+                try:
+                    parsed_category_id = int(category_id)
+                except (ValueError, TypeError):
+                    parsed_category_id = None
+            try:
+                safe_page_num = max(1, int(request.GET.get('page', 1)))
+            except (ValueError, TypeError):
+                safe_page_num = 1
             page = request.GET.get('page', 1)
             out_of_stock = request.GET.get('out_of_stock') == 'true'
             is_combo_param = request.GET.get('is_combo')
@@ -279,8 +298,8 @@ class GetStoreInventoryItems(APIView):
                 )
                 if public_mode:
                     combos_query = combos_query.filter(paused=False, stock__gt=0)
-                if category_id:
-                    combos_query = combos_query.filter(category_id=category_id)
+                if parsed_category_id is not None:
+                    combos_query = combos_query.filter(category_id=parsed_category_id)
                 if out_of_stock and not public_mode:
                     combos_query = combos_query.filter(stock=0)
                 combos_query = combos_query.order_by('-creation')
@@ -337,7 +356,7 @@ class GetStoreInventoryItems(APIView):
                     'store_categories': list(store_categories),
                     'pagination': {
                         'has_next': current_combos.has_next() if current_combos else False,
-                        'current_page': int(page),
+                        'current_page': current_combos.number if current_combos else safe_page_num,
                         'total_pages': paginator.num_pages
                     }
                 }, status=status.HTTP_200_OK)
@@ -355,8 +374,8 @@ class GetStoreInventoryItems(APIView):
             if public_mode:
                 items_query = items_query.filter(paused=False, stock__gt=0)
             
-            if category_id:
-                items_query = items_query.filter(product__category_id=category_id)
+            if parsed_category_id is not None:
+                items_query = items_query.filter(product__category_id=parsed_category_id)
                 
             if out_of_stock and not public_mode:
                 items_query = items_query.filter(stock=0)
@@ -462,8 +481,8 @@ class GetStoreInventoryItems(APIView):
             )
             if public_mode:
                 store_combos_qs = store_combos_qs.filter(paused=False, stock__gt=0)
-            if category_id:
-                store_combos_qs = store_combos_qs.filter(category_id=category_id)
+            if parsed_category_id is not None:
+                store_combos_qs = store_combos_qs.filter(category_id=parsed_category_id)
             if out_of_stock and not public_mode:
                 store_combos_qs = store_combos_qs.filter(stock=0)
             store_combos_list = [c.get_json() for c in store_combos_qs.order_by('-creation')]
@@ -475,12 +494,12 @@ class GetStoreInventoryItems(APIView):
                 'store_categories': list(store_categories),
                 'pagination': {
                     'has_next': current_items.has_next() if current_items else False,
-                    'current_page': int(page),
+                    'current_page': current_items.number if current_items else safe_page_num,
                     'total_pages': paginator.num_pages
                 }
             }, status=status.HTTP_200_OK)
 
-        except CompanyStore.DoesNotExist:
+        except (CompanyStore.DoesNotExist, ValidationError, ValueError, TypeError):
             return Response({'error': 'No existe la sucursal especificada.'}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({'error': f'Error interno: {e}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -527,7 +546,7 @@ class GetAtlasPlusPlanDetails(APIView):
         estado de cuota actual, datos fiscales del emisor y costos en tiempo real (USD y Bs BCV)
         para el plan Atlas Plus.
         """
-        config = SystemConfig.objects.latest('creation')
+        config = SystemConfig.objects.order_by('-creation').first() or SystemConfig.objects.create()
         atlas_plan, _ = AtlasPlusPlan.objects.get_or_create(user=request.user)
         
         dollar_bcv_tax = _get_cached_bcv_rate(default=1.0)
@@ -624,7 +643,7 @@ class UploadSubscriptionPayment(APIView):
                     pass
 
                 if bank_api_available:
-                    config = SystemConfig.objects.latest('creation')
+                    config = SystemConfig.objects.order_by('-creation').first() or SystemConfig.objects.create()
                     period_start = (
                         atlas_plan.valid_until
                         if (atlas_plan.tier == AtlasSubscriptionTier.PREMIUM and atlas_plan.valid_until and atlas_plan.valid_until > now)
@@ -657,6 +676,8 @@ class UploadSubscriptionPayment(APIView):
                 status=status.HTTP_406_NOT_ACCEPTABLE,
             )
 
+        return Response({'error': 'Tipo de suscripción inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+
 
 class FullPaySubscriptionWithWalletView(APIView):
     throttle_classes = [ScopedRateThrottle]
@@ -681,10 +702,10 @@ class FullPaySubscriptionWithWalletView(APIView):
                 return Response({'error': "No se pudo determinar la tasa del dolar."}, status=status.HTTP_423_LOCKED)
 
             with transaction.atomic():
-                wallet = UserWallet.objects.select_for_update().get(user=request.user)
+                wallet, _ = UserWallet.objects.select_for_update().get_or_create(user=request.user)
 
-                config = SystemConfig.objects.latest('creation')
-                atlas_plan = AtlasPlusPlan.objects.select_for_update().get(user=request.user)
+                config = SystemConfig.objects.order_by('-creation').first() or SystemConfig.objects.create()
+                atlas_plan, _ = AtlasPlusPlan.objects.select_for_update().get_or_create(user=request.user)
                 price_usd = config.atlas_plus_price_usd
                 now = timezone.now()
 
@@ -1681,7 +1702,7 @@ class UpdateStoreAPI(APIView):
         try:
             # Obtenemos la tienda directamente por su ID
             store = CompanyStore.objects.get(id=data['store_id'])
-        except CompanyStore.DoesNotExist:
+        except (CompanyStore.DoesNotExist, ValidationError, ValueError, TypeError):
             return Response({'error': 'No se encontró la sucursal.'}, status=status.HTTP_404_NOT_FOUND)
 
         if store.company.owner != request.user:
@@ -2271,7 +2292,10 @@ class MerchantPaymentMethodViewSet(viewsets.ViewSet):
 
         target_company = None
         if order_id:
-            order = Order.objects.select_related('store__company').filter(id=order_id).first()
+            try:
+                order = Order.objects.select_related('store__company').filter(id=int(order_id)).first()
+            except (ValueError, TypeError):
+                order = None
             if not order:
                 return Response({'error': 'Orden no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
             if (
@@ -2282,12 +2306,18 @@ class MerchantPaymentMethodViewSet(viewsets.ViewSet):
                 return Response({'error': 'No tienes permiso para ver los métodos de pago de esta orden.'}, status=status.HTTP_403_FORBIDDEN)
             target_company = order.store.company
         elif store_id:
-            store = CompanyStore.objects.select_related('company').filter(id=store_id).first()
+            try:
+                store = CompanyStore.objects.select_related('company').filter(id=store_id).first()
+            except (ValidationError, ValueError, TypeError):
+                store = None
             if not store:
                 return Response({'error': 'Sucursal no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
             target_company = store.company
         elif company_id:
-            target_company = Company.objects.filter(id=company_id).first()
+            try:
+                target_company = Company.objects.filter(id=company_id).first()
+            except (ValidationError, ValueError, TypeError):
+                target_company = None
             if not target_company:
                 return Response({'error': 'Compañía no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
         else:

@@ -1288,14 +1288,23 @@ Estás hablando directamente con el dueño/operador de la compañía **{snapshot
 
         if action_type == "CREATE_FLASH_OFFER":
             item_id = payload.get("item_id")
-            percentage = int(payload.get("percentage", 15) or 15)
-            duration_hours = int(payload.get("duration_hours", 24) or 24)
+            try:
+                percentage = int(payload.get("percentage", 15) or 15)
+            except (ValueError, TypeError):
+                percentage = 15
+            try:
+                duration_hours = int(payload.get("duration_hours", 24) or 24)
+            except (ValueError, TypeError):
+                duration_hours = 24
             percentage = max(5, min(80, percentage))
             duration_hours = max(1, min(168, duration_hours))
 
-            item = InventoryItem.objects.filter(
-                id=item_id, store__company=self.company
-            ).select_related("product", "store").first()
+            try:
+                item = InventoryItem.objects.filter(
+                    id=item_id, store__company=self.company
+                ).select_related("product", "store").first()
+            except Exception:
+                item = None
             if not item:
                 return {"success": False, "error": "El ítem de inventario no existe o no pertenece a tu compañía."}
 
@@ -1331,7 +1340,10 @@ Estás hablando directamente con el dueño/operador de la compañía **{snapshot
 
         if action_type == "ACTIVATE_TOKEN_DISCOUNT":
             product_id = payload.get("product_id")
-            tokens_per_dollar = int(payload.get("tokens_per_dollar", 10) or 10)
+            try:
+                tokens_per_dollar = int(payload.get("tokens_per_dollar", 10) or 10)
+            except (ValueError, TypeError):
+                tokens_per_dollar = 10
             tokens_per_dollar = max(1, min(100, tokens_per_dollar))
 
             with transaction.atomic():
@@ -1342,7 +1354,10 @@ Estás hablando directamente con el dueño/operador de la compañía **{snapshot
 
                 updated_product_name = None
                 if product_id:
-                    prod = Product.objects.filter(id=product_id, company=self.company).first()
+                    try:
+                        prod = Product.objects.filter(id=product_id, company=self.company).first()
+                    except Exception:
+                        prod = None
                     if prod:
                         prod.discounts_by_tokens_active = True
                         prod.save(update_fields=["discounts_by_tokens_active"])
@@ -1365,17 +1380,28 @@ Estás hablando directamente con el dueño/operador de la compañía **{snapshot
             }
 
         if action_type == "LAUNCH_RESCUE_CAMPAIGN":
+            try:
+                offer_pct = int(payload.get("offer_percentage", 10) or 10)
+            except (ValueError, TypeError):
+                offer_pct = 10
+            try:
+                dur_h = int(payload.get("duration_hours", 24) or 24)
+            except (ValueError, TypeError):
+                dur_h = 24
             return self.launch_lead_rescue_campaign(
                 item_id=payload.get("item_id"),
-                offer_percentage=int(payload.get("offer_percentage", 10) or 10),
-                duration_hours=int(payload.get("duration_hours", 24) or 24),
+                offer_percentage=offer_pct,
+                duration_hours=dur_h,
             )
 
         if action_type == "GENERATE_STORY_SCRIPT":
             item_id = payload.get("item_id")
-            item = InventoryItem.objects.filter(
-                id=item_id, store__company=self.company
-            ).select_related("product", "store").first()
+            try:
+                item = InventoryItem.objects.filter(
+                    id=item_id, store__company=self.company
+                ).select_related("product", "store").first()
+            except Exception:
+                item = None
             prod_name = item.product.name if item else self.company.name
             price_str = f"${item.get_effective_price()}" if item else "el mejor precio"
             script = {
@@ -1407,9 +1433,12 @@ Estás hablando directamente con el dueño/operador de la compañía **{snapshot
         if not item_id:
             return {"success": False, "error": "Se requiere el ID del producto en inventario (item_id)."}
 
-        item = InventoryItem.objects.filter(
-            id=item_id, store__company=self.company, paused=False
-        ).select_related("product", "store").first()
+        try:
+            item = InventoryItem.objects.filter(
+                id=item_id, store__company=self.company, paused=False
+            ).select_related("product", "store").first()
+        except Exception:
+            item = None
         if not item:
             return {"success": False, "error": "El producto no existe o está pausado."}
 

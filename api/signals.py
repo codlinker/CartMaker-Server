@@ -96,8 +96,12 @@ def on_payment_created(sender, instance: MerchantPlanPayment, created: bool, **k
                         )
 
                 # 2. ACREDITAMOS EL PAGO MÓVIL/TRANSFERENCIA
-                monto_pagado_bs = Decimal(str(instance.amount))
-                tasa_bcv = Decimal(str(instance.bcv_taxes_to_day))
+                monto_pagado_bs = Decimal(str(instance.amount or '0'))
+                tasa_bcv = Decimal(str(instance.bcv_taxes_to_day or '0'))
+                if tasa_bcv <= Decimal('0'):
+                    tasa_bcv = Decimal(str(getattr(SystemConfig.objects.order_by('-creation').first(), 'bcv_tax', None) or '1'))
+                    if tasa_bcv <= Decimal('0'):
+                        tasa_bcv = Decimal('1')
                 monto_pagado_usd = monto_pagado_bs / tasa_bcv
 
                 wallet.regist_transaction(
@@ -230,8 +234,12 @@ def on_atlas_payment_status_changed(sender, instance: AtlasPlusPlanPayment, crea
             # --- CASO APROBADO ---
             elif instance.status == PaymentStatus.APPROVED:
                 wallet, _ = UserWallet.objects.select_for_update().get_or_create(user=user)
-                tasa_bcv = Decimal(str(instance.bcv_taxes_to_day))
-                monto_pagado_usd = Decimal(str(instance.amount)) / tasa_bcv
+                tasa_bcv = Decimal(str(instance.bcv_taxes_to_day or '0'))
+                if tasa_bcv <= Decimal('0'):
+                    tasa_bcv = Decimal(str(getattr(config, 'bcv_tax', None) or '1'))
+                    if tasa_bcv <= Decimal('0'):
+                        tasa_bcv = Decimal('1')
+                monto_pagado_usd = Decimal(str(instance.amount or '0')) / tasa_bcv
 
                 wallet.regist_transaction(
                     monto_pagado_usd, 'atlas',
@@ -333,9 +341,16 @@ def on_atlas_payment_status_changed(sender, instance: AtlasPlusPlanPayment, crea
 @receiver(post_save, sender=AtlasPlusPlan, dispatch_uid="invalidate_atlas_plan_cache_unique")
 @receiver(post_save, sender=AtlasPlusPlanPayment, dispatch_uid="invalidate_atlas_payment_cache_unique")
 def invalidate_atlas_subscriptions_cache(sender, instance, **kwargs):
-    user_id = instance.user_id if isinstance(instance, AtlasPlusPlan) else instance.plan.user_id
+    try:
+        user_id = instance.user_id if isinstance(instance, AtlasPlusPlan) else (
+            instance.plan.user_id if 'plan' in instance._state.fields_cache else (
+                AtlasPlusPlan.objects.filter(pk=instance.plan_id).values_list('user_id', flat=True).first()
+            )
+        )
+    except Exception:
+        user_id = None
     if user_id:
-        transaction.on_commit(lambda: cache.delete(f"cartmaker:tenant:{user_id}:subscriptions"))
+        transaction.on_commit(lambda uid=user_id: cache.delete(f"cartmaker:tenant:{uid}:subscriptions"))
 
 @receiver(post_save, sender=ProductViewLog)
 def on_view_log_saved(sender, instance, **kwargs):
@@ -363,9 +378,11 @@ def on_view_log_saved(sender, instance, **kwargs):
 
 @receiver(post_delete, sender=ProductViewLog)
 def on_view_log_deleted(sender, instance, **kwargs):
-    transaction.on_commit(lambda: recalculate_item_popularity(instance.inventory_item_id))
+    item_id = instance.inventory_item_id
+    if item_id:
+        transaction.on_commit(lambda iid=item_id: recalculate_item_popularity(iid))
 
-def _invalidate_store_catalog_caches(store, item_id=None, combo_id=None):
+def _invalidate_store_catalog_caches(store=None, item_id=None, combo_id=None, store_id=None, company_id=None):
     """
     Invalida de forma determinista todos los cachés estructurales asociados a una sucursal
     (Mapa store_products, Vitrina store:v2, Home feed, Categorías, Ofertas y Búsqueda)
@@ -381,21 +398,27 @@ def _invalidate_store_catalog_caches(store, item_id=None, combo_id=None):
         if direct_keys:
             cache.delete_many(direct_keys)
 
+        if store is None and store_id:
+            store = CompanyStore.objects.select_related('location').filter(id=store_id).first()
+
+        resolved_store_id = store_id or getattr(store, 'id', None)
+        resolved_company_id = company_id or getattr(store, 'company_id', None)
+        has_del_pattern = hasattr(cache, 'delete_pattern')
+
+        if has_del_pattern and resolved_store_id:
+            cache.delete_pattern(f"cartmaker:struct:map_products:v2:{resolved_store_id}:*")
+            cache.delete_pattern(f"cartmaker:struct:store_products:{resolved_store_id}:*")
+            cache.delete_pattern(f"cartmaker:struct:store:v2:{resolved_store_id}:*")
+        if has_del_pattern and resolved_company_id:
+            cache.delete_pattern(f"cartmaker:struct:store:v2:*:{resolved_company_id}:*")
+
         if not store:
             return
 
-        store_id = getattr(store, 'id', None)
-        company_id = getattr(store, 'company_id', None)
-        has_del_pattern = hasattr(cache, 'delete_pattern')
-
-        if has_del_pattern and store_id:
-            cache.delete_pattern(f"cartmaker:struct:map_products:v2:{store_id}:*")
-            cache.delete_pattern(f"cartmaker:struct:store_products:{store_id}:*")
-            cache.delete_pattern(f"cartmaker:struct:store:v2:{store_id}:*")
-        if has_del_pattern and company_id:
-            cache.delete_pattern(f"cartmaker:struct:store:v2:*:{company_id}:*")
-
-        location = getattr(store, 'location', None)
+        try:
+            location = getattr(store, 'location', None)
+        except Exception:
+            location = None
         if location and getattr(location, 'coordinates', None) and has_del_pattern:
             approx_lat = round(location.coordinates.y, 3)
             approx_lng = round(location.coordinates.x, 3)
@@ -409,47 +432,87 @@ def _invalidate_store_catalog_caches(store, item_id=None, combo_id=None):
 
 @receiver(post_save, sender=InventoryItem)
 def update_item_volatile_cache(sender, instance: InventoryItem, **kwargs):
-    cache_key = f"cartmaker:volatile:item:{instance.id}"
+    item_id = instance.id
+    store_id = instance.store_id
+    cached_store = instance._state.fields_cache.get('store')
+    cache_key = f"cartmaker:volatile:item:{item_id}"
     state = {
         "stock": instance.stock,
         "paused": instance.paused,
         "custom_price": float(instance.custom_price) if instance.custom_price else None
     }
     def _sync_item_cache():
-        cache.set(cache_key, state, timeout=86400)
-        _invalidate_store_catalog_caches(getattr(instance, 'store', None), item_id=instance.id)
+        try:
+            cache.set(cache_key, state, timeout=86400)
+        except Exception:
+            pass
+        _invalidate_store_catalog_caches(store=cached_store, item_id=item_id, store_id=store_id)
     transaction.on_commit(_sync_item_cache)
 
 
 @receiver(post_save, sender=ProductsCombo)
 def update_combo_volatile_cache(sender, instance: ProductsCombo, **kwargs):
+    combo_id = instance.id
+    store_id = instance.store_id
+    company_id = instance.company_id
+    cached_store = instance._state.fields_cache.get('store')
+    paused_flag = bool(instance.paused)
     def _sync_combo_cache():
-        eff_stock = instance.get_effective_stock()
+        try:
+            eff_stock = instance.get_effective_stock()
+        except Exception:
+            eff_stock = 0
         state = {
             "stock": eff_stock,
-            "paused": bool(instance.paused),
+            "paused": paused_flag,
             "custom_price": None,
         }
-        cache.set(f"cartmaker:volatile:item:{instance.id}", state, timeout=86400)
-        cache.set(f"cartmaker:volatile:combo:{instance.id}", state, timeout=86400)
-        _invalidate_store_catalog_caches(getattr(instance, 'store', None), combo_id=instance.id)
+        try:
+            cache.set(f"cartmaker:volatile:item:{combo_id}", state, timeout=86400)
+            cache.set(f"cartmaker:volatile:combo:{combo_id}", state, timeout=86400)
+        except Exception:
+            pass
+        _invalidate_store_catalog_caches(
+            store=cached_store,
+            combo_id=combo_id,
+            store_id=store_id,
+            company_id=company_id,
+        )
     transaction.on_commit(_sync_combo_cache)
 
 
 @receiver(post_delete, sender=ProductsCombo)
 def delete_combo_volatile_cache(sender, instance: ProductsCombo, **kwargs):
+    combo_id = instance.id
+    store_id = instance.store_id
+    company_id = instance.company_id
+    cached_store = instance._state.fields_cache.get('store')
     def _finalize_combo_deletion():
-        cache.delete(f"cartmaker:volatile:item:{instance.id}")
-        cache.delete(f"cartmaker:volatile:combo:{instance.id}")
-        _invalidate_store_catalog_caches(getattr(instance, 'store', None), combo_id=instance.id)
+        try:
+            cache.delete(f"cartmaker:volatile:item:{combo_id}")
+            cache.delete(f"cartmaker:volatile:combo:{combo_id}")
+        except Exception:
+            pass
+        _invalidate_store_catalog_caches(
+            store=cached_store,
+            combo_id=combo_id,
+            store_id=store_id,
+            company_id=company_id,
+        )
     transaction.on_commit(_finalize_combo_deletion)
 
 
 @receiver(post_delete, sender=InventoryItem)
 def delete_item_volatile_cache(sender, instance: InventoryItem, **kwargs):
+    item_id = instance.id
+    store_id = instance.store_id
+    cached_store = instance._state.fields_cache.get('store')
     def finalize_item_deletion():
-        cache.delete(f"cartmaker:volatile:item:{instance.id}")
-        _invalidate_store_catalog_caches(getattr(instance, 'store', None), item_id=instance.id)
+        try:
+            cache.delete(f"cartmaker:volatile:item:{item_id}")
+        except Exception:
+            pass
+        _invalidate_store_catalog_caches(store=cached_store, item_id=item_id, store_id=store_id)
     transaction.on_commit(finalize_item_deletion)
 
 @receiver(post_save, sender=Product)
@@ -607,23 +670,28 @@ def invalidate_company_cache(sender, instance, **kwargs):
 @receiver(post_save, sender=Notification)
 def invalidate_subscriptions_cache(sender, instance, **kwargs):
     user_id = None
-    if isinstance(instance, UserWallet):
-        user_id = instance.user_id
-    elif isinstance(instance, MerchantSubscription):
-        user_id = instance.merchant_id
-    elif isinstance(instance, MerchantPlanPayment):
-        user_id = instance.subscription.merchant_id
-    elif isinstance(instance, Notification):
-        if instance.category in [NotificationCategory.PAYMENT_REJECTED, NotificationCategory.PAYMENT_APPROVED]:
+    try:
+        if isinstance(instance, UserWallet):
             user_id = instance.user_id
-            
+        elif isinstance(instance, MerchantSubscription):
+            user_id = instance.merchant_id
+        elif isinstance(instance, MerchantPlanPayment):
+            user_id = instance.subscription.merchant_id if 'subscription' in instance._state.fields_cache else (
+                MerchantSubscription.objects.filter(pk=instance.subscription_id).values_list('merchant_id', flat=True).first()
+            )
+        elif isinstance(instance, Notification):
+            if instance.category in [NotificationCategory.PAYMENT_REJECTED, NotificationCategory.PAYMENT_APPROVED]:
+                user_id = instance.user_id
+    except Exception:
+        user_id = None
+
     if user_id:
-        def clear_sub_and_company():
-            cache.delete(f"cartmaker:tenant:{user_id}:subscriptions")
-            # El blindaje final que agregamos en el paso anterior, ahora dentro de on_commit
-            if isinstance(instance, (MerchantSubscription, MerchantPlanPayment)):
-                cache.delete(f"cartmaker:tenant:{user_id}:company")
-                
+        is_merchant_sub_related = isinstance(instance, (MerchantSubscription, MerchantPlanPayment))
+        def clear_sub_and_company(uid=user_id, clear_company=is_merchant_sub_related):
+            cache.delete(f"cartmaker:tenant:{uid}:subscriptions")
+            if clear_company:
+                cache.delete(f"cartmaker:tenant:{uid}:company")
+
         transaction.on_commit(clear_sub_and_company)
 
 

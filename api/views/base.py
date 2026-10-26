@@ -1,10 +1,16 @@
 """Shared imports and helper utilities for the modular api.views package."""
 import csv
+from decimal import Decimal, InvalidOperation
 import hashlib
 import io
 import json
+import logging
+import math
 import re
-from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
+from django.http import Http404
+
+logger = logging.getLogger(__name__)
 from dateutil.relativedelta import relativedelta
 from rest_framework import parsers
 from rest_framework.views import APIView

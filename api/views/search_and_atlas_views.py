@@ -125,6 +125,10 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
 
         if not sub_category_id or lat is None or lng is None:
             return Response({'error': 'Faltan parámetros'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            sub_category_id = int(sub_category_id)
+        except (ValueError, TypeError):
+            return Response({'error': 'sub_category_id inválido'}, status=status.HTTP_400_BAD_REQUEST)
 
         engine = ProductSearchEngine(lat, lng, user=request.user)
         data_list = engine.get_category_feed(
@@ -142,6 +146,29 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
         lat, lng = self._get_coordinates(request)
         _, price_order = self._get_sorting_params(request)
         page, page_size = self._get_pagination_params(request)
+
+        if store_id in ('null', 'None', ''):
+            store_id = None
+        if company_id in ('null', 'None', ''):
+            company_id = None
+
+        if store_id:
+            try:
+                store_id = str(uuid.UUID(str(store_id).strip()))
+            except (ValueError, TypeError, AttributeError):
+                store_id = None
+        if company_id:
+            try:
+                company_id = str(uuid.UUID(str(company_id).strip()))
+            except (ValueError, TypeError, AttributeError):
+                company_id = None
+        if category_id not in (None, '', 'null', 'all'):
+            try:
+                category_id = int(category_id)
+            except (ValueError, TypeError):
+                category_id = None
+        else:
+            category_id = None
 
         if (not store_id and not company_id) or lat is None or lng is None:
             return Response(
@@ -392,7 +419,7 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
             
             return Response({'success': True, 'data': data}, status=status.HTTP_200_OK)
             
-        except (InventoryItem.DoesNotExist, ProductsCombo.DoesNotExist):
+        except (InventoryItem.DoesNotExist, ProductsCombo.DoesNotExist, ValidationError, ValueError, TypeError):
             return Response({'error': 'El producto o combo no existe o fue retirado.'}, status=status.HTTP_404_NOT_FOUND)
 
     # ------------------------------------------------------------------------
@@ -415,7 +442,7 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
                 target_obj = CompanyVideoStory.objects.get(id=target_id)
             else:
                 return Response({'error': 'Tipo no soportado.'}, status=status.HTTP_400_BAD_REQUEST)
-        except (InventoryItem.DoesNotExist, ProductsCombo.DoesNotExist, CompanyVideoStory.DoesNotExist):
+        except (InventoryItem.DoesNotExist, ProductsCombo.DoesNotExist, CompanyVideoStory.DoesNotExist, ValidationError, ValueError, TypeError):
             return Response({'error': 'El contenido no existe.'}, status=status.HTTP_404_NOT_FOUND)
 
         content_type_obj = ContentType.objects.get_for_model(target_obj)
@@ -453,7 +480,7 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
                 video=video
             )
             return Response({'status': 'viewed'}, status=status.HTTP_200_OK)
-        except CompanyVideoStory.DoesNotExist:
+        except (CompanyVideoStory.DoesNotExist, ValidationError, ValueError, TypeError):
             return Response({'error': 'Historia no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
 class AtlasViewSet(viewsets.ViewSet):
@@ -1648,10 +1675,13 @@ class AtlasViewSet(viewsets.ViewSet):
                 existing_inv = None
             invoice = existing_inv or AtlasPlusInvoice.issue_for_payment(payment=payment, config=config)
         else:
-            inv_qs = AtlasPlusInvoice.objects.select_related('payment', 'user').filter(pk=lookup_id)
-            if not (request.user.is_staff or request.user.is_superuser):
-                inv_qs = inv_qs.filter(user=request.user)
-            invoice = inv_qs.first()
+            try:
+                inv_qs = AtlasPlusInvoice.objects.select_related('payment', 'user').filter(pk=lookup_id)
+                if not (request.user.is_staff or request.user.is_superuser):
+                    inv_qs = inv_qs.filter(user=request.user)
+                invoice = inv_qs.first()
+            except (ValidationError, ValueError, TypeError):
+                invoice = None
             if not invoice:
                 return Response({'error': 'No se encontró la factura especificada.'}, status=status.HTTP_404_NOT_FOUND)
 

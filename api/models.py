@@ -2383,17 +2383,32 @@ class ProductsCombo(models.Model):
 
     def get_effective_stock(self) -> int:
         base_stock = max(0, int(self.stock or 0))
+        items = self._get_items_list()
+        if not items:
+            return 0
         if not self.deduct_component_stock:
             return base_stock
         caps = [base_stock]
-        for item in self._get_items_list():
+        for item in items:
+            qty = max(1, int(item.quantity or 1))
             inv = item.inventory_item if item.inventory_item_id else None
+            if inv is None and item.product_id and self.store_id:
+                inv = (
+                    InventoryItem.objects.filter(
+                        store_id=self.store_id,
+                        product_id=item.product_id,
+                        paused=False,
+                    )
+                    .order_by('-stock')
+                    .first()
+                )
             if inv is not None:
                 if inv.paused:
                     caps.append(0)
                 else:
-                    qty = max(1, int(item.quantity or 1))
                     caps.append(max(0, int(inv.stock or 0)) // qty)
+            else:
+                caps.append(0)
         return min(caps) if caps else 0
 
     def get_combo_summary(self) -> str:

@@ -298,32 +298,37 @@ def parse_flexible_date(date_str):
                 raise ValueError(f"Formato de fecha no reconocido: {date_str}")
             
 def recalculate_item_popularity(inventory_item_id: str):
-    from .models import ProductViewLog, InventoryItem
-    from django.utils import timezone
-    from datetime import timedelta
+    if not inventory_item_id:
+        return
+    try:
+        from .models import ProductViewLog, InventoryItem
+        from django.utils import timezone
+        from datetime import timedelta
 
-    # 💡 LA MAGIA: Solo nos importa el engagement fresco de los últimos 14 días
-    time_horizon = timezone.now() - timedelta(days=14)
-    
-    stats = ProductViewLog.objects.filter(
-        inventory_item_id=inventory_item_id,
-        start_time__gte=time_horizon # 👈 Filtro crítico
-    ).aggregate(
-        unique_viewers=Count('client', distinct=True),
-        unique_carters=Count('client', filter=Q(added_to_cart=True), distinct=True),
-        unique_buyers=Count('client', filter=Q(bought=True), distinct=True)
-    )
-    
-    # Pesos comerciales exponenciales calibrados para el funnel
-    views_score = (stats['unique_viewers'] or 0) * 1.0
-    carts_score = (stats['unique_carters'] or 0) * 10.0
-    buys_score = (stats['unique_buyers'] or 0) * 50.0 # Multiplicador de alto impacto
-    
-    total_popularity = views_score + carts_score + buys_score
-    
-    InventoryItem.objects.filter(id=inventory_item_id).update(
-        cached_popularity_score=total_popularity
-    )
+        # 💡 LA MAGIA: Solo nos importa el engagement fresco de los últimos 14 días
+        time_horizon = timezone.now() - timedelta(days=14)
+        
+        stats = ProductViewLog.objects.filter(
+            inventory_item_id=inventory_item_id,
+            start_time__gte=time_horizon # 👈 Filtro crítico
+        ).aggregate(
+            unique_viewers=Count('client', distinct=True),
+            unique_carters=Count('client', filter=Q(added_to_cart=True), distinct=True),
+            unique_buyers=Count('client', filter=Q(bought=True), distinct=True)
+        )
+        
+        # Pesos comerciales exponenciales calibrados para el funnel
+        views_score = (stats['unique_viewers'] or 0) * 1.0
+        carts_score = (stats['unique_carters'] or 0) * 10.0
+        buys_score = (stats['unique_buyers'] or 0) * 50.0 # Multiplicador de alto impacto
+        
+        total_popularity = views_score + carts_score + buys_score
+        
+        InventoryItem.objects.filter(id=inventory_item_id).update(
+            cached_popularity_score=total_popularity
+        )
+    except Exception:
+        pass
 
 def validate_venezuelan_rif_modulo11(raw_rif: str):
     """

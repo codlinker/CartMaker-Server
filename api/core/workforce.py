@@ -2530,6 +2530,8 @@ def rollback_employee_changes(
             keys_to_del = (
                 [f"cartmaker:struct:item:{iid}" for iid in affected_item_cache_ids]
                 + [f"cartmaker:volatile:item:{iid}" for iid in affected_item_cache_ids]
+                + [f"cartmaker:struct:combo:{iid}" for iid in affected_item_cache_ids]
+                + [f"cartmaker:volatile:combo:{iid}" for iid in affected_item_cache_ids]
             )
             transaction.on_commit(lambda: cache.delete_many(keys_to_del))
 

@@ -99,7 +99,10 @@ class CartMakerMapViewSet(viewsets.ViewSet):
 
             # --- APLICACIÓN DE FILTROS ORIGINALES ---
             if filters_dict['c_cat']:
-                queryset = queryset.filter(store__company__category_id=filters_dict['c_cat'])
+                try:
+                    queryset = queryset.filter(store__company__category_id=int(filters_dict['c_cat']))
+                except (ValueError, TypeError):
+                    pass
             if filters_dict['plat']:
                 queryset = queryset.filter(store__company__is_platinum=True)
 
@@ -107,26 +110,40 @@ class CartMakerMapViewSet(viewsets.ViewSet):
                 inventory_query = Q(store__product_items__paused=False, store__product_items__stock__gt=0)
                 combo_query = Q(store__combos__paused=False, store__combos__stock__gt=0)
                 if filters_dict['p_sub']:
-                    inventory_query &= Q(store__product_items__product__category_id=filters_dict['p_sub'])
-                    combo_query &= Q(store__combos__category_id=filters_dict['p_sub'])
+                    try:
+                        p_sub_id = int(filters_dict['p_sub'])
+                        inventory_query &= Q(store__product_items__product__category_id=p_sub_id)
+                        combo_query &= Q(store__combos__category_id=p_sub_id)
+                    except (ValueError, TypeError):
+                        pass
                 elif filters_dict['p_cat']:
-                    inventory_query &= Q(store__product_items__product__category__parent_category_id=filters_dict['p_cat'])
-                    combo_query &= Q(store__combos__category__parent_category_id=filters_dict['p_cat'])
+                    try:
+                        p_cat_id = int(filters_dict['p_cat'])
+                        inventory_query &= Q(store__product_items__product__category__parent_category_id=p_cat_id)
+                        combo_query &= Q(store__combos__category__parent_category_id=p_cat_id)
+                    except (ValueError, TypeError):
+                        pass
 
                 if filters_dict['min_p']:
-                    min_val = float(filters_dict['min_p'])
-                    inventory_query &= (
-                        Q(store__product_items__custom_price__isnull=False, store__product_items__custom_price__gte=min_val) |
-                        Q(store__product_items__custom_price__isnull=True, store__product_items__product__price__gte=min_val)
-                    )
-                    combo_query &= Q(store__combos__price__gte=min_val)
+                    try:
+                        min_val = float(filters_dict['min_p'])
+                        inventory_query &= (
+                            Q(store__product_items__custom_price__isnull=False, store__product_items__custom_price__gte=min_val) |
+                            Q(store__product_items__custom_price__isnull=True, store__product_items__product__price__gte=min_val)
+                        )
+                        combo_query &= Q(store__combos__price__gte=min_val)
+                    except (ValueError, TypeError):
+                        pass
                 if filters_dict['max_p']:
-                    max_val = float(filters_dict['max_p'])
-                    inventory_query &= (
-                        Q(store__product_items__custom_price__isnull=False, store__product_items__custom_price__lte=max_val) |
-                        Q(store__product_items__custom_price__isnull=True, store__product_items__product__price__lte=max_val)
-                    )
-                    combo_query &= Q(store__combos__price__lte=max_val)
+                    try:
+                        max_val = float(filters_dict['max_p'])
+                        inventory_query &= (
+                            Q(store__product_items__custom_price__isnull=False, store__product_items__custom_price__lte=max_val) |
+                            Q(store__product_items__custom_price__isnull=True, store__product_items__product__price__lte=max_val)
+                        )
+                        combo_query &= Q(store__combos__price__lte=max_val)
+                    except (ValueError, TypeError):
+                        pass
                 queryset = queryset.filter(inventory_query | combo_query).distinct()
 
             if filters_dict['q']:
@@ -208,10 +225,38 @@ class CartMakerMapViewSet(viewsets.ViewSet):
             store_id = request.query_params.get('store_id')
             if not store_id:
                 return Response({'error': 'store_id es requerido'}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                store_id = str(uuid.UUID(str(store_id).strip()))
+            except (ValueError, TypeError, AttributeError):
+                return Response({'error': 'store_id inválido'}, status=status.HTTP_400_BAD_REQUEST)
 
-            subcategory_id = request.query_params.get('subcategory_id') or 'all'
-            min_price = request.query_params.get('min_price') or 'none'
-            max_price = request.query_params.get('max_price') or 'none'
+            raw_sub_id = request.query_params.get('subcategory_id')
+            parsed_sub_id = None
+            if raw_sub_id not in (None, '', 'all'):
+                try:
+                    parsed_sub_id = int(raw_sub_id)
+                except (ValueError, TypeError):
+                    parsed_sub_id = None
+
+            raw_min_p = request.query_params.get('min_price')
+            parsed_min_p = None
+            if raw_min_p not in (None, '', 'none'):
+                try:
+                    parsed_min_p = float(raw_min_p)
+                except (ValueError, TypeError):
+                    parsed_min_p = None
+
+            raw_max_p = request.query_params.get('max_price')
+            parsed_max_p = None
+            if raw_max_p not in (None, '', 'none'):
+                try:
+                    parsed_max_p = float(raw_max_p)
+                except (ValueError, TypeError):
+                    parsed_max_p = None
+
+            subcategory_id = str(parsed_sub_id) if parsed_sub_id is not None else 'all'
+            min_price = str(parsed_min_p) if parsed_min_p is not None else 'none'
+            max_price = str(parsed_max_p) if parsed_max_p is not None else 'none'
             is_combo_param = request.query_params.get('is_combo')
 
             # 1. Definir llave única estructural para esta combinación exacta de filtros en la sucursal
@@ -239,12 +284,12 @@ class CartMakerMapViewSet(viewsets.ViewSet):
                         paused=False,
                         stock__gt=0,
                     )
-                    if request.query_params.get('subcategory_id'):
-                        combos_qs = combos_qs.filter(category_id=request.query_params.get('subcategory_id'))
-                    if request.query_params.get('min_price'):
-                        combos_qs = combos_qs.filter(price__gte=float(request.query_params.get('min_price')))
-                    if request.query_params.get('max_price'):
-                        combos_qs = combos_qs.filter(price__lte=float(request.query_params.get('max_price')))
+                    if parsed_sub_id is not None:
+                        combos_qs = combos_qs.filter(category_id=parsed_sub_id)
+                    if parsed_min_p is not None:
+                        combos_qs = combos_qs.filter(price__gte=parsed_min_p)
+                    if parsed_max_p is not None:
+                        combos_qs = combos_qs.filter(price__lte=parsed_max_p)
 
                     combos_struct = [c.get_json() for c in combos_qs.order_by('-creation')[:25]]
                 except Exception as combo_err:
@@ -286,18 +331,18 @@ class CartMakerMapViewSet(viewsets.ViewSet):
                 )
 
                 # Aplicar filtro por SubCategoría si viene en los parámetros
-                if request.query_params.get('subcategory_id'):
-                    queryset = queryset.filter(product__category_id=request.query_params.get('subcategory_id'))
+                if parsed_sub_id is not None:
+                    queryset = queryset.filter(product__category_id=parsed_sub_id)
 
                 # Aplicar filtro de rango de precios original evaluando el costo real
-                if request.query_params.get('min_price') or request.query_params.get('max_price'):
+                if parsed_min_p is not None or parsed_max_p is not None:
                     queryset = queryset.annotate(
                         actual_price=Coalesce('custom_price', 'product__price')
                     )
-                    if request.query_params.get('min_price'):
-                        queryset = queryset.filter(actual_price__gte=float(request.query_params.get('min_price')))
-                    if request.query_params.get('max_price'):
-                        queryset = queryset.filter(actual_price__lte=float(request.query_params.get('max_price')))
+                    if parsed_min_p is not None:
+                        queryset = queryset.filter(actual_price__gte=parsed_min_p)
+                    if parsed_max_p is not None:
+                        queryset = queryset.filter(actual_price__lte=parsed_max_p)
 
                 # Evaluamos los primeros 50 ítems del catálogo de la tienda
                 items = queryset[:50]
@@ -531,18 +576,22 @@ class CompanyCacheAPI(APIView):
         items_qs = InventoryItem.objects.filter(store__company_id=company['id'])
         if allowed_store_ids is not None:
             items_qs = items_qs.filter(store_id__in=allowed_store_ids)
-        items_pks = items_qs.values_list('id', flat=True)
-        videos_pks = CompanyVideoStory.objects.filter(company_id=company['id']).values_list('id', flat=True)
+        items_pks_str = [str(uid) for uid in items_qs.values_list('id', flat=True)]
+        videos_pks_str = [str(vid) for vid in CompanyVideoStory.objects.filter(company_id=company['id']).values_list('id', flat=True)]
 
-        pending_items = UniversalComment.objects.filter(content_type=item_ct).annotate(
-            object_uuid=Cast('object_id', output_field=UUIDField())
-        ).filter(object_uuid__in=items_pks).filter(Q(answer_text__isnull=True) | Q(answer_text__exact=''))
+        pending_items_ids = list(
+            UniversalComment.objects.filter(content_type=item_ct, object_id__in=items_pks_str)
+            .filter(Q(answer_text__isnull=True) | Q(answer_text__exact=''))
+            .values_list('id', flat=True)
+        ) if items_pks_str else []
 
-        pending_videos = UniversalComment.objects.filter(content_type=video_ct).annotate(
-            object_uuid=Cast('object_id', output_field=UUIDField())
-        ).filter(object_uuid__in=videos_pks).filter(Q(answer_text__isnull=True) | Q(answer_text__exact=''))
+        pending_videos_ids = list(
+            UniversalComment.objects.filter(content_type=video_ct, object_id__in=videos_pks_str)
+            .filter(Q(answer_text__isnull=True) | Q(answer_text__exact=''))
+            .values_list('id', flat=True)
+        ) if videos_pks_str else []
 
-        pending_questions = list(pending_items.values_list('id', flat=True)) + list(pending_videos.values_list('id', flat=True))
+        pending_questions = pending_items_ids + pending_videos_ids
 
         payment_methods = company.get('payment_methods', [])
         if emp is not None:
@@ -648,7 +697,7 @@ class SystemConfigCacheAPI(APIView):
         """
         Caché de configuracion global y emisor fiscal SENIAT dinámico.
         """
-        config = SystemConfig.objects.latest('creation')
+        config = SystemConfig.objects.order_by('-creation').first() or SystemConfig.objects.create()
         data = {
             'atlas_plus_price_usd': float(config.atlas_plus_price_usd),
             'atlas_plus_price_formatted': format_ve_amount(config.atlas_plus_price_usd, 2, "$", True),

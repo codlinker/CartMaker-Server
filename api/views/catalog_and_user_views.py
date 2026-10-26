@@ -43,6 +43,21 @@ def _safe_delete_combo_own_images(combo: ProductsCombo) -> None:
             print(f"Error borrando imagen propia de combo {combo_id_str}: {e}")
 
 
+def _safe_delete_product_own_images(product: Product) -> None:
+    """
+    Elimina del storage únicamente las imágenes propias subidas para `product.id`
+    (`product_pictures/<product.id>/...`).
+    """
+    prod_id_str = str(product.id)
+    for img in (product.images or []):
+        if not img or prod_id_str not in str(img):
+            continue
+        try:
+            storage_manager.delete_file(img)
+        except Exception as e:
+            print(f"Error borrando imagen propia de producto {prod_id_str}: {e}")
+
+
 def _resolve_and_validate_combo_items(company: Company, store: CompanyStore, raw_combo_items) -> tuple:
     """
     Valida y resuelve relacionalmente la lista `combo_items` contra los modelos `Product`
@@ -493,15 +508,39 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         except WorkforceError as e:
             return _catalog_workforce_error_response(e)
         pk = kwargs.get('pk')
-        if pk and not InventoryItem.objects.filter(pk=pk).exists() and ProductsCombo.objects.filter(pk=pk).exists():
-            return self.combos(request, item_id=str(pk))
-        item = self.get_object()
+        try:
+            if pk and not InventoryItem.objects.filter(pk=pk).exists() and ProductsCombo.objects.filter(pk=pk).exists():
+                return self.combos(request, item_id=str(pk))
+            item = self.get_object()
+        except (ValidationError, ValueError, TypeError):
+            return Response({'error': 'ID de lote inválido.'}, status=status.HTTP_400_BAD_REQUEST)
         try:
             with transaction.atomic():
                 # CART-67: Desvincular explícitamente cualquier video historia asociado antes de eliminar el InventoryItem
                 CompanyVideoStory.objects.filter(associated_item_id=item.id).update(associated_item=None)
-                item_id = item.id
+                item_id = str(item.id)
+                store_id = item.store_id
+                product_id = item.product_id
+                affected_combos = list(
+                    ProductsCombo.objects.select_related('store__location')
+                    .filter(store_id=store_id, combo_items__product_id=product_id)
+                    .distinct()
+                )
                 item.delete()
+                for c in affected_combos:
+                    if hasattr(c, '_prefetched_objects_cache'):
+                        c._prefetched_objects_cache.clear()
+                    eff_stock = c.get_effective_stock()
+                    c_id_str = str(c.id)
+                    c_state = {"stock": eff_stock, "paused": bool(c.paused), "custom_price": None}
+                    transaction.on_commit(
+                        lambda cid=c_id_str, st=c_state: (
+                            cache.set(f"cartmaker:volatile:item:{cid}", st, timeout=86400),
+                            cache.set(f"cartmaker:volatile:combo:{cid}", st, timeout=86400),
+                            cache.delete(f"cartmaker:struct:item:{cid}"),
+                            cache.delete(f"cartmaker:struct:combo:{cid}"),
+                        )
+                    )
                 transaction.on_commit(lambda: cache.delete(f"cartmaker:struct:item:{item_id}"))
             return Response(status=status.HTTP_204_NO_CONTENT)
         except Exception as e:
@@ -1508,13 +1547,6 @@ class ProductViewSet(viewsets.ModelViewSet):
                         else:
                             final_images.append(item)
 
-                    if not final_images and dynamic_data.get('is_combo') and component_products:
-                        for comp_prod in component_products:
-                            for c_img in (comp_prod.images or [])[:1]:
-                                norm_c = storage_manager.normalize_path(c_img)
-                                if norm_c and norm_c not in final_images:
-                                    final_images.append(norm_c)
-
                     product.images = final_images
 
                 product.save()
@@ -1546,12 +1578,22 @@ class ProductViewSet(viewsets.ModelViewSet):
             require_owner_for_destructive_action(request, resource_label='productos del catálogo')
         except WorkforceError as e:
             return _catalog_workforce_error_response(e)
-        product = self.get_object()
+        try:
+            product = self.get_object()
+        except (ValidationError, ValueError, TypeError):
+            return Response({'error': 'ID de producto inválido.'}, status=status.HTTP_400_BAD_REQUEST)
         try:
             with transaction.atomic():
-                affected_item_ids = list(
-                    InventoryItem.objects.filter(product_id=product.id).values_list('id', flat=True)
+                affected_item_ids = [
+                    str(iid) for iid in InventoryItem.objects.filter(product_id=product.id).values_list('id', flat=True)
+                ]
+                affected_combos = list(
+                    ProductsCombo.objects.select_related('store__location')
+                    .filter(combo_items__product_id=product.id)
+                    .distinct()
                 )
+                affected_combo_ids = [str(c.id) for c in affected_combos]
+
                 # CART-67: Desvincular explícitamente los videos asociados antes de eliminar el producto o sus InventoryItem
                 if affected_item_ids:
                     CompanyVideoStory.objects.filter(associated_item_id__in=affected_item_ids).update(
@@ -1564,10 +1606,29 @@ class ProductViewSet(viewsets.ModelViewSet):
                 # Luego eliminamos el registro de la DB
                 product.delete()
 
-                if affected_item_ids:
-                    transaction.on_commit(
-                        lambda: cache.delete_many([f"cartmaker:struct:item:{iid}" for iid in affected_item_ids])
-                    )
+                # Si algún combo quedó con menos de 2 unidades tras eliminar este producto componente, lo pausamos
+                for combo in affected_combos:
+                    if hasattr(combo, '_prefetched_objects_cache'):
+                        combo._prefetched_objects_cache.clear()
+                    remaining_units = sum(max(1, int(ci.quantity or 1)) for ci in combo.combo_items.all())
+                    if remaining_units < 2 and not combo.paused:
+                        combo.paused = True
+                        combo.save(update_fields=['paused'])
+
+                if affected_item_ids or affected_combo_ids:
+                    def _clean_product_delete_caches():
+                        keys_to_del = []
+                        for iid in affected_item_ids:
+                            keys_to_del.append(f"cartmaker:struct:item:{iid}")
+                            keys_to_del.append(f"cartmaker:volatile:item:{iid}")
+                        for cid in affected_combo_ids:
+                            keys_to_del.append(f"cartmaker:struct:item:{cid}")
+                            keys_to_del.append(f"cartmaker:struct:combo:{cid}")
+                            keys_to_del.append(f"cartmaker:volatile:item:{cid}")
+                            keys_to_del.append(f"cartmaker:volatile:combo:{cid}")
+                        if keys_to_del:
+                            cache.delete_many(keys_to_del)
+                    transaction.on_commit(_clean_product_delete_caches)
             return Response(status=status.HTTP_204_NO_CONTENT)
             
         except Exception as e:
@@ -1596,11 +1657,19 @@ class ProductViewSet(viewsets.ModelViewSet):
         try:
             with transaction.atomic():
                 # Filtramos para asegurar que pertenezcan al usuario dueño de la compañía
-                products_to_delete = Product.objects.select_related('company').filter(id__in=product_ids, company__owner=request.user)
+                products_to_delete = list(
+                    Product.objects.select_related('company').filter(id__in=product_ids, company__owner=request.user)
+                )
                 valid_product_ids = [prod.id for prod in products_to_delete]
-                affected_item_ids = list(
-                    InventoryItem.objects.filter(product_id__in=valid_product_ids).values_list('id', flat=True)
+                affected_item_ids = [
+                    str(iid) for iid in InventoryItem.objects.filter(product_id__in=valid_product_ids).values_list('id', flat=True)
+                ] if valid_product_ids else []
+                affected_combos = list(
+                    ProductsCombo.objects.select_related('store__location')
+                    .filter(combo_items__product_id__in=valid_product_ids)
+                    .distinct()
                 ) if valid_product_ids else []
+                affected_combo_ids = [str(c.id) for c in affected_combos]
 
                 # CART-67: Desvincular explícitamente los videos asociados para que ningún video quede huérfano ni sea eliminado
                 if affected_item_ids:
@@ -1613,12 +1682,30 @@ class ProductViewSet(viewsets.ModelViewSet):
                     _safe_delete_product_own_images(product)
                 
                 # Eliminación masiva a nivel de BD
-                deleted_count, _ = products_to_delete.delete()
+                deleted_count, _ = Product.objects.filter(id__in=valid_product_ids).delete() if valid_product_ids else (0, {})
 
-                if affected_item_ids:
-                    transaction.on_commit(
-                        lambda: cache.delete_many([f"cartmaker:struct:item:{iid}" for iid in affected_item_ids])
-                    )
+                for combo in affected_combos:
+                    if hasattr(combo, '_prefetched_objects_cache'):
+                        combo._prefetched_objects_cache.clear()
+                    remaining_units = sum(max(1, int(ci.quantity or 1)) for ci in combo.combo_items.all())
+                    if remaining_units < 2 and not combo.paused:
+                        combo.paused = True
+                        combo.save(update_fields=['paused'])
+
+                if affected_item_ids or affected_combo_ids:
+                    def _clean_bulk_delete_caches():
+                        keys_to_del = []
+                        for iid in affected_item_ids:
+                            keys_to_del.append(f"cartmaker:struct:item:{iid}")
+                            keys_to_del.append(f"cartmaker:volatile:item:{iid}")
+                        for cid in affected_combo_ids:
+                            keys_to_del.append(f"cartmaker:struct:item:{cid}")
+                            keys_to_del.append(f"cartmaker:struct:combo:{cid}")
+                            keys_to_del.append(f"cartmaker:volatile:item:{cid}")
+                            keys_to_del.append(f"cartmaker:volatile:combo:{cid}")
+                        if keys_to_del:
+                            cache.delete_many(keys_to_del)
+                    transaction.on_commit(_clean_bulk_delete_caches)
 
             return Response({'success': True, 'deleted_count': deleted_count}, status=status.HTTP_200_OK)
 

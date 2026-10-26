@@ -193,11 +193,14 @@ class MerchantGrowthViewSet(viewsets.ViewSet):
         if not item_id:
             return Response({"error": "El campo 'item_id' es obligatorio."}, status=status.HTTP_400_BAD_REQUEST)
 
-        item = (
-            InventoryItem.objects.filter(id=item_id, store__company=company)
-            .select_related("product", "product__category", "product__category__parent_category", "store", "store__location", "offer")
-            .first()
-        )
+        try:
+            item = (
+                InventoryItem.objects.filter(id=item_id, store__company=company)
+                .select_related("product", "product__category", "product__category__parent_category", "store", "store__location", "offer")
+                .first()
+            )
+        except (ValidationError, ValueError, TypeError):
+            item = None
         if not item:
             return Response(
                 {"error": "El producto no existe o no pertenece a tu compañía."},
@@ -297,7 +300,10 @@ class MerchantGrowthViewSet(viewsets.ViewSet):
 
         raw_items = request.data.get("items") or []
         note = (request.data.get("note") or "").strip()[:300]
-        expires_in_hours = max(1, min(72, int(request.data.get("expires_in_hours", 24) or 24)))
+        try:
+            expires_in_hours = max(1, min(72, int(request.data.get("expires_in_hours", 24) or 24)))
+        except (ValueError, TypeError):
+            expires_in_hours = 24
 
         if not isinstance(raw_items, list) or not raw_items:
             return Response(
@@ -305,13 +311,19 @@ class MerchantGrowthViewSet(viewsets.ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        item_ids = [str(entry.get("item_id")) for entry in raw_items if isinstance(entry, dict) and entry.get("item_id")]
+        item_ids = []
+        for entry in raw_items:
+            if isinstance(entry, dict) and entry.get("item_id"):
+                try:
+                    item_ids.append(str(uuid.UUID(str(entry.get("item_id")).strip())))
+                except (ValueError, TypeError, AttributeError):
+                    pass
         db_items = {
             str(it.id): it
             for it in InventoryItem.objects.filter(
                 id__in=item_ids, store__company=company, paused=False
             ).select_related("product", "store", "offer")
-        }
+        } if item_ids else {}
 
         if not db_items:
             return Response(
@@ -422,17 +434,26 @@ class MerchantGrowthViewSet(viewsets.ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        company = Company.objects.filter(id=company_id).first()
+        try:
+            company = Company.objects.filter(id=company_id).first()
+        except (ValidationError, ValueError, TypeError):
+            company = None
         if not company:
             return Response({"error": "Compañía no encontrada."}, status=status.HTTP_404_NOT_FOUND)
 
-        item_ids = [str(x.get("item_id")) for x in raw_items if isinstance(x, dict) and x.get("item_id")]
+        item_ids = []
+        for x in raw_items:
+            if isinstance(x, dict) and x.get("item_id"):
+                try:
+                    item_ids.append(str(uuid.UUID(str(x.get("item_id")).strip())))
+                except (ValueError, TypeError, AttributeError):
+                    pass
         db_items = {
             str(it.id): it
             for it in InventoryItem.objects.filter(
                 id__in=item_ids, store__company=company, paused=False
             ).select_related("product", "store", "offer")
-        }
+        } if item_ids else {}
 
         packaged = []
         total_usd = 0.0
@@ -619,11 +640,19 @@ class MerchantGrowthViewSet(viewsets.ViewSet):
         if not company:
             return Response({"error": "Compañía no encontrada."}, status=status.HTTP_404_NOT_FOUND)
 
+        try:
+            offer_pct = int(request.data.get("offer_percentage", 10) or 10)
+        except (ValueError, TypeError):
+            offer_pct = 10
+        try:
+            dur_hours = int(request.data.get("duration_hours", 24) or 24)
+        except (ValueError, TypeError):
+            dur_hours = 24
         copilot = AtlasMerchantCopilot(company=company, user=request.user)
         result = copilot.launch_lead_rescue_campaign(
             item_id=request.data.get("item_id"),
-            offer_percentage=int(request.data.get("offer_percentage", 10) or 10),
-            duration_hours=int(request.data.get("duration_hours", 24) or 24),
+            offer_percentage=offer_pct,
+            duration_hours=dur_hours,
             custom_message=request.data.get("custom_message"),
         )
         status_code = status.HTTP_200_OK if result.get("success") else status.HTTP_400_BAD_REQUEST

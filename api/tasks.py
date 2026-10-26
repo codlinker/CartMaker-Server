@@ -147,14 +147,19 @@ def send_uncompleted_orders_reminders_to_merchants():
     )
     
     for order in pending_orders:
-        merchant_id = order.store.company.owner.id
-        NotificationManager.notify_order_status_change(
-            user_id=merchant_id,
-            order_id=order.id,
-            title="⚠️ Pedido pendiente por cerrar",
-            body=f"La orden N° {order.id} aún no ha sido marcada como completada. Gestiona tu entrega.",
-            is_merchant=True
-        )
+        try:
+            merchant_id = order.store.company.owner_id if (order.store and order.store.company) else None
+            if not merchant_id:
+                continue
+            NotificationManager.notify_order_status_change(
+                user_id=merchant_id,
+                order_id=order.id,
+                title="⚠️ Pedido pendiente por cerrar",
+                body=f"La orden N° {order.id} aún no ha sido marcada como completada. Gestiona tu entrega.",
+                is_merchant=True
+            )
+        except Exception as err:
+            logger.warning(f"⚠️ No se pudo enviar recordatorio para orden #{order.id}: {err}")
 
 @shared_task(ignore_result=True)
 def cleanup_expired_video_stories():
@@ -541,22 +546,49 @@ def process_analytics_batch():
     # 1. STORE VIEWS (Bulk Create)
     # ==========================================
     if raw_stores:
-        store_logs = []
+        parsed_store_rows = []
+        candidate_store_ids = set()
+        candidate_client_ids = set()
         for item_bytes in raw_stores:
             try:
                 data = json.loads(item_bytes.decode('utf-8'))
-                store_logs.append(StoreViewLog(
-                    client_id=data['client_id'],
-                    store_id=data['store_id'],
-                    join_time=parse_aware_datetime(data['join_time']),
-                    exit_time=parse_aware_datetime(data.get('exit_time')),
-                    location_watched=data['location_watched'],
-                    presentation_video_watched=data['presentation_video_watched'],
-                    stories_watched=data['stories_watched'],
-                    products_watched=data['products_watched'],
-                    tryed_to_contact=data['tryed_to_contact']
-                ))
-            except Exception: pass
+                join_dt = parse_aware_datetime(data.get('join_time'))
+                cid = data.get('client_id')
+                sid = data.get('store_id')
+                if not join_dt or not cid or not sid:
+                    continue
+                parsed_store_rows.append((str(cid), str(sid), join_dt, data))
+                candidate_store_ids.add(str(sid))
+                candidate_client_ids.add(str(cid))
+            except Exception:
+                pass
+        valid_store_ids = set()
+        valid_client_ids = set()
+        if candidate_store_ids:
+            try:
+                valid_store_ids = {str(uid) for uid in CompanyStore.objects.filter(id__in=candidate_store_ids).values_list('id', flat=True)}
+            except Exception:
+                valid_store_ids = set()
+        if candidate_client_ids:
+            try:
+                valid_client_ids = {str(uid) for uid in User.objects.filter(id__in=candidate_client_ids).values_list('id', flat=True)}
+            except Exception:
+                valid_client_ids = set()
+        store_logs = [
+            StoreViewLog(
+                client_id=cid,
+                store_id=sid,
+                join_time=join_dt,
+                exit_time=parse_aware_datetime(data.get('exit_time')),
+                location_watched=bool(data.get('location_watched', False)),
+                presentation_video_watched=bool(data.get('presentation_video_watched', False)),
+                stories_watched=bool(data.get('stories_watched', False)),
+                products_watched=bool(data.get('products_watched', False)),
+                tryed_to_contact=bool(data.get('tryed_to_contact', False)),
+            )
+            for cid, sid, join_dt, data in parsed_store_rows
+            if sid in valid_store_ids and cid in valid_client_ids
+        ]
         try:
             if store_logs:
                 StoreViewLog.objects.bulk_create(store_logs, batch_size=500)
@@ -568,17 +600,35 @@ def process_analytics_batch():
     # 2. NAVIGATION LOGS (Bulk Create)
     # ==========================================
     if raw_navigation:
-        nav_logs = []
+        parsed_nav_rows = []
+        nav_user_ids = set()
         for item_bytes in raw_navigation:
             try:
                 data = json.loads(item_bytes.decode('utf-8'))
-                nav_logs.append(UserNavigationLog(
-                    user_id=data['client_id'],
-                    navigation_record=data['navigation_record'],
-                    login_time=parse_aware_datetime(data['login_time']),
-                    logout_time=parse_aware_datetime(data.get('logout_time'))
-                ))
-            except Exception: pass
+                login_dt = parse_aware_datetime(data.get('login_time'))
+                uid = data.get('client_id')
+                if not login_dt or not uid:
+                    continue
+                parsed_nav_rows.append((str(uid), login_dt, data))
+                nav_user_ids.add(str(uid))
+            except Exception:
+                pass
+        valid_nav_uids = set()
+        if nav_user_ids:
+            try:
+                valid_nav_uids = {str(uid) for uid in User.objects.filter(id__in=nav_user_ids).values_list('id', flat=True)}
+            except Exception:
+                valid_nav_uids = set()
+        nav_logs = [
+            UserNavigationLog(
+                user_id=uid,
+                navigation_record=data.get('navigation_record') or [],
+                login_time=login_dt,
+                logout_time=parse_aware_datetime(data.get('logout_time')),
+            )
+            for uid, login_dt, data in parsed_nav_rows
+            if uid in valid_nav_uids
+        ]
         try:
             if nav_logs:
                 UserNavigationLog.objects.bulk_create(nav_logs, batch_size=500)
@@ -594,7 +644,9 @@ def process_analytics_batch():
         for item_bytes in raw_video:
             try:
                 data = json.loads(item_bytes.decode('utf-8'))
-                key = (data['client_id'], data['video_id'])
+                cid = str(data['client_id'])
+                vid = str(data['video_id'])
+                key = (cid, vid)
                 
                 if key not in aggregated_metrics:
                     aggregated_metrics[key] = {
@@ -606,21 +658,24 @@ def process_analytics_batch():
                     }
                 
                 metrics = aggregated_metrics[key]
-                metrics['watch_time_seconds'] += data['watch_time_seconds']
-                metrics['video_completed'] |= data['video_completed']
-                metrics['interacted_with_product'] |= data['interacted_with_product']
-                metrics['added_to_cart_from_video'] |= data['added_to_cart_from_video']
-                metrics['bought_from_video'] |= data['bought_from_video']
-            except Exception: pass
+                metrics['watch_time_seconds'] += float(data.get('watch_time_seconds') or 0.0)
+                metrics['video_completed'] |= bool(data.get('video_completed', False))
+                metrics['interacted_with_product'] |= bool(data.get('interacted_with_product', False))
+                metrics['added_to_cart_from_video'] |= bool(data.get('added_to_cart_from_video', False))
+                metrics['bought_from_video'] |= bool(data.get('bought_from_video', False))
+            except Exception:
+                pass
 
         try:
             if aggregated_metrics:
-                client_ids = [k[0] for k in aggregated_metrics.keys()]
-                video_ids = [k[1] for k in aggregated_metrics.keys()]
-                
+                client_ids = {k[0] for k in aggregated_metrics.keys()}
+                video_ids = {k[1] for k in aggregated_metrics.keys()}
+                valid_video_ids = {str(uid) for uid in CompanyVideoStory.objects.filter(id__in=video_ids).values_list('id', flat=True)}
+                valid_client_ids = {str(uid) for uid in User.objects.filter(id__in=client_ids).values_list('id', flat=True)}
+
                 existing_logs = VideoEngagementLog.objects.filter(
-                    client_id__in=client_ids, 
-                    video_id__in=video_ids
+                    client_id__in=valid_client_ids, 
+                    video_id__in=valid_video_ids
                 )
                 existing_map = {(str(log.client_id), str(log.video_id)): log for log in existing_logs}
 
@@ -628,6 +683,8 @@ def process_analytics_batch():
                 to_create = []
 
                 for (cid, vid), m in aggregated_metrics.items():
+                    if cid not in valid_client_ids or vid not in valid_video_ids:
+                        continue
                     if (cid, vid) in existing_map:
                         log = existing_map[(cid, vid)]
                         log.watch_time_seconds += m['watch_time_seconds']
