@@ -12,7 +12,10 @@ from PIL import Image, ImageFilter, ImageOps
 
 
 # Límite estricto por defecto (50 KB) para todas las imágenes subidas por usuarios
-DEFAULT_MAX_IMAGE_KB = int(getattr(settings, 'COS_MAX_IMAGE_KB', 50) or 50)
+try:
+    DEFAULT_MAX_IMAGE_KB = int(getattr(settings, 'COS_MAX_IMAGE_KB', 50) or 50) if settings.configured else 50
+except Exception:
+    DEFAULT_MAX_IMAGE_KB = 50
 DEFAULT_MAX_IMAGE_BYTES = DEFAULT_MAX_IMAGE_KB * 1024
 COMPRESSIBLE_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.heic'}
 
@@ -90,23 +93,33 @@ def _resize_perceptual(img: Image.Image, scale: float, sharpen: bool = True) -> 
     return resized
 
 
-def _compress_jpeg_perceptual(img: Image.Image, max_bytes: int, min_perceptual_quality: int = 68) -> bytes:
+def _compress_jpeg_best_practice(
+    img: Image.Image,
+    max_bytes: int,
+    min_perceptual_quality: int = 68,
+) -> bytes:
+    """
+    Motor idéntico 1:1 a `compress_static_images.py`:
+      Fase 1: Mantener 100% de la resolución original y buscar calidad en [min_perceptual_quality, 95]
+              con submuestreo 4:4:4 cuando la calidad >= 82.
+      Fase 2: Si a 100% resolución requiere bajar de `min_perceptual_quality`, reducir
+              gradualmente las dimensiones con LANCZOS + UnsharpMask manteniendo calidad [68, 90]
+              y 16.7 millones de colores (24-bit RGB, cero cuantización de paleta).
+      Fase 3: Fallback para presupuestos ultra bajos.
+    """
     rgb_img = _prepare_rgb_image(img)
 
-    # Pre-cap de resolución para fotos de cámara de alta resolución (>1600px) para acelerar la compresión en vivo
-    orig_w, orig_h = rgb_img.size
-    max_dim = max(orig_w, orig_h)
-    if max_dim > 1600:
-        rgb_img = _resize_perceptual(rgb_img, scale=1600.0 / max_dim, sharpen=True)
-
+    # Fase 1: 100% resolución original
     res_full = _binary_search_jpeg(rgb_img, max_bytes=max_bytes, min_q=min_perceptual_quality, max_q=95)
     if res_full is not None:
         return res_full[0]
 
+    # Fase 2: Escalado perceptual LANCZOS manteniendo calidad alta >= min_perceptual_quality
     probe_bytes = len(_encode_jpeg_bytes(rgb_img, quality=min_perceptual_quality, subsampling=2))
     ratio_estimate = math.sqrt(max_bytes / max(1, probe_bytes))
-    scale = min(0.92, max(0.35, ratio_estimate * 1.12))
+    start_scale = min(0.92, max(0.35, ratio_estimate * 1.12))
 
+    scale = start_scale
     while scale >= 0.18:
         scaled_img = _resize_perceptual(rgb_img, scale=scale, sharpen=True)
         res_scaled = _binary_search_jpeg(
@@ -119,6 +132,7 @@ def _compress_jpeg_perceptual(img: Image.Image, max_bytes: int, min_perceptual_q
             return res_scaled[0]
         scale *= 0.88
 
+    # Fase 3: Fallback extremo
     for fallback_scale in (0.25, 0.20, 0.15, 0.12):
         scaled_img = _resize_perceptual(rgb_img, scale=fallback_scale, sharpen=False)
         res_low = _binary_search_jpeg(scaled_img, max_bytes=max_bytes, min_q=40, max_q=75)
@@ -129,113 +143,23 @@ def _compress_jpeg_perceptual(img: Image.Image, max_bytes: int, min_perceptual_q
     return _encode_jpeg_bytes(tiny_img, quality=40, subsampling=2)
 
 
-def _encode_png_bytes(img: Image.Image) -> bytes:
-    buf = io.BytesIO()
-    img.save(buf, format="PNG", optimize=True, compress_level=9)
-    return buf.getvalue()
-
-
-def _compress_png_perceptual(img: Image.Image, max_bytes: int) -> bytes:
-    orig_w, orig_h = img.size
-    max_dim = max(orig_w, orig_h)
-    work_img = img
-    if max_dim > 1600:
-        scale_init = 1600.0 / max_dim
-        work_img = img.resize(
-            (max(64, int(round(orig_w * scale_init))), max(64, int(round(orig_h * scale_init)))),
-            Image.Resampling.LANCZOS,
-        )
-
-    lossless_data = _encode_png_bytes(work_img)
-    if len(lossless_data) <= max_bytes:
-        return lossless_data
-
-    rgba_source = (
-        work_img.convert("RGBA")
-        if ("A" in work_img.mode or "transparency" in work_img.info)
-        else work_img.convert("RGB")
-    )
-    for colors in (256, 192, 128, 96, 64):
-        quantized = rgba_source.quantize(
-            colors=colors,
-            method=Image.Quantize.FASTOCTREE,
-            dither=Image.Dither.FLOYDSTEINBERG,
-        )
-        candidate = _encode_png_bytes(quantized)
-        if len(candidate) <= max_bytes:
-            return candidate
-
-    cur_w, cur_h = rgba_source.size
-    scale = 0.88
-    while scale >= 0.15:
-        new_w = max(48, int(round(cur_w * scale)))
-        new_h = max(48, int(round(cur_h * scale)))
-        resized = rgba_source.resize((new_w, new_h), Image.Resampling.LANCZOS)
-        for colors in (256, 128, 64):
-            quantized = resized.quantize(
-                colors=colors,
-                method=Image.Quantize.FASTOCTREE,
-                dither=Image.Dither.FLOYDSTEINBERG,
-            )
-            candidate = _encode_png_bytes(quantized)
-            if len(candidate) <= max_bytes:
-                return candidate
-        scale *= 0.85
-
-    tiny = rgba_source.resize(
-        (max(32, int(cur_w * 0.12)), max(32, int(cur_h * 0.12))),
-        Image.Resampling.LANCZOS,
-    )
-    quantized = tiny.quantize(colors=64, method=Image.Quantize.FASTOCTREE)
-    return _encode_png_bytes(quantized)
-
-
-def _compress_webp_perceptual(img: Image.Image, max_bytes: int, min_perceptual_quality: int = 68) -> bytes:
-    work_img = img
-    orig_w, orig_h = work_img.size
-    max_dim = max(orig_w, orig_h)
-    if max_dim > 1600:
-        work_img = _resize_perceptual(work_img, scale=1600.0 / max_dim, sharpen=True)
-
-    def _encode_webp(im: Image.Image, q: int) -> bytes:
-        buf = io.BytesIO()
-        im.save(buf, format="WEBP", quality=q, method=4)
-        return buf.getvalue()
-
-    scale = 1.0
-    while scale >= 0.18:
-        cur_img = work_img if scale == 1.0 else _resize_perceptual(work_img, scale=scale, sharpen=True)
-        lowest = _encode_webp(cur_img, min_perceptual_quality)
-        if len(lowest) <= max_bytes:
-            best_bytes = lowest
-            low, high = min_perceptual_quality, 95
-            while low <= high:
-                mid = (low + high) // 2
-                cand = _encode_webp(cur_img, mid)
-                if len(cand) <= max_bytes:
-                    best_bytes = cand
-                    low = mid + 1
-                else:
-                    high = mid - 1
-            return best_bytes
-        scale *= 0.88
-
-    tiny = _resize_perceptual(work_img, scale=0.15, sharpen=False)
-    return _encode_webp(tiny, 50)
-
-
-def compress_uploaded_image_stream(file_obj, file_name: str, max_bytes: int = DEFAULT_MAX_IMAGE_BYTES):
+def compress_uploaded_image_stream(
+    file_obj,
+    file_name: str,
+    max_bytes: int = DEFAULT_MAX_IMAGE_BYTES,
+) -> tuple[object, str]:
     """
     Intercepta en memoria (`io.BytesIO`) cualquier imagen subida por un usuario
-    y la comprime perceptualmente a `<= max_bytes` (50 KB por defecto) sin pérdida
-    de nitidez visual (EXIF transpose, búsqueda binaria 4:4:4/4:2:0, LANCZOS + UnsharpMask,
-    y cuantización FASTOCTREE para PNG).
-    Si el archivo no es imagen, es un GIF animado, ya pesa `<= max_bytes`, o ocurre
-    cualquier excepción, devuelve un stream con los bytes originales intactos.
+    y la comprime perceptualmente a `<= max_bytes` (50 KB por defecto) usando
+    exactamente el motor JPEG 24-bit RGB de `compress_static_images.py`
+    (preservando los 16.7 millones de colores sin posterización ni pérdida de gradientes,
+    incluso cuando el usuario sube capturas de pantalla en formato `.png`).
+    Devuelve `(stream_comprimido, nuevo_file_name)`.
     """
-    ext = os.path.splitext(str(file_name or ""))[1].lower()
-    if ext not in COMPRESSIBLE_IMAGE_EXTENSIONS:
-        return file_obj
+    base_name, ext = os.path.splitext(str(file_name or ""))
+    ext_lower = ext.lower()
+    if ext_lower not in COMPRESSIBLE_IMAGE_EXTENSIONS:
+        return file_obj, file_name
 
     try:
         if hasattr(file_obj, "seek"):
@@ -244,34 +168,28 @@ def compress_uploaded_image_stream(file_obj, file_name: str, max_bytes: int = DE
         if hasattr(file_obj, "seek"):
             file_obj.seek(0)
     except Exception:
-        return file_obj
+        return file_obj, file_name
 
     if not raw_bytes or len(raw_bytes) <= max_bytes:
-        return io.BytesIO(raw_bytes) if raw_bytes else file_obj
+        return (io.BytesIO(raw_bytes) if raw_bytes else file_obj), file_name
 
     try:
         with Image.open(io.BytesIO(raw_bytes)) as raw_img:
             if getattr(raw_img, "is_animated", False) and getattr(raw_img, "n_frames", 1) > 1:
-                return io.BytesIO(raw_bytes)
+                return io.BytesIO(raw_bytes), file_name
 
             img = ImageOps.exif_transpose(raw_img)
             img.load()
 
-            if ext in (".jpg", ".jpeg", ".heic"):
-                compressed_bytes = _compress_jpeg_perceptual(img, max_bytes=max_bytes)
-            elif ext == ".png":
-                compressed_bytes = _compress_png_perceptual(img, max_bytes=max_bytes)
-            elif ext == ".webp":
-                compressed_bytes = _compress_webp_perceptual(img, max_bytes=max_bytes)
-            else:
-                return io.BytesIO(raw_bytes)
+            compressed_bytes = _compress_jpeg_best_practice(img, max_bytes=max_bytes)
 
         if compressed_bytes and len(compressed_bytes) < len(raw_bytes):
-            return io.BytesIO(compressed_bytes)
+            new_file_name = f"{base_name}.jpg" if ext_lower not in (".jpg", ".jpeg") else file_name
+            return io.BytesIO(compressed_bytes), new_file_name
     except Exception as exc:
         print(f"⚠️ Compresión perceptual omitida para {file_name}: {exc}")
 
-    return io.BytesIO(raw_bytes)
+    return io.BytesIO(raw_bytes), file_name
 
 
 class COS:
@@ -455,17 +373,17 @@ class COS:
         en memoria a `<= 50 KB` (o `max_image_kb` si se indica) antes de guardarse.
         Retorna la ruta relativa limpia (`folder_path/file_name`).
         """
-        full_path = os.path.join(folder_path, file_name).replace("\\", "/").lstrip("/")
         target_max_bytes = (
             int(max_image_kb) * 1024
             if max_image_kb is not None and int(max_image_kb) > 0
             else DEFAULT_MAX_IMAGE_BYTES
         )
-        file_obj = compress_uploaded_image_stream(
+        file_obj, file_name = compress_uploaded_image_stream(
             file_obj,
             file_name=file_name,
             max_bytes=target_max_bytes,
         )
+        full_path = os.path.join(folder_path, file_name).replace("\\", "/").lstrip("/")
 
         if self.storage_type == 'aws':
             target_bucket, resolved_private = self._resolve_bucket(full_path, is_private=is_private)
