@@ -18,6 +18,7 @@ from api.models import (
     Mall,
     MerchantPlan,
     Product,
+    ProductsCombo,
     SubCategory,
     SystemConfig,
     User,
@@ -152,10 +153,20 @@ class Command(BaseCommand):
             {'name': 'Repuestos Automotrices'},
             {'name': 'Servicios Automotrices'},
             
-            # --- Alimentación y Bebidas ---
+            # --- Alimentación, Restaurantes y Comida Preparada ---
             {'name': 'Restaurante'},
+            {'name': 'Comida Rápida y Food Truck'},
+            {'name': 'Arepera, Empanadas y Desayunos'},
+            {'name': 'Pizzería y Pastas'},
+            {'name': 'Pollera y Parrillera'},
+            {'name': 'Sushi y Comida Asiática'},
+            {'name': 'Cafetería, Heladería y Postres'},
+            {'name': 'Kiosco, Chicha y Pasapalos'},
             {'name': 'Supermercado'},
+            {'name': 'Bodegón y Abasto'},
             {'name': 'Panadería y Pastelería'},
+            {'name': 'Carnicería, Charcutería y Pescadería'},
+            {'name': 'Frutería y Verdulería'},
             {'name': 'Licorería'},
             
             # --- Salud, Belleza y Cuidado ---
@@ -348,6 +359,10 @@ class Command(BaseCommand):
                     if len(existing_subs) > 1:
                         dup_ids = [dup.id for dup in existing_subs[1:]]
                         Product.objects.filter(category_id__in=dup_ids).update(category=sub_obj)
+                        try:
+                            ProductsCombo.objects.filter(category_id__in=dup_ids).update(category=sub_obj)
+                        except Exception:
+                            pass
                         SubCategory.objects.filter(id__in=dup_ids).delete()
 
                     changed_fields = []
@@ -399,6 +414,10 @@ class Command(BaseCommand):
                 target_sub = fallback_sub
             if target_sub is not None:
                 Product.objects.filter(category=old_sub).update(category=target_sub)
+                try:
+                    ProductsCombo.objects.filter(category=old_sub).update(category=target_sub)
+                except Exception:
+                    pass
             old_sub.delete()
             deleted_subs += 1
 
@@ -510,7 +529,7 @@ class Command(BaseCommand):
             self.stdout.write(self.style.ERROR(f'  [!] Archivo JSON no encontrado: {json_path}'))
             return
 
-        with open(json_path, 'r', encoding='utf-8') as f:
+        with open(json_path, 'r', encoding='utf-8-sig') as f:
             malls_data = json.load(f)
 
         existing_malls = set(Mall.objects.values_list('name', flat=True))
