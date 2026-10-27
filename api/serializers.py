@@ -30,13 +30,60 @@ class RegisterSerializer(serializers.ModelSerializer):
         required=False,
         allow_empty=True,
     )
+    is_adult = serializers.BooleanField(write_only=True, required=False, default=True)
+    is_over_18 = serializers.BooleanField(write_only=True, required=False, default=True)
+    accepted_terms = serializers.BooleanField(write_only=True, required=False, default=True)
+    terms_accepted = serializers.BooleanField(write_only=True, required=False, default=True)
+    birth_date = serializers.DateField(
+        write_only=True,
+        required=False,
+        allow_null=True,
+        input_formats=['%Y-%m-%d', '%d/%m/%Y'],
+    )
 
     class Meta:
         model = User
-        fields = ('email', 'first_name', 'last_name', 'password', 'tokens', 'gender', "id", 'category_ids')
+        fields = (
+            'email', 'first_name', 'last_name', 'password', 'tokens', 'gender', "id", 'category_ids',
+            'is_adult', 'is_over_18', 'accepted_terms', 'terms_accepted', 'birth_date',
+        )
+
+    def validate(self, attrs):
+        raw_data = getattr(self, 'initial_data', {}) or {}
+        for age_key in ('is_adult', 'is_over_18'):
+            if age_key in raw_data:
+                val = raw_data.get(age_key)
+                if val is False or str(val).strip().lower() in ('false', '0', 'no'):
+                    raise serializers.ValidationError({
+                        "error": "Debes ser mayor de 18 años para crear una cuenta en CartMaker.",
+                        "code": "UNDERAGE_RESTRICTED",
+                    })
+        for terms_key in ('accepted_terms', 'terms_accepted'):
+            if terms_key in raw_data:
+                val = raw_data.get(terms_key)
+                if val is False or str(val).strip().lower() in ('false', '0', 'no'):
+                    raise serializers.ValidationError({
+                        "error": "Debes aceptar los Términos de Uso y la Política de Privacidad y Contenido de CartMaker.",
+                        "code": "TERMS_NOT_ACCEPTED",
+                    })
+        bdate = attrs.get('birth_date')
+        if bdate:
+            today = timezone.localdate()
+            age = today.year - bdate.year - ((today.month, today.day) < (bdate.month, bdate.day))
+            if age < 18:
+                raise serializers.ValidationError({
+                    "error": "Debes tener al menos 18 años cumplidos para registrarte en CartMaker.",
+                    "code": "UNDERAGE_RESTRICTED",
+                })
+        return attrs
 
     def create(self, validated_data):
         raw_category_ids = validated_data.pop('category_ids', None)
+        validated_data.pop('is_adult', None)
+        validated_data.pop('is_over_18', None)
+        validated_data.pop('accepted_terms', None)
+        validated_data.pop('terms_accepted', None)
+        birth_date = validated_data.pop('birth_date', None)
         with transaction.atomic():
             user = User.objects.create_user(
                 email=validated_data['email'],
@@ -45,6 +92,9 @@ class RegisterSerializer(serializers.ModelSerializer):
                 last_name=validated_data.get('last_name', ''),
                 gender=validated_data.get('gender', UserGender.MALE)
             )
+            if birth_date:
+                user.birth_date = birth_date
+                user.save(update_fields=['birth_date'])
             if raw_category_ids is not None:
                 valid_cats = Category.objects.filter(id__in=raw_category_ids)
                 user.preferred_categories.set(valid_cats)
@@ -322,6 +372,16 @@ class VerifyUserSerializer(serializers.Serializer):
                 f"Ya existe un usuario registrado con la cédula {cleaned}."
             )
         return cleaned
+
+    def validate_birth_date(self, value):
+        if value:
+            today = timezone.localdate()
+            age = today.year - value.year - ((today.month, today.day) < (value.month, value.day))
+            if age < 18:
+                raise serializers.ValidationError(
+                    "Debes ser mayor de 18 años para verificar tu identidad y operar en CartMaker."
+                )
+        return value
 
     def validate_biometry(self, value):
         """

@@ -15,4 +15,6 @@ from .catalog_and_user_views import *
 from .merchant_growth_views import *
 from .workforce_views import *
 from .delivery_views import *
+from .ugc_moderation_views import *
+
 

@@ -224,6 +224,8 @@
                     <div class="footer-links-col">
                         <h4>Confianza y Soporte</h4>
                         <ul>
+                            <li><a href="{% url 'web_privacy_policy' %}">Política de Privacidad</a></li>
+                            <li><a href="{% url 'web_account_deletion' %}">Eliminación de Cuenta (Habeas Data)</a></li>
                             <li><a href="#seguridad">Verificación Biométrica 512-D</a></li>
                             <li><a href="#seguridad">Auditoría RIF &amp; SAREN</a></li>
                             <li><a href="#faq">Preguntas Frecuentes</a></li>
@@ -235,12 +237,12 @@
 
                 <div class="footer-bottom-bar">
                     <p class="footer-copyright">
-                        © 2026 CartMaker Inc. Todos los derechos reservados. Diseñado para impulsar el comercio en tu zona.
+                        © 2026 CartMaker C.A. Todos los derechos reservados. Diseñado para impulsar el comercio en tu zona.
                     </p>
                     <div class="footer-legal-links">
-                        <a href="#seguridad">Privacidad Biométrica</a>
+                        <a href="{% url 'web_privacy_policy' %}">Política de Privacidad</a>
                         <span class="dot-sep">•</span>
-                        <a href="#faq">Términos de Uso</a>
+                        <a href="{% url 'web_account_deletion' %}">Eliminar Cuenta / Biometría</a>
                         <span class="dot-sep">•</span>
                         <a href="#contacto">Soporte Directo</a>
                     </div>

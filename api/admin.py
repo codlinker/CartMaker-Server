@@ -827,6 +827,23 @@ class DeliveryTraceAdmin(ModelAdmin):
     exclude = ("compressed_points",)
 
 
+@admin.register(ContentReport)
+class ContentReportAdmin(ModelAdmin):
+    list_display = ("id", "target_type", "target_id", "reason", "status", "reporter", "created_at")
+    list_filter = ("status", "reason", "target_type")
+    search_fields = ("target_id", "description", "reporter__email")
+    readonly_fields = ("created_at",)
+
+
+@admin.register(UserBlock)
+class UserBlockAdmin(ModelAdmin):
+    list_display = ("id", "blocker", "target_type", "blocked_company", "blocked_user", "created_at")
+    list_filter = ("target_type",)
+    search_fields = ("blocker__email", "blocked_company__name", "blocked_user__email")
+    readonly_fields = ("created_at",)
+
+
+
 others = [
     InventoryItemOffer, 
     InventoryItemTransaction, OrderCancellationTopic, 

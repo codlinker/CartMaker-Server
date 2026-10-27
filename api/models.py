@@ -5401,3 +5401,209 @@ class CartMakerApiKey(models.Model):
             pass
 
         return True
+
+
+# ==========================================
+# MÓDULO UGC & CUMPLIMIENTO GOOGLE PLAY (DENUNCIAS Y BLOQUEOS)
+# ==========================================
+
+class ContentReport(models.Model):
+    """
+    Denuncia de contenido generado por usuarios (UGC) o comercios en 1 toque
+    (cumplimiento con la Política de Contenido Generado por Usuarios de Google Play).
+    """
+
+    class TargetType(models.TextChoices):
+        PRODUCT = 'product', 'Producto / Lote'
+        COMBO = 'combo', 'Combo de Productos'
+        VIDEO = 'video', 'Video Historia (CartMaker TV)'
+        COMPANY = 'company', 'Comercio / Empresa'
+        STORE = 'store', 'Sucursal / Tienda'
+        COMMENT = 'comment', 'Pregunta / Comentario'
+        USER = 'user', 'Usuario'
+
+    class ReportReason(models.TextChoices):
+        NUDITY_OR_SEXUAL = 'NUDITY_OR_SEXUAL', 'Desnudez o contenido sexual explícito'
+        ADULT_TOYS = 'ADULT_TOYS', 'Juguetes sexuales o artículos eróticos (+18)'
+        TOBACCO_OR_VAPE = 'TOBACCO_OR_VAPE', 'Tabaco, cigarrillos o vapeadores'
+        DRUGS_OR_NARCOTICS = 'DRUGS_OR_NARCOTICS', 'Drogas, estupefacientes o sustancias ilícitas'
+        WEAPONS_OR_VIOLENCE = 'WEAPONS_OR_VIOLENCE', 'Armas, explosivos o violencia gráfica'
+        SCAM_OR_FAKE = 'SCAM_OR_FAKE', 'Fraude, estafa o producto falsificado'
+        HARASSMENT_OR_HATE = 'HARASSMENT_OR_HATE', 'Acoso, lenguaje ofensivo o incitación al odio'
+        OTHER = 'OTHER', 'Otro incumplimiento de las normas'
+
+    class ReportStatus(models.TextChoices):
+        PENDING = 'PENDING', 'Pendiente de revisión'
+        QUARANTINED = 'QUARANTINED', 'En cuarentena preventiva automática'
+        REMOVED = 'REMOVED', 'Contenido eliminado / sancionado'
+        DISMISSED = 'DISMISSED', 'Desestimado'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    reporter = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='submitted_content_reports',
+    )
+    target_type = models.CharField(
+        max_length=32,
+        choices=TargetType.choices,
+        db_index=True,
+    )
+    target_id = models.CharField(max_length=64, db_index=True)
+    reason = models.CharField(
+        max_length=40,
+        choices=ReportReason.choices,
+        default=ReportReason.OTHER,
+        db_index=True,
+    )
+    description = models.TextField(blank=True, default='')
+    status = models.CharField(
+        max_length=20,
+        choices=ReportStatus.choices,
+        default=ReportStatus.PENDING,
+        db_index=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['target_type', 'target_id', 'status']),
+            models.Index(fields=['reporter', 'target_type', 'target_id']),
+        ]
+
+    def __str__(self):
+        return f"Denuncia [{self.reason}] -> {self.target_type}:{self.target_id}"
+
+    def get_json(self) -> dict:
+        return {
+            'id': str(self.id),
+            'target_type': self.target_type,
+            'target_id': str(self.target_id),
+            'reason': self.reason,
+            'reason_label': self.get_reason_display(),
+            'description': self.description,
+            'status': self.status,
+            'created_at': timezone.localtime(self.created_at).isoformat() if self.created_at else None,
+        }
+
+
+class UserBlock(models.Model):
+    """
+    Bloqueo de comercios o usuarios por parte de un usuario (cumplimiento Google Play UGC).
+    Al bloquear un comercio o usuario, su contenido deja de mostrarse inmediatamente al denunciante.
+    """
+
+    class BlockTargetType(models.TextChoices):
+        COMPANY = 'company', 'Comercio / Empresa'
+        USER = 'user', 'Usuario'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    blocker = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='blocked_targets',
+    )
+    target_type = models.CharField(
+        max_length=20,
+        choices=BlockTargetType.choices,
+        default=BlockTargetType.COMPANY,
+        db_index=True,
+    )
+    blocked_company = models.ForeignKey(
+        Company,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='blocked_by_users',
+    )
+    blocked_user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='blocked_by_others',
+    )
+    reason = models.CharField(max_length=160, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['blocker', 'target_type']),
+            models.Index(fields=['blocker', 'blocked_company']),
+            models.Index(fields=['blocker', 'blocked_user']),
+        ]
+
+    def __str__(self):
+        target_lbl = self.blocked_company_id or self.blocked_user_id
+        return f"Bloqueo {self.blocker_id} -> {self.target_type}:{target_lbl}"
+
+    @staticmethod
+    def invalidate_user_cache(user_id) -> None:
+        try:
+            cache.delete(f"cm:blocked_companies:{user_id}")
+            cache.delete(f"cm:blocked_users:{user_id}")
+        except Exception:
+            pass
+
+    @classmethod
+    def get_blocked_company_ids(cls, user_id) -> list:
+        if not user_id:
+            return []
+        cache_key = f"cm:blocked_companies:{user_id}"
+        try:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return cached
+        except Exception:
+            pass
+        ids = [
+            str(cid)
+            for cid in cls.objects.filter(
+                blocker_id=user_id,
+                blocked_company_id__isnull=False,
+            ).values_list('blocked_company_id', flat=True)
+        ]
+        try:
+            cache.set(cache_key, ids, timeout=3600)
+        except Exception:
+            pass
+        return ids
+
+    @classmethod
+    def get_blocked_user_ids(cls, user_id) -> list:
+        if not user_id:
+            return []
+        cache_key = f"cm:blocked_users:{user_id}"
+        try:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return cached
+        except Exception:
+            pass
+        ids = [
+            str(uid)
+            for uid in cls.objects.filter(
+                blocker_id=user_id,
+                blocked_user_id__isnull=False,
+            ).values_list('blocked_user_id', flat=True)
+        ]
+        try:
+            cache.set(cache_key, ids, timeout=3600)
+        except Exception:
+            pass
+        return ids
+
+    def get_json(self) -> dict:
+        return {
+            'id': str(self.id),
+            'target_type': self.target_type,
+            'blocked_company_id': str(self.blocked_company_id) if self.blocked_company_id else None,
+            'blocked_company_name': self.blocked_company.name if self.blocked_company else None,
+            'blocked_user_id': str(self.blocked_user_id) if self.blocked_user_id else None,
+            'blocked_user_name': self.blocked_user.get_full_name() if self.blocked_user else None,
+            'reason': self.reason,
+            'created_at': timezone.localtime(self.created_at).isoformat() if self.created_at else None,
+        }

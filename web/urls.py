@@ -7,6 +7,15 @@ urlpatterns = [
     # 🌍 Zona Pública
     path('', views.landing_view, name='web_home'),
     path('presentacion/', views.pitch_deck_view, name='web_pitch_deck'),
+    # 📜 Páginas Legales y de Privacidad (Google Play Console & App Store Data Safety / Habeas Data)
+    path('privacidad/', views.privacy_policy_view, name='web_privacy_policy'),
+    path('privacidad', views.privacy_policy_view, name='web_privacy_policy_no_slash'),
+    path('privacy/', views.privacy_policy_view, name='web_privacy_policy_en'),
+    path('privacy', views.privacy_policy_view, name='web_privacy_policy_en_no_slash'),
+    path('eliminar-cuenta/', views.account_deletion_view, name='web_account_deletion'),
+    path('eliminar-cuenta', views.account_deletion_view, name='web_account_deletion_no_slash'),
+    path('delete-account/', views.account_deletion_view, name='web_account_deletion_en'),
+    path('delete-account', views.account_deletion_view, name='web_account_deletion_en_no_slash'),
     path('tienda/<uuid:company_id>/', views.public_storefront_view, name='public_storefront'),
     path('t/<uuid:company_id>/', views.public_storefront_view, name='public_storefront_short'),
     path('p/<uuid:item_id>/', views.public_product_redirect_view, name='public_product_link'),

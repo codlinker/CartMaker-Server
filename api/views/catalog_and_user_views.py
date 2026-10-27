@@ -1,6 +1,7 @@
 """Inventory Items, Products, Push Notifications, Client Contact Methods, Locations, and User Profile."""
 from .base import *
 from .base import _get_cached_bcv_rate, _extract_and_validate_category_ids
+from ..core.content_moderation import ContentModerationError, moderate_text_fields
 from ..core.workforce import (
     WorkforceError,
     resolve_merchant_actor,
@@ -844,6 +845,11 @@ class ProductsComboViewSet(viewsets.ModelViewSet):
                         zeroed_stock_or_paused=zeroed_or_paused,
                     )
 
+            moderate_text_fields({
+                'nombre del combo': combo_name,
+                'descripción del combo': combo_desc,
+            })
+
             with transaction.atomic():
                 created_new = existing_combo is None
                 if existing_combo is not None:
@@ -970,6 +976,8 @@ class ProductsComboViewSet(viewsets.ModelViewSet):
             )
         except CompanyStore.DoesNotExist:
             return Response({'success': False, 'error': 'Sucursal no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+        except ContentModerationError as e:
+            return e.to_response()
         except WorkforceError as e:
             return _catalog_workforce_error_response(e)
         except Exception as e:
@@ -1190,6 +1198,13 @@ class ProductViewSet(viewsets.ModelViewSet):
                         category_name=category.parent_category.name if category.parent_category_id else None,
                         base_price=float(prod_data.get('price', 0.0) or 0.0),
                     )
+                    moderate_text_fields({
+                        'nombre del producto': prod_data.get('name'),
+                        'descripción del producto': prod_data.get('description'),
+                        'atributos': dynamic_data.get('attributes'),
+                        'variantes': dynamic_data.get('variants'),
+                        'extras/modificadores': dynamic_data.get('modifier_groups'),
+                    })
 
                     # Instanciamos sin guardar en BD todavía
                     product = Product(
@@ -1267,6 +1282,8 @@ class ProductViewSet(viewsets.ModelViewSet):
 
             return Response({'success': True, 'data': created_products_json}, status=status.HTTP_201_CREATED)
 
+        except ContentModerationError as e:
+            return e.to_response()
         except WorkforceError as e:
             return _catalog_workforce_error_response(e)
         except Exception as e:
@@ -1327,6 +1344,13 @@ class ProductViewSet(viewsets.ModelViewSet):
                     category_name=category.parent_category.name if (category and category.parent_category_id) else None,
                     base_price=float(d.get('price', 0.0) or 0.0),
                 )
+                moderate_text_fields({
+                    'nombre del producto': d.get('name'),
+                    'descripción del producto': d.get('description'),
+                    'atributos': dynamic_data.get('attributes'),
+                    'variantes': dynamic_data.get('variants'),
+                    'extras/modificadores': dynamic_data.get('modifier_groups'),
+                })
 
                 product = Product.objects.create(
                     company=company,
@@ -1400,6 +1424,8 @@ class ProductViewSet(viewsets.ModelViewSet):
                 prod_json = product.get_json()
                 return Response({'success': True, 'id': str(product.id), 'data': prod_json}, status=status.HTTP_201_CREATED)
 
+        except ContentModerationError as e:
+            return e.to_response()
         except WorkforceError as e:
             return _catalog_workforce_error_response(e)
         except Exception as e:
@@ -1475,6 +1501,13 @@ class ProductViewSet(viewsets.ModelViewSet):
                     base_price=float(product.price or 0.0),
                     existing_product=product,
                 )
+                moderate_text_fields({
+                    'nombre del producto': product.name,
+                    'descripción del producto': product.description,
+                    'atributos': dynamic_data.get('attributes'),
+                    'variantes': dynamic_data.get('variants'),
+                    'extras/modificadores': dynamic_data.get('modifier_groups'),
+                })
 
                 product.selling_unit = dynamic_data['selling_unit']
                 product.unit_label = dynamic_data['unit_label']
@@ -1568,6 +1601,8 @@ class ProductViewSet(viewsets.ModelViewSet):
 
             return Response({'success': True, 'id': str(product.id), 'data': prod_json}, status=status.HTTP_200_OK)
 
+        except ContentModerationError as e:
+            return e.to_response()
         except WorkforceError as e:
             return _catalog_workforce_error_response(e)
         except Exception as e:

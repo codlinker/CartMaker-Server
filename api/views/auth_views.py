@@ -217,6 +217,28 @@ class GoogleRegistView(APIView):
     throttle_scope = 'auth'
 
     def post(self, request):
+        for age_key in ('is_adult', 'is_over_18'):
+            if age_key in request.data:
+                val = request.data.get(age_key)
+                if val is False or str(val).strip().lower() in ('false', '0', 'no'):
+                    return Response(
+                        {
+                            'error': 'Debes ser mayor de 18 años para crear una cuenta en CartMaker.',
+                            'code': 'UNDERAGE_RESTRICTED',
+                        },
+                        status=400,
+                    )
+        for terms_key in ('accepted_terms', 'terms_accepted'):
+            if terms_key in request.data:
+                val = request.data.get(terms_key)
+                if val is False or str(val).strip().lower() in ('false', '0', 'no'):
+                    return Response(
+                        {
+                            'error': 'Debes aceptar los Términos de Uso y la Política de Privacidad y Contenido de CartMaker.',
+                            'code': 'TERMS_NOT_ACCEPTED',
+                        },
+                        status=400,
+                    )
         token = request.data.get('token_id')
         try:
             idinfo = id_token.verify_oauth2_token(token, google_requests.Request(), settings.GOOGLE_OAUTH_CLIENT_ID)

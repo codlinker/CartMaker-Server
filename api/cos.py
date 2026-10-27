@@ -383,6 +383,22 @@ class COS:
             file_name=file_name,
             max_bytes=target_max_bytes,
         )
+
+        # 🛡️ Barrera de moderación visual IA antes de guardar en AWS S3 o disco local
+        ext_check = os.path.splitext(str(file_name or ""))[1].lower()
+        if ext_check in COMPRESSIBLE_IMAGE_EXTENSIONS or ext_check == '.gif':
+            from .core.content_moderation import moderate_image_bytes
+            if hasattr(file_obj, 'seek'):
+                file_obj.seek(0)
+            img_bytes_for_mod = file_obj.read()
+            if hasattr(file_obj, 'seek'):
+                file_obj.seek(0)
+            moderate_image_bytes(
+                img_bytes_for_mod,
+                folder_path=str(folder_path or ""),
+                file_name=str(file_name or ""),
+            )
+
         full_path = os.path.join(folder_path, file_name).replace("\\", "/").lstrip("/")
 
         if self.storage_type == 'aws':

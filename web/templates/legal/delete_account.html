@@ -1,0 +1,628 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Portal Público de Eliminación de Cuenta y Supresión de Datos Biométricos (Habeas Data - Art. 28 CRBV) de CartMaker C.A. (com.codlinker.cartmaker).">
+    <meta name="theme-color" content="#6D49F2">
+    <meta name="robots" content="index, follow">
+    <title>Eliminación de Cuenta y Datos Biométricos (Habeas Data) — CartMaker</title>
+    <link rel="icon" type="image/x-icon" href="{% static 'img/favicon.ico' %}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --cm-purple: #6D49F2;
+            --cm-purple-dark: #5132C9;
+            --cm-purple-soft: #F3EFFE;
+            --cm-purple-border: #DDD2FC;
+            --cm-ink: #0F172A;
+            --cm-slate: #334155;
+            --cm-muted: #64748B;
+            --cm-bg: #F8FAFC;
+            --cm-card: #FFFFFF;
+            --cm-border: #E2E8F0;
+            --cm-green: #10B981;
+            --cm-green-soft: #ECFDF5;
+            --cm-red: #EF4444;
+            --cm-red-soft: #FEF2F2;
+            --cm-amber: #F59E0B;
+            --cm-amber-soft: #FFFBEB;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: var(--cm-bg);
+            color: var(--cm-ink);
+            line-height: 1.65;
+            -webkit-font-smoothing: antialiased;
+        }
+        h1, h2, h3, h4 {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            color: var(--cm-ink);
+            letter-spacing: -0.02em;
+            margin-top: 0;
+        }
+        a { color: var(--cm-purple); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+
+        .legal-navbar {
+            position: sticky;
+            top: 0;
+            z-index: 50;
+            background: rgba(255, 255, 255, 0.92);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--cm-border);
+        }
+        .legal-nav-inner {
+            max-width: 1080px;
+            margin: 0 auto;
+            padding: 14px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .brand-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none !important;
+        }
+        .brand-icon {
+            width: 38px;
+            height: 38px;
+            border-radius: 11px;
+            background: linear-gradient(135deg, var(--cm-purple), var(--cm-purple-dark));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 6px 16px rgba(109, 73, 242, 0.28);
+        }
+        .brand-icon img {
+            width: 22px;
+            height: 22px;
+            filter: brightness(0) invert(1);
+        }
+        .brand-name {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-weight: 800;
+            font-size: 19px;
+            color: var(--cm-ink);
+        }
+        .brand-sub {
+            display: block;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--cm-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .nav-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .btn-outline {
+            padding: 9px 15px;
+            border-radius: 10px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--cm-slate);
+            border: 1px solid var(--cm-border);
+            background: #FFFFFF;
+            text-decoration: none !important;
+        }
+        .btn-outline:hover {
+            border-color: var(--cm-purple);
+            color: var(--cm-purple);
+        }
+
+        .legal-hero {
+            background: radial-gradient(circle at 85% 15%, rgba(109, 73, 242, 0.14), transparent 45%),
+                        linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%);
+            border-bottom: 1px solid var(--cm-border);
+            padding: 44px 24px 36px;
+        }
+        .legal-hero-inner {
+            max-width: 1080px;
+            margin: 0 auto;
+        }
+        .badge-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 14px;
+        }
+        .badge-purple {
+            background: var(--cm-purple-soft);
+            color: var(--cm-purple);
+            border: 1px solid var(--cm-purple-border);
+            padding: 5px 12px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .legal-hero h1 {
+            font-size: clamp(26px, 3.8vw, 36px);
+            line-height: 1.2;
+            margin-bottom: 12px;
+        }
+        .legal-hero p {
+            max-width: 820px;
+            font-size: 15.5px;
+            color: var(--cm-slate);
+            margin: 0;
+        }
+
+        .main-grid {
+            max-width: 1080px;
+            margin: 34px auto 64px;
+            padding: 0 24px;
+            display: grid;
+            grid-template-columns: 1.1fr 0.9fr;
+            gap: 28px;
+            align-items: start;
+        }
+        .card {
+            background: var(--cm-card);
+            border: 1px solid var(--cm-border);
+            border-radius: 18px;
+            padding: 28px;
+            box-shadow: 0 4px 16px rgba(15, 23, 42, 0.03);
+            margin-bottom: 24px;
+        }
+        .card h2 {
+            font-size: 20px;
+            margin-bottom: 12px;
+        }
+        .card p, .card li {
+            font-size: 14.5px;
+            color: var(--cm-slate);
+        }
+
+        .step-list {
+            list-style: none;
+            padding: 0;
+            margin: 16px 0 0;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .step-item {
+            display: flex;
+            gap: 14px;
+            align-items: flex-start;
+            background: #F8FAFC;
+            border: 1px solid var(--cm-border);
+            border-radius: 12px;
+            padding: 14px 16px;
+        }
+        .step-badge {
+            min-width: 28px;
+            height: 28px;
+            border-radius: 8px;
+            background: var(--cm-purple);
+            color: #FFFFFF;
+            font-weight: 800;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-top: 2px;
+        }
+
+        /* Form Styles */
+        .form-group {
+            margin-bottom: 18px;
+        }
+        .form-label {
+            display: block;
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--cm-ink);
+            margin-bottom: 6px;
+        }
+        .form-input, .form-select, .form-textarea {
+            width: 100%;
+            padding: 11px 14px;
+            border-radius: 10px;
+            border: 1px solid #CBD5E1;
+            font-family: inherit;
+            font-size: 14px;
+            color: var(--cm-ink);
+            background: #FFFFFF;
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+        .form-input:focus, .form-select:focus, .form-textarea:focus {
+            outline: none;
+            border-color: var(--cm-purple);
+            box-shadow: 0 0 0 3px rgba(109, 73, 242, 0.15);
+        }
+        .form-hint {
+            display: block;
+            font-size: 12px;
+            color: var(--cm-muted);
+            margin-top: 5px;
+        }
+        .radio-card {
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+            border: 1px solid var(--cm-border);
+            border-radius: 12px;
+            padding: 13px 15px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            background: #FFFFFF;
+            transition: border-color 0.15s ease, background 0.15s ease;
+        }
+        .radio-card:hover {
+            border-color: var(--cm-purple);
+            background: #FCFAFF;
+        }
+        .radio-card input[type="radio"] {
+            margin-top: 4px;
+            accent-color: var(--cm-purple);
+        }
+        .btn-submit {
+            width: 100%;
+            padding: 13px 20px;
+            border: none;
+            border-radius: 12px;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 15px;
+            font-weight: 700;
+            color: #FFFFFF;
+            background: linear-gradient(135deg, var(--cm-purple), var(--cm-purple-dark));
+            cursor: pointer;
+            box-shadow: 0 8px 20px rgba(109, 73, 242, 0.28);
+            transition: transform 0.1s ease, opacity 0.15s ease;
+        }
+        .btn-submit:hover {
+            opacity: 0.96;
+        }
+
+        .alert-success {
+            background: var(--cm-green-soft);
+            border: 1px solid #6EE7B7;
+            color: #065F46;
+            border-radius: 14px;
+            padding: 18px 20px;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+        .alert-error {
+            background: var(--cm-red-soft);
+            border: 1px solid #FCA5A5;
+            color: #991B1B;
+            border-radius: 14px;
+            padding: 16px 18px;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+
+        .retention-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13.5px;
+            margin-top: 12px;
+        }
+        .retention-table th, .retention-table td {
+            text-align: left;
+            padding: 11px 12px;
+            border-bottom: 1px solid var(--cm-border);
+            vertical-align: top;
+        }
+        .retention-table th {
+            background: #F1F5F9;
+            font-size: 11.5px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--cm-ink);
+        }
+        .pill-immediate {
+            display: inline-block;
+            background: var(--cm-red-soft);
+            color: #B91C1C;
+            border: 1px solid #FECACA;
+            font-size: 11px;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 999px;
+        }
+        .pill-dissociated {
+            display: inline-block;
+            background: var(--cm-amber-soft);
+            color: #B45309;
+            border: 1px solid #FDE68A;
+            font-size: 11px;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 999px;
+        }
+
+        .footer-legal {
+            border-top: 1px solid var(--cm-border);
+            background: #FFFFFF;
+            padding: 32px 24px;
+            text-align: center;
+            font-size: 13px;
+            color: var(--cm-muted);
+        }
+
+        @media (max-width: 900px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <header class="legal-navbar">
+        <div class="legal-nav-inner">
+            <a href="{% url 'web_home' %}" class="brand-link">
+                <div class="brand-icon">
+                    <img src="{% static 'img/logo_sin_letras.svg' %}" alt="CartMaker">
+                </div>
+                <div>
+                    <span class="brand-name">CartMaker</span>
+                    <span class="brand-sub">Portal de Habeas Data y Baja de Cuenta</span>
+                </div>
+            </a>
+            <div class="nav-actions">
+                <a href="{% url 'web_privacy_policy' %}" class="btn-outline">Ver Política de Privacidad</a>
+                <a href="{% url 'web_home' %}" class="btn-outline">Volver al Inicio</a>
+            </div>
+        </div>
+    </header>
+
+    <section class="legal-hero">
+        <div class="legal-hero-inner">
+            <div class="badge-row">
+                <span class="badge-purple">Art. 28 CRBV · Derecho de Supresión (Habeas Data)</span>
+                <span class="badge-purple">Google Play Data Safety · com.codlinker.cartmaker</span>
+            </div>
+            <h1>Eliminación de Cuenta y Supresión de Datos Biométricos</h1>
+            <p>
+                En <strong>CartMaker C.A.</strong> tienes control total sobre tu información personal y biométrica. Puedes suprimir tus datos biométricos faciales y tu Cédula de Identidad (conservando tu cuenta básica) o eliminar definitivamente tu cuenta y todos tus datos asociados, tanto desde la aplicación móvil como desde este formulario web público sin necesidad de abrir la app.
+            </p>
+        </div>
+    </section>
+
+    <main class="main-grid">
+        <!-- Columna Izquierda: Formulario Web Público -->
+        <div>
+            <div class="card">
+                <h2>Opción A: Solicitar o Ejecutar la Baja desde la Web</h2>
+                <p>
+                    Completa este formulario para procesar la supresión de tus datos biométricos o la eliminación definitiva de tu cuenta sin abrir la aplicación móvil.
+                </p>
+
+                {% if result_status == 'executed_immediately' %}
+                    <div class="alert-success">
+                        <strong>¡Supresión ejecutada de forma inmediata! (Folio: <code>{{ folio }}</code>)</strong><br>
+                        {{ result_message }}
+                    </div>
+                {% elif result_status == 'request_registered' %}
+                    <div class="alert-success">
+                        <strong>Solicitud de Habeas Data registrada con éxito (Folio: <code>{{ folio }}</code>)</strong><br>
+                        {{ result_message }}
+                    </div>
+                {% elif result_status == 'error' %}
+                    <div class="alert-error">
+                        <strong>No se pudo completar la solicitud:</strong><br>
+                        {{ result_message }}
+                    </div>
+                {% endif %}
+
+                <form method="POST" action="{% url 'web_account_deletion' %}">
+                    {% csrf_token %}
+
+                    <div class="form-group">
+                        <label class="form-label" for="email">Correo electrónico asociado a tu cuenta de CartMaker *</label>
+                        <input
+                            type="email"
+                            id="email"
+                            name="email"
+                            class="form-input"
+                            placeholder="ejemplo@correo.com"
+                            value="{{ submitted_email|default:'' }}"
+                            required
+                        >
+                    </div>
+
+                    <div class="form-group">
+                        <span class="form-label">¿Qué deseas eliminar? *</span>
+
+                        <label class="radio-card">
+                            <input type="radio" name="deletion_scope" value="biometrics_only" {% if selected_scope != 'full_account' %}checked{% endif %}>
+                            <div>
+                                <strong style="display:block;font-size:14px;color:var(--cm-ink);">
+                                    1. Suprimir únicamente mis datos biométricos y Cédula (Habeas Data)
+                                </strong>
+                                <span style="font-size:13px;color:var(--cm-muted);">
+                                    Borra físicamente tu Cédula y selfie del bucket privado de AWS S3 y elimina tu vector matemático facial (192/512-D), manteniendo tu cuenta activa para navegar el catálogo.
+                                </span>
+                            </div>
+                        </label>
+
+                        <label class="radio-card">
+                            <input type="radio" name="deletion_scope" value="full_account" {% if selected_scope == 'full_account' %}checked{% endif %}>
+                            <div>
+                                <strong style="display:block;font-size:14px;color:#B91C1C;">
+                                    2. Eliminar definitivamente mi cuenta de CartMaker y todos mis datos
+                                </strong>
+                                <span style="font-size:13px;color:var(--cm-muted);">
+                                    Elimina tus datos biométricos, documentos KYC en AWS S3, foto de perfil, ubicaciones GPS, métodos de contacto, tokens de notificación y desactiva permanentemente tu cuenta.
+                                </span>
+                            </div>
+                        </label>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="password">Contraseña de tu cuenta (Opcional — para ejecución instantánea)</label>
+                        <input
+                            type="password"
+                            id="password"
+                            name="password"
+                            class="form-input"
+                            placeholder="Ingresa tu contraseña para borrar en este instante (o déjalo en blanco)"
+                            autocomplete="current-password"
+                        >
+                        <span class="form-hint">
+                            Si ingresas tu contraseña actual, el servidor verificará tu titularidad y <strong>eliminará tus datos en tiempo real en este mismo instante</strong>. Si iniciaste sesión con Google o no recuerdas tu contraseña, déjalo en blanco y procesaremos tu solicitud bajo el protocolo de Habeas Data.
+                        </span>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="reason">Motivo o comentario adicional (Opcional)</label>
+                        <textarea
+                            id="reason"
+                            name="reason"
+                            rows="3"
+                            class="form-textarea"
+                            placeholder="Indica cualquier detalle adicional sobre tu solicitud..."
+                        >{{ submitted_reason|default:'' }}</textarea>
+                    </div>
+
+                    <div class="form-group" style="margin-bottom:22px;">
+                        <label style="display:flex;gap:10px;align-items:flex-start;font-size:13px;color:var(--cm-slate);cursor:pointer;">
+                            <input type="checkbox" name="confirm_suppression" value="true" required style="margin-top:3px;accent-color:var(--cm-purple);">
+                            <span>
+                                Confirmo que soy el titular de la cuenta indicada y solicito expresamente la supresión de los datos seleccionados conforme al Artículo 28 de la CRBV (Habeas Data).
+                            </span>
+                        </label>
+                    </div>
+
+                    <button type="submit" class="btn-submit">
+                        Procesar Solicitud de Supresión / Baja de Cuenta
+                    </button>
+                </form>
+            </div>
+
+            <div class="card">
+                <h2>Contacto Directo con Soporte y Oficial de Privacidad</h2>
+                <p>
+                    También puedes solicitar la baja de tu cuenta o la supresión de tus datos biométricos escribiendo directamente desde el correo electrónico titular de tu cuenta a:
+                </p>
+                <ul>
+                    <li><strong>Correo de Privacidad y Habeas Data:</strong> <a href="mailto:privacidad@cartmaker.app?subject=Solicitud%20Habeas%20Data%20-%20Eliminacion%20de%20Cuenta">privacidad@cartmaker.app</a></li>
+                    <li><strong>Soporte Oficial CartMaker:</strong> <a href="mailto:soporte@cartmaker.app?subject=Baja%20de%20Cuenta%20CartMaker">soporte@cartmaker.app</a></li>
+                    <li><strong>Tiempo máximo de respuesta por vía manual:</strong> Menos de 48 horas hábiles (instantáneo si se realiza desde la App o ingresando tu contraseña en el formulario superior).</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Columna Derecha: Pasos desde la App + Tabla de Retención de Datos -->
+        <div>
+            <div class="card">
+                <h2>Opción B: Eliminación Instantánea desde la App CartMaker</h2>
+                <p>
+                    Si tienes la aplicación móvil instalada en tu teléfono Android o iOS, puedes ejecutar el borrado físico e inmediato en menos de 15 segundos:
+                </p>
+                <ol class="step-list">
+                    <li class="step-item">
+                        <span class="step-badge">1</span>
+                        <div>
+                            <strong>Abre tu Perfil y Ajustes</strong><br>
+                            Inicia sesión en la app <strong>CartMaker</strong> y toca el ícono de <strong>Perfil / Ajustes</strong> en la esquina superior o barra inferior.
+                        </div>
+                    </li>
+                    <li class="step-item">
+                        <span class="step-badge">2</span>
+                        <div>
+                            <strong>Ingresa a «Cédula de Identidad / Privacidad»</strong><br>
+                            Dentro de la sección de seguridad e identidad, abre el panel de <strong>Cédula de Identidad y Derechos de Habeas Data (Art. 28 CRBV)</strong>.
+                        </div>
+                    </li>
+                    <li class="step-item">
+                        <span class="step-badge">3</span>
+                        <div>
+                            <strong>Elige «Suprimir Biometría» o «Dar de Baja mi Cuenta»</strong><br>
+                            Pulsa <strong>«Suprimir datos biométricos»</strong> para borrar tu vector facial y tus fotos de cédula/selfie en AWS S3 de inmediato, o marca la opción <strong>«Desactivar y dar de baja mi cuenta definitivamente»</strong> y confirma.
+                        </div>
+                    </li>
+                </ol>
+            </div>
+
+            <div class="card">
+                <h2>¿Qué datos se eliminan de inmediato y cuáles se disocian?</h2>
+                <p>
+                    En cumplimiento de la sección <em>Seguridad de los Datos (Data Safety)</em> de Google Play, detallamos el tratamiento exacto de cada categoría de información al ejecutar la baja:
+                </p>
+
+                <table class="retention-table">
+                    <thead>
+                        <tr>
+                            <th>Tipo de Dato</th>
+                            <th>Acción y Plazo</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>
+                                <strong>Vector Biométrico Facial (192/512-D)</strong><br>
+                                <span style="font-size:12.5px;color:var(--cm-muted);">Descriptor matemático facial y estado de verificación KYC.</span>
+                            </td>
+                            <td>
+                                <span class="pill-immediate">Eliminación Inmediata</span><br>
+                                <small>Se purga a <code>NULL</code> de forma irreversible en la base de datos.</small>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>
+                                <strong>Fotos de Cédula y Selfie en AWS S3</strong><br>
+                                <span style="font-size:12.5px;color:var(--cm-muted);">Archivos en <code>identity_verifications/</code> dentro del bucket privado S3.</span>
+                            </td>
+                            <td>
+                                <span class="pill-immediate">Eliminación Física Inmediata</span><br>
+                                <small>Destrucción permanente del objeto en Amazon S3.</small>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>
+                                <strong>Perfil, Avatar, Ubicaciones GPS y Contactos</strong><br>
+                                <span style="font-size:12.5px;color:var(--cm-muted);">Foto de perfil, direcciones guardadas, teléfonos y tokens FCM.</span>
+                            </td>
+                            <td>
+                                <span class="pill-immediate">Eliminación Inmediata</span><br>
+                                <small>Se borran al solicitar la eliminación completa de la cuenta.</small>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>
+                                <strong>Órdenes Completadas y Facturas Digitales</strong><br>
+                                <span style="font-size:12.5px;color:var(--cm-muted);">Registros históricos de transacciones comerciales y facturación SENIAT.</span>
+                            </td>
+                            <td>
+                                <span class="pill-dissociated">Conservación Disociada (Legal)</span><br>
+                                <small>Se conservan de forma disociada (sin biometría ni documentos KYC) por obligación mercantil, contable y tributaria venezolana.</small>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <footer class="footer-legal">
+        <div>
+            <strong>CartMaker C.A.</strong> · Paquete Oficial Android/iOS: <code>com.codlinker.cartmaker</code> · Versión Normativa <code>VE-2026.1</code>
+        </div>
+        <div style="margin-top:8px;">
+            <a href="{% url 'web_home' %}">Inicio</a> &nbsp;•&nbsp;
+            <a href="{% url 'web_privacy_policy' %}">Política de Privacidad (/privacidad/)</a> &nbsp;•&nbsp;
+            <a href="{% url 'web_account_deletion' %}">Eliminación de Cuenta y Datos (/eliminar-cuenta/)</a>
+        </div>
+    </footer>
+
+</body>
+</html>

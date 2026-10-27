@@ -79,6 +79,31 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
             'results': paginated_data
         }, status=status.HTTP_200_OK)
 
+    def _filter_blocked_entries(self, items: list, request) -> list:
+        user = getattr(request, 'user', None)
+        if not user or not user.is_authenticated or not items:
+            return items
+        blocked_ids = UserBlock.get_blocked_company_ids(user.id)
+        if not blocked_ids:
+            return items
+        blocked_set = set(blocked_ids)
+        filtered = []
+        for entry in items:
+            if not isinstance(entry, dict):
+                filtered.append(entry)
+                continue
+            cid = (
+                entry.get('company_id')
+                or (entry.get('company') or {}).get('id')
+                or ((entry.get('store') or {}).get('company') or {}).get('id')
+                or (entry.get('store') or {}).get('company_id')
+                or ((entry.get('product') or {}).get('company') or {}).get('id')
+            )
+            if cid and str(cid) in blocked_set:
+                continue
+            filtered.append(entry)
+        return filtered
+
     def _respond_pre_sliced_data(self, data_list, request, page: int, page_size: int) -> Response:
         """
         Paginador optimizado para feeds.
@@ -87,9 +112,12 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
         if isinstance(data_list, dict):
             actual_items = data_list.get('results', [])
             has_next = len(actual_items) >= page_size
-            combos_list = data_list.get('combos', [])
+            actual_items = self._filter_blocked_entries(actual_items, request)
+            combos_list = self._filter_blocked_entries(data_list.get('combos', []), request)
+            data_list = {**data_list, 'results': actual_items, 'combos': combos_list}
         else:
             has_next = len(data_list) == page_size
+            data_list = self._filter_blocked_entries(data_list, request)
             combos_list = [x for x in data_list if isinstance(x, dict) and x.get('is_combo')]
         has_previous = page > 1
 

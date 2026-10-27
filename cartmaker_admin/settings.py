@@ -155,6 +155,7 @@ WSGI_APPLICATION = 'cartmaker_admin.wsgi.application'
 # Configuración global de DRF
 REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'EXCEPTION_HANDLER': 'api.core.content_moderation.cartmaker_exception_handler',
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),

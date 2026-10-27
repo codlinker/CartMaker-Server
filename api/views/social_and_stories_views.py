@@ -12,6 +12,7 @@ from ..core.workforce import (
     snapshot_video_story,
     record_employee_audit_log,
 )
+from ..core.content_moderation import ContentModerationError, moderate_text_fields
 
 
 def _story_workforce_error_response(err: WorkforceError) -> Response:
@@ -53,9 +54,13 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
             now = timezone.now()
             company, _, _ = resolve_merchant_actor(self.request)
             merchant_q = Q(company=company) if company is not None else Q(company__owner=user)
-            return base_qs.filter(
+            qs = base_qs.filter(
                 Q(expires_at__gt=now, video_file__isnull=False) | merchant_q
             )
+            blocked_cids = UserBlock.get_blocked_company_ids(user.id)
+            if blocked_cids:
+                qs = qs.exclude(company_id__in=blocked_cids)
+            return qs
         return base_qs
 
     @staticmethod
@@ -275,8 +280,29 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
                 )
 
         try:
+            if has_title or has_desc:
+                moderate_text_fields(
+                    title=instance.title,
+                    description=instance.description,
+                    context="video",
+                )
             with transaction.atomic():
                 dtnow_str = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
+
+                if thumb_obj:
+                    old_thumb = instance.thumbnail
+                    t_ext = thumb_obj.name.rsplit('.', 1)[-1].lower()
+                    t_name = f"story_thumb_{company.id}_{dtnow_str}.{t_ext}"
+                    t_path = storage_manager.save_file(thumb_obj, "stories/thumbnails", t_name)
+                    if not t_path:
+                        raise Exception("Fallo en el storage_manager al guardar la nueva miniatura.")
+                    if old_thumb and old_thumb != t_path:
+                        try:
+                            storage_manager.delete_file(old_thumb)
+                        except Exception as del_err:
+                            print(f"Aviso: No se pudo eliminar la miniatura anterior {old_thumb}: {del_err}")
+                    instance.thumbnail = t_path
+                    update_fields.add('thumbnail')
 
                 if video_obj:
                     old_video = instance.video_file
@@ -295,21 +321,6 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
                     if instance.is_media_expired:
                         instance.expires_at = timezone.now() + timedelta(hours=72)
                         update_fields.add('expires_at')
-
-                if thumb_obj:
-                    old_thumb = instance.thumbnail
-                    t_ext = thumb_obj.name.rsplit('.', 1)[-1].lower()
-                    t_name = f"story_thumb_{company.id}_{dtnow_str}.{t_ext}"
-                    t_path = storage_manager.save_file(thumb_obj, "stories/thumbnails", t_name)
-                    if not t_path:
-                        raise Exception("Fallo en el storage_manager al guardar la nueva miniatura.")
-                    if old_thumb and old_thumb != t_path:
-                        try:
-                            storage_manager.delete_file(old_thumb)
-                        except Exception as del_err:
-                            print(f"Aviso: No se pudo eliminar la miniatura anterior {old_thumb}: {del_err}")
-                    instance.thumbnail = t_path
-                    update_fields.add('thumbnail')
 
                 update_fields.add('updated_at')
                 instance.save(update_fields=list(update_fields))
@@ -341,6 +352,8 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
                 },
                 status=status.HTTP_200_OK,
             )
+        except ContentModerationError as e:
+            return e.to_response()
         except Exception as e:
             print(f"Error al actualizar la historia {instance.id}: {e}")
             return Response(
@@ -653,19 +666,21 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
             if associated_combo is not None:
                 metadata_parsed['associated_combo_id'] = str(associated_combo.id)
 
+            moderate_text_fields(title=title, description=description, context="video")
+
             # 4. Transacción Atómica y Guardado Físico
             with transaction.atomic():
                 dtnow_str = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
                 
+                # --- GUARDAR MINIATURA PRIMERO (se modera antes de subir el video pesado) ---
+                t_name = f"story_thumb_{company.id}_{dtnow_str}.{t_ext}"
+                t_folder = "stories/thumbnails"
+                t_path = storage_manager.save_file(thumb_obj, t_folder, t_name)
+
                 # --- GUARDAR VIDEO ---
                 v_name = f"story_video_{company.id}_{dtnow_str}.{v_ext}"
                 v_folder = "stories/videos" 
                 v_path = storage_manager.save_file(video_obj, v_folder, v_name)
-
-                # --- GUARDAR MINIATURA ---
-                t_name = f"story_thumb_{company.id}_{dtnow_str}.{t_ext}"
-                t_folder = "stories/thumbnails"
-                t_path = storage_manager.save_file(thumb_obj, t_folder, t_name)
 
                 if not v_path or not t_path:
                     raise Exception("Fallo en el storage_manager al guardar los archivos.")
@@ -714,6 +729,8 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
                 **story_json,
             }, status=status.HTTP_201_CREATED)
 
+        except ContentModerationError as e:
+            return e.to_response()
         except Exception as e:
             print(f"Error al guardar la historia: {e}")
             return Response({
@@ -911,6 +928,10 @@ class UniversalConversationViewSet(viewsets.ViewSet):
             content_type=content_type_obj,
             object_id=target_id
         ).select_related('client', 'content_type').order_by('-question_creation')
+        if getattr(request, 'user', None) and request.user.is_authenticated:
+            blocked_uids = UserBlock.get_blocked_user_ids(request.user.id)
+            if blocked_uids:
+                comments = comments.exclude(client_id__in=blocked_uids)
 
         paginator = UniversalConversationPagination()
         paginated_qs = paginator.paginate_queryset(comments, request)
@@ -930,6 +951,11 @@ class UniversalConversationViewSet(viewsets.ViewSet):
         clean_text = question_text.strip()
         if not clean_text:
             return Response({'error': 'El comentario no puede estar vacío.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            moderate_text_fields(comment=clean_text, context="comentario")
+        except ContentModerationError as e:
+            return e.to_response()
 
         with transaction.atomic():
             try:
@@ -980,6 +1006,11 @@ class UniversalConversationViewSet(viewsets.ViewSet):
         clean_text = answer_text.strip()
         if not clean_text:
             return Response({'error': 'La respuesta no puede estar vacía.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            moderate_text_fields(comment=clean_text, context="respuesta")
+        except ContentModerationError as e:
+            return e.to_response()
 
         with transaction.atomic():
             try:

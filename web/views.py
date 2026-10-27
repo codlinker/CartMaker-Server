@@ -845,6 +845,197 @@ def pitch_deck_view(request):
     return render(request, 'pitch_deck.html')
 
 
+def privacy_policy_view(request):
+    """
+    GET /privacidad/ (y alias /privacy/)
+    Página pública HTML de la Política de Privacidad y Habeas Data (Art. 28 y 60 CRBV - VE-2026.1)
+    exigida por Google Play Console y Apple App Store para com.codlinker.cartmaker.
+    """
+    return render(request, 'legal/privacy_policy.html')
+
+
+def account_deletion_view(request):
+    """
+    GET / POST /eliminar-cuenta/ (y alias /delete-account/)
+    Página pública HTML de Eliminación de Cuenta y Supresión de Datos Biométricos (Habeas Data)
+    exigida por la sección Seguridad de los Datos (Data Safety) de Google Play Console.
+    """
+    import secrets
+    from django.utils import timezone
+    from django.core.cache import cache
+
+    context = {
+        'selected_scope': 'biometrics_only',
+        'submitted_email': '',
+        'submitted_reason': '',
+        'result_status': None,
+        'result_message': '',
+        'folio': '',
+    }
+
+    if request.method == 'POST':
+        email = (request.POST.get('email') or '').strip().lower()
+        deletion_scope = (request.POST.get('deletion_scope') or 'biometrics_only').strip()
+        if deletion_scope not in ('biometrics_only', 'full_account'):
+            deletion_scope = 'biometrics_only'
+        password = request.POST.get('password') or ''
+        reason = (request.POST.get('reason') or '').strip()[:500]
+        confirm = str(request.POST.get('confirm_suppression') or '').strip().lower() in ('true', '1', 'on', 'yes')
+
+        context['selected_scope'] = deletion_scope
+        context['submitted_email'] = email
+        context['submitted_reason'] = reason
+
+        if not email or '@' not in email:
+            context['result_status'] = 'error'
+            context['result_message'] = 'Debes ingresar un correo electrónico válido asociado a tu cuenta de CartMaker.'
+            return render(request, 'legal/delete_account.html', context)
+
+        if not confirm:
+            context['result_status'] = 'error'
+            context['result_message'] = 'Debes marcar la casilla de confirmación expresa para procesar la solicitud de Habeas Data.'
+            return render(request, 'legal/delete_account.html', context)
+
+        client_ip = (request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0].strip() or request.META.get('REMOTE_ADDR', ''))
+        rl_key = f"cm:habeas_web_rl:{client_ip}"
+        try:
+            hits = cache.get(rl_key, 0) or 0
+            if hits >= 10:
+                context['result_status'] = 'error'
+                context['result_message'] = 'Has realizado demasiadas solicitudes recientes. Por favor intenta nuevamente en unos minutos.'
+                return render(request, 'legal/delete_account.html', context, status=429)
+            cache.set(rl_key, hits + 1, timeout=600)
+        except Exception:
+            pass
+
+        folio = f"HD-2026-{secrets.token_hex(3).upper()}"
+        context['folio'] = folio
+        deactivate_account = (deletion_scope == 'full_account')
+
+        # Modo 1: Si el usuario proporcionó su contraseña, validamos y ejecutamos la supresión en tiempo real
+        if password:
+            target_user = User.objects.filter(email__iexact=email, is_active=True).first()
+            if target_user is None or not target_user.check_password(password):
+                context['result_status'] = 'error'
+                context['result_message'] = (
+                    'Las credenciales ingresadas no coinciden con una cuenta activa. '
+                    'Si iniciaste sesión con Google o no recuerdas tu contraseña, deja el campo de contraseña en blanco para registrar tu solicitud.'
+                )
+                return render(request, 'legal/delete_account.html', context)
+
+            if deactivate_account:
+                active_statuses = [OrderStatus.WAITING, OrderStatus.DELIVERY_SENT, 2]
+                has_active_orders = Order.objects.filter(
+                    Q(client=target_user) | Q(store__company__owner=target_user),
+                    status__in=active_statuses,
+                ).exists()
+                if has_active_orders:
+                    context['result_status'] = 'error'
+                    context['result_message'] = (
+                        'Tu cuenta tiene órdenes activas en curso. Por seguridad transaccional, '
+                        'finalízalas o cancélalas antes de dar de baja definitiva tu cuenta.'
+                    )
+                    return render(request, 'legal/delete_account.html', context)
+
+            now = timezone.now()
+            with transaction.atomic():
+                locked_user = User.objects.select_for_update().get(pk=target_user.pk)
+                old_cedula = locked_user.cedula_number
+
+                paths_to_delete = set()
+                if locked_user.cedula_document:
+                    paths_to_delete.add(locked_user.cedula_document)
+                for ext in ('jpg', 'jpeg', 'png', 'webp', 'heic'):
+                    paths_to_delete.add(f"identity_verifications/cedula_{locked_user.id}.{ext}")
+                    paths_to_delete.add(f"identity_verifications/selfie_{locked_user.id}.{ext}")
+                if deactivate_account and locked_user.profile_picture:
+                    paths_to_delete.add(locked_user.profile_picture)
+
+                for rel_path in paths_to_delete:
+                    try:
+                        storage_manager.delete_file(rel_path)
+                    except Exception:
+                        pass
+
+                locked_user.cedula_document = None
+                locked_user.biometric_vector = None
+                locked_user.cedula_verified = False
+                locked_user.cedula_number = None
+                locked_user.nacionality = None
+                locked_user.biometric_suppressed_at = now
+
+                if deactivate_account:
+                    locked_user.profile_picture = None
+                    locked_user.is_active = False
+                    DeviceToken.objects.filter(user=locked_user).delete()
+                    ClientLocation.objects.filter(user=locked_user).delete()
+                    ClientContactMethod.objects.filter(client=locked_user).delete()
+                    CompanyStore.objects.filter(company__owner=locked_user).update(is_active=False)
+                    InventoryItem.objects.filter(store__company__owner=locked_user).update(paused=True)
+
+                locked_user.save()
+                uid = locked_user.id
+
+                def _clear_caches():
+                    cache.delete(f"cartmaker:tenant:{uid}:profile")
+                    cache.delete(f"cartmaker:tenant:{uid}:subscriptions")
+                    cache.delete(f"cartmaker:tenant:{uid}:company")
+                    if old_cedula:
+                        digits = "".join(ch for ch in str(old_cedula) if ch.isdigit())
+                        for nac in ("V", "E"):
+                            cache.delete(f"cm:cne_cedula:{nac}:{digits}")
+
+                transaction.on_commit(_clear_caches)
+
+            context['result_status'] = 'executed_immediately'
+            if deactivate_account:
+                context['result_message'] = (
+                    f"Se han eliminado físicamente tus archivos biométricos y documentos KYC en AWS S3, "
+                    f"ubicaciones, contactos y foto de perfil, y la cuenta ({email}) ha sido dada de baja de forma permanente."
+                )
+            else:
+                context['result_message'] = (
+                    f"Se han eliminado físicamente tu Cédula de Identidad y selfie del bucket privado de AWS S3 "
+                    f"y se ha purgado tu vector matemático facial (Habeas Data). Tu cuenta básica ({email}) permanece activa."
+                )
+            context['submitted_email'] = ''
+            context['submitted_reason'] = ''
+            return render(request, 'legal/delete_account.html', context)
+
+        # Modo 2: Solicitud sin contraseña (ej. usuarios con Google Sign-In o sin acceso a la app)
+        try:
+            cache.set(
+                f"cm:habeas_request:{folio}",
+                {
+                    'folio': folio,
+                    'email': email,
+                    'scope': deletion_scope,
+                    'reason': reason,
+                    'ip': client_ip,
+                    'created_at': timezone.now().isoformat(),
+                },
+                timeout=30 * 86400,
+            )
+        except Exception:
+            pass
+
+        scope_label = (
+            'Eliminación definitiva de cuenta y datos asociados'
+            if deactivate_account
+            else 'Supresión de datos biométricos y Cédula de Identidad (Habeas Data)'
+        )
+        context['result_status'] = 'request_registered'
+        context['result_message'] = (
+            f"Hemos registrado tu solicitud de «{scope_label}» para la cuenta {email}. "
+            f"Nuestro equipo de Privacidad y Soporte verificará la titularidad y ejecutará la baja definitiva "
+            f"en un plazo máximo de 48 horas hábiles. Conserva tu código de seguimiento {folio}."
+        )
+        context['submitted_email'] = ''
+        context['submitted_reason'] = ''
+
+    return render(request, 'legal/delete_account.html', context)
+
+
 # ==============================================================
 # 🛍️ VITRINA WEB PÚBLICA INTERACTIVA (PILAR 1 - OMNICANALIDAD)
 # ==============================================================

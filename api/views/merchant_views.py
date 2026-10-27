@@ -1,6 +1,7 @@
 """Company, Store, Subscriptions, KYB RIF Validation, Merchant Catalog, and Public Store Profile views."""
 from .base import *
 from .base import _get_cached_bcv_rate, _extract_and_validate_category_ids
+from ..core.content_moderation import ContentModerationError, moderate_text_fields
 from ..core.workforce import resolve_merchant_actor, user_can_manage_company, user_can_manage_store
 from ..permissions import IsPersonalContext
 
@@ -973,6 +974,11 @@ class CreateCompanyAPI(APIView):
             # Guardamos la clave relativa en BD para que Company.get_json() firme siempre una Presigned URL fresca
             rif_doc_url = rif_rel_path
             mercantil_doc_url = mercantil_rel_path
+        moderate_text_fields({
+            'nombre del comercio': company_name,
+            'razón social': razon_social,
+            'dirección': address,
+        })
         with transaction.atomic():
             locked_user = User.objects.select_for_update().get(pk=user.pk)
             if locked_user.user_type == UserType.MERCHANT or Company.objects.filter(owner=locked_user).exists():
@@ -1085,6 +1091,10 @@ class UpdateCompanyAPI(APIView):
         company_has_changed = False
         store_has_changed = False
 
+        moderate_text_fields({
+            'nombre del comercio': name,
+            'dirección': address,
+        })
         with transaction.atomic():
             dtnow_str = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
             
@@ -1445,6 +1455,10 @@ class CreateStoreAPI(APIView):
         d = serializer.validated_data
         
         try:
+            moderate_text_fields({
+                'nombre de la sucursal': d.get('name'),
+                'dirección': d.get('address'),
+            })
             with transaction.atomic():
                 # 1. Verificar propiedad de la compañía
                 try:
@@ -1539,6 +1553,8 @@ class CreateStoreAPI(APIView):
                     'data': store.get_json() 
                 }, status=status.HTTP_201_CREATED)
 
+        except ContentModerationError as e:
+            return e.to_response()
         except Exception as e:
             # Si algo falla, el transaction.atomic() hará rollback de todo
             return Response({
@@ -1729,6 +1745,10 @@ class UpdateStoreAPI(APIView):
         
         store_has_changed = False
 
+        moderate_text_fields({
+            'nombre del comercio': name,
+            'dirección': address,
+        })
         with transaction.atomic():
             dtnow_str = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
             
