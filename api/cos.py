@@ -1,3 +1,4 @@
+import contextvars
 import hashlib
 import io
 import math
@@ -10,6 +11,28 @@ from django.conf import settings
 from django.core.cache import cache
 from PIL import Image, ImageFilter, ImageOps
 
+
+# Archivos guardados durante la petición HTTP actual. Si la petición termina rechazada por moderación
+# (ContentModerationError), esos archivos se borran para no dejar huérfanos en S3 / disco.
+_REQUEST_SAVED_FILES: contextvars.ContextVar = contextvars.ContextVar('cm_request_saved_files', default=None)
+
+
+def begin_request_file_tracking():
+    """Inicia el rastreo de archivos guardados en la petición actual. Devuelve el token para `end_...`."""
+    return _REQUEST_SAVED_FILES.set([])
+
+
+def end_request_file_tracking(token) -> None:
+    try:
+        _REQUEST_SAVED_FILES.reset(token)
+    except Exception:
+        _REQUEST_SAVED_FILES.set(None)
+
+
+def track_saved_file(full_path: str) -> None:
+    tracked = _REQUEST_SAVED_FILES.get()
+    if tracked is not None and full_path:
+        tracked.append(full_path)
 
 # Límite estricto por defecto (50 KB) para todas las imágenes subidas por usuarios
 try:
@@ -423,6 +446,7 @@ class COS:
                     full_path,
                     ExtraArgs=extra_args,
                 )
+                track_saved_file(full_path)
                 return full_path
             except ClientError as e:
                 error_code = e.response.get('Error', {}).get('Code', '') if hasattr(e, 'response') else ''
@@ -446,6 +470,7 @@ class COS:
                             full_path,
                             ExtraArgs=extra_args,
                         )
+                        track_saved_file(full_path)
                         return full_path
                     except ClientError as inner_e:
                         print(f"❌ Error subiendo a AWS S3 (fallback): {inner_e}")
@@ -470,7 +495,72 @@ class COS:
                 else:
                     destination.write(file_obj.read())
 
+            track_saved_file(full_path)
             return full_path
+
+    def cleanup_request_saved_files(self) -> int:
+        """
+        Borra los archivos guardados durante la petición actual (si hay rastreo activo).
+        Se invoca cuando la petición es rechazada por moderación para no dejar huérfanos.
+        """
+        tracked = _REQUEST_SAVED_FILES.get()
+        if not tracked:
+            return 0
+        paths = list(dict.fromkeys(tracked))
+        tracked.clear()
+        deleted = 0
+        for path in paths:
+            try:
+                if self.delete_file(path):
+                    deleted += 1
+            except Exception as exc:
+                print(f"⚠️ No se pudo limpiar archivo huérfano {path}: {exc}")
+        return deleted
+
+    def read_file_bytes(self, relative_path: str, max_bytes: int = 15 * 1024 * 1024):
+        """
+        Lee (hasta `max_bytes`) los bytes de un archivo almacenado. Retorna `None` si no existe o falla.
+        """
+        if not relative_path:
+            return None
+        clean_path = self.normalize_path(relative_path).lstrip('/')
+        if not clean_path or clean_path.startswith(('http://', 'https://')):
+            return None
+        try:
+            if self.storage_type == 'aws':
+                target_bucket, _ = self._resolve_bucket(clean_path)
+                obj = self.s3_client.get_object(Bucket=target_bucket, Key=clean_path)
+                return obj['Body'].read(max_bytes)
+            full_path = os.path.join(settings.MEDIA_ROOT, clean_path)
+            if not os.path.isfile(full_path):
+                return None
+            with open(full_path, 'rb') as fh:
+                return fh.read(max_bytes)
+        except Exception as exc:
+            print(f"⚠️ No se pudo leer {clean_path}: {exc}")
+            return None
+
+    def download_to_path(self, relative_path: str, dest_path: str) -> bool:
+        """Descarga un archivo almacenado a una ruta local (para procesarlo con ffmpeg)."""
+        if not relative_path:
+            return False
+        clean_path = self.normalize_path(relative_path).lstrip('/')
+        if not clean_path or clean_path.startswith(('http://', 'https://')):
+            return False
+        try:
+            if self.storage_type == 'aws':
+                target_bucket, _ = self._resolve_bucket(clean_path)
+                self.s3_client.download_file(target_bucket, clean_path, dest_path)
+                return True
+            full_path = os.path.join(settings.MEDIA_ROOT, clean_path)
+            if not os.path.isfile(full_path):
+                return False
+            import shutil
+            shutil.copyfile(full_path, dest_path)
+            return True
+        except Exception as exc:
+            print(f"⚠️ No se pudo descargar {clean_path}: {exc}")
+            return False
 
     def get_url(
         self,

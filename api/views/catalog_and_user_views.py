@@ -1,7 +1,7 @@
 """Inventory Items, Products, Push Notifications, Client Contact Methods, Locations, and User Profile."""
 from .base import *
 from .base import _get_cached_bcv_rate, _extract_and_validate_category_ids
-from ..core.content_moderation import ContentModerationError, moderate_text_fields
+from ..core.content_moderation import ContentModerationError, moderate_text_fields, premoderate_uploaded_images
 from ..core.workforce import (
     WorkforceError,
     resolve_merchant_actor,
@@ -849,6 +849,18 @@ class ProductsComboViewSet(viewsets.ModelViewSet):
                 'nombre del combo': combo_name,
                 'descripción del combo': combo_desc,
             })
+            # Pre-moderación concurrente de las imágenes nuevas ANTES de abrir la transacción
+            premoderate_uploaded_images(request.FILES.values())
+
+            # Validamos extensiones ANTES de la transacción (un `return` dentro de atomic haría commit parcial)
+            for _uploaded in request.FILES.values():
+                _fname = str(getattr(_uploaded, 'name', '') or '')
+                _ext = _fname.rsplit('.', 1)[-1].lower() if '.' in _fname else ''
+                if _ext not in ('jpg', 'jpeg', 'png', 'webp'):
+                    return Response(
+                        {'success': False, 'error': f"Formato de imagen no permitido ({_fname})."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
 
             with transaction.atomic():
                 created_new = existing_combo is None
@@ -1168,6 +1180,9 @@ class ProductViewSet(viewsets.ModelViewSet):
                         target_label=prod_data.get('name', 'Producto'),
                     )
 
+            # Pre-moderación concurrente de todas las imágenes del lote ANTES de abrir la transacción
+            premoderate_uploaded_images(request.FILES.values())
+
             with transaction.atomic():
                 # 1. Pre-cargar subcategorías involucradas en un solo viaje a la BD
                 category_ids = {prod_data['category_id'] for prod_data in products_list if prod_data.get('category_id')}
@@ -1351,6 +1366,7 @@ class ProductViewSet(viewsets.ModelViewSet):
                     'variantes': dynamic_data.get('variants'),
                     'extras/modificadores': dynamic_data.get('modifier_groups'),
                 })
+                premoderate_uploaded_images(request.FILES.values())
 
                 product = Product.objects.create(
                     company=company,
@@ -1508,6 +1524,7 @@ class ProductViewSet(viewsets.ModelViewSet):
                     'variantes': dynamic_data.get('variants'),
                     'extras/modificadores': dynamic_data.get('modifier_groups'),
                 })
+                premoderate_uploaded_images(request.FILES.values())
 
                 product.selling_unit = dynamic_data['selling_unit']
                 product.unit_label = dynamic_data['unit_label']
@@ -1517,6 +1534,8 @@ class ProductViewSet(viewsets.ModelViewSet):
                 product.attributes = dynamic_data['attributes']
                 product.variants = dynamic_data['variants']
                 product.modifier_groups = dynamic_data['modifier_groups']
+
+                discarded_image_paths = []
 
                 # ===============================
                 # MANEJO DE IMÁGENES CORREGIDO
@@ -1547,15 +1566,14 @@ class ProductViewSet(viewsets.ModelViewSet):
                                 if clean_path:
                                     processed_image_order.append(clean_path)
                     
-                    # 2. BORRAR IMÁGENES DESCARTADAS PROPIAS (Solo si edita el dueño y la foto pertenece a este product.id)
+                    # 2. IDENTIFICAR IMÁGENES DESCARTADAS PROPIAS (Solo si edita el dueño y la foto pertenece a este product.id).
+                    # El borrado físico se DIFIERE hasta que las nuevas imágenes hayan sido subidas, moderadas y
+                    # el producto guardado; así un rechazo por moderación no destruye las fotos existentes.
                     if emp is None:
                         prod_id_str = str(product.id)
                         for old_url in product.images:
                             if old_url not in processed_image_order and prod_id_str in str(old_url):
-                                try:
-                                    storage_manager.delete_file(old_url)
-                                except Exception as e:
-                                    print(f"Error borrando img descartada: {e}")
+                                discarded_image_paths.append(old_url)
 
                     final_images = []
                     dtnow_str = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
@@ -1584,6 +1602,13 @@ class ProductViewSet(viewsets.ModelViewSet):
 
                 product.save()
                 after_snap = snapshot_product(product)
+
+                # Borrado físico diferido de imágenes descartadas (ya con las nuevas moderadas y persistidas)
+                for _old_path in discarded_image_paths:
+                    try:
+                        storage_manager.delete_file(_old_path)
+                    except Exception as e:
+                        print(f"Error borrando img descartada: {e}")
 
                 if emp is not None:
                     record_employee_audit_log(

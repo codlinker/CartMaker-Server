@@ -17,7 +17,7 @@ from .permissions import IsNodeMicroservice
 from django.db import transaction
 from django.utils import timezone
 from api.cos import storage_manager
-
+from api.core.content_moderation import ContentModerationError, moderate_text_fields
 ALLOWED_CHAT_MEDIA_EXTENSIONS = {
     'jpg', 'jpeg', 'png', 'webp', 'gif',
     'mp3', 'wav', 'ogg', 'm4a', 'aac', 'webm',
@@ -306,6 +306,13 @@ class ChatWebhookViewSet(viewsets.ViewSet):
             if order.status >= 3:
                 return Response({"error": "Orden cerrada"}, status=status.HTTP_403_FORBIDDEN)
 
+            # 🛡️ Moderación del texto escrito por el usuario (el texto de métodos de pago lo genera el sistema).
+            # Node reenvía `error` al cliente como `chat_error`, por lo que el mensaje se rechaza limpiamente.
+            if message_type == 'text' and isinstance(text, str) and text.strip():
+                try:
+                    moderate_text_fields({'mensaje': text})
+                except ContentModerationError as mod_err:
+                    return mod_err.to_response()
             metadata_dict = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
 
             # Si el comerciante envía datos de pago (por IDs o por lista de métodos o message_type='payment_methods')

@@ -79,6 +79,30 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
             'results': paginated_data
         }, status=status.HTTP_200_OK)
 
+    @staticmethod
+    def _extract_entry_company_ids(entry: dict) -> set:
+        """Recolecta todos los posibles company_id de una entrada de feed (producto, combo o video)."""
+        found = set()
+
+        def _add(val):
+            if val is not None and str(val).strip():
+                found.add(str(val).strip())
+
+        def _scan(node, depth=0):
+            if not isinstance(node, dict) or depth > 3:
+                return
+            _add(node.get('company_id'))
+            comp = node.get('company')
+            if isinstance(comp, dict):
+                _add(comp.get('id'))
+            elif comp is not None and not isinstance(comp, (list, tuple)):
+                _add(comp)
+            for sub_key in ('product', 'store', 'associated_item', 'item'):
+                _scan(node.get(sub_key), depth + 1)
+
+        _scan(entry)
+        return found
+
     def _filter_blocked_entries(self, items: list, request) -> list:
         user = getattr(request, 'user', None)
         if not user or not user.is_authenticated or not items:
@@ -89,17 +113,7 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
         blocked_set = set(blocked_ids)
         filtered = []
         for entry in items:
-            if not isinstance(entry, dict):
-                filtered.append(entry)
-                continue
-            cid = (
-                entry.get('company_id')
-                or (entry.get('company') or {}).get('id')
-                or ((entry.get('store') or {}).get('company') or {}).get('id')
-                or (entry.get('store') or {}).get('company_id')
-                or ((entry.get('product') or {}).get('company') or {}).get('id')
-            )
-            if cid and str(cid) in blocked_set:
+            if isinstance(entry, dict) and (self._extract_entry_company_ids(entry) & blocked_set):
                 continue
             filtered.append(entry)
         return filtered
@@ -230,7 +244,7 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
         data_list = engine.get_offers_feed(page=page, page_size=effective_page_size, sort_by=sort_by, price_order=price_order)
 
         if is_home_widget:
-            top_10 = data_list[:10]
+            top_10 = self._filter_blocked_entries(data_list[:10], request)
             return Response({'results': top_10}, status=status.HTTP_200_OK)
             
         return self._respond_pre_sliced_data(data_list, request, page, page_size)
@@ -249,7 +263,7 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
         data_list = engine.get_stores_with_tokens_feed(page=page, page_size=effective_page_size)
 
         if is_home_widget:
-            top_10 = data_list[:10]
+            top_10 = self._filter_blocked_entries(data_list[:10], request)
             # Mantenemos consistencia con la respuesta de 'favorites'
             return Response({'data': {'results': top_10}}, status=status.HTTP_200_OK)
             
@@ -337,7 +351,7 @@ class ProductSearchEngineViewSet(viewsets.ViewSet):
         data_list = engine.get_favorites_feed(page=page, page_size=effective_page_size, sort_by=sort_by, price_order=price_order)
 
         if is_home_widget:
-            top_10 = data_list[:10]
+            top_10 = self._filter_blocked_entries(data_list[:10], request)
             return Response({'data': {'results': top_10}}, status=status.HTTP_200_OK)
     
         return self._respond_pre_sliced_data(data_list, request, page, page_size)

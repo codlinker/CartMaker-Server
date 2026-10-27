@@ -1,7 +1,7 @@
 """Company, Store, Subscriptions, KYB RIF Validation, Merchant Catalog, and Public Store Profile views."""
 from .base import *
 from .base import _get_cached_bcv_rate, _extract_and_validate_category_ids
-from ..core.content_moderation import ContentModerationError, moderate_text_fields
+from ..core.content_moderation import ContentModerationError, moderate_text_fields, premoderate_uploaded_images
 from ..core.workforce import resolve_merchant_actor, user_can_manage_company, user_can_manage_store
 from ..permissions import IsPersonalContext
 
@@ -955,6 +955,12 @@ class CreateCompanyAPI(APIView):
                 return Response({'error': 'Debes especificar las coordenadas y la dirección.'}, status=status.HTTP_400_BAD_REQUEST)
             location = Point(float(lng), float(lat), srid=4326)
             mall = None
+        # Moderación de texto ANTES de subir los documentos KYB (un rechazo no deja archivos huérfanos)
+        moderate_text_fields({
+            'nombre del comercio': company_name,
+            'razón social': razon_social,
+            'dirección': address,
+        })
         # Subida de documentos KYB a Cloud Object Storage (si aplica)
         rif_doc_url = None
         mercantil_doc_url = None
@@ -974,11 +980,6 @@ class CreateCompanyAPI(APIView):
             # Guardamos la clave relativa en BD para que Company.get_json() firme siempre una Presigned URL fresca
             rif_doc_url = rif_rel_path
             mercantil_doc_url = mercantil_rel_path
-        moderate_text_fields({
-            'nombre del comercio': company_name,
-            'razón social': razon_social,
-            'dirección': address,
-        })
         with transaction.atomic():
             locked_user = User.objects.select_for_update().get(pk=user.pk)
             if locked_user.user_type == UserType.MERCHANT or Company.objects.filter(owner=locked_user).exists():
@@ -1095,6 +1096,10 @@ class UpdateCompanyAPI(APIView):
             'nombre del comercio': name,
             'dirección': address,
         })
+        # Pre-moderación concurrente de todas las imágenes nuevas ANTES de abrir la transacción
+        premoderate_uploaded_images(
+            [f for f in (profile_img, main_store_img, presentation_video_thumbnail) if f],
+        )
         with transaction.atomic():
             dtnow_str = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
             
@@ -1102,32 +1107,26 @@ class UpdateCompanyAPI(APIView):
             # 1. MANEJO DE ARCHIVOS (MULTIMEDIA)
             # ===============================
             if profile_img:
-                # NUEVO: Limpiamos la imagen de perfil anterior
-                if company.image:
-                    try:
-                        storage_manager.delete_file(company.image)
-                    except Exception as e:
-                        print(f"Error borrando img vieja: {e}")
-
+                old_company_image = company.image
                 extension = profile_img.name.split('.')[-1]
                 file_name = f"{company.id}_{dtnow_str}.{extension}"
                 folder = "company_profile_pictures"
+                # Se guarda (y modera) PRIMERO la nueva imagen; la anterior solo se borra si todo salió bien
                 relative_path = storage_manager.save_file(profile_img, folder, file_name)
                 
                 if relative_path:
                     company.image = relative_path
                     company_has_changed = True
+                    if old_company_image and old_company_image != relative_path:
+                        try:
+                            storage_manager.delete_file(old_company_image)
+                        except Exception as e:
+                            print(f"Error borrando img vieja: {e}")
                 else:
                     raise Exception("Error al guardar la imagen de perfil en el storage.")
             
             if main_store_img:
-                # NUEVO: Limpiamos la foto de tienda anterior
-                if main_store.store_img_url:
-                    try:
-                        storage_manager.delete_file(main_store.store_img_url)
-                    except Exception as e:
-                        print(f"Error borrando img de tienda vieja: {e}")
-
+                old_store_image = main_store.store_img_url
                 extension = main_store_img.name.split('.')[-1]
                 file_name = f"{dtnow_str}.{extension}"
                 folder = f"store_pictures/{main_store.id}"
@@ -1136,19 +1135,16 @@ class UpdateCompanyAPI(APIView):
                 if relative_path:
                     main_store.store_img_url = relative_path
                     store_has_changed = True
+                    if old_store_image and old_store_image != relative_path:
+                        try:
+                            storage_manager.delete_file(old_store_image)
+                        except Exception as e:
+                            print(f"Error borrando img de tienda vieja: {e}")
                 else:
                     raise Exception("Error al guardar la imagen de la tienda en el storage.")
             
             if presentation_video:
-                # NUEVO: ¡Aquí matamos el video viejo!
-                if company.presentation_video_url:
-                    try:
-                        storage_manager.delete_file(company.presentation_video_url)
-                    except Exception as e:
-                        # Hacemos un print/log pero NO detenemos la ejecución si falla
-                        # (es mejor dejar un archivo huérfano que bloquearle la app al usuario)
-                        print(f"Atención: No se pudo borrar el video anterior en {company.presentation_video_url}. Error: {e}")
-
+                old_presentation_video = company.presentation_video_url
                 extension = presentation_video.name.split('.')[-1]
                 file_name = f"{company.id}_video_{dtnow_str}.{extension}"
                 folder = "company_presentation_videos"
@@ -1157,17 +1153,23 @@ class UpdateCompanyAPI(APIView):
                 if relative_path:
                     company.presentation_video_url = relative_path
                     company_has_changed = True
+                    # Moderación asíncrona de fotogramas del video (se da de baja si es prohibido)
+                    from ..tasks import moderate_company_presentation_video
+                    transaction.on_commit(
+                        lambda _cid=company.id: moderate_company_presentation_video.delay(_cid)
+                    )
+                    if old_presentation_video and old_presentation_video != relative_path:
+                        try:
+                            storage_manager.delete_file(old_presentation_video)
+                        except Exception as e:
+                            # Hacemos un print/log pero NO detenemos la ejecución si falla
+                            # (es mejor dejar un archivo huérfano que bloquearle la app al usuario)
+                            print(f"Atención: No se pudo borrar el video anterior en {old_presentation_video}. Error: {e}")
                 else:
                     raise Exception("Error al guardar el video en el storage.")
             
             if presentation_video_thumbnail:
-                # NUEVO: Limpiamos la miniatura vieja
-                if company.presentation_video_thumbnail:
-                    try:
-                        storage_manager.delete_file(company.presentation_video_thumbnail)
-                    except Exception as e:
-                        print(f"Error borrando thumbnail viejo: {e}")
-
+                old_presentation_thumb = company.presentation_video_thumbnail
                 extension = presentation_video_thumbnail.name.split('.')[-1]
                 file_name = f"{company.id}_thumbnail_{dtnow_str}.{extension}"
                 folder = "company_presentation_videos"
@@ -1176,6 +1178,11 @@ class UpdateCompanyAPI(APIView):
                 if relative_path:
                     company.presentation_video_thumbnail = relative_path
                     company_has_changed = True
+                    if old_presentation_thumb and old_presentation_thumb != relative_path:
+                        try:
+                            storage_manager.delete_file(old_presentation_thumb)
+                        except Exception as e:
+                            print(f"Error borrando thumbnail viejo: {e}")
                 else:
                     raise Exception("Error al guardar el thumbnail del video en el storage.")
 
@@ -1749,6 +1756,8 @@ class UpdateStoreAPI(APIView):
             'nombre del comercio': name,
             'dirección': address,
         })
+        # Pre-moderación de la foto nueva ANTES de abrir la transacción
+        premoderate_uploaded_images([store_img] if store_img else [])
         with transaction.atomic():
             dtnow_str = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
             
@@ -1756,21 +1765,21 @@ class UpdateStoreAPI(APIView):
             # 1. MANEJO DE ARCHIVOS (FOTO SUCURSAL)
             # ===============================
             if store_img:
-                # Limpiamos la foto de tienda anterior
-                if store.store_img_url:
-                    try:
-                        storage_manager.delete_file(store.store_img_url)
-                    except Exception as e:
-                        print(f"Error borrando img de tienda vieja: {e}")
-
+                old_store_image = store.store_img_url
                 extension = store_img.name.split('.')[-1]
                 file_name = f"{dtnow_str}.{extension}"
                 folder = f"store_pictures/{store.id}"
+                # Se guarda (y modera) PRIMERO la nueva imagen; la anterior solo se borra si todo salió bien
                 relative_path = storage_manager.save_file(store_img, folder, file_name)
                 
                 if relative_path:
                     store.store_img_url = relative_path
                     store_has_changed = True
+                    if old_store_image and old_store_image != relative_path:
+                        try:
+                            storage_manager.delete_file(old_store_image)
+                        except Exception as e:
+                            print(f"Error borrando img de tienda vieja: {e}")
                 else:
                     raise Exception("Error al guardar la imagen de la tienda en el storage.")
             

@@ -5421,6 +5421,7 @@ class ContentReport(models.Model):
         STORE = 'store', 'Sucursal / Tienda'
         COMMENT = 'comment', 'Pregunta / Comentario'
         USER = 'user', 'Usuario'
+        IMAGE = 'image', 'Imagen almacenada (moderación automática)'
 
     class ReportReason(models.TextChoices):
         NUDITY_OR_SEXUAL = 'NUDITY_OR_SEXUAL', 'Desnudez o contenido sexual explícito'
@@ -5442,7 +5443,10 @@ class ContentReport(models.Model):
     reporter = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
+        null=True,
+        blank=True,
         related_name='submitted_content_reports',
+        help_text='Nulo cuando el reporte lo genera automáticamente el sistema de moderación.',
     )
     target_type = models.CharField(
         max_length=32,
@@ -5603,7 +5607,10 @@ class UserBlock(models.Model):
             'blocked_company_id': str(self.blocked_company_id) if self.blocked_company_id else None,
             'blocked_company_name': self.blocked_company.name if self.blocked_company else None,
             'blocked_user_id': str(self.blocked_user_id) if self.blocked_user_id else None,
-            'blocked_user_name': self.blocked_user.get_full_name() if self.blocked_user else None,
+            'blocked_user_name': (
+                f"{self.blocked_user.first_name or ''} {self.blocked_user.last_name or ''}".strip() or None
+                if self.blocked_user else None
+            ),
             'reason': self.reason,
             'created_at': timezone.localtime(self.created_at).isoformat() if self.created_at else None,
         }

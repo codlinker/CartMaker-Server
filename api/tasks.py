@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 
 import requests
+from api.cos import storage_manager
 from api.core.firebase_admin import NotificationManager
 from .core.platinum_manager import PlatinumEvaluator
 from api.models import *
@@ -199,6 +200,111 @@ def cleanup_expired_video_stories():
     except Exception as e:
         logger.error(f"❌ Error crítico en cleanup_expired_video_stories: {e}")
 
+def _video_is_clean_or_none_fetched(video_path: str):
+    """
+    Descarga el video a un temporal y modera sus fotogramas clave.
+    Retorna (True, None) si es seguro / no se pudo analizar, o (False, categoría) si es prohibido.
+    """
+    from api.core.content_moderation import ContentModerationError, moderate_local_video
+
+    if not video_path:
+        return True, None
+    with tempfile.TemporaryDirectory() as tmpdir:
+        local_video = os.path.join(tmpdir, "moderation_input.mp4")
+        if not storage_manager.download_to_path(str(video_path), local_video):
+            logger.warning(f"⚠️ Moderación de video omitida: no se pudo leer {video_path}")
+            return True, None
+        try:
+            moderate_local_video(local_video)
+        except ContentModerationError as exc:
+            return False, exc.category
+        except Exception as exc:
+            logger.warning(f"⚠️ Moderación de video omitida por error: {exc}")
+    return True, None
+
+
+def _moderate_story_video_or_takedown(story) -> bool:
+    """Devuelve False si el video fue dado de baja por contener contenido prohibido."""
+    from api.core.content_moderation import record_system_report
+
+    is_clean, category = _video_is_clean_or_none_fetched(story.video_file)
+    if is_clean:
+        return True
+    logger.error(f"🚫 Video story {story.id} dado de baja por moderación ({category}).")
+    story.expires_at = timezone.now()
+    story.save(update_fields=['expires_at'])
+    try:
+        story.clear_media_files()
+    except Exception as exc:
+        logger.warning(f"⚠️ No se pudo limpiar media de la historia {story.id}: {exc}")
+    record_system_report('video', story.id, category, "Fotogramas del video contienen contenido prohibido.")
+    if story.associated_item_id:
+        cache.delete(f"cartmaker:struct:item:{story.associated_item_id}")
+    return False
+
+
+@shared_task(ignore_result=True)
+def moderate_company_presentation_video(company_id):
+    """Modera el video de presentación de un comercio; si es prohibido lo elimina del perfil."""
+    from api.core.content_moderation import record_system_report
+
+    try:
+        company = Company.objects.get(id=company_id)
+    except Company.DoesNotExist:
+        return
+    video_path = company.presentation_video_url
+    if not video_path:
+        return
+    is_clean, category = _video_is_clean_or_none_fetched(video_path)
+    if is_clean:
+        return
+    logger.error(f"🚫 Video de presentación de {company_id} dado de baja por moderación ({category}).")
+    thumb = company.presentation_video_thumbnail
+    for p in (video_path, thumb):
+        try:
+            if p:
+                storage_manager.delete_file(p)
+        except Exception as exc:
+            logger.warning(f"⚠️ No se pudo borrar {p}: {exc}")
+    company.presentation_video_url = None
+    company.presentation_video_thumbnail = None
+    company.save(update_fields=['presentation_video_url', 'presentation_video_thumbnail'])
+    record_system_report('company', company.id, category, "Video de presentación con contenido prohibido.")
+
+
+@shared_task(bind=True, ignore_result=True, max_retries=5)
+def recheck_unverified_image(self, full_path):
+    """
+    Re-verifica una imagen que se aceptó SIN veredicto porque los proveedores de visión no respondieron.
+    Reintenta con backoff exponencial; si resulta prohibida, la borra y limpia sus referencias.
+    """
+    from api.core.content_moderation import (
+        classify_image_bytes, purge_image_references, record_system_report,
+    )
+
+    image_bytes = storage_manager.read_file_bytes(full_path)
+    if not image_bytes:
+        return  # ya no existe (reemplazada/borrada)
+
+    verdict = classify_image_bytes(image_bytes)
+    if verdict is None:
+        if self.request.retries >= self.max_retries:
+            logger.error(f"❌ Imagen sin veredicto tras {self.max_retries} reintentos: {full_path}")
+            return
+        raise self.retry(countdown=60 * (2 ** self.request.retries))
+
+    allowed, category, _provider = verdict
+    if allowed:
+        return
+    logger.error(f"🚫 Imagen {full_path} eliminada tras re-verificación ({category}).")
+    try:
+        storage_manager.delete_file(full_path)
+    except Exception as exc:
+        logger.warning(f"⚠️ No se pudo borrar {full_path}: {exc}")
+    purge_image_references(full_path)
+    record_system_report('image', full_path, category, "Imagen detectada como prohibida en re-verificación diferida.")
+
+
 @shared_task(ignore_result=True)
 def optimize_and_transcode_video_story(story_id):
     """
@@ -208,6 +314,11 @@ def optimize_and_transcode_video_story(story_id):
     """
     try:
         story = CompanyVideoStory.objects.get(id=story_id)
+
+        # 🛡️ FASE 0: Moderación de fotogramas del video (si es prohibido, se da de baja y se detiene el pipeline)
+        if not _moderate_story_video_or_takedown(story):
+            return
+
         matrix_data = getattr(story, 'applied_filter_matrix', None)
         
         # =========================================================================

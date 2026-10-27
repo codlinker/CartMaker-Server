@@ -281,11 +281,10 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
 
         try:
             if has_title or has_desc:
-                moderate_text_fields(
-                    title=instance.title,
-                    description=instance.description,
-                    context="video",
-                )
+                moderate_text_fields({
+                    'title': instance.title,
+                    'description': instance.description,
+                })
             with transaction.atomic():
                 dtnow_str = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
 
@@ -666,7 +665,7 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
             if associated_combo is not None:
                 metadata_parsed['associated_combo_id'] = str(associated_combo.id)
 
-            moderate_text_fields(title=title, description=description, context="video")
+            moderate_text_fields({'title': title, 'description': description})
 
             # 4. Transacción Atómica y Guardado Físico
             with transaction.atomic():
@@ -953,7 +952,7 @@ class UniversalConversationViewSet(viewsets.ViewSet):
             return Response({'error': 'El comentario no puede estar vacío.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            moderate_text_fields(comment=clean_text, context="comentario")
+            moderate_text_fields({'comentario': clean_text})
         except ContentModerationError as e:
             return e.to_response()
 
@@ -1008,7 +1007,7 @@ class UniversalConversationViewSet(viewsets.ViewSet):
             return Response({'error': 'La respuesta no puede estar vacía.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            moderate_text_fields(comment=clean_text, context="respuesta")
+            moderate_text_fields({'respuesta': clean_text})
         except ContentModerationError as e:
             return e.to_response()
 

@@ -128,6 +128,7 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'cartmaker_admin.security_middleware.CartMakerClientGatekeeperMiddleware',
+    'cartmaker_admin.request_files_middleware.RequestFileTrackingMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]

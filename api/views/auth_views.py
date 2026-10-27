@@ -1,5 +1,6 @@
 """Authentication, OAuth2, Biometric 512-D Login, Device Registration, and KYC Verification views."""
 from .base import *
+from rest_framework.exceptions import ValidationError as DRFValidationError
 from .base import _get_cached_bcv_rate, _extract_and_validate_category_ids
 from rest_framework_simplejwt.views import TokenRefreshView
 from ..core.workforce import get_user_workspaces
@@ -328,6 +329,24 @@ class RegisterView(generics.CreateAPIView):
 
     def post(self, request, *args, **kwargs):
         return super().post(request, *args, **kwargs)
+
+    def handle_exception(self, exc):
+        """
+        Normaliza los rechazos +18 / términos al mismo formato plano que usa `google/regist`:
+        {"success": false, "code": "...", "error": "...", "detail": "..."} (HTTP 400).
+        """
+        detail = getattr(exc, 'detail', None)
+        if isinstance(exc, DRFValidationError) and isinstance(detail, dict):
+            def _first(val):
+                return str(val[0]) if isinstance(val, (list, tuple)) and val else str(val or '')
+            code_val = _first(detail.get('code'))
+            if code_val in ('UNDERAGE_RESTRICTED', 'TERMS_NOT_ACCEPTED'):
+                msg = _first(detail.get('error'))
+                return Response(
+                    {'success': False, 'code': code_val, 'error': msg, 'detail': msg},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        return super().handle_exception(exc)
     
 class VerifyEmailView(APIView):
     throttle_classes = [ScopedRateThrottle]

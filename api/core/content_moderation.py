@@ -99,6 +99,12 @@ class ContentModerationError(Exception):
         }
 
     def to_response(self) -> Response:
+        # Rechazo por moderación: eliminamos los archivos ya subidos en esta misma petición (sin huérfanos)
+        try:
+            from api.cos import storage_manager
+            storage_manager.cleanup_request_saved_files()
+        except Exception as exc:
+            logger.warning(f"[ContentModeration] No se pudo limpiar archivos huérfanos: {exc}")
         return Response(self.to_dict(), status=self.status_code)
 
 
@@ -199,6 +205,22 @@ _TEXT_RULES: Tuple[Tuple[str, re.Pattern], ...] = (
 )
 
 
+# Frases legítimas que contienen términos sensibles y NO deben bloquearse (se eliminan antes de evaluar):
+#  - Terapia de reemplazo de nicotina (farmacia): parches, chicles, gomas, pastillas, spray.
+#  - Perfumería / velas / café / cosmética con "notas", "aroma" o "sabor" a tabaco.
+#  - Artículos de juguete o decoración: "pistola de juguete/agua/silicon/pintura/clavos/grapas".
+_SAFE_CONTEXT_PATTERN = re.compile(
+    r"\b("
+    r"(?:parche|parches|chicle|chicles|goma|gomas|pastilla|pastillas|spray|inhalador|terapia)\s+"
+    r"(?:de\s+|para\s+)?(?:reemplazo\s+de\s+)?nicotina|"
+    r"(?:nota|notas|aroma|aromas|sabor|sabores|esencia|fragancia)\s+(?:a\s+|de\s+)tabaco|"
+    r"pistola\s+de\s+(?:juguete|agua|silicon|silicona|pintura|clavos|grapas)|"
+    r"municion\s+de\s+(?:airsoft|paintball)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
 def moderate_text(text: Any, field_label: str = "") -> None:
     """
     Evalúa en < 0.5 ms si un texto contiene términos prohibidos por las políticas de CartMaker y Google Play.
@@ -210,6 +232,9 @@ def moderate_text(text: Any, field_label: str = "") -> None:
     norm = _normalize_text_for_moderation(text)
     if not norm:
         return
+
+    # Frases legítimas (farmacia, perfumería, cafetería) que contienen términos sensibles
+    norm = _SAFE_CONTEXT_PATTERN.sub(" ", norm)
 
     # Evaluamos tanto el texto normalizado como su variante des-leetspeakeada
     candidates = (norm, norm.translate(_LEET_MAP))
@@ -277,8 +302,10 @@ def _should_moderate_folder(folder_path: str) -> bool:
     clean = str(folder_path or "").strip().replace("\\", "/").lstrip("/")
     if not clean:
         return True
+    # Normalizamos con "/" final para que "identity_verifications" (sin slash) también quede exenta
+    clean_slash = clean if clean.endswith("/") else clean + "/"
     for exempt in EXEMPT_DOCUMENT_PREFIXES:
-        if clean.startswith(exempt):
+        if clean_slash.startswith(exempt):
             return False
     return True
 
@@ -467,6 +494,7 @@ def moderate_image_bytes(
     image_bytes: bytes,
     folder_path: str = "",
     file_name: str = "",
+    schedule_recheck: bool = True,
 ) -> None:
     """
     Evalúa una imagen en memoria ANTES de subirla a AWS S3 o guardarla en disco.
@@ -513,6 +541,10 @@ def moderate_image_bytes(
     )
 
     if verdict is None:
+        # Fail-open controlado: la imagen se acepta para no bloquear al usuario si la IA no responde,
+        # pero se agenda una RE-VERIFICACIÓN asíncrona con reintentos (si hay algún proveedor configurado).
+        if schedule_recheck:
+            _schedule_unverified_recheck(folder_path, file_name)
         return
 
     allowed, category, _provider = verdict
@@ -527,3 +559,193 @@ def moderate_image_bytes(
 
     if not allowed:
         raise ContentModerationError(category=category)
+
+
+def classify_image_bytes(image_bytes: bytes) -> Optional[Tuple[bool, str, str]]:
+    """Cadena de proveedores de visión. Devuelve (allowed, category, provider) o None si ninguno respondió."""
+    return (
+        _check_with_aws_rekognition(image_bytes)
+        or _check_with_openrouter_vision(image_bytes)
+        or _check_with_openai_moderation(image_bytes)
+    )
+
+
+def moderation_providers_configured() -> bool:
+    """True si hay al menos un proveedor de visión configurado (sin él no tiene sentido reintentar)."""
+    def _cfg(name: str) -> str:
+        return str(getattr(settings, name, None) or os.environ.get(name, "") or "").strip()
+
+    rekognition_on = _cfg("USE_AWS_REKOGNITION_MODERATION").lower() in ("true", "1", "yes")
+    return bool(rekognition_on or _cfg("OPENROUTER_API_KEY") or _cfg("OPENAI_API_KEY"))
+
+
+def _schedule_unverified_recheck(folder_path: str, file_name: str) -> None:
+    """Agenda la re-verificación asíncrona de una imagen que se aceptó sin veredicto (proveedores caídos)."""
+    if not file_name or not moderation_providers_configured():
+        return
+    full_path = os.path.join(str(folder_path or ""), str(file_name)).replace("\\", "/").lstrip("/")
+    logger.warning(f"[ContentModeration] Imagen aceptada SIN veredicto, re-verificación agendada: {full_path}")
+    try:
+        from api.tasks import recheck_unverified_image
+        recheck_unverified_image.apply_async(args=[full_path], countdown=45)
+    except Exception as exc:
+        logger.warning(f"[ContentModeration] No se pudo agendar re-verificación de {full_path}: {exc}")
+
+
+# -------------------------------------------------------------------------
+# Pre-moderación CONCURRENTE (reduce la latencia cuando se suben varias imágenes en una misma petición)
+# -------------------------------------------------------------------------
+_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".heic", ".gif")
+
+
+def premoderate_uploaded_images(files: Iterable[Any], folder_path: str = "") -> None:
+    """
+    Modera EN PARALELO todas las imágenes subidas en una petición ANTES de abrir transacciones o subir a S3.
+    Deja el veredicto en caché Redis (por hash del stream comprimido), de modo que el `save_file` posterior
+    no repite la llamada a la IA. Lanza `ContentModerationError` en cuanto una imagen es rechazada.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from api.cos import compress_uploaded_image_stream
+
+    payloads = []
+    for f in files or []:
+        name = str(getattr(f, "name", "") or "")
+        if os.path.splitext(name)[1].lower() not in _IMAGE_EXTS:
+            continue
+        try:
+            compressed, new_name = compress_uploaded_image_stream(f, file_name=name)
+            if hasattr(compressed, "seek"):
+                compressed.seek(0)
+            data = compressed.read()
+            if hasattr(compressed, "seek"):
+                compressed.seek(0)
+            if hasattr(f, "seek"):
+                f.seek(0)
+            payloads.append((data, new_name))
+        except Exception:
+            continue
+
+    if not payloads:
+        return
+
+    def _run(item):
+        data, name = item
+        moderate_image_bytes(data, folder_path=folder_path, file_name=name, schedule_recheck=False)
+
+    if len(payloads) == 1:
+        _run(payloads[0])
+        return
+
+    with ThreadPoolExecutor(max_workers=min(6, len(payloads))) as pool:
+        futures = [pool.submit(_run, p) for p in payloads]
+        first_error: Optional[ContentModerationError] = None
+        for fut in futures:
+            try:
+                fut.result()
+            except ContentModerationError as exc:
+                if first_error is None:
+                    first_error = exc
+            except Exception as exc:
+                logger.warning(f"[ContentModeration] Pre-moderación omitida: {exc}")
+    if first_error is not None:
+        raise first_error
+
+
+# -------------------------------------------------------------------------
+# Moderación de VIDEO (frames clave con ffmpeg) y acciones automáticas del sistema
+# -------------------------------------------------------------------------
+def extract_video_frames(local_video_path: str, count: int = 3) -> list:
+    """Extrae `count` fotogramas JPEG (≈512 px de ancho) repartidos a lo largo del video con ffmpeg."""
+    import subprocess
+    import tempfile
+
+    duration = 0.0
+    try:
+        probe = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", local_video_path,
+            ],
+            capture_output=True, text=True, timeout=30,
+        )
+        duration = float((probe.stdout or "0").strip() or 0)
+    except Exception:
+        duration = 0.0
+
+    if duration > 1.0:
+        stamps = [duration * frac for frac in ((0.12, 0.5, 0.88) if count >= 3 else (0.5,))]
+    else:
+        stamps = [0.0]
+
+    frames = []
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for idx, ts in enumerate(stamps[:count]):
+            out_path = os.path.join(tmpdir, f"frame_{idx}.jpg")
+            try:
+                subprocess.run(
+                    [
+                        "ffmpeg", "-y", "-ss", f"{ts:.2f}", "-i", local_video_path,
+                        "-frames:v", "1", "-vf", "scale=512:-2", "-q:v", "5", out_path,
+                    ],
+                    capture_output=True, timeout=60,
+                )
+                if os.path.isfile(out_path):
+                    with open(out_path, "rb") as fh:
+                        data = fh.read()
+                    if data:
+                        frames.append(data)
+            except Exception as exc:
+                logger.warning(f"[ContentModeration] No se pudo extraer frame {idx}: {exc}")
+    return frames
+
+
+def moderate_local_video(local_video_path: str) -> None:
+    """Modera fotogramas clave de un video local. Lanza `ContentModerationError` si alguno es prohibido."""
+    for frame in extract_video_frames(local_video_path):
+        moderate_image_bytes(frame, folder_path="stories/frames", file_name="frame.jpg", schedule_recheck=False)
+
+
+def record_system_report(target_type: str, target_id: str, category: str, description: str = "") -> None:
+    """Registra una denuncia generada automáticamente por el sistema de moderación (sin usuario denunciante)."""
+    try:
+        from api.models import ContentReport
+
+        reason = category if category in {c[0] for c in ContentReport.ReportReason.choices} else ContentReport.ReportReason.OTHER
+        ContentReport.objects.create(
+            reporter=None,
+            target_type=target_type,
+            target_id=str(target_id),
+            reason=reason,
+            description=(f"[Moderación automática] {description}")[:1000],
+            status=ContentReport.ReportStatus.REMOVED,
+        )
+    except Exception as exc:
+        logger.warning(f"[ContentModeration] No se pudo registrar el reporte del sistema: {exc}")
+
+
+def purge_image_references(path: str) -> int:
+    """
+    Quita de la base de datos toda referencia a una imagen eliminada por moderación, para que la app
+    no apunte a un archivo inexistente (productos, combos, perfiles, tiendas, videos).
+    """
+    from api.models import Company, CompanyStore, CompanyVideoStory, Product, ProductsCombo, User
+
+    changed = 0
+    clean = str(path or "").lstrip("/")
+    if not clean:
+        return 0
+    try:
+        for model, field in ((Product, "images"), (ProductsCombo, "custom_images")):
+            for obj in model.objects.filter(**{f"{field}__contains": [clean]}):
+                setattr(obj, field, [x for x in (getattr(obj, field) or []) if x != clean])
+                obj.save(update_fields=[field])
+                changed += 1
+        changed += Company.objects.filter(image=clean).update(image=None)
+        changed += Company.objects.filter(presentation_video_thumbnail=clean).update(presentation_video_thumbnail=None)
+        changed += CompanyStore.objects.filter(store_img_url=clean).update(store_img_url=None)
+        changed += User.objects.filter(profile_picture=clean).update(profile_picture="")
+        changed += CompanyVideoStory.objects.filter(thumbnail=clean).update(thumbnail=None)
+    except Exception as exc:
+        logger.warning(f"[ContentModeration] Error purgando referencias de {clean}: {exc}")
+    return changed
