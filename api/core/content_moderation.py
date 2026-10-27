@@ -663,23 +663,68 @@ def premoderate_uploaded_images(files: Iterable[Any], folder_path: str = "") -> 
 # -------------------------------------------------------------------------
 # Moderación de VIDEO (frames clave con ffmpeg) y acciones automáticas del sistema
 # -------------------------------------------------------------------------
+def get_ffmpeg_binary() -> str:
+    """
+    Devuelve la ruta ejecutable de `ffmpeg`:
+      1. Si `ffmpeg` está instalado en el sistema operativo (`/usr/bin/ffmpeg`), lo prefiere.
+      2. Si no, usa el binario estático precompilado de `imageio-ffmpeg` (instalado vía `requirements.txt`).
+    """
+    import shutil
+
+    sys_bin = shutil.which("ffmpeg")
+    if sys_bin:
+        return sys_bin
+    try:
+        import imageio_ffmpeg
+
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return "ffmpeg"
+
+
+def get_video_duration_seconds(local_video_path: str) -> float:
+    """Obtiene la duración del video en segundos usando `ffprobe` (si existe) o la cabecera de `ffmpeg -i`."""
+    import shutil
+    import subprocess
+
+    ffprobe_bin = shutil.which("ffprobe")
+    if ffprobe_bin:
+        try:
+            probe = subprocess.run(
+                [
+                    ffprobe_bin, "-v", "error", "-show_entries", "format=duration",
+                    "-of", "default=noprint_wrappers=1:nokey=1", local_video_path,
+                ],
+                capture_output=True, text=True, timeout=20,
+            )
+            dur = float((probe.stdout or "0").strip() or 0)
+            if dur > 0:
+                return dur
+        except Exception:
+            pass
+
+    try:
+        ffmpeg_bin = get_ffmpeg_binary()
+        res = subprocess.run(
+            [ffmpeg_bin, "-hide_banner", "-i", local_video_path],
+            capture_output=True, text=True, timeout=20,
+        )
+        m = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", res.stderr or "")
+        if m:
+            hours, mins, secs = int(m.group(1)), int(m.group(2)), float(m.group(3))
+            return hours * 3600.0 + mins * 60.0 + secs
+    except Exception:
+        pass
+    return 0.0
+
+
 def extract_video_frames(local_video_path: str, count: int = 3) -> list:
     """Extrae `count` fotogramas JPEG (≈512 px de ancho) repartidos a lo largo del video con ffmpeg."""
     import subprocess
     import tempfile
 
-    duration = 0.0
-    try:
-        probe = subprocess.run(
-            [
-                "ffprobe", "-v", "error", "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1", local_video_path,
-            ],
-            capture_output=True, text=True, timeout=30,
-        )
-        duration = float((probe.stdout or "0").strip() or 0)
-    except Exception:
-        duration = 0.0
+    ffmpeg_bin = get_ffmpeg_binary()
+    duration = get_video_duration_seconds(local_video_path)
 
     if duration > 1.0:
         stamps = [duration * frac for frac in ((0.12, 0.5, 0.88) if count >= 3 else (0.5,))]
@@ -693,7 +738,7 @@ def extract_video_frames(local_video_path: str, count: int = 3) -> list:
             try:
                 subprocess.run(
                     [
-                        "ffmpeg", "-y", "-ss", f"{ts:.2f}", "-i", local_video_path,
+                        ffmpeg_bin, "-y", "-ss", f"{ts:.2f}", "-i", local_video_path,
                         "-frames:v", "1", "-vf", "scale=512:-2", "-q:v", "5", out_path,
                     ],
                     capture_output=True, timeout=60,
@@ -717,17 +762,28 @@ def moderate_local_video(local_video_path: str) -> None:
 def record_system_report(target_type: str, target_id: str, category: str, description: str = "") -> None:
     """Registra una denuncia generada automáticamente por el sistema de moderación (sin usuario denunciante)."""
     try:
+        from django.db import transaction
         from api.models import ContentReport
 
         reason = category if category in {c[0] for c in ContentReport.ReportReason.choices} else ContentReport.ReportReason.OTHER
-        ContentReport.objects.create(
-            reporter=None,
-            target_type=target_type,
-            target_id=str(target_id),
-            reason=reason,
-            description=(f"[Moderación automática] {description}")[:1000],
-            status=ContentReport.ReportStatus.REMOVED,
-        )
+        raw_target_id = str(target_id)
+        max_len = ContentReport._meta.get_field('target_id').max_length
+        full_description = f"[Moderación automática] {description}"
+        if len(raw_target_id) > max_len:
+            # Las rutas de imágenes (product_pictures/<uuid>/prod_<uuid>_...) superan el tamaño de `target_id`:
+            # se guarda un hash estable y la ruta completa queda en la descripción para poder auditarla.
+            full_description = f"{full_description} | ruta: {raw_target_id}"
+            raw_target_id = "sha1:" + hashlib.sha1(raw_target_id.encode("utf-8")).hexdigest()
+        # Savepoint: un fallo al registrar el reporte nunca debe romper la transacción del llamador
+        with transaction.atomic():
+            ContentReport.objects.create(
+                reporter=None,
+                target_type=target_type,
+                target_id=raw_target_id,
+                reason=reason,
+                description=full_description[:1000],
+                status=ContentReport.ReportStatus.REMOVED,
+            )
     except Exception as exc:
         logger.warning(f"[ContentModeration] No se pudo registrar el reporte del sistema: {exc}")
 

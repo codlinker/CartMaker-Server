@@ -385,6 +385,124 @@ BIOMETRIC_LOGIN_THRESHOLD_ACCEPTABLE = 0.26
 BIOMETRIC_LOGIN_THRESHOLD_1TO1 = 0.30
 BIOMETRIC_LOGIN_MIN_MARGIN = 0.08
 
+# -------------------------------------------------------------------------
+# VERSIONADO DEL MODELO FACIAL (migración fp32 -> int8 sin re-registro masivo)
+# -------------------------------------------------------------------------
+# Cada User guarda en `biometric_model_version` con qué modelo se generó su `biometric_vector`.
+# Los embeddings de modelos distintos NO son comparables entre sí (espacios latentes distintos),
+# por eso TODA comparación (login 1:1, login 1:N, duplicados KYC, rolling template) se hace
+# exclusivamente entre vectores de la MISMA versión y con los umbrales de esa versión.
+#
+# LIMITACIÓN CONOCIDA: mientras convivan dos versiones, la detección de multicuenta (KYC 1:N)
+# NO cruza versiones: una persona registrada con 'mobilefacenet-fp32-v1' podría abrir una segunda
+# cuenta registrándose con 'mobilefacenet-int8-v1' sin ser detectada. Se mitiga acortando la
+# ventana de convivencia (re-enrolamiento forzado de usuarios antiguos) y retirando la versión
+# vieja de BIOMETRIC_ALLOWED_MODEL_VERSIONS cuando termine la migración.
+BIOMETRIC_MODEL_CURRENT_DEFAULT = 'mobilefacenet-fp32-v1'
+BIOMETRIC_MODEL_VERSION_MAX_LENGTH = 32
+_BIOMETRIC_ALLOWED_MODEL_VERSIONS_FALLBACK = frozenset({'mobilefacenet-fp32-v1', 'mobilefacenet-int8-v1'})
+
+
+def _load_allowed_model_versions() -> frozenset:
+    """Versiones permitidas: settings.BIOMETRIC_ALLOWED_MODEL_VERSIONS (iterable) o el valor por defecto."""
+    configured = getattr(settings, 'BIOMETRIC_ALLOWED_MODEL_VERSIONS', None)
+    if configured:
+        if isinstance(configured, str):
+            configured = [p for p in configured.split(',')]
+        allowed = {
+            str(v).strip().lower()[:BIOMETRIC_MODEL_VERSION_MAX_LENGTH]
+            for v in configured
+            if str(v).strip()
+        }
+        if allowed:
+            return frozenset(allowed)
+    return _BIOMETRIC_ALLOWED_MODEL_VERSIONS_FALLBACK
+
+
+BIOMETRIC_ALLOWED_MODEL_VERSIONS = _load_allowed_model_versions()
+
+# Umbrales por versión (perfect, acceptable_1n, one_to_one, kyc_duplicate, min_margin).
+# Inicialmente IGUALES a los de fp32 para ambas versiones: la cuantización int8 debe recalibrarse con
+# `scripts/calibrate_biometric_thresholds.py` sobre un set real de pares antes de cambiarlos.
+_BIOMETRIC_BASE_THRESHOLDS = {
+    'perfect': BIOMETRIC_LOGIN_THRESHOLD_PERFECT,
+    'acceptable_1n': BIOMETRIC_LOGIN_THRESHOLD_ACCEPTABLE,
+    'one_to_one': BIOMETRIC_LOGIN_THRESHOLD_1TO1,
+    'kyc_duplicate': BIOMETRIC_KYC_DUPLICATE_THRESHOLD,
+    'min_margin': BIOMETRIC_LOGIN_MIN_MARGIN,
+}
+BIOMETRIC_THRESHOLD_KEYS = tuple(_BIOMETRIC_BASE_THRESHOLDS.keys())
+
+
+def _build_thresholds_by_model() -> dict:
+    """
+    Construye {version: {umbral: valor}}. Se pueden sobrescribir vía settings.BIOMETRIC_THRESHOLD_OVERRIDES,
+    p. ej. {'mobilefacenet-int8-v1': {'acceptable_1n': 0.27, 'kyc_duplicate': 0.31}} (dict, o string JSON).
+    Claves/valores inválidos se ignoran.
+    """
+    table = {
+        version: dict(_BIOMETRIC_BASE_THRESHOLDS)
+        for version in set(BIOMETRIC_ALLOWED_MODEL_VERSIONS) | _BIOMETRIC_ALLOWED_MODEL_VERSIONS_FALLBACK
+    }
+    overrides = getattr(settings, 'BIOMETRIC_THRESHOLD_OVERRIDES', None)
+    if isinstance(overrides, str):
+        try:
+            overrides = json.loads(overrides) if overrides.strip() else None
+        except ValueError:
+            overrides = None
+    if isinstance(overrides, dict):
+        for version, values in overrides.items():
+            version_key = str(version).strip().lower()
+            if not isinstance(values, dict):
+                continue
+            target = table.setdefault(version_key, dict(_BIOMETRIC_BASE_THRESHOLDS))
+            for key, value in values.items():
+                if key not in BIOMETRIC_THRESHOLD_KEYS:
+                    continue
+                try:
+                    fval = float(value)
+                except (TypeError, ValueError):
+                    continue
+                if math.isfinite(fval) and 0.0 <= fval <= 2.0:
+                    target[key] = fval
+    return table
+
+
+BIOMETRIC_THRESHOLDS_BY_MODEL = _build_thresholds_by_model()
+
+
+def normalize_embedding_model_version(raw) -> str:
+    """
+    Normaliza la versión del modelo facial enviada por el cliente (`embedding_model_version`):
+    strip + minúsculas + máx. 32 caracteres. Vacío/None => BIOMETRIC_MODEL_CURRENT_DEFAULT
+    (apps antiguas que no envían el campo). Valor no permitido => ValueError con mensaje claro.
+    """
+    if raw is None:
+        return BIOMETRIC_MODEL_CURRENT_DEFAULT
+    version = str(raw).strip().lower()
+    if not version:
+        return BIOMETRIC_MODEL_CURRENT_DEFAULT
+    if len(version) > BIOMETRIC_MODEL_VERSION_MAX_LENGTH:
+        raise ValueError(
+            f"embedding_model_version excede {BIOMETRIC_MODEL_VERSION_MAX_LENGTH} caracteres y no es una versión soportada."
+        )
+    if version not in BIOMETRIC_ALLOWED_MODEL_VERSIONS:
+        raise ValueError(
+            f"Versión de modelo facial no soportada: '{version}'. "
+            f"Versiones permitidas: {', '.join(sorted(BIOMETRIC_ALLOWED_MODEL_VERSIONS))}."
+        )
+    return version
+
+
+def get_biometric_thresholds(version=None) -> dict:
+    """Umbrales {perfect, acceptable_1n, one_to_one, kyc_duplicate, min_margin} de la versión (copia)."""
+    key = str(version or BIOMETRIC_MODEL_CURRENT_DEFAULT).strip().lower()
+    return dict(
+        BIOMETRIC_THRESHOLDS_BY_MODEL.get(key)
+        or BIOMETRIC_THRESHOLDS_BY_MODEL.get(BIOMETRIC_MODEL_CURRENT_DEFAULT)
+        or _BIOMETRIC_BASE_THRESHOLDS
+    )
+
 
 def normalize_biometric_vector(
     raw_vector,

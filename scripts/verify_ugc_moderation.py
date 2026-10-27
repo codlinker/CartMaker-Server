@@ -521,7 +521,13 @@ try:
         pr_x.refresh_from_db()
         check('re-verificación: archivo prohibido borrado del storage', not _os.path.isfile(_os.path.join(settings.MEDIA_ROOT, bad_path)))
         check('  referencia purgada del producto (la otra foto se conserva)', pr_x.images == ['product_pictures/otra/ok.jpg'], pr_x.images)
-        check('  reporte del sistema registrado (sin denunciante)', ContentReport.objects.filter(reporter__isnull=True, target_type='image', target_id=bad_path).exists())
+        import hashlib as _hl
+        from django.db.models import Q as _Q
+        _sys_tid = bad_path if len(bad_path) <= 64 else 'sha1:' + _hl.sha1(bad_path.encode('utf-8')).hexdigest()
+        check('  reporte del sistema registrado (sin denunciante)', ContentReport.objects.filter(_Q(target_id=_sys_tid), reporter__isnull=True, target_type='image').exists())
+        if len(bad_path) > 64:
+            check('  ruta larga: target_id hasheado y ruta completa en la descripción',
+                  ContentReport.objects.filter(target_id=_sys_tid, description__contains=bad_path).exists())
 
         # ------------------------------------------------------------------
         print('\n=== 14. MODERACIÓN DE VIDEO (frames con ffmpeg shim) ===')

@@ -4,6 +4,48 @@ from .base import _get_cached_bcv_rate, _extract_and_validate_category_ids
 from ..core.workforce import resolve_merchant_actor
 from ..permissions import get_request_ctx
 
+import functools
+from django.utils.cache import patch_cache_control
+
+
+def _swap_images_for_thumbnails(node) -> None:
+    """
+    Recorre (in situ) un fragmento del payload del home y, en todo dict que tenga `images` + `image_variants`
+    alineados, reemplaza cada URL de `images` por su `thumb_url`. Tolera ciclos/mirrors compartidos (idempotente).
+    """
+    if isinstance(node, list):
+        for child in node:
+            _swap_images_for_thumbnails(child)
+    elif isinstance(node, dict):
+        images = node.get('images')
+        variants = node.get('image_variants')
+        if isinstance(images, list) and isinstance(variants, list) and len(images) == len(variants):
+            node['images'] = [
+                (variant.get('thumb_url') or original) if isinstance(variant, dict) else original
+                for original, variant in zip(images, variants)
+            ]
+        for value in node.values():
+            if isinstance(value, (list, dict)):
+                _swap_images_for_thumbnails(value)
+
+
+def public_max_age(seconds: int):
+    """
+    Decorador de `get()` para contenido global idéntico para todos los usuarios (malls, config del sistema):
+    añade `Cache-Control: private, max-age=<seconds>` a las respuestas 200 (`private`: solo la app/navegador, nunca
+    un CDN intermedio, para no saltarse el control de API key). Junto con el ETag/304 automático
+    (`ConditionalGetMiddleware`) la app puede evitar la petición o revalidarla sin descargar el cuerpo.
+    """
+    def decorator(view_get):
+        @functools.wraps(view_get)
+        def wrapper(self, request, *args, **kwargs):
+            response = view_get(self, request, *args, **kwargs)
+            if getattr(response, 'status_code', None) == 200:
+                patch_cache_control(response, private=True, max_age=int(seconds))
+            return response
+        return wrapper
+    return decorator
+
 #########################################################
 #################### MANEJO DE MAPAS ####################
 #########################################################
@@ -500,6 +542,7 @@ class GetMallsCache(APIView):
     throttle_scope = 'actions'
     permission_classes = [AllowAny]
 
+    @public_max_age(300)
     def get(self, request):
         cache_key = "cartmaker:global:malls"
         cached_data = cache.get(cache_key)
@@ -693,6 +736,7 @@ class SystemConfigCacheAPI(APIView):
     throttle_scope = 'navigation'
     permission_classes = [AllowAny]
 
+    @public_max_age(120)
     def get(self, request):
         """
         Caché de configuracion global y emisor fiscal SENIAT dinámico.
@@ -723,7 +767,7 @@ class UserCacheAPI(APIView):
         cache_key = f"cartmaker:tenant:{request.user.id}:profile"
         cached_data = cache.get(cache_key)
 
-        if cached_data and "preferred_category_ids" in cached_data:
+        if cached_data and "preferred_category_ids" in cached_data and "biometric_model_version" in cached_data:
             return Response(cached_data, status=status.HTTP_200_OK)
 
         # Cache Miss
@@ -747,6 +791,7 @@ class UserCacheAPI(APIView):
             "email_verified": user.email_verified,
             "user_type": user.user_type,
             "profile_picture": user.get_profile_picture_url(),
+            "profile_picture_thumb_url": user.get_profile_picture_thumb_url(),
             "cedula_document_url": user.get_cedula_document_url(),
             "cedula_verified": user.cedula_verified,
             "cedula_number": user.cedula_number if user.cedula_number else "",
@@ -756,6 +801,9 @@ class UserCacheAPI(APIView):
                 else None
             ),
             "biometric_consent_version": user.biometric_consent_version,
+            # Versión del modelo facial con que se generó el vector (null si no hay vector registrado).
+            # El cliente la usa para decidir si debe re-enrolar la cara tras migrar de modelo.
+            "biometric_model_version": user.biometric_model_version if user.biometric_vector is not None else None,
             "biometric_suppressed_at": (
                 user.biometric_suppressed_at.isoformat()
                 if user.biometric_suppressed_at
@@ -894,6 +942,27 @@ class HomeCacheAPI(APIView):
             "top_rated_products": sections.get("top_rated_products", []),
             "more_to_explore": sections.get("more_to_explore", []),
         }
+
+        # --- Opciones opt-in para aligerar el payload (la forma por defecto no cambia) ---
+        # ?compact=1 -> elimina los espejos de secciones en la raíz y el árbol de categorías duplicado
+        #               (`departments` y `sections.departments` repiten `categories`); todo sigue en `sections`.
+        # ?img=thumb -> en los ítems del home, `images` pasa a ser la miniatura WebP (320 px) de cada imagen
+        #               (el original sigue disponible en `image_variants[].url`).
+        if str(request.query_params.get('compact', '')).strip().lower() in ('1', 'true', 'yes'):
+            for mirrored_key in (
+                "departments", "selected_for_you", "zone_combos", "flash_offers", "offers", "token_stores",
+                "local_merchants_and_tokens", "very_close_products", "dynamic_subcategory_sections", "favorites",
+                "under_25_products", "top_rated_products", "more_to_explore",
+            ):
+                payload.pop(mirrored_key, None)
+            if isinstance(payload.get("sections"), dict):
+                payload["sections"].pop("departments", None)
+        if str(request.query_params.get('img', '')).strip().lower() == 'thumb':
+            _swap_images_for_thumbnails(payload.get("sections"))
+            _swap_images_for_thumbnails(payload.get("stories"))
+            for mirrored_key in ("selected_for_you", "zone_combos", "flash_offers", "offers", "very_close_products",
+                                 "under_25_products", "top_rated_products", "more_to_explore", "favorites"):
+                _swap_images_for_thumbnails(payload.get(mirrored_key))
         return Response(payload, status=status.HTTP_200_OK)
 
 class SearchCacheAPI(APIView):

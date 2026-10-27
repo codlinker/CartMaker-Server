@@ -1390,14 +1390,38 @@ class AnalyticsViewSet(viewsets.ViewSet):
         return Response({'data': data}, status=status.HTTP_200_OK)
 
 
+from datetime import datetime as _dt, timedelta as _td, timezone as _dt_tz
+
+
+class LogsBatchThrottle(ScopedRateThrottle):
+    """
+    Throttle del endpoint `logs/batch/`. Usa el scope `logs_batch` de `DEFAULT_THROTTLE_RATES`;
+    si no está configurado en settings, aplica un cupo por defecto razonable para lotes
+    (cada petición agrupa hasta 100 eventos, por lo que 30/min equivale a miles de eventos).
+    """
+    DEFAULT_RATE = '30/minute'
+
+    def get_rate(self):
+        return self.THROTTLE_RATES.get(self.scope, self.DEFAULT_RATE)
+
+
 class InteractionLogViewSet(viewsets.ViewSet):
     """
     API dedicada a registrar silenciosamente la telemetría del usuario en la App.
     Alimenta los modelos de Machine Learning y el Algoritmo de Recomendación.
+
+    Cada tipo de evento tiene un método interno `_ingest_*` que contiene la validación y el encolado
+    en Redis. Tanto los endpoints individuales como `logs/batch/` lo reutilizan, de modo que ambos
+    se comportan exactamente igual.
     """
     permission_classes = [IsAuthenticated]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'actions'
+
+    # Máximo de eventos por lote en `logs/batch/` y ventana de antigüedad aceptada para `ts`.
+    BATCH_MAX_EVENTS = 100
+    BATCH_TS_MAX_AGE = _td(days=7)
+    BATCH_TS_FUTURE_TOLERANCE = _td(minutes=1)  # tolerancia por desfase de reloj del dispositivo
 
     # ==========================================
     # HELPER: Procesador de Fechas
@@ -1417,23 +1441,21 @@ class InteractionLogViewSet(viewsets.ViewSet):
         return parsed
 
     # ==========================================
-    # ENDPOINTS
+    # LÓGICA COMPARTIDA (endpoints individuales y batch)
+    # Cada método devuelve (http_status, body). `body` None = respuesta sin cuerpo.
+    # `fallback_ts` (ISO8601) solo lo usa el batch para rellenar el campo de tiempo obligatorio
+    # cuando el evento no lo trae; los endpoints individuales no lo envían.
     # ==========================================
-    @action(detail=False, methods=['post'])
-    def product_view(self, request):
-        """
-        Registra el Dwell Time e interacciones. Envía los datos a un Buffer en Redis.
-        """
-        data = request.data
+    def _ingest_product_view(self, user, data, fallback_ts=None):
         item_id = data.get('item_id')
-        start_time_raw = data.get('start_time')
+        start_time_raw = data.get('start_time') or fallback_ts
 
         if not item_id or not start_time_raw:
-            return Response({'error': 'item_id y start_time son obligatorios.'}, status=status.HTTP_400_BAD_REQUEST)
+            return status.HTTP_400_BAD_REQUEST, {'error': 'item_id y start_time son obligatorios.'}
 
         # Preparamos el payload añadiendo el ID del usuario y metadatos de atribución (Atlas IA / Orgánico)
         payload = {
-            'client_id': str(request.user.id),
+            'client_id': str(user.id),
             'item_id': str(item_id),
             'added_to_cart': data.get('added_to_cart', False),
             'bought': data.get('bought', False),
@@ -1449,26 +1471,21 @@ class InteractionLogViewSet(viewsets.ViewSet):
             # Empujamos a la lista de Redis
             redis_conn = cache.client.get_client()
             redis_conn.rpush("telemetry:product_views", json.dumps(payload))
-            return Response(status=status.HTTP_202_ACCEPTED) # 202 significa "Aceptado para procesamiento"
+            return status.HTTP_202_ACCEPTED, None # 202 significa "Aceptado para procesamiento"
             
         except Exception as e:
             print(f"Error al encolar analítica en Redis: {e}")
-            return Response({'error': 'Error interno'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return status.HTTP_500_INTERNAL_SERVER_ERROR, {'error': 'Error interno'}
 
-    @action(detail=False, methods=['post'])
-    def store_view(self, request):
-        """
-        Registra el comportamiento del usuario dentro del perfil de una tienda.
-        """
-        data = request.data
+    def _ingest_store_view(self, user, data, fallback_ts=None):
         store_id = data.get('store_id')
-        join_time_raw = data.get('join_time')
+        join_time_raw = data.get('join_time') or fallback_ts
 
         if not store_id or not join_time_raw:
-            return Response({'error': 'store_id y join_time son obligatorios.'}, status=status.HTTP_400_BAD_REQUEST)
+            return status.HTTP_400_BAD_REQUEST, {'error': 'store_id y join_time son obligatorios.'}
 
         payload = {
-            'client_id': str(request.user.id),
+            'client_id': str(user.id),
             'store_id': str(store_id),
             'join_time': join_time_raw,
             'exit_time': data.get('exit_time'),
@@ -1482,25 +1499,20 @@ class InteractionLogViewSet(viewsets.ViewSet):
         try:
             redis_conn = cache.client.get_client()
             redis_conn.rpush("telemetry:store_views", json.dumps(payload))
-            return Response(status=status.HTTP_202_ACCEPTED)
+            return status.HTTP_202_ACCEPTED, None
         except Exception as e:
             print(f"Error al encolar analítica de store_view: {e}")
-            return Response({'error': 'Error interno'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return status.HTTP_500_INTERNAL_SERVER_ERROR, {'error': 'Error interno'}
 
-    @action(detail=False, methods=['post'])
-    def navigation(self, request):
-        """
-        Registra el mapa de pantallas que el usuario visitó durante su sesión.
-        """
-        data = request.data
+    def _ingest_navigation(self, user, data, fallback_ts=None):
         navigation_record = data.get('navigation_record', {})
-        login_time_raw = data.get('login_time')
+        login_time_raw = data.get('login_time') or fallback_ts
 
         if not login_time_raw:
-            return Response({'error': 'login_time es obligatorio.'}, status=status.HTTP_400_BAD_REQUEST)
+            return status.HTTP_400_BAD_REQUEST, {'error': 'login_time es obligatorio.'}
 
         payload = {
-            'client_id': str(request.user.id),
+            'client_id': str(user.id),
             'navigation_record': navigation_record,
             'login_time': login_time_raw,
             'logout_time': data.get('logout_time')
@@ -1509,28 +1521,24 @@ class InteractionLogViewSet(viewsets.ViewSet):
         try:
             redis_conn = cache.client.get_client()
             redis_conn.rpush("telemetry:navigation_logs", json.dumps(payload))
-            return Response(status=status.HTTP_202_ACCEPTED)
+            return status.HTTP_202_ACCEPTED, None
         except Exception as e:
             print(f"Error al encolar analítica de navigation: {e}")
-            return Response({'error': 'Error interno'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return status.HTTP_500_INTERNAL_SERVER_ERROR, {'error': 'Error interno'}
 
-    @action(detail=False, methods=['post'])
-    def video_engagement(self, request):
-        """
-        Registra interacciones de video y acumula el tiempo de visualización.
-        """
-        data = request.data
+    def _ingest_video_engagement(self, user, data, fallback_ts=None):
+        # `fallback_ts` no aplica: video_engagement no tiene campo de tiempo.
         video_id = data.get('video_id')
         
         if not video_id:
-            return Response({'error': 'video_id es obligatorio.'}, status=status.HTTP_400_BAD_REQUEST)
+            return status.HTTP_400_BAD_REQUEST, {'error': 'video_id es obligatorio.'}
 
         # Blindaje de parseo booleano desde Flutter
         def parse_bool(val):
             return str(val).lower() == 'true' if isinstance(val, str) else bool(val)
 
         payload = {
-            'client_id': str(request.user.id),
+            'client_id': str(user.id),
             'video_id': str(video_id),
             'watch_time_seconds': float(data.get('watch_time_seconds', 0.0)),
             'video_completed': parse_bool(data.get('video_completed', False)),
@@ -1542,8 +1550,162 @@ class InteractionLogViewSet(viewsets.ViewSet):
         try:
             redis_conn = cache.client.get_client()
             redis_conn.rpush("telemetry:video_engagement", json.dumps(payload))
-            return Response({'success': True}, status=status.HTTP_202_ACCEPTED)
+            return status.HTTP_202_ACCEPTED, {'success': True}
         except Exception as e:
             print(f"Error al encolar analítica de video_engagement: {e}")
-            return Response({'error': 'Error interno'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return status.HTTP_500_INTERNAL_SERVER_ERROR, {'error': 'Error interno'}
 
+    # Tipo de evento -> método interno compartido (usado por `logs/batch/`).
+    BATCH_EVENT_HANDLERS = {
+        'product_view': '_ingest_product_view',
+        'video_engagement': '_ingest_video_engagement',
+        'store_view': '_ingest_store_view',
+        'navigation': '_ingest_navigation',
+    }
+
+    def _parse_event_ts(self, ts_raw):
+        """
+        Convierte el `ts` opcional de un evento del batch (ISO8601 o epoch en milisegundos) a un string
+        ISO8601 en UTC. Devuelve None si falta o no es válido: formato desconocido, en el futuro
+        (más de 1 minuto de tolerancia) o con más de 7 días de antigüedad. En ese caso se ignora
+        y la lógica usa el momento actual (now).
+        """
+        if ts_raw is None or ts_raw == '' or isinstance(ts_raw, bool):
+            return None
+        try:
+            if isinstance(ts_raw, (int, float)) or (isinstance(ts_raw, str) and ts_raw.strip().lstrip('-').replace('.', '', 1).isdigit()):
+                parsed = _dt.fromtimestamp(float(ts_raw) / 1000.0, tz=_dt_tz.utc)
+            else:
+                parsed = self._parse_aware_datetime(ts_raw)
+                if parsed is None:
+                    return None
+        except (ValueError, TypeError, OverflowError, OSError):
+            return None
+
+        now = timezone.now()
+        if parsed > now + self.BATCH_TS_FUTURE_TOLERANCE or parsed < now - self.BATCH_TS_MAX_AGE:
+            return None
+        return parsed.astimezone(_dt_tz.utc).isoformat()
+
+    # ==========================================
+    # ENDPOINTS
+    # ==========================================
+    @action(detail=False, methods=['post'])
+    def product_view(self, request):
+        """
+        Registra el Dwell Time e interacciones. Envía los datos a un Buffer en Redis.
+        """
+        http_status, body = self._ingest_product_view(request.user, request.data)
+        return Response(body, status=http_status)
+
+    @action(detail=False, methods=['post'])
+    def store_view(self, request):
+        """
+        Registra el comportamiento del usuario dentro del perfil de una tienda.
+        """
+        http_status, body = self._ingest_store_view(request.user, request.data)
+        return Response(body, status=http_status)
+
+    @action(detail=False, methods=['post'])
+    def navigation(self, request):
+        """
+        Registra el mapa de pantallas que el usuario visitó durante su sesión.
+        """
+        http_status, body = self._ingest_navigation(request.user, request.data)
+        return Response(body, status=http_status)
+
+    @action(detail=False, methods=['post'])
+    def video_engagement(self, request):
+        """
+        Registra interacciones de video y acumula el tiempo de visualización.
+        """
+        http_status, body = self._ingest_video_engagement(request.user, request.data)
+        return Response(body, status=http_status)
+
+    @action(
+        detail=False, methods=['post'], url_path='batch',
+        throttle_classes=[LogsBatchThrottle], throttle_scope='logs_batch',
+    )
+    def batch(self, request):
+        """
+        POST /api/v1/logs/batch/ — Registra varios eventos de telemetría en una sola petición.
+
+        Cuerpo (JSON), objeto o lista directa de eventos:
+            {"events": [
+                {"type": "product_view" | "video_engagement" | "store_view" | "navigation",
+                 "payload": {...mismos campos que el endpoint individual...},
+                 "ts": "<ISO8601 o epoch en ms, opcional>"},
+                ...
+            ]}
+            [ {...evento...}, {...evento...} ]
+
+        - Máximo 100 eventos por lote (más -> 400). Permisos idénticos a los endpoints individuales;
+          throttle propio (scope `logs_batch`, 30/min por defecto) porque cada lote agrupa muchos eventos.
+        - Cada evento reutiliza exactamente la misma validación y encolado en Redis que su endpoint
+          individual (`_ingest_*`). Se procesan uno a uno: un evento inválido NO aborta el resto.
+        - `ts` (opcional): si es válido (no futuro, no más de 7 días de antigüedad) se usa como
+          timestamp del evento cuando éste no trae su propio campo de tiempo obligatorio
+          (`start_time` / `join_time` / `login_time`); si no es válido se ignora y se usa now.
+          El campo de tiempo explícito del payload siempre tiene prioridad.
+
+        Respuesta 200:
+            {"success": true, "accepted": N, "rejected": M,
+             "results": [{"index": i, "type": "...", "status": "ok" | "error", "error": "..."?}, ...]}
+        Errores 400 (`{"error": ...}`): cuerpo sin lista de eventos o más de 100 eventos.
+        """
+        body = request.data
+        events = body if isinstance(body, list) else (body.get('events') if hasattr(body, 'get') else None)
+
+        if not isinstance(events, list):
+            return Response(
+                {'error': "El cuerpo debe ser una lista de eventos o un objeto con la clave 'events' (lista)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if len(events) > self.BATCH_MAX_EVENTS:
+            return Response(
+                {'error': f'Máximo {self.BATCH_MAX_EVENTS} eventos por lote (recibidos {len(events)}).'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        results = []
+        accepted = 0
+        for index, event in enumerate(events):
+            event_type = event.get('type') if isinstance(event, dict) else None
+            result = {'index': index, 'type': event_type}
+
+            def fail(message):
+                result.update({'status': 'error', 'error': message})
+
+            if not isinstance(event, dict):
+                fail('El evento debe ser un objeto JSON.')
+            elif event_type not in self.BATCH_EVENT_HANDLERS:
+                fail(f"Tipo de evento desconocido: {event_type!r}.")
+            elif not isinstance(event.get('payload'), dict):
+                fail("'payload' es obligatorio y debe ser un objeto.")
+            else:
+                handler = getattr(self, self.BATCH_EVENT_HANDLERS[event_type])
+                try:
+                    http_status, resp_body = handler(
+                        request.user, event['payload'], fallback_ts=self._parse_event_ts(event.get('ts')),
+                    )
+                except (ValueError, TypeError) as e:
+                    http_status, resp_body = status.HTTP_400_BAD_REQUEST, {'error': f'Payload inválido: {e}'}
+                except Exception as e:
+                    print(f"Error inesperado en logs/batch (index {index}, type {event_type}): {e}")
+                    http_status, resp_body = status.HTTP_500_INTERNAL_SERVER_ERROR, {'error': 'Error interno'}
+
+                if 200 <= http_status < 300:
+                    result['status'] = 'ok'
+                else:
+                    fail((resp_body or {}).get('error', 'Error al procesar el evento.'))
+
+            if result['status'] == 'ok':
+                accepted += 1
+            results.append(result)
+
+        return Response({
+            'success': True,
+            'accepted': accepted,
+            'rejected': len(results) - accepted,
+            'results': results,
+        }, status=status.HTTP_200_OK)

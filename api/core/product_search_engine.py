@@ -353,13 +353,16 @@ class ProductSearchEngine:
             cid = str(v.company_id)
             if cid not in companies_map:
                 img_url = storage_manager.get_url(v.company.image) if v.company.image else ""
+                img_thumb_url = (storage_manager.get_variant_url(v.company.image, 'thumb') if v.company.image else "") or ""
                 companies_map[cid] = {
                     "store_id": cid,
                     "company_id": cid,
                     "store_name": v.company.name,
                     "company_name": v.company.name,
                     "profile_picture_img_url": img_url,
+                    "profile_picture_img_thumb_url": img_thumb_url,
                     "company_image": img_url,
+                    "company_image_thumb_url": img_thumb_url,
                     "new_stories": [],
                     "watched_stories": [],
                     "stories": [],
@@ -1317,7 +1320,11 @@ class ProductSearchEngine:
                 v_payload = {
                     'video_id': str(vid.id),
                     'video_url': storage_manager.get_url(vid.video_file) if vid.video_file else None,
+                    'video_url_feed': (
+                        storage_manager.get_url(vid.feed_video_file) if vid.feed_video_file else None
+                    ) or (storage_manager.get_url(vid.video_file) if vid.video_file else None),
                     'thumbnail_url': storage_manager.get_url(vid.thumbnail) if vid.thumbnail else None,
+                    'thumbnail_thumb_url': storage_manager.get_variant_url(vid.thumbnail, 'thumb') if vid.thumbnail else None,
                     'duration_seconds': float(vid.duration_seconds or 0.0),
                     'description': vid.description or '',
                     'views_count': int(vid.views_count or 0),
@@ -2819,6 +2826,7 @@ class ProductSearchEngine:
                 "company_id": str(company.id),
                 "storeName": company.name,
                 "storeProfilePictureUrl": storage_manager.get_url(company.image) if company.image else "",
+                "storeProfilePictureThumbUrl": (storage_manager.get_variant_url(company.image, 'thumb') if company.image else "") or "",
                 "category": company.category.name if company.category else "Comercio",
                 "isPlatinium": company.is_platinum,
                 "tokens": wallet.balance,

@@ -317,6 +317,15 @@ class CompanyVideoStoryViewSet(viewsets.ModelViewSet):
                             print(f"Aviso: No se pudo eliminar el video anterior {old_video}: {del_err}")
                     instance.video_file = v_path
                     update_fields.add('video_file')
+                    # La versión ligera del feed pertenece al video anterior: se descarta y se regenera en Celery
+                    old_feed_video = instance.feed_video_file
+                    if old_feed_video:
+                        try:
+                            storage_manager.delete_file(old_feed_video)
+                        except Exception as del_err:
+                            print(f"Aviso: No se pudo eliminar el video de feed anterior {old_feed_video}: {del_err}")
+                        instance.feed_video_file = None
+                        update_fields.add('feed_video_file')
                     if instance.is_media_expired:
                         instance.expires_at = timezone.now() + timedelta(hours=72)
                         update_fields.add('expires_at')

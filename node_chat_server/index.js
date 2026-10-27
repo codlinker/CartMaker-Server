@@ -550,13 +550,17 @@ app.post('/internal/emit-support-mute', (req, res) => {
 });
 
 // 5. Django ordena: "Notifica cambio de estado de orden en tiempo real"
+//    Acepta un destinatario (`recipient_id`) o varios (`recipient_ids`: dueño + asistentes del comercio).
+//    `reason` indica el motivo (order_created | status_changed | reported | cancelled | completed | ...).
 app.post('/internal/emit-order-status', (req, res) => {
   if (!isValidMicroserviceToken(req.headers['x-microservice-token'])) return res.status(403).send('Forbidden');
   const {
     order_id,
     status,
     recipient_id,
+    recipient_ids,
     is_merchant_receiver,
+    reason,
     reported_by_role,
     reporter_id,
     reported_by_user_id,
@@ -566,12 +570,21 @@ app.post('/internal/emit-order-status', (req, res) => {
     body
   } = req.body;
 
-  const payload = {
+  const recipients = new Set();
+  if (recipient_id != null && recipient_id !== '') recipients.add(String(recipient_id));
+  if (Array.isArray(recipient_ids)) {
+    recipient_ids.forEach((rid) => {
+      if (rid != null && rid !== '') recipients.add(String(rid));
+    });
+  }
+
+  const buildPayload = (recipientId) => ({
     type: 'order_status_changed',
     order_id: order_id != null ? String(order_id) : null,
     id: order_id,
     status,
-    recipient_id: recipient_id != null ? String(recipient_id) : null,
+    reason: reason || 'status_changed',
+    recipient_id: recipientId,
     is_merchant_receiver: Boolean(is_merchant_receiver),
     reported_by_role: reported_by_role || null,
     reporter_id: reporter_id != null ? String(reporter_id) : null,
@@ -580,18 +593,20 @@ app.post('/internal/emit-order-status', (req, res) => {
     active_ticket_id: active_ticket_id || null,
     title: title || null,
     body: body || null
-  };
+  });
 
-  if (recipient_id) {
-    io.to(`user_${recipient_id}`).emit('order_status_changed', payload);
-    io.to(`user_${recipient_id}`).emit('order_updated', payload);
-  }
+  recipients.forEach((rid) => {
+    const payload = buildPayload(rid);
+    io.to(`user_${rid}`).emit('order_status_changed', payload);
+    io.to(`user_${rid}`).emit('order_updated', payload);
+  });
   if (order_id != null) {
-    io.to(`order_${order_id}`).emit('order_status_changed', payload);
-    io.to(`order_${order_id}`).emit('order_updated', payload);
+    const roomPayload = buildPayload(recipients.size > 0 ? Array.from(recipients)[0] : null);
+    io.to(`order_${order_id}`).emit('order_status_changed', roomPayload);
+    io.to(`order_${order_id}`).emit('order_updated', roomPayload);
   }
 
-  res.json({ success: true });
+  res.json({ success: true, recipients: recipients.size });
 });
 
 // 6. Django ordena: "Revoca en caliente las sesiones de trabajador de este empleo"
@@ -1635,6 +1650,32 @@ app.post('/internal/delivery-status', (req, res) => {
       op = op ? op.to(room) : io.to(room);
     });
     op.emit('delivery_status_changed', buildPublicDeliveryStatusPayload(payload));
+  }
+
+  // Asignación / reasignación de repartidor, recogida, entrega, cancelación o falla: la orden (y su bloque `delivery`)
+  // cambió, así que comprador y comercio también reciben `order_updated` para refrescar sus listas sin polling.
+  if (payload.order_id != null) {
+    const orderRooms = new Set([`order_${payload.order_id}`]);
+    if (payload.client_user_id) orderRooms.add(`user_${payload.client_user_id}`);
+    if (Array.isArray(payload.merchant_user_ids)) {
+      payload.merchant_user_ids.forEach((uid) => {
+        if (uid) orderRooms.add(`user_${uid}`);
+      });
+    }
+    let orderOp = null;
+    orderRooms.forEach((room) => {
+      orderOp = orderOp ? orderOp.to(room) : io.to(room);
+    });
+    orderOp.emit('order_updated', {
+      type: 'order_updated',
+      reason: 'delivery_status',
+      order_id: String(payload.order_id),
+      id: payload.order_id,
+      delivery_id: payload.delivery_id != null ? payload.delivery_id : null,
+      delivery_status: payload.status != null ? Number(payload.status) : null,
+      delivery_status_label: payload.status_label || null,
+      updated_at_ms: payload.updated_at_ms || Date.now()
+    });
   }
 
   // Reasignación: el repartidor anterior deja de recibir estado y posiciones de esta entrega

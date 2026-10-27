@@ -707,3 +707,73 @@ def invalidate_subscriptions_on_invoice_created(sender, instance: AtlasPlusInvoi
 @receiver(post_delete, sender=CartMakerBankAccount)
 def invalidate_system_config_cache(sender, instance, **kwargs):
     transaction.on_commit(lambda: cache.delete("cartmaker:global:system_config"))
+
+
+# =========================================================================
+# ÓRDENES: marca de última modificación (consulta incremental `?updated_after=` y ETag de `GET orders/`)
+# =========================================================================
+# Campos de DeliveryAssignment que cambian con la telemetría del repartidor y NO deben marcar la orden como modificada
+_DELIVERY_TELEMETRY_FIELDS = frozenset({
+    'last_fix_point', 'last_fix_speed_mps', 'last_fix_heading', 'last_fix_accuracy_m',
+    'last_fix_at', 'last_fix_source', 'pin_attempts',
+})
+
+
+@receiver(post_save, sender=DeliveryAssignment, dispatch_uid="touch_order_on_delivery_assignment_save")
+def touch_order_on_delivery_assignment_save(sender, instance: DeliveryAssignment, created: bool, update_fields=None, **kwargs):
+    """Asignar/reasignar repartidor, cambios de estado o ruta de la entrega modifican lo que ve la orden."""
+    if not created and update_fields is not None and set(update_fields) <= _DELIVERY_TELEMETRY_FIELDS:
+        return
+    Order.touch(instance.order_id)
+
+
+@receiver(post_save, sender=SupportTicket, dispatch_uid="touch_order_on_support_ticket_save")
+def touch_order_on_support_ticket_save(sender, instance: SupportTicket, **kwargs):
+    """Reportar, silenciar, asignar agente o cerrar un ticket cambia el bloque de reporte de la orden."""
+    if instance.order_id:
+        Order.touch(instance.order_id)
+
+
+# =========================================================================
+# MODERACIÓN UGC: avisar al denunciante cuando su denuncia se resuelve
+# =========================================================================
+_UGC_RESOLVED_STATUSES = (ContentReport.ReportStatus.REMOVED, ContentReport.ReportStatus.DISMISSED)
+
+
+@receiver(pre_save, sender=ContentReport, dispatch_uid="capture_content_report_prev_status")
+def _capture_content_report_prev_status(sender, instance: ContentReport, **kwargs):
+    instance._prev_status = None
+    if instance.pk:
+        instance._prev_status = sender.objects.filter(pk=instance.pk).values_list('status', flat=True).first()
+
+
+@receiver(post_save, sender=ContentReport, dispatch_uid="notify_reporter_content_report_resolved")
+def notify_reporter_content_report_resolved(sender, instance: ContentReport, created: bool, **kwargs):
+    if created or instance.status not in _UGC_RESOLVED_STATUSES:
+        return
+    prev_status = getattr(instance, '_prev_status', None)
+    if prev_status in _UGC_RESOLVED_STATUSES:
+        return  # ya estaba resuelta: no se vuelve a notificar
+
+    # Sello de resolución sin disparar de nuevo las señales
+    if instance.resolved_at is None:
+        sender.objects.filter(pk=instance.pk, resolved_at__isnull=True).update(resolved_at=timezone.now())
+
+    if not instance.reporter_id:
+        return  # reportes automáticos del sistema: no hay denunciante a quien avisar
+
+    report_id = str(instance.id)
+    reporter_id = instance.reporter_id
+    target_type = instance.target_type
+    target_id = str(instance.target_id)
+    removed = instance.status == ContentReport.ReportStatus.REMOVED
+    reason_label = instance.get_reason_display()
+
+    transaction.on_commit(lambda: NotificationManager.notify_ugc_report_resolved(
+        reporter_id=reporter_id,
+        report_id=report_id,
+        target_type=target_type,
+        target_id=target_id,
+        content_removed=removed,
+        reason_label=reason_label,
+    ))

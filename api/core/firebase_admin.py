@@ -198,8 +198,13 @@ class NotificationManager:
             }
         )
         
-        # 💡 Este es el payload silencioso que despierta a Flutter
-        data = {'type': 'new_question', 'question_id': str(question_id)} 
+        # 💡 Este es el payload silencioso que despierta a Flutter (incluye los IDs para abrir la pantalla correcta)
+        data = {
+            'type': 'new_question',
+            'question_id': str(question_id),
+            'item_id': str(item_id),
+            'notification_id': str(notification.id),
+        }
         
         try:
             user = User.objects.prefetch_related('fcm_tokens').get(id=merchant_user_id)
@@ -225,7 +230,15 @@ class NotificationManager:
             }
         )
         
-        data = {'type': 'generic_refresh'} 
+        # `type` se conserva ('generic_refresh') para las versiones actuales de la app; `event`, `item_id` y
+        # `target_type` permiten a la versión nueva abrir directamente el producto/video correcto.
+        data = {
+            'type': 'generic_refresh',
+            'event': 'new_answer',
+            'item_id': str(item_id),
+            'target_type': str(target_type),
+            'notification_id': str(notification.id),
+        }
         
         try:
             user = User.objects.prefetch_related('fcm_tokens').get(id=user_id)
@@ -233,38 +246,128 @@ class NotificationManager:
         except Exception as e:
             logger.error(f"Fallo al notificar pregunta: {e}")
 
+    # =====================================================================
+    # TIEMPO REAL DE ÓRDENES (socket) + DESTINATARIOS DEL LADO COMERCIO
+    # =====================================================================
+    @classmethod
+    def _merchant_staff_user_ids(cls, order_id, exclude_user_ids=None) -> List[int]:
+        """
+        Asistentes ACTIVOS de la sucursal de la orden con permiso `can_manage_orders` (el dueño no se incluye).
+        Ven y gestionan las órdenes del comercio, por lo que también deben enterarse en tiempo real.
+        """
+        try:
+            from django.db.models import Q
+            from ..models import Order, Employee, EmployeeRole, EmployeeStatus
+            store = Order.objects.select_related('store').only('store_id', 'store__company_id').get(id=order_id).store
+            staff_ids = (
+                Employee.objects.filter(
+                    company_id=store.company_id,
+                    status=EmployeeStatus.ACTIVE,
+                    role=EmployeeRole.ASSISTANT,
+                    permissions__can_manage_orders=True,
+                )
+                .filter(Q(employeestoreassignment__store=store) | Q(permissions__allowed_stores=store))
+                .values_list('user_id', flat=True)
+                .distinct()
+            )
+            excluded = {str(uid) for uid in (exclude_user_ids or [])}
+            return [uid for uid in staff_ids if str(uid) not in excluded]
+        except Exception as e:
+            logger.warning(f"No se pudieron resolver los asistentes de la orden {order_id}: {e}")
+            return []
+
+    @classmethod
+    def emit_order_socket(
+        cls,
+        order_id,
+        recipient_ids,
+        status_value: Optional[int] = None,
+        is_merchant: bool = False,
+        reason: str = 'status_changed',
+        title: Optional[str] = None,
+        body: Optional[str] = None,
+        extra: Optional[Dict] = None,
+    ) -> None:
+        """
+        Emite `order_updated` / `order_status_changed` (Node) a cada destinatario y a la sala `order_<id>`.
+        Nunca lanza errores (el socket es un acelerador; la app tiene polling de respaldo y FCM).
+        `reason`: order_created | status_changed | delivery_status | reported | ticket_updated | payment_confirmed ...
+        """
+        unique_ids = []
+        for rid in (recipient_ids or []):
+            if rid is not None and str(rid) not in unique_ids:
+                unique_ids.append(str(rid))
+        if not unique_ids:
+            return
+        try:
+            if status_value is None:
+                from ..models import Order
+                status_value = Order.objects.filter(id=order_id).values_list('status', flat=True).first()
+            payload = {
+                'order_id': order_id,
+                'status': int(status_value) if status_value is not None else None,
+                'recipient_ids': unique_ids,
+                'recipient_id': unique_ids[0],
+                'is_merchant_receiver': bool(is_merchant),
+                'reason': reason,
+                'title': title,
+                'body': body,
+            }
+            if extra:
+                payload.update({k: v for k, v in extra.items() if k not in payload})
+            requests.post(
+                f"{settings.INTERNAL_WEBSOCKETS_URL}internal/emit-order-status",
+                json=payload,
+                headers={'X-Microservice-Token': settings.SECRET_KEY},
+                timeout=2,
+            )
+        except Exception:
+            pass
+
     @classmethod
     def notify_order_created(cls, merchant_id: int, order_id: int, store_name: str, total: float) -> None:
-        """ Notifica al comerciante que ha ingresado una nueva venta en su sucursal. """
+        """
+        Notifica al comerciante (dueño + asistentes con permiso de órdenes) que ha ingresado una nueva venta:
+        persiste la notificación, envía push FCM y emite `order_updated` por socket (`reason='order_created'`).
+        """
         title = '¡Nueva orden recibida!'
         body = f'Has recibido el pedido N° {order_id} en {store_name} por un total de {total}$.'
-        
-        notification = Notification.objects.create(
-            user_id=merchant_id,
-            section=NotificationSection.MERCHANT_ORDERS,
-            title=title,
-            body=body,
-            category=NotificationCategory.NEW_ORDER,
-            metadata={
-                'order_id': str(order_id),
-                'recipient_id': str(merchant_id),
-                'is_merchant_receiver': True,
-            }
+
+        staff_ids = cls._merchant_staff_user_ids(order_id, exclude_user_ids=[merchant_id])
+        recipients = [merchant_id] + list(staff_ids)
+
+        for recipient_id in recipients:
+            try:
+                notification = Notification.objects.create(
+                    user_id=recipient_id,
+                    section=NotificationSection.MERCHANT_ORDERS,
+                    title=title,
+                    body=body,
+                    category=NotificationCategory.NEW_ORDER,
+                    metadata={
+                        'order_id': str(order_id),
+                        'recipient_id': str(recipient_id),
+                        'is_merchant_receiver': True,
+                    }
+                )
+
+                # 💡 Especificamos que el evento es 'new_order' e incluimos recipient_id
+                data = {
+                    'type': 'new_order',
+                    'order_id': str(order_id),
+                    'notification_id': str(notification.id),
+                    'recipient_id': str(recipient_id),
+                    'is_merchant_receiver': 'true',
+                }
+
+                user = User.objects.prefetch_related('fcm_tokens').get(id=recipient_id)
+                cls._send_multicast(user=user, title=title, body=body, data_payload=data)
+            except Exception as e:
+                logger.error(f"Fallo al notificar creación de orden al comerciante {recipient_id}: {e}")
+
+        cls.emit_order_socket(
+            order_id, recipients, is_merchant=True, reason='order_created', title=title, body=body,
         )
-        
-        # 💡 CAMBIO AQUÍ: Ahora especificamos que el evento es 'new_order' e incluimos recipient_id
-        data = {
-            'type': 'new_order',
-            'order_id': str(order_id),
-            'recipient_id': str(merchant_id),
-            'is_merchant_receiver': 'true',
-        } 
-        
-        try:
-            user = User.objects.prefetch_related('fcm_tokens').get(id=merchant_id)
-            cls._send_multicast(user=user, title=title, body=body, data_payload=data)
-        except Exception as e:
-            logger.error(f"Fallo al notificar creación de orden al comerciante: {e}")
 
     @classmethod
     def notify_order_status_change(
@@ -335,28 +438,32 @@ class NotificationManager:
                 if v is not None:
                     data[str(k)] = str(v)
 
-        # Emitimos también por WebSocket en tiempo real hacia la sala del usuario y de la orden
+        # Emitimos también por WebSocket en tiempo real hacia la sala del usuario y de la orden.
+        # Si el destinatario es el comercio, el aviso también llega a los asistentes que gestionan órdenes.
+        socket_recipients = [user_id]
+        if is_merchant:
+            socket_recipients += cls._merchant_staff_user_ids(order_id, exclude_user_ids=[user_id])
+        _STATUS_REASONS = {2: 'reported', 3: 'cancelled', 4: 'completed', 5: 'solved', 1: 'delivery_sent'}
         try:
-            requests.post(
-                f"{settings.INTERNAL_WEBSOCKETS_URL}internal/emit-order-status",
-                json={
-                    'order_id': order_id,
-                    'status': int(new_status),
-                    'recipient_id': str(user_id),
-                    'is_merchant_receiver': bool(is_merchant),
-                    'reported_by_role': reported_by_role,
-                    'reporter_id': str(reporter_id) if reporter_id else None,
-                    'reported_by_user_id': str(reporter_id) if reporter_id else None,
-                    'support_ticket_id': support_ticket_id,
-                    'active_ticket_id': support_ticket_id,
-                    'title': title,
-                    'body': body,
-                },
-                headers={'X-Microservice-Token': settings.SECRET_KEY},
-                timeout=2,
-            )
-        except Exception:
-            pass
+            socket_reason = _STATUS_REASONS.get(int(new_status), 'status_changed')
+        except (TypeError, ValueError):
+            socket_reason = 'status_changed'
+        cls.emit_order_socket(
+            order_id,
+            socket_recipients,
+            status_value=int(new_status) if new_status is not None and int(new_status) >= 0 else None,
+            is_merchant=is_merchant,
+            reason=socket_reason,
+            title=title,
+            body=body,
+            extra={
+                'reported_by_role': reported_by_role,
+                'reporter_id': str(reporter_id) if reporter_id else None,
+                'reported_by_user_id': str(reporter_id) if reporter_id else None,
+                'support_ticket_id': support_ticket_id,
+                'active_ticket_id': support_ticket_id,
+            },
+        )
         
         try:
             user = User.objects.prefetch_related('fcm_tokens').get(id=user_id)
@@ -598,3 +705,55 @@ class NotificationManager:
             cls._send_multicast(user=user_obj, title=title, body=body, data_payload=data)
         except Exception as e:
             logger.error(f"Fallo al enviar push de trabajadores a {user_id}: {e}")
+
+    @classmethod
+    def notify_ugc_report_resolved(
+        cls,
+        reporter_id,
+        report_id: str,
+        target_type: str,
+        target_id: str,
+        content_removed: bool,
+        reason_label: str = '',
+    ) -> None:
+        """
+        Avisa al denunciante del resultado de su denuncia de contenido (UGC): contenido retirado/sancionado o
+        desestimado. Persiste la notificación en la bandeja y envía el push FCM con `type` e IDs.
+        """
+        if content_removed:
+            title = 'Gracias por tu denuncia'
+            body = 'Revisamos tu denuncia y retiramos el contenido por incumplir las normas de CartMaker.'
+        else:
+            title = 'Revisamos tu denuncia'
+            body = 'Revisamos tu denuncia y el contenido no incumple las normas de CartMaker. Gracias por ayudarnos a cuidar la comunidad.'
+        outcome = 'removed' if content_removed else 'dismissed'
+        try:
+            notification = Notification.objects.create(
+                user_id=reporter_id,
+                section=NotificationSection.HOME,
+                title=title,
+                body=body,
+                category=NotificationCategory.UGC_REPORT_RESOLVED,
+                metadata={
+                    'type': 'ugc_report_resolved',
+                    'report_id': str(report_id),
+                    'target_type': str(target_type),
+                    'target_id': str(target_id),
+                    'outcome': outcome,
+                    'reason': reason_label,
+                    'recipient_id': str(reporter_id),
+                },
+            )
+            data = {
+                'type': 'ugc_report_resolved',
+                'report_id': str(report_id),
+                'target_type': str(target_type),
+                'target_id': str(target_id),
+                'outcome': outcome,
+                'notification_id': str(notification.id),
+                'recipient_id': str(reporter_id),
+            }
+            user_obj = User.objects.prefetch_related('fcm_tokens').get(id=reporter_id)
+            cls._send_multicast(user=user_obj, title=title, body=body, data_payload=data)
+        except Exception as e:
+            logger.error(f"Fallo al notificar el resultado de la denuncia {report_id} a {reporter_id}: {e}")

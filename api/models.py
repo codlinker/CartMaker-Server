@@ -240,6 +240,8 @@ class NotificationCategory(models.IntegerChoices):
     # Delivery en tiempo real
     DELIVERY_ASSIGNMENT = 15, _('Asignación de Delivery')
     DELIVERY_STATUS = 16, _('Estado de Delivery')
+    # Moderación UGC: resultado de una denuncia enviada por el usuario
+    UGC_REPORT_RESOLVED = 17, _('Resultado de denuncia de contenido.')
 
 class MessageOrigin(models.IntegerChoices):
     """
@@ -406,6 +408,9 @@ class User(AbstractBaseUser, PermissionsMixin):
     cedula_verified = models.BooleanField(default=False)
     cedula_number = models.CharField(max_length=50, null=True, blank=True)
     biometric_vector = VectorField(dimensions=512, null=True, blank=True)
+    # Versión del modelo de reconocimiento facial (ej. 'mobilefacenet-fp32-v1' / 'mobilefacenet-int8-v1') con el que
+    # se generó `biometric_vector`. Los vectores de modelos distintos NO son comparables entre sí.
+    biometric_model_version = models.CharField(max_length=32, default='mobilefacenet-fp32-v1', db_index=True)
     biometric_consent_accepted_at = models.DateTimeField(null=True, blank=True)
     biometric_consent_version = models.CharField(max_length=32, null=True, blank=True)
     biometric_suppressed_at = models.DateTimeField(null=True, blank=True)
@@ -446,6 +451,12 @@ class User(AbstractBaseUser, PermissionsMixin):
         if not self.profile_picture:
             return ""
         return storage_manager.get_url(self.profile_picture) or ""
+
+    def get_profile_picture_thumb_url(self) -> str:
+        """URL de la miniatura (WebP 320 px) de la foto de perfil; cae al original si aún no existe."""
+        if not self.profile_picture:
+            return ""
+        return storage_manager.get_variant_url(self.profile_picture, 'thumb') or ""
 
     def get_cedula_document_url(self) -> str:
         """
@@ -826,12 +837,18 @@ class Company(models.Model):
             'category':self.category.name if self.category else "",
             'merchant_type': self.merchant_type,
             'image':url,
+            'image_thumb_url': storage_manager.get_variant_url(self.image, 'thumb') if self.image else "",
+            'image_medium_url': storage_manager.get_variant_url(self.image, 'medium') if self.image else "",
             'presentation_video_url':presentation_url,
             "gamification_enabled":self.gamification_enabled,
             "gamification_tokens_per_dollar":self.gamification_tokens_per_dollar,
             "main_work_hours":self.main_work_hours,
             "main_work_days":self.main_work_days,
             "presentation_video_thumbnail":presentation_video_thumbnail,
+            "presentation_video_thumbnail_thumb_url": (
+                storage_manager.get_variant_url(self.presentation_video_thumbnail, 'thumb')
+                if self.presentation_video_thumbnail else ""
+            ),
             "is_platinum":self.is_platinum,
             'rif_number': self.rif_number,
             'razon_social': self.razon_social,
@@ -977,6 +994,8 @@ class CompanyStore(models.Model):
             'name': self.name,
             'creation': timezone.localtime(self.creation).strftime("%d/%m/%Y, %H:%M:%S"),
             'store_img_url': url,
+            'store_img_thumb_url': storage_manager.get_variant_url(self.store_img_url, 'thumb') if self.store_img_url else "",
+            'store_img_medium_url': storage_manager.get_variant_url(self.store_img_url, 'medium') if self.store_img_url else "",
             'work_hours': self.effective_work_hours,
             'work_days': self.effective_work_days,
             'is_currently_open': self.is_currently_open,
@@ -1404,6 +1423,7 @@ class Employee(models.Model):
                 'last_name': (user.last_name or '').strip(),
                 'email': user.email,
                 'profile_picture': user.get_profile_picture_url() if user.profile_picture else '',
+                'profile_picture_thumb_url': user.get_profile_picture_thumb_url(),
                 'cedula_verified': bool(user.cedula_verified),
             },
             'role': int(self.role),
@@ -2055,8 +2075,10 @@ class Product(models.Model):
             normalize_variants,
         )
         images = []
-        for img_url in (self.images or []):
-            images.append(storage_manager.get_url(img_url))
+        # `images` (lista de URLs originales) se conserva idéntico para las versiones actuales de la app.
+        # `image_variants` añade, por cada imagen: {url, thumb_url (320px WebP), medium_url (800px WebP)}.
+        image_variants = storage_manager.get_image_variants_list(self.images or [])
+        images = [variant['url'] for variant in image_variants]
         category = self.category
         if category is None:
             category_data = {
@@ -2099,6 +2121,7 @@ class Product(models.Model):
             "discounts_data": self.discounts_data,
             "company_id": self.company_id,
             "images": images,
+            "image_variants": image_variants,
             "selling_unit": selling_unit_code,
             "unit_label": unit_label_val,
             "price_label": unit_meta.get("price_label", "Precio por unidad"),
@@ -2222,6 +2245,7 @@ class InventoryItem(models.Model):
             "creation": timezone.localtime(self.creation) if self.creation else None,
             "company_name": self.store.company.name,
             "company_image": storage_manager.get_url(self.store.company.image),
+            "company_image_thumb_url": storage_manager.get_variant_url(self.store.company.image, 'thumb'),
             "sold_out_time": timezone.localtime(self.sold_out_time) if self.sold_out_time else None,
             "expiration_date": timezone.localtime(self.expiration_date) if self.expiration_date else None,
             "custom_price": float(self.custom_price) if self.custom_price is not None else None,
@@ -2420,6 +2444,23 @@ class ProductsCombo(models.Model):
                 parts.append(f"{qty}x {prod_name}")
         return " + ".join(parts)
 
+    def get_image_variants_data(self) -> list:
+        """Igual que `get_images()` pero cada elemento es {url, thumb_url, medium_url} (WebP 320 / 800 px)."""
+        resolved = []
+        seen_urls = set()
+        raw_paths = [raw for raw in (self.custom_images or []) if raw]
+        if not raw_paths:
+            for item in self._get_items_list():
+                prod_imgs = item.product.images if item.product_id else []
+                if isinstance(prod_imgs, list) and prod_imgs:
+                    raw_paths.append(prod_imgs[0])
+        for raw_img in raw_paths:
+            variant = storage_manager.get_image_variants(raw_img)
+            if variant.get('url') and variant['url'] not in seen_urls:
+                seen_urls.add(variant['url'])
+                resolved.append(variant)
+        return resolved
+
     def get_images(self) -> list:
         resolved = []
         for raw_img in (self.custom_images or []):
@@ -2459,6 +2500,7 @@ class ProductsCombo(models.Model):
         effective_stock = self.get_effective_stock()
         combo_summary = self.get_combo_summary()
         images = self.get_images()
+        image_variants = self.get_image_variants_data()
 
         category = self.category
         if category is None and items_list and items_list[0].product_id and items_list[0].product.category_id:
@@ -2514,6 +2556,7 @@ class ProductsCombo(models.Model):
             "discounts_data": self.discounts_data,
             "company_id": self.company_id,
             "images": images,
+            "image_variants": image_variants,
             "selling_unit": "combo",
             "unit_label": "combo",
             "price_label": "Precio del combo",
@@ -2569,6 +2612,7 @@ class ProductsCombo(models.Model):
             "deduct_component_stock": bool(self.deduct_component_stock),
             "paused": bool(self.paused),
             "images": images,
+            "image_variants": image_variants,
             "custom_images": [storage_manager.get_url(img) for img in (self.custom_images or []) if img],
             "combo_summary": combo_summary,
             "combo_items": serialized_items,
@@ -2581,6 +2625,7 @@ class ProductsCombo(models.Model):
             "company_id": self.company_id,
             "company_name": company_obj.name,
             "company_image": storage_manager.get_url(company_obj.image),
+            "company_image_thumb_url": storage_manager.get_variant_url(company_obj.image, 'thumb'),
             "creation": creation_local,
             "sold_out_time": timezone.localtime(self.sold_out_time) if self.sold_out_time else None,
             "expiration_date": timezone.localtime(self.expiration_date) if self.expiration_date else None,
@@ -2671,6 +2716,7 @@ class ProductsComboItem(models.Model):
             "selling_unit": self.product.selling_unit or "unit",
             "unit_label": self.product.unit_label or "und",
             "image_url": img_url,
+            "image_thumb_url": (storage_manager.get_variant_url(prod_imgs[0], 'thumb') if prod_imgs else "") or "",
             "selected_variant_id": self.selected_variant_id or None,
             "selected_variant": sel_var,
             "notes": self.notes or "",
@@ -2714,6 +2760,9 @@ class Order(models.Model):
     cancellation_topic = models.IntegerField(choices=CancellationReason.choices, null=True, blank=True)
     withdrawal_type = models.IntegerField(choices=WithdrawalType.choices)
     client_location = models.ForeignKey(ClientLocation, on_delete=models.SET_NULL, null=True, blank=True)
+    # Marca de última modificación (orden, entrega o ticket asociado). Habilita la consulta incremental
+    # `?updated_after=` y el ETag barato de `GET orders/` y `GET orders/merchant_orders/`.
+    updated_at = models.DateTimeField(default=timezone.now, db_index=True)
 
     class Meta:
         indexes = [
@@ -2721,6 +2770,20 @@ class Order(models.Model):
             models.Index(fields=['store', 'status', '-creation'], name='order_store_status_idx'),
             models.Index(fields=['status', 'creation'], name='order_status_creation_idx'),
         ]
+
+    def save(self, *args, **kwargs):
+        """Refresca `updated_at` en cada guardado, incluso con `save(update_fields=[...])`."""
+        self.updated_at = timezone.now()
+        update_fields = kwargs.get('update_fields')
+        if update_fields is not None:
+            kwargs['update_fields'] = list(set(update_fields) | {'updated_at'})
+        super().save(*args, **kwargs)
+
+    @staticmethod
+    def touch(order_id) -> None:
+        """Marca la orden como modificada sin cargar la instancia (usado por señales de entrega y tickets)."""
+        if order_id:
+            Order.objects.filter(pk=order_id).update(updated_at=timezone.now())
 
     def get_delivery_json(self, viewer_user=None, viewer_role: Optional[str] = None) -> Optional[dict]:
         """
@@ -2906,6 +2969,7 @@ class DeliveryAssignment(models.Model):
             'vehicle_type': int(rider.vehicle_type) if rider.vehicle_type is not None else None,
             'vehicle_type_label': str(rider.get_vehicle_type_display()) if rider.vehicle_type is not None else None,
             'profile_picture': user.get_profile_picture_url() if user.profile_picture else '',
+            'profile_picture_thumb_url': user.get_profile_picture_thumb_url(),
         }
         if include_employee_id:
             data['employee_id'] = rider.id
@@ -5029,11 +5093,15 @@ class UniversalComment(models.Model):
             "client_data": {
                 "id": self.client_id,
                 "name": f"{self.client.first_name} {self.client.last_name}",
-                "profile_picture": self.client.get_profile_picture_url()
+                "profile_picture": self.client.get_profile_picture_url(),
+                "profile_picture_thumb_url": self.client.get_profile_picture_thumb_url(),
             },
             "seller_data": {
                 "name": company_name,
-                "profile_picture": company_image_url
+                "profile_picture": company_image_url,
+                "profile_picture_thumb_url": (
+                    (storage_manager.get_variant_url(company.image, 'thumb') if company and company.image else "") or ""
+                ),
             },
             "target_info": {
                 "name": item_name,
@@ -5057,6 +5125,8 @@ class CompanyVideoStory(models.Model):
     video_file = models.CharField(max_length=500, null=True, blank=True)
     duration_seconds = models.FloatField(default=0.0)
     thumbnail = models.CharField(max_length=500, null=True, blank=True)
+    # Versión ligera para el feed de CartMaker TV (H.264 720p, <= 2.5 Mbps, faststart). `video_file` es el original.
+    feed_video_file = models.CharField(max_length=500, null=True, blank=True)
     description = models.TextField(blank=True, null=True)
     associated_item = models.ForeignKey(
         InventoryItem, 
@@ -5097,10 +5167,13 @@ class CompanyVideoStory(models.Model):
         if self.video_file:
             storage_manager.delete_file(self.video_file)
             self.video_file = None
+        if self.feed_video_file:
+            storage_manager.delete_file(self.feed_video_file)
+            self.feed_video_file = None
         if self.thumbnail:
             storage_manager.delete_file(self.thumbnail)
             self.thumbnail = None
-        self.save(update_fields=['video_file', 'thumbnail'])
+        self.save(update_fields=['video_file', 'feed_video_file', 'thumbnail'])
 
     def reactivate_story(self, new_video_path: str, new_thumbnail_path: str):
         self.video_file = new_video_path
@@ -5140,8 +5213,14 @@ class CompanyVideoStory(models.Model):
             'company_id': str(self.company_id),
             'company_name': self.company.name,
             'company_image': storage_manager.get_url(self.company.image) if self.company.image else None,
+            'company_image_thumb_url': storage_manager.get_variant_url(self.company.image, 'thumb') if self.company.image else None,
             'video_url': storage_manager.get_url(self.video_file) if self.video_file else None,
+            'video_url_feed': (
+                storage_manager.get_url(self.feed_video_file) if self.feed_video_file else None
+            ) or (storage_manager.get_url(self.video_file) if self.video_file else None),
             'thumbnail_url': storage_manager.get_url(self.thumbnail) if self.thumbnail else None,
+            'thumbnail_thumb_url': storage_manager.get_variant_url(self.thumbnail, 'thumb') if self.thumbnail else None,
+            'thumbnail_medium_url': storage_manager.get_variant_url(self.thumbnail, 'medium') if self.thumbnail else None,
             'title': self.title or self.description or '',
             'description': self.description,
             'duration': self.duration_seconds,

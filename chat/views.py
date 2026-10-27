@@ -49,6 +49,52 @@ def _parse_pagination(request, default_limit=15, max_limit=100):
     return offset, limit
 
 
+AFTER_ID_DEFAULT_LIMIT = 100
+AFTER_ID_MAX_LIMIT = 200
+
+
+def _parse_after_id(request):
+    """
+    Lee el parámetro opcional `after_id` (backfill incremental).
+
+    Devuelve `(after_id, error_response)`:
+      - `(None, None)` si no se envió el parámetro (se usa la paginación clásica por offset).
+      - `(int, None)` si es un entero >= 0 válido.
+      - `(None, Response 400)` si no es entero o es negativo.
+    """
+    raw = request.query_params.get('after_id')
+    if raw is None or str(raw).strip() == '':
+        return None, None
+    try:
+        after_id = int(str(raw).strip())
+    except (ValueError, TypeError):
+        return None, Response({"error": "after_id debe ser un entero mayor o igual a 0."}, status=status.HTTP_400_BAD_REQUEST)
+    if after_id < 0:
+        return None, Response({"error": "after_id debe ser un entero mayor o igual a 0."}, status=status.HTTP_400_BAD_REQUEST)
+    return after_id, None
+
+
+def _after_id_limit(request):
+    """Límite para el modo `after_id`: por defecto 100, máximo 200."""
+    try:
+        return min(AFTER_ID_MAX_LIMIT, max(1, int(request.query_params.get('limit', AFTER_ID_DEFAULT_LIMIT))))
+    except (ValueError, TypeError):
+        return AFTER_ID_DEFAULT_LIMIT
+
+
+def _fetch_after_id(queryset, after_id, limit):
+    """
+    Devuelve `(mensajes, has_more, next_after_id)` con los mensajes de `queryset` cuyo id > after_id,
+    en orden ascendente por id (cronológico, ids autoincrementales). Pide `limit + 1` filas para
+    calcular `has_more` sin un COUNT adicional.
+    """
+    rows = list(queryset.filter(id__gt=after_id).order_by('id')[:limit + 1])
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    next_after_id = rows[-1].id if rows else after_id
+    return rows, has_more, next_after_id
+
+
 # =========================================================================
 # 1. ENDPOINT PARA FLUTTER (Historial)
 # =========================================================================
@@ -57,12 +103,23 @@ class ChatViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['get'])
     def history(self, request):
-        """ Devuelve el historial paginado de un chat """
+        """
+        Devuelve el historial paginado de un chat.
+
+        Modo clásico (sin `after_id`): últimos mensajes por `offset`/`limit` (máx. 100), cronológicos.
+        Modo backfill incremental (`?after_id=<id>`): SOLO mensajes con id > after_id, orden ascendente
+        por id, máximo `limit` (default 100, máx. 200). Respuesta adicional: `has_more` y `next_after_id`
+        (id del último mensaje devuelto, o el after_id recibido si no hay nuevos); `next_offset` es None.
+        `after_id` inválido (no entero / negativo) -> 400.
+        """
         order_id = request.query_params.get('order_id')
         offset, limit = _parse_pagination(request)
+        after_id, after_error = _parse_after_id(request)
         
         if not order_id:
             return Response({"error": "Falta el ID de la orden."}, status=status.HTTP_400_BAD_REQUEST)
+        if after_error:
+            return after_error
         
         try:
             order = Order.objects.select_related('store__company').get(id=order_id)
@@ -71,6 +128,19 @@ class ChatViewSet(viewsets.ViewSet):
 
             if not is_client and not is_merchant:
                 return Response({"error": "No tienes acceso."}, status=status.HTTP_403_FORBIDDEN)
+
+            if after_id is not None:
+                rows, has_more, next_after_id = _fetch_after_id(
+                    ChatMessage.objects.filter(order=order).select_related('sender'),
+                    after_id,
+                    _after_id_limit(request),
+                )
+                return Response({
+                    'data': [msg.get_json() for msg in rows],
+                    'has_more': has_more,
+                    'next_after_id': next_after_id,
+                    'next_offset': None,
+                }, status=status.HTTP_200_OK)
 
             # 💡 Traemos los últimos X mensajes ordenados por fecha descendente
             messages = ChatMessage.objects.filter(order=order).select_related('sender').order_by('-created_at')[offset:offset+limit]
@@ -210,8 +280,18 @@ class SupportChatViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['get'])
     def history(self, request):
+        """
+        Historial del chat de un ticket de soporte (conserva `ticket` en la respuesta).
+
+        Soporta el mismo backfill incremental que el chat de órdenes: `?after_id=<id>` devuelve solo
+        mensajes con id > after_id (id asc, máx. `limit`: default 100, tope 200) más `has_more` y
+        `next_after_id`; `next_offset` es None. `after_id` inválido -> 400.
+        """
         ticket_id = request.query_params.get('ticket_id')
         offset, limit = _parse_pagination(request)
+        after_id, after_error = _parse_after_id(request)
+        if after_error:
+            return after_error
         
         try:
             ticket = SupportTicket.objects.select_related(
@@ -231,6 +311,21 @@ class SupportChatViewSet(viewsets.ViewSet):
 
             if not (ticket.is_user_participant(request.user) or is_staff_support):
                 return Response({"error": "No tienes acceso a este ticket."}, status=status.HTTP_403_FORBIDDEN)
+
+            if after_id is not None:
+                rows, has_more, next_after_id = _fetch_after_id(
+                    SupportMessage.objects.filter(ticket=ticket)
+                    .select_related('sender', 'ticket', 'ticket__order__store__company'),
+                    after_id,
+                    _after_id_limit(request),
+                )
+                return Response({
+                    'data': [msg.get_json() for msg in rows],
+                    'ticket': ticket.get_json(current_user=request.user),
+                    'has_more': has_more,
+                    'next_after_id': next_after_id,
+                    'next_offset': None,
+                }, status=status.HTTP_200_OK)
 
             messages = (
                 SupportMessage.objects.filter(ticket=ticket)

@@ -223,38 +223,171 @@ sudo systemctl enable grafana-server
 
 ---
 
-## 🚀 Ejecución del Proyecto
+## 🚀 Ejecución y Servicios del Proyecto
 
-Se deben tener estas 3 terminales abiertas:
+CartMaker-Server está compuesto por **4 servicios principales de aplicación** (más `postgresql` y `redis-server`):
 
-### Terminal 1 - Servidor de la API (Uvicorn)
+| Servicio (`systemd`) | Puerto interno | Rol principal |
+| :--- | :--- | :--- |
+| **`cartmaker-backend`** | `8000` | Servidor ASGI (`uvicorn`) de Django: API REST `/api/v1/`, panel administrativo y páginas legales (`/privacidad/`, `/eliminar-cuenta/`). |
+| **`cartmaker-celery`** | — | Worker asíncrono + planificador periódico (`celery worker -B`): generación de miniaturas WebP (`thumb`/`medium`), moderación IA de imágenes/videos, transcodificación de historias (`imageio-ffmpeg` / MediaConvert), correos OTP/facturas, alertas Push FCM, ofertas de delivery y volcado de analíticas. |
+| **`cartmaker-chat`** | `3001` | Microservicio Node.js (`node_chat_server/index.js`) con Socket.IO y adaptador Redis: chat de órdenes y soporte tripartito, eventos `order_updated` en tiempo real y telemetría GPS de repartidores. |
+| **`cartmaker-osrm`** *(alias de `osrm-car`)* | `127.0.0.1:5000` | Motor de ruteo vial C++ nativo (`osrm-routed --mmap`) con el mapa de Venezuela para cotización de distancias, tiempos de entrega y polilíneas de delivery. |
 
+---
+
+### A. Gestión de Servicios en Producción (EC2 con `systemd`)
+
+#### Comandos de uso diario
+```bash
+# Reiniciar TODOS los servicios de CartMaker tras un despliegue
+sudo systemctl restart cartmaker-backend cartmaker-celery cartmaker-chat cartmaker-osrm
+
+# Verificar el estado de todos los servicios de un vistazo
+sudo systemctl status cartmaker-backend cartmaker-celery cartmaker-chat cartmaker-osrm
+
+# Iniciar o detener todos los servicios
+sudo systemctl start cartmaker-backend cartmaker-celery cartmaker-chat cartmaker-osrm
+sudo systemctl stop cartmaker-backend cartmaker-celery cartmaker-chat cartmaker-osrm
+
+# Habilitar arranque automático al reiniciar la EC2
+sudo systemctl enable cartmaker-backend cartmaker-celery cartmaker-chat cartmaker-osrm redis-server postgresql
+```
+
+#### Consultar logs en vivo (`journalctl`)
+```bash
+# Logs en tiempo real por servicio
+sudo journalctl -u cartmaker-backend -f
+sudo journalctl -u cartmaker-celery -f
+sudo journalctl -u cartmaker-chat -f
+sudo journalctl -u cartmaker-osrm -f
+
+# Ver las últimas 100 líneas de todos los servicios juntos
+sudo journalctl -u cartmaker-backend -u cartmaker-celery -u cartmaker-chat -u cartmaker-osrm -n 100 --no-pager
+```
+
+---
+
+### B. Checklist de Despliegue / Actualización en EC2 (`git pull`)
+
+Cada vez que subas cambios a `main` y actualices el servidor en EC2, ejecuta en orden:
+
+```bash
+cd ~/CartMaker-Server
+
+# 1. Descargar últimos cambios del repositorio
+git pull
+
+# 2. Activar el entorno virtual e instalar/actualizar dependencias Python
+#    (incluye imageio-ffmpeg==0.6.0 con el binario estático de ffmpeg precompilado)
+source venv/bin/activate
+pip install -r requirements.txt
+
+# 3. Aplicar migraciones de base de datos y recolectar archivos estáticos
+python manage.py migrate
+python manage.py collectstatic --noinput
+
+# 4. (Opcional pero recomendado) Sincronizar catálogo base, categorías y SystemConfig
+python manage.py fill_default_bd
+
+# 5. Si hubo cambios en node_chat_server/package.json
+cd node_chat_server && npm install --omit=dev && cd ..
+
+# 6. Reiniciar los servicios para cargar el nuevo código y las tareas de Celery
+sudo systemctl restart cartmaker-backend cartmaker-celery cartmaker-chat cartmaker-osrm
+```
+
+---
+
+### C. Comandos de Mantenimiento y Backfill (`manage.py` y `scripts/`)
+
+Todos estos comandos se ejecutan con el entorno virtual activo (`source venv/bin/activate`):
+
+#### 1. Backfill de variantes de imagen (`thumb` 320 px / `medium` 800 px en WebP) y `Cache-Control`
+Las imágenes **nuevas** que se suben a la app generan automáticamente sus miniaturas `.webp` en segundo plano mediante Celery y se guardan con `Cache-Control: public, max-age=31536000, immutable`.  
+Para rellenar las imágenes **antiguas** que ya existían antes de esta actualización, existe el comando idempotente `backfill_image_variants` (puedes interrumpirlo y volverlo a correr: salta automáticamente lo que ya esté listo):
+
+```bash
+# 1) Ver cuántas imágenes existen y cuántas faltan por generar (no modifica nada)
+python manage.py backfill_image_variants --dry-run
+
+# 2) Ejecutar el backfill completo + actualizar cabeceras Cache-Control en S3 (recomendado correr 1 vez)
+python manage.py backfill_image_variants --cache-control --workers 4
+
+# Opciones avanzadas por si deseas correrlo por partes:
+python manage.py backfill_image_variants --only products combos --limit 500 --workers 4
+python manage.py backfill_image_variants --force   # Regenera variantes aunque ya existan
+```
+
+#### 2. Poblado y sincronización de datos base (`fill_default_bd`)
+Sincroniza sin duplicar las categorías, subcategorías, esquemas de atributos/tallas, tarifas de `SystemConfig`, planes y centros comerciales:
+```bash
+python manage.py fill_default_bd
+```
+
+#### 3. Instalación / actualización del motor vial OSRM (`cartmaker-osrm`)
+Descarga los binarios nativos de OSRM v5.27.1 en `/opt/osrm/rootfs`, descarga y verifica por MD5 el mapa vial de Venezuela desde Geofabrik, compila el grafo MLD (creando `/swapfile` automático si la EC2 tiene poca RAM) e instala/reinicia el servicio `osrm-car` (con alias `cartmaker-osrm`) en `127.0.0.1:5000`:
+```bash
+bash scripts/osrm/rebuild.sh
+
+# Para forzar recompilación aunque el mapa .pbf no haya cambiado:
+FORCE=1 bash scripts/osrm/rebuild.sh
+```
+
+#### 4. Migración de documentos sensibles a bucket privado S3 (`migrate_private_s3`)
+Normaliza rutas heredadas y copia documentos privados (KYC/KYB, capturas de pago, adjuntos de chat) al bucket privado con cifrado `AES256`:
+```bash
+python manage.py migrate_private_s3 --dry-run
+python manage.py migrate_private_s3 --delete-from-public
+```
+
+#### 5. Calibración de umbrales biométricos (`calibrate_biometric_thresholds.py`)
+Calcula FAR, FRR, EER y umbrales recomendados `1:1` y `1:N` a partir de un archivo CSV/JSONL de pares de embeddings (`mobilefacenet-fp32-v1` o `mobilefacenet-int8-v1`):
+```bash
+python scripts/calibrate_biometric_thresholds.py --self-test
+python scripts/calibrate_biometric_thresholds.py --input pares.jsonl --model-version mobilefacenet-int8-v1
+```
+
+---
+
+### D. Tareas Periódicas Automáticas (ejecutadas por `cartmaker-celery`)
+
+Al correr `celery` con la bandera `-B` (Beat integrado), el servicio `cartmaker-celery` ejecuta automáticamente:
+- **Cada 30 segundos:** `expire_and_retry_delivery_offers_task` (expira ofertas de delivery tras 45 s sin respuesta y reintenta asignación).
+- **Cada 15 minutos:** `process_analytics_batch` (vuelca las colas Redis de vistas de productos, tiendas, navegación, video engagement y demanda insatisfecha hacia PostgreSQL).
+- **Cada hora (minuto 0):** `cleanup_expired_video_stories` (limpia archivos de video/miniatura de historias vencidas tras 72 h).
+- **Cada 6 horas:** `send_uncompleted_orders_reminders_to_merchants` (recordatorio a comercios con órdenes abiertas > 6 h).
+- **Diario 12:02 AM:** `cleanup_expired_offers` (elimina ofertas caducadas e invalida caché zonal).
+- **Diario 03:00 AM:** `evaluate_platinum_status` (evalúa métricas y otorga/revoca estatus Platinum).
+- **Diario 03:30 AM:** `cleanup_expired_delivery_traces_task` (elimina trazas GPS con > 30 días por Habeas Data).
+- **Diario 03:45 AM:** `cleanup_old_notifications` (poda notificaciones leídas > 30 días o > 30 por usuario y no leídas > 90 días).
+- **Diario 10:00 AM:** `notify_atlas_plus_expiring` (envía aviso Push FCM a suscriptores Atlas Plus que vencen en ≤ 3 días).
+- **Diario 08:00 PM:** `refresh_admin_dashboard_metrics` (actualiza tasa BCV y precalcula métricas financieras del dashboard).
+
+---
+
+### E. Ejecución Manual en Desarrollo Local (Terminales separadas)
+
+Si estás desarrollando localmente sin `systemd`, abre las siguientes terminales en la raíz del proyecto (con `source venv/bin/activate`):
+
+#### Terminal 1 — Servidor de la API (Uvicorn)
 ```bash
 uvicorn cartmaker_admin.asgi:application --host 0.0.0.0 --port 8000 --reload
-
 ```
 
-### Terminal 2: Worker de Celery
-
-Este proceso ejecuta todas las tasks en segundo plano, evitando que acciones pesadas bloqueen la velocidad de respuesta del servidor.
-
+#### Terminal 2 — Worker + Beat de Celery
 ```bash
-celery -A cartmaker_admin worker -B --loglevel=info --concurrency=2 
-
+celery -A cartmaker_admin worker -B --loglevel=info --concurrency=2
 ```
 
-### Terminal 3: Microservicio de Chat
-
-Este proceso ejecuta el microservicio de Node.js para el manejo de Websockets para las conversaciones
-en tiempo real en los chats de las ordenes activas (chat de compra y venta).
-
+#### Terminal 3 — Microservicio de Chat y Tiempo Real (Node.js)
 ```bash
-node  node_chat_server/index.js
-
+node node_chat_server/index.js
 ```
 
-
-> **Nota:** Si agregas nuevas funciones a `tasks.py`, recuerda reiniciar el proceso de Celery para que las reconozca.
-> EOF
-
+#### Terminal 4 — Motor de rutas OSRM (Opcional en local; si no corre, usa fallback Haversine)
+```bash
+bash scripts/osrm/rebuild.sh
 ```
+
+> **Nota:** Si agregas o modificas tareas en `api/tasks.py` o `api/core/image_variants.py`, recuerda reiniciar `cartmaker-celery` (`sudo systemctl restart cartmaker-celery`) para que los workers carguen el código nuevo.

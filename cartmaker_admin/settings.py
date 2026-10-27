@@ -121,6 +121,11 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # Compresión gzip de las respuestas de TEXTO (JSON de cache/*, listados, etc.; no recomprime imágenes/videos).
+    # Debe ir ANTES de cualquier middleware que lea o escriba el cuerpo. Si nginx ya comprime, no se recomprime.
+    'cartmaker_admin.gzip_middleware.SelectiveGZipMiddleware',
+    # ETag automático (hash del cuerpo) + 304 Not Modified cuando el cliente envía If-None-Match / If-Modified-Since.
+    'django.middleware.http.ConditionalGetMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     "django.middleware.locale.LocaleMiddleware",
@@ -421,7 +426,16 @@ CACHES = {
         'OPTIONS': {
             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
         }
-    }
+    },
+    # Registro persistente de variantes de imagen (thumb/medium) ya generadas. Vive en una DB aparte
+    # porque la caché 'default' se limpia por completo en cada arranque del servidor (api/apps.py).
+    'image_variants': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': 'redis://127.0.0.1:6379/3',
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+        }
+    },
 }
 
 # CELERY Y REDIS
@@ -489,6 +503,12 @@ CELERY_BEAT_SCHEDULE = {
     'cleanup-old-notifications-nightly': {
         'task': 'api.tasks.cleanup_old_notifications',
         'schedule': crontab(minute=45, hour=3),
+    },
+
+    # Tarea 10: Push de Atlas Plus por vencer (próximos 3 días). Todos los días a las 10:00 AM
+    'notify-atlas-plus-expiring-daily': {
+        'task': 'cartmaker.subscriptions.notify_atlas_plus_expiring',
+        'schedule': crontab(minute=0, hour=10),
     },
 }
 

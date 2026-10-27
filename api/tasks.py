@@ -12,6 +12,8 @@ import tempfile
 import requests
 from api.cos import storage_manager
 from api.core.firebase_admin import NotificationManager
+# Registra en Celery las tareas de variantes de imagen (thumb/medium WebP)
+from api.core.image_variants import generate_image_variants_task, ensure_image_variants_task  # noqa: F401
 from .core.platinum_manager import PlatinumEvaluator
 from api.models import *
 from .utils import (
@@ -19,6 +21,9 @@ from .utils import (
     normalize_biometric_vector,
     BIOMETRIC_VECTOR_DIMENSIONS,
     BIOMETRIC_LOGIN_THRESHOLD_PERFECT,
+    BIOMETRIC_MODEL_CURRENT_DEFAULT,
+    get_biometric_thresholds,
+    normalize_embedding_model_version,
 )
 from django.core.cache import cache
 from django.utils.dateparse import parse_datetime
@@ -31,8 +36,19 @@ logger = logging.getLogger(__name__)
 User = get_user_model()
 
 @shared_task(ignore_result=True)
-def update_rolling_template(user_id, new_vector):
+def update_rolling_template(user_id, new_vector, model_version=BIOMETRIC_MODEL_CURRENT_DEFAULT):
+    """
+    Mezcla suavemente (alpha=0.05) la plantilla biométrica del usuario con una captura de alta confianza.
+    Solo mezcla si `model_version` (versión del modelo que generó `new_vector`) coincide con
+    `User.biometric_model_version`: los embeddings de modelos distintos no son comparables.
+    El default retrocompatible cubre tareas encoladas antes del despliegue (sin el argumento).
+    """
     try:
+        try:
+            model_version = normalize_embedding_model_version(model_version)
+        except ValueError:
+            return
+        perfect_threshold = get_biometric_thresholds(model_version)['perfect']
         is_valid_new, norm_new, _ = normalize_biometric_vector(
             new_vector, expected_dim=BIOMETRIC_VECTOR_DIMENSIONS
         )
@@ -40,7 +56,9 @@ def update_rolling_template(user_id, new_vector):
             return
 
         with transaction.atomic():
-            user = User.objects.select_for_update().only('biometric_vector').get(id=user_id)
+            user = User.objects.select_for_update().only('biometric_vector', 'biometric_model_version').get(id=user_id)
+            if (user.biometric_model_version or BIOMETRIC_MODEL_CURRENT_DEFAULT) != model_version:
+                return
             old_vector = user.biometric_vector
             if old_vector is None or len(old_vector) != BIOMETRIC_VECTOR_DIMENSIONS:
                 return
@@ -54,7 +72,7 @@ def update_rolling_template(user_id, new_vector):
             # Defensa en profundidad: verificar distancia coseno antes de mezclar plantillas
             cosine_sim = sum(o * n for o, n in zip(norm_old, norm_new))
             cosine_dist = 1.0 - cosine_sim
-            if cosine_dist < 0.06 or cosine_dist > BIOMETRIC_LOGIN_THRESHOLD_PERFECT:
+            if cosine_dist < 0.06 or cosine_dist > perfect_threshold:
                 return
 
             # Adaptación conservadora (alpha = 0.05) + re-proyección a la hiperesfera unitaria S^511 (||v||_2 = 1.0)
@@ -305,6 +323,97 @@ def recheck_unverified_image(self, full_path):
     record_system_report('image', full_path, category, "Imagen detectada como prohibida en re-verificación diferida.")
 
 
+FEED_VIDEO_SHORT_SIDE = 720
+FEED_VIDEO_MAX_BITRATE_KBPS = 2500
+
+
+def _ensure_story_thumbnail_and_feed_video(story) -> None:
+    """
+    Tras moderar (y filtrar) el video de una historia:
+      1. Garantiza que exista una miniatura (si falta, extrae un fotograma del video).
+      2. Genera la versión ligera para el feed de CartMaker TV: H.264 main, lado corto 720 px, <= 2.5 Mbps,
+         AAC 96 kbps y `+faststart`, expuesta como `video_url_feed`. El original (`video_file`) no se toca.
+    Nunca lanza errores: el pipeline sigue (HLS) aunque este paso falle; la API cae al original.
+    """
+    try:
+        video_path = str(story.video_file or '')
+        if not video_path or video_path.lower().endswith('.m3u8'):
+            return
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local_in = os.path.join(tmpdir, 'feed_input.mp4')
+            if not storage_manager.download_to_path(video_path, local_in):
+                logger.warning(f"⚠️ Feed/miniatura omitidos: no se pudo leer {video_path}")
+                return
+
+            from api.core.content_moderation import get_ffmpeg_binary
+            ffmpeg_bin = get_ffmpeg_binary()
+            stamp = timezone.localtime(timezone.now()).strftime('%d-%m-%Y_%H-%M-%S')
+
+            # 1) Miniatura garantizada
+            if not story.thumbnail:
+                local_thumb = os.path.join(tmpdir, 'frame.jpg')
+                res_thumb = subprocess.run(
+                    [ffmpeg_bin, '-y', '-ss', '0.5', '-i', local_in, '-frames:v', '1',
+                     '-vf', f"scale='if(lt(iw,ih),min({FEED_VIDEO_SHORT_SIDE},iw),-2)':'if(lt(iw,ih),-2,min({FEED_VIDEO_SHORT_SIDE},ih))'",
+                     '-q:v', '3', local_thumb],
+                    capture_output=True, text=True, timeout=60,
+                )
+                if res_thumb.returncode != 0 or not os.path.isfile(local_thumb):
+                    # Videos de menos de 0.5 s: primer fotograma
+                    res_thumb = subprocess.run(
+                        [ffmpeg_bin, '-y', '-i', local_in, '-frames:v', '1', '-q:v', '3', local_thumb],
+                        capture_output=True, text=True, timeout=60,
+                    )
+                if res_thumb.returncode == 0 and os.path.isfile(local_thumb):
+                    with open(local_thumb, 'rb') as fh:
+                        thumb_bytes = fh.read()
+                    import io as _io
+                    thumb_path = storage_manager.save_file(
+                        _io.BytesIO(thumb_bytes), 'stories/thumbnails', f"story_thumb_{story.company_id}_{stamp}_auto.jpg"
+                    )
+                    if thumb_path:
+                        story.thumbnail = thumb_path
+                        story.save(update_fields=['thumbnail'])
+                        logger.info(f"🖼️ Miniatura generada automáticamente para la historia {story.id}")
+                else:
+                    logger.warning(f"⚠️ No se pudo extraer miniatura de la historia {story.id}: {res_thumb.stderr[-300:]}")
+
+            # 2) Versión ligera para el feed
+            local_out = os.path.join(tmpdir, 'feed_output.mp4')
+            result = subprocess.run(
+                [ffmpeg_bin, '-y', '-i', local_in,
+                 '-map', '0:v:0', '-map', '0:a:0?', '-sn',
+                 '-vf', f"scale='if(lt(iw,ih),min({FEED_VIDEO_SHORT_SIDE},iw),-2)':'if(lt(iw,ih),-2,min({FEED_VIDEO_SHORT_SIDE},ih))',format=yuv420p",
+                 '-c:v', 'libx264', '-preset', 'veryfast', '-profile:v', 'main', '-level:v', '4.0',
+                 '-crf', '25', '-maxrate', f'{FEED_VIDEO_MAX_BITRATE_KBPS}k', '-bufsize', f'{FEED_VIDEO_MAX_BITRATE_KBPS * 2}k',
+                 '-c:a', 'aac', '-b:a', '96k', '-ac', '2',
+                 '-movflags', '+faststart', local_out],
+                capture_output=True, text=True, timeout=240,
+            )
+            if result.returncode != 0 or not os.path.isfile(local_out):
+                logger.warning(f"⚠️ FFmpeg no pudo generar el video de feed de {story.id}: {result.stderr[-400:]}")
+                return
+
+            feed_path = f"stories/videos/feed_{story.id}_{stamp}.mp4"
+            with open(local_out, 'rb') as fh:
+                if not storage_manager.put_bytes(feed_path, fh.read(), content_type='video/mp4'):
+                    logger.warning(f"⚠️ No se pudo subir el video de feed de la historia {story.id}")
+                    return
+
+            old_feed = story.feed_video_file
+            story.feed_video_file = feed_path
+            story.save(update_fields=['feed_video_file'])
+            if old_feed and old_feed != feed_path:
+                try:
+                    storage_manager.delete_file(old_feed)
+                except Exception:
+                    pass
+            logger.info(f"🎞️ Video de feed ligero generado para la historia {story.id}: {feed_path}")
+    except Exception as exc:
+        logger.warning(f"⚠️ Miniatura/feed omitidos para la historia {getattr(story, 'id', '?')}: {exc}")
+
+
 @shared_task(ignore_result=True)
 def optimize_and_transcode_video_story(story_id):
     """
@@ -325,6 +434,8 @@ def optimize_and_transcode_video_story(story_id):
         # 🎨 FASE 1: APLICACIÓN DEL FILTRO DE COLOR (Video y Thumbnail)
         # =========================================================================
         if matrix_data:
+            from api.core.content_moderation import get_ffmpeg_binary
+            ffmpeg_bin = get_ffmpeg_binary()
             logger.info(f"🎨 Matriz de color detectada para la historia {story_id}. Procesando...")
             raw_matrix = json.loads(matrix_data) if isinstance(matrix_data, str) else matrix_data
             if not isinstance(raw_matrix, list) or len(raw_matrix) < 14:
@@ -363,7 +474,7 @@ def optimize_and_transcode_video_story(story_id):
 
                     # 1. Filtrar Video
                     result_v = subprocess.run([
-                        'ffmpeg', '-y', '-i', local_input, 
+                        ffmpeg_bin, '-y', '-i', local_input, 
                         '-vf', vf_string, 
                         '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-profile:v', 'main', '-level:v', '4.0',
                         '-c:a', 'copy', local_output
@@ -371,7 +482,7 @@ def optimize_and_transcode_video_story(story_id):
                     
                     # 💡 2. Filtrar Thumbnail en S3
                     result_t = subprocess.run([
-                        'ffmpeg', '-y', '-i', local_thumb_in, 
+                        ffmpeg_bin, '-y', '-i', local_thumb_in, 
                         '-vf', vf_string, local_thumb_out
                     ], capture_output=True, text=True, timeout=180)
 
@@ -398,7 +509,7 @@ def optimize_and_transcode_video_story(story_id):
                 
                 # 1. Filtrar Video Local
                 result_v = subprocess.run([
-                    'ffmpeg', '-y', '-i', absolute_input_path, 
+                    ffmpeg_bin, '-y', '-i', absolute_input_path, 
                     '-vf', vf_string, 
                     '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-profile:v', 'main', '-level:v', '4.0',
                     '-c:a', 'copy', local_output_path
@@ -406,7 +517,7 @@ def optimize_and_transcode_video_story(story_id):
 
                 # 💡 2. Filtrar Thumbnail Local
                 result_t = subprocess.run([
-                    'ffmpeg', '-y', '-i', absolute_thumb_path, 
+                    ffmpeg_bin, '-y', '-i', absolute_thumb_path, 
                     '-vf', vf_string, local_thumb_out_path
                 ], capture_output=True, text=True, timeout=180)
 
@@ -420,6 +531,11 @@ def optimize_and_transcode_video_story(story_id):
                 shutil.move(local_output_path, absolute_input_path)
                 shutil.move(local_thumb_out_path, absolute_thumb_path)
                 logger.info("✅ Filtro aplicado localmente sobrescribiendo video y thumbnail originales.")
+
+        # =========================================================================
+        # 🎞️ FASE 1.5: MINIATURA GARANTIZADA + VIDEO LIGERO PARA EL FEED (720p, <= 2.5 Mbps, faststart)
+        # =========================================================================
+        _ensure_story_thumbnail_and_feed_video(story)
 
         # =========================================================================
         # 📡 FASE 2: ORQUESTACIÓN HLS CON MEDIACONVERT (Solo producción AWS)
@@ -897,6 +1013,64 @@ def send_otp_email_task(self, user_email: str, otp_code: str, timestamp_str: str
 def notify_expiring_subscriptions():
     """Vender ya no depende de una suscripción. El nombre de la tarea se conserva por si queda un mensaje en cola."""
     return
+
+
+@shared_task(name="cartmaker.subscriptions.notify_atlas_plus_expiring", ignore_result=True)
+def notify_atlas_plus_expiring(days_ahead: int = 3):
+    """
+    Avisa por push FCM (y en la bandeja) a quienes tienen Atlas Plus activo que vence en los próximos `days_ahead`
+    días. Idempotente: una sola alerta por usuario y fecha de vencimiento (se verifica contra la tabla Notification).
+    """
+    now = timezone.now()
+    window_end = now + timedelta(days=int(days_ahead))
+    plans = (
+        AtlasPlusPlan.objects
+        .filter(valid_until__gt=now, valid_until__lte=window_end)
+        .exclude(tier=AtlasSubscriptionTier.FREEMIUM)
+        .select_related('user')
+    )
+    sent = 0
+    for plan in plans.iterator():
+        try:
+            valid_until_local = timezone.localtime(plan.valid_until)
+            valid_key = valid_until_local.date().isoformat()
+            already = Notification.objects.filter(
+                user_id=plan.user_id,
+                category=NotificationCategory.SUBSCRIPTION_EXPIRED,
+                metadata__type='atlas_plus_expiring',
+                metadata__valid_until=valid_key,
+            ).exists()
+            if already:
+                continue
+            title = 'Tu Atlas Plus está por vencer'
+            body = f"Tu suscripción Atlas Plus vence el {valid_until_local.strftime('%d/%m/%Y')}. Renuévala para no perder tu límite ampliado."
+            notification = Notification.objects.create(
+                user_id=plan.user_id,
+                section=NotificationSection.HOME,
+                title=title,
+                body=body,
+                category=NotificationCategory.SUBSCRIPTION_EXPIRED,
+                metadata={
+                    'type': 'atlas_plus_expiring',
+                    'valid_until': valid_key,
+                    'recipient_id': str(plan.user_id),
+                },
+            )
+            NotificationManager._send_multicast(
+                user=plan.user,
+                title=title,
+                body=body,
+                data_payload={
+                    'type': 'atlas_plus_expiring',
+                    'objective': 'atlas',
+                    'valid_until': valid_key,
+                    'notification_id': str(notification.id),
+                },
+            )
+            sent += 1
+        except Exception as exc:
+            logger.warning(f"⚠️ No se pudo avisar vencimiento de Atlas Plus al usuario {plan.user_id}: {exc}")
+    logger.info(f"🔔 Avisos de vencimiento de Atlas Plus enviados: {sent}")
 
 
 @shared_task(ignore_result=True)

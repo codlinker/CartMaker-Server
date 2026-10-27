@@ -4,6 +4,11 @@ from rest_framework.exceptions import ValidationError as DRFValidationError
 from .base import _get_cached_bcv_rate, _extract_and_validate_category_ids
 from rest_framework_simplejwt.views import TokenRefreshView
 from ..core.workforce import get_user_workspaces
+from ..utils import (
+    BIOMETRIC_MODEL_CURRENT_DEFAULT,
+    get_biometric_thresholds,
+    normalize_embedding_model_version,
+)
 
 ####################################################
 ################## AUTENTICACION ###################
@@ -59,12 +64,29 @@ class BiometricLoginView(APIView):
     - Modo 1:1 (si el cliente envía 'user_id' o 'email' vinculado al dispositivo).
     - Modo 1:N con blindaje matemático: Normalización L2 en S^511, umbral estricto (<= 0.26)
       y prueba de margen contra el 2.do vecino más cercano (Lowe's Margin >= 0.08).
+
+    Versionado del modelo facial (`embedding_model_version`, opcional; ausente => 'mobilefacenet-fp32-v1'):
+    - Solo se comparan vectores de la MISMA versión (`User.biometric_model_version`) y con los umbrales
+      de esa versión (api/utils.py: get_biometric_thresholds).
+    - Versión no soportada => 400 {'code': 'BIOMETRIC_MODEL_UNSUPPORTED'}.
+    - 1:1 con un usuario cuyo vector es de OTRA versión => 409 {'code': 'BIOMETRIC_REENROLL_REQUIRED'}.
+    - 1:N: los usuarios de otra versión simplemente no participan en la búsqueda.
+    LIMITACIÓN CONOCIDA: mientras convivan dos versiones, la detección de multicuenta no cruza versiones.
     """
     permission_classes = [AllowAny]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'auth'
 
     def post(self, request):
+        try:
+            model_version = normalize_embedding_model_version(request.data.get('embedding_model_version'))
+        except ValueError as exc:
+            return Response(
+                {'error': str(exc), 'code': 'BIOMETRIC_MODEL_UNSUPPORTED'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        thresholds = get_biometric_thresholds(model_version)
+
         raw_vector = request.data.get('biometry')
         is_valid_vec, vector, vec_error = normalize_biometric_vector(
             raw_vector, expected_dim=BIOMETRIC_VECTOR_DIMENSIONS
@@ -92,6 +114,9 @@ class BiometricLoginView(APIView):
             base_qs = base_qs.filter(id=target_user_id)
         elif target_email:
             base_qs = base_qs.filter(email__iexact=target_email)
+        else:
+            # 1:N: solo vecinos de la misma versión de modelo (los espacios latentes no son comparables)
+            base_qs = base_qs.filter(biometric_model_version=model_version)
 
         top_matches = list(base_qs.order_by('distance')[:2])
         if not top_matches:
@@ -107,10 +132,30 @@ class BiometricLoginView(APIView):
                 status=status.HTTP_406_NOT_ACCEPTABLE,
             )
 
+        if is_one_to_one:
+            registered_version = (
+                getattr(closest_user, 'biometric_model_version', None) or BIOMETRIC_MODEL_CURRENT_DEFAULT
+            )
+            if registered_version != model_version:
+                # Vector de otra versión del modelo: no es comparable, hay que re-enrolar (no es un 401 genérico)
+                return Response(
+                    {
+                        'error': (
+                            "Tu verificación facial fue creada con una versión anterior de la aplicación. "
+                            "Inicia sesión con tu correo y contraseña para actualizar tu verificación facial."
+                        ),
+                        'code': 'BIOMETRIC_REENROLL_REQUIRED',
+                        'reenroll_required': True,
+                        'registered_model_version': registered_version,
+                        'requested_model_version': model_version,
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+
         effective_threshold = (
-            BIOMETRIC_LOGIN_THRESHOLD_1TO1
+            thresholds['one_to_one']
             if is_one_to_one
-            else BIOMETRIC_LOGIN_THRESHOLD_ACCEPTABLE
+            else thresholds['acceptable_1n']
         )
 
         print("USUARIO OBTENIDO (512-D): ", closest_user)
@@ -127,7 +172,7 @@ class BiometricLoginView(APIView):
             second_user = top_matches[1]
             if second_user.distance is not None:
                 margin = second_user.distance - closest_user.distance
-                if margin < BIOMETRIC_LOGIN_MIN_MARGIN:
+                if margin < thresholds['min_margin']:
                     print(
                         f"🚨 LOGIN BIOMÉTRICO RECHAZADO POR AMBIGÜEDAD: "
                         f"Top1={closest_user.distance:.4f}, Top2={second_user.distance:.4f}, Margen={margin:.4f}"
@@ -139,8 +184,8 @@ class BiometricLoginView(APIView):
 
         # Solo adaptamos el rolling template cuando la coincidencia es de altísima confianza (<= 0.18),
         # evitando contaminar el vector con capturas dudosas o de terceros.
-        if 0.06 <= closest_user.distance <= BIOMETRIC_LOGIN_THRESHOLD_PERFECT:
-            update_rolling_template.delay(closest_user.id, vector)
+        if 0.06 <= closest_user.distance <= thresholds['perfect']:
+            update_rolling_template.delay(closest_user.id, vector, model_version)
 
         refresh = RefreshToken.for_user(closest_user)
         # Contexto de sesión: el login biométrico emite tokens de la cuenta personal
@@ -520,9 +565,19 @@ class VerifyUser(APIView):
                 {"error": "Tu identidad ya se encuentra verificada en CartMaker."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        # Versión del modelo facial que generó `biometry` (opcional; ausente => 'mobilefacenet-fp32-v1').
+        # La detección de duplicados KYC solo compara contra usuarios de la misma versión (limitación
+        # conocida: la detección de multicuenta no cruza versiones mientras convivan dos modelos).
+        try:
+            model_version = normalize_embedding_model_version(request.data.get('embedding_model_version'))
+        except ValueError as exc:
+            return Response(
+                {"error": str(exc), "code": "BIOMETRIC_MODEL_UNSUPPORTED"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         serializer = VerifyUserSerializer(
             data=request.data,
-            context={"request": request.user},
+            context={"request": request.user, "embedding_model_version": model_version},
         )
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
@@ -573,6 +628,7 @@ class VerifyUser(APIView):
                     else UserNacionality.EXTRANJERO
                 )
                 locked_user.biometric_vector = data['biometry']
+                locked_user.biometric_model_version = model_version
                 locked_user.birth_date = data['birth_date']
                 locked_user.cedula_verified = True
 

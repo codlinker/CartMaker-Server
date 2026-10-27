@@ -959,6 +959,7 @@ def account_deletion_view(request):
 
                 locked_user.cedula_document = None
                 locked_user.biometric_vector = None
+                locked_user.biometric_model_version = 'mobilefacenet-fp32-v1'
                 locked_user.cedula_verified = False
                 locked_user.cedula_number = None
                 locked_user.nacionality = None

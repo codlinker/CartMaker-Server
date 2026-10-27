@@ -9,11 +9,19 @@ from api.utils import (
     validate_venezuelan_rif_modulo11,
     normalize_biometric_vector,
     BIOMETRIC_VECTOR_DIMENSIONS,
+    BIOMETRIC_MODEL_CURRENT_DEFAULT,
+    BIOMETRIC_LOGIN_THRESHOLD_PERFECT,
+    BIOMETRIC_LOGIN_THRESHOLD_ACCEPTABLE,
+    BIOMETRIC_LOGIN_THRESHOLD_1TO1,
+    BIOMETRIC_KYC_DUPLICATE_THRESHOLD,
+    BIOMETRIC_LOGIN_MIN_MARGIN,
+    normalize_embedding_model_version,
+    get_biometric_thresholds,
 )
 from api.core.category_schemas import (
     resolve_cart_item_dynamic_pricing,
-    normalize_variants_payload,
-    normalize_modifier_groups_payload,
+    normalize_variants as normalize_variants_payload,
+    normalize_modifier_groups as normalize_modifier_groups_payload,
 )
 from chat.views import _parse_pagination
 
@@ -70,6 +78,36 @@ class BiometricVectorNormalizationTests(SimpleTestCase):
         ok, _, err = normalize_biometric_vector(raw)
         self.assertFalse(ok)
         self.assertIn("NaN o infinitos", err)
+
+
+class BiometricModelVersioningTests(SimpleTestCase):
+    """Versionado del modelo facial (fp32 -> int8): normalización de versión y umbrales por modelo."""
+
+    def test_missing_version_defaults_to_fp32(self):
+        self.assertEqual(normalize_embedding_model_version(None), BIOMETRIC_MODEL_CURRENT_DEFAULT)
+        self.assertEqual(normalize_embedding_model_version("  "), BIOMETRIC_MODEL_CURRENT_DEFAULT)
+
+    def test_version_is_trimmed_and_lowercased(self):
+        self.assertEqual(
+            normalize_embedding_model_version(" MobileFaceNet-INT8-v1 "), "mobilefacenet-int8-v1"
+        )
+
+    def test_unsupported_or_too_long_version_raises(self):
+        with self.assertRaises(ValueError):
+            normalize_embedding_model_version("otro-modelo")
+        with self.assertRaises(ValueError):
+            normalize_embedding_model_version("x" * 33)
+
+    def test_thresholds_match_legacy_constants_for_all_versions(self):
+        expected = {
+            "perfect": BIOMETRIC_LOGIN_THRESHOLD_PERFECT,
+            "acceptable_1n": BIOMETRIC_LOGIN_THRESHOLD_ACCEPTABLE,
+            "one_to_one": BIOMETRIC_LOGIN_THRESHOLD_1TO1,
+            "kyc_duplicate": BIOMETRIC_KYC_DUPLICATE_THRESHOLD,
+            "min_margin": BIOMETRIC_LOGIN_MIN_MARGIN,
+        }
+        for version in ("mobilefacenet-fp32-v1", "mobilefacenet-int8-v1"):
+            self.assertEqual(get_biometric_thresholds(version), expected)
 
 
 class DynamicPricingAndSchemasTests(SimpleTestCase):

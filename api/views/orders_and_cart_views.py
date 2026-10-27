@@ -20,6 +20,7 @@ from ..core.workforce import (
     record_employee_audit_log,
 )
 from ..permissions import IsPersonalContext, get_request_ctx
+from ..core.order_listing import OrderListing
 
 
 def _order_workforce_error_response(err: WorkforceError) -> Response:
@@ -231,6 +232,7 @@ class OrderViewSet(viewsets.ViewSet):
                 'company_name': company.name,
                 'store_name': order.store.name if is_merchant_mode else company.name,
                 'store_image': store_image_url,
+                'store_image_thumb_url': (storage_manager.get_variant_url(company.image, 'thumb') if company.image else "") or "",
                 'store_lat': store_lat,
                 'store_lng': store_lng,
                 'store_contact_methods': store_contact_methods_dict,
@@ -243,6 +245,8 @@ class OrderViewSet(viewsets.ViewSet):
                 'client_lng': client_lng,
                 'client_address': client_address,
                 "client_image": order.client.get_profile_picture_url() if order.client.profile_picture else None,
+                "client_image_thumb_url": order.client.get_profile_picture_thumb_url() or None,
+                'updated_at': order.updated_at.isoformat() if order.updated_at else None,
                 'client_name': f"{order.client.first_name} {order.client.last_name}",
                 'client_contact_methods': contact_methods_dict,
                 'end_time': timezone.localtime(order.end_time).strftime("%d/%m/%Y %I:%M %p").lower() if order.end_time else creation_str,
@@ -282,7 +286,14 @@ class OrderViewSet(viewsets.ViewSet):
             'store__contact_methods',
             'client__contact_methods',
             'support_tickets',
-        ).filter(client=request.user).order_by('-creation')
+        ).filter(client=request.user)
+
+        # ETag/304 barato, `?updated_after=` incremental y paginación opcional (`page`, `page_size`)
+        listing = OrderListing(request, orders, scope='client')
+        early_response = listing.begin()
+        if early_response is not None:
+            return early_response
+        orders = listing.get_orders()
         
         orders_data = []
         for order in orders:
@@ -290,8 +301,10 @@ class OrderViewSet(viewsets.ViewSet):
             
             # Obtenemos el logo de la empresa usando tu storage_manager
             store_image_url = ""
+            store_image_thumb_url = ""
             if company.image:
                 store_image_url = storage_manager.get_url(company.image)
+                store_image_thumb_url = storage_manager.get_variant_url(company.image, 'thumb') or ""
                 
             # Formateamos la fecha exacto como el Mockup: "17/01/2026 09:26 am"
             creation_str = timezone.localtime(order.creation).strftime("%d/%m/%Y %I:%M %p").lower() if order.creation else None
@@ -339,6 +352,7 @@ class OrderViewSet(viewsets.ViewSet):
                 'company_id': str(company.id),
                 'store_name': company.name,
                 'store_image': store_image_url,
+                'store_image_thumb_url': store_image_thumb_url,
                 'store_contact_methods': store_contact_methods_dict,
                 'store_lat': store_lat,
                 'store_lng': store_lng,
@@ -354,9 +368,10 @@ class OrderViewSet(viewsets.ViewSet):
                 'client_cedula': order.client.cedula_number,
                 'client_email': order.client.email,
                 'delivery': order.get_delivery_json(viewer_user=request.user, viewer_role='client'),
+                'updated_at': order.updated_at.isoformat() if order.updated_at else None,
             })
 
-        return Response({'data': orders_data}, status=status.HTTP_200_OK)
+        return listing.build_response(orders_data)
     
     @action(detail=False, methods=['get'])
     def merchant_orders(self, request):
@@ -391,7 +406,12 @@ class OrderViewSet(viewsets.ViewSet):
             except (ValueError, TypeError, AttributeError):
                 return Response({'data': []}, status=status.HTTP_200_OK)
 
-        orders = orders_qs.order_by('-creation')
+        # ETag/304 barato, `?updated_after=` incremental y paginación opcional (`page`, `page_size`)
+        listing = OrderListing(request, orders_qs, scope='merchant')
+        early_response = listing.begin()
+        if early_response is not None:
+            return early_response
+        orders = listing.get_orders()
         
         orders_data = []
         for order in orders:
@@ -399,6 +419,7 @@ class OrderViewSet(viewsets.ViewSet):
             
             # Extraemos la imagen de perfil usando tu método del modelo User
             client_image_url = order.client.get_profile_picture_url() if order.client.profile_picture else ""
+            client_image_thumb_url = order.client.get_profile_picture_thumb_url()
 
             # EXTRACCIÓN DE MÉTODOS DE CONTACTO (Cliente -> Tienda)
             contact_methods_dict = {
@@ -413,8 +434,10 @@ class OrderViewSet(viewsets.ViewSet):
             
             # Imagen corporativa de la Company
             store_image_url = ""
+            store_image_thumb_url = ""
             if company.image:
                 store_image_url = storage_manager.get_url(company.image)
+                store_image_thumb_url = storage_manager.get_variant_url(company.image, 'thumb') or ""
 
             # Coordenadas geográficas de la sucursal emisora
             store_lat = None
@@ -441,6 +464,7 @@ class OrderViewSet(viewsets.ViewSet):
                 'withdrawal_type': order.withdrawal_type,
                 'client_name': f"{order.client.first_name} {order.client.last_name}",
                 'client_image': client_image_url,
+                'client_image_thumb_url': client_image_thumb_url,
                 'client_contact_methods': contact_methods_dict,
                 'store_name': order.store.name,
                 'store_id': str(order.store_id),
@@ -448,6 +472,7 @@ class OrderViewSet(viewsets.ViewSet):
                 
                 # Datos estructurados inyectados para MerchantRouteMap
                 'store_image': store_image_url,
+                'store_image_thumb_url': store_image_thumb_url,
                 'store_lat': store_lat,
                 'store_lng': store_lng,
                 'client_lat': client_lat,
@@ -457,8 +482,9 @@ class OrderViewSet(viewsets.ViewSet):
                 'cart': order.cart,
                 'creation': creation_str,
                 'delivery': order.get_delivery_json(viewer_user=request.user, viewer_role='merchant'),
+                'updated_at': order.updated_at.isoformat() if order.updated_at else None,
             })
-        return Response({'data': orders_data}, status=status.HTTP_200_OK)
+        return listing.build_response(orders_data)
     
     @action(detail=False, methods=['post'])
     def merchant_ship_order(self, request):

@@ -291,6 +291,7 @@ class UserSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         rep = super().to_representation(instance)
         rep['profile_picture'] = instance.get_profile_picture_url()
+        rep['profile_picture_thumb_url'] = instance.get_profile_picture_thumb_url()
         rep['cedula_document'] = instance.get_cedula_document_url() or None
         return rep
 
@@ -356,10 +357,30 @@ class VerifyUserSerializer(serializers.Serializer):
     )
     biometric_consent_accepted = serializers.CharField(max_length=16, required=False, allow_blank=True, allow_null=True)
     biometric_consent_version = serializers.CharField(max_length=32, required=False, allow_blank=True, allow_null=True)
+    # Versión del modelo facial que generó `biometry` (opcional; ausente => 'mobilefacenet-fp32-v1').
+    # max_length holgado: el valor se valida/normaliza en validate_embedding_model_version.
+    embedding_model_version = serializers.CharField(max_length=64, required=False, allow_blank=True, allow_null=True)
 
     def _get_current_user(self):
         req_ctx = self.context.get('request')
         return req_ctx.user if hasattr(req_ctx, 'user') else req_ctx
+
+    def _resolve_embedding_model_version(self) -> str:
+        """
+        Versión de modelo efectiva (normalizada). Prioriza el valor ya normalizado por la vista
+        (context['embedding_model_version']); si no, lo toma del payload. Lanza ValueError si no es soportada.
+        """
+        ctx_version = self.context.get('embedding_model_version')
+        if ctx_version:
+            return normalize_embedding_model_version(ctx_version)
+        initial = getattr(self, 'initial_data', None) or {}
+        return normalize_embedding_model_version(initial.get('embedding_model_version'))
+
+    def validate_embedding_model_version(self, value):
+        try:
+            return normalize_embedding_model_version(value)
+        except ValueError as exc:
+            raise serializers.ValidationError(str(exc))
 
     def validate_cedula_number(self, value):
         cleaned = str(value).strip().upper()
@@ -387,6 +408,11 @@ class VerifyUserSerializer(serializers.Serializer):
         """
         Validación matemática y detección de identidad duplicada (1:N) en 512 dimensiones
         usando normalización L2 sobre la hiperesfera unitaria S^511, índice HNSW y Distancia Coseno.
+
+        Versionado de modelo: la comparación 1:N SOLO se hace contra usuarios con la misma
+        `biometric_model_version` que el request y con el umbral `kyc_duplicate` de esa versión.
+        LIMITACIÓN CONOCIDA: mientras convivan dos versiones, la detección de multicuenta NO cruza
+        versiones (ver api/utils.py, BIOMETRIC_MODEL_CURRENT_DEFAULT).
         """
         is_valid_vec, normalized_vector, vec_error = normalize_biometric_vector(
             value, expected_dim=BIOMETRIC_VECTOR_DIMENSIONS
@@ -395,10 +421,17 @@ class VerifyUserSerializer(serializers.Serializer):
             raise serializers.ValidationError(vec_error)
 
         try:
+            model_version = self._resolve_embedding_model_version()
+        except ValueError as exc:
+            raise serializers.ValidationError(str(exc))
+        kyc_threshold = get_biometric_thresholds(model_version)['kyc_duplicate']
+
+        try:
             current_user = self._get_current_user()
             qs = User.objects.filter(
                 cedula_verified=True,
                 biometric_vector__isnull=False,
+                biometric_model_version=model_version,
                 is_active=True,
             )
             if current_user and getattr(current_user, 'id', None):
@@ -408,10 +441,10 @@ class VerifyUserSerializer(serializers.Serializer):
                 distance=CosineDistance('biometric_vector', normalized_vector)
             ).order_by('distance').first()
 
-            if closest_match and closest_match.distance is not None and closest_match.distance < BIOMETRIC_KYC_DUPLICATE_THRESHOLD:
+            if closest_match and closest_match.distance is not None and closest_match.distance < kyc_threshold:
                 print(
-                    f"🚨 ALERTA DE SEGURIDAD BIOMÉTRICA (512-D): Intento de multicuenta bloqueado. "
-                    f"Distancia Coseno: {closest_match.distance:.4f} (< {BIOMETRIC_KYC_DUPLICATE_THRESHOLD}) "
+                    f"🚨 ALERTA DE SEGURIDAD BIOMÉTRICA (512-D, {model_version}): Intento de multicuenta bloqueado. "
+                    f"Distancia Coseno: {closest_match.distance:.4f} (< {kyc_threshold}) "
                     f"contra C.I: {closest_match.cedula_number}"
                 )
                 raise serializers.ValidationError(

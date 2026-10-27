@@ -4,6 +4,7 @@ import io
 import math
 import mimetypes
 import os
+import uuid
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
@@ -41,6 +42,72 @@ except Exception:
     DEFAULT_MAX_IMAGE_KB = 50
 DEFAULT_MAX_IMAGE_BYTES = DEFAULT_MAX_IMAGE_KB * 1024
 COMPRESSIBLE_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.heic'}
+
+# Cabecera de caché para todo objeto PÚBLICO subido por save_file. Los nombres de archivo llevan id + timestamp
+# (nunca se sobrescribe una versión existente), por lo que es seguro cachearlos de forma permanente.
+IMMUTABLE_CACHE_CONTROL = 'public, max-age=31536000, immutable'
+
+# ---------------------------------------------------------------------------------------------------------------
+# Variantes de imagen (miniaturas): `thumb` (lado mayor 320 px) y `medium` (lado mayor 800 px) en WebP calidad 80.
+# Convención de nombres determinista (sin tocar la BD): `<ruta_sin_ext>__thumb.webp` / `<ruta_sin_ext>__medium.webp`.
+# ---------------------------------------------------------------------------------------------------------------
+IMAGE_VARIANT_SPECS = {'thumb': 320, 'medium': 800}
+IMAGE_VARIANT_WEBP_QUALITY = 80
+IMAGE_VARIANT_SOURCE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp'}
+IMAGE_VARIANT_SOURCE_PREFIXES = (
+    'product_pictures/',
+    'products/',
+    'combo_pictures/',
+    'stories/thumbnails/',
+    'company_profile_pictures/',
+    'store_pictures/',
+    'company_presentation_videos/',
+    'profile_pictures/',
+    'profiles/',
+)
+_IMAGE_VARIANT_MARKER_PREFIX = 'cm:imgvar:v1:'
+_IMAGE_VARIANT_PROBE_PREFIX = 'cm:imgvar:probe:v1:'
+_IMAGE_VARIANT_PROBE_TTL = 6 * 3600
+
+
+def image_variant_key(path: str, variant: str) -> str:
+    """Ruta de almacenamiento de una variante: `a/b/foto.jpg` -> `a/b/foto__thumb.webp`."""
+    root, _ext = os.path.splitext(str(path or ''))
+    return f"{root}__{variant}.webp"
+
+
+def is_image_variant_path(path: str) -> bool:
+    root, _ext = os.path.splitext(str(path or ''))
+    return any(root.endswith(f"__{name}") for name in IMAGE_VARIANT_SPECS)
+
+
+def is_image_variant_eligible(path: str) -> bool:
+    """True si la ruta (ya normalizada, relativa) es una imagen pública de UGC que debe tener variantes."""
+    clean = str(path or '').lstrip('/')
+    if not clean or clean.startswith(('http://', 'https://')):
+        return False
+    if is_image_variant_path(clean):
+        return False
+    if os.path.splitext(clean)[1].lower() not in IMAGE_VARIANT_SOURCE_EXTENSIONS:
+        return False
+    return clean.startswith(IMAGE_VARIANT_SOURCE_PREFIXES)
+
+
+def _variants_registry():
+    """Caché persistente (DB 3 de Redis) con las imágenes que ya tienen variantes. Cae a 'default' si no existe."""
+    try:
+        from django.core.cache import caches
+        return caches['image_variants']
+    except Exception:
+        return cache
+
+
+def _variant_marker_cache_key(path: str) -> str:
+    return _IMAGE_VARIANT_MARKER_PREFIX + hashlib.sha1(str(path).encode('utf-8')).hexdigest()[:32]
+
+
+def _variant_probe_cache_key(path: str) -> str:
+    return _IMAGE_VARIANT_PROBE_PREFIX + hashlib.sha1(str(path).encode('utf-8')).hexdigest()[:32]
 
 
 def _prepare_rgb_image(img: Image.Image) -> Image.Image:
@@ -367,6 +434,9 @@ class COS:
             return False
         return any(clean.startswith(prefix) for prefix in self.PRIVATE_STORAGE_PREFIXES)
 
+    def _is_private_target(self, full_path: str, is_private: bool | None = None) -> bool:
+        return self.is_private_path(full_path) if is_private is None else bool(is_private)
+
     def _resolve_bucket(self, path: str, is_private: bool | None = None) -> tuple[str, bool]:
         """
         Retorna `(bucket_name, resolved_is_private)` para la ruta dada.
@@ -424,6 +494,13 @@ class COS:
 
         full_path = os.path.join(folder_path, file_name).replace("\\", "/").lstrip("/")
 
+        # Objetos públicos: el nombre SIEMPRE es único por versión (sufijo aleatorio). Así una nueva subida jamás pisa
+        # a la anterior (nada de borrar "la vieja" y llevarse la nueva por colisión en el mismo segundo) y el archivo
+        # puede cachearse de forma permanente (`Cache-Control: immutable`) en CDN, navegador y app.
+        if not self._is_private_target(full_path, is_private) and not full_path.startswith('static/'):
+            stem, ext = os.path.splitext(str(file_name))
+            file_name = f"{stem}_{uuid.uuid4().hex[:8]}{ext}"
+            full_path = os.path.join(folder_path, file_name).replace("\\", "/").lstrip("/")
         if self.storage_type == 'aws':
             target_bucket, resolved_private = self._resolve_bucket(full_path, is_private=is_private)
             try:
@@ -436,6 +513,9 @@ class COS:
                     # Cifrado en reposo en el servidor (SSE-S3 AES-256) para todos los documentos sensibles
                     extra_args['ServerSideEncryption'] = 'AES256'
                     extra_args['ContentDisposition'] = 'inline'
+                else:
+                    # Objetos públicos: nombre único por versión -> caché permanente en CDN/navegador/app
+                    extra_args['CacheControl'] = IMMUTABLE_CACHE_CONTROL
 
                 if hasattr(file_obj, 'seek'):
                     file_obj.seek(0)
@@ -447,6 +527,7 @@ class COS:
                     ExtraArgs=extra_args,
                 )
                 track_saved_file(full_path)
+                self._schedule_image_variants(full_path)
                 return full_path
             except ClientError as e:
                 error_code = e.response.get('Error', {}).get('Code', '') if hasattr(e, 'response') else ''
@@ -496,7 +577,161 @@ class COS:
                     destination.write(file_obj.read())
 
             track_saved_file(full_path)
+            self._schedule_image_variants(full_path)
             return full_path
+
+    # ------------------------------------------------------------------
+    # Variantes de imagen (thumb / medium en WebP)
+    # ------------------------------------------------------------------
+    def _schedule_image_variants(self, full_path: str) -> None:
+        """Encola (Celery) la generación de miniaturas de una imagen pública recién subida. Nunca lanza errores."""
+        try:
+            if not is_image_variant_eligible(full_path):
+                return
+            from .core.image_variants import generate_image_variants_task
+            generate_image_variants_task.apply_async(args=[full_path], countdown=1, ignore_result=True)
+        except Exception as exc:
+            print(f"⚠️ No se pudo encolar la generación de variantes para {full_path}: {exc}")
+
+    def variants_ready(self, relative_path: str) -> bool:
+        """True si ya se generaron (y registraron) las variantes de la imagen."""
+        clean = self.normalize_path(relative_path).lstrip('/')
+        if not is_image_variant_eligible(clean):
+            return False
+        try:
+            return bool(_variants_registry().get(_variant_marker_cache_key(clean)))
+        except Exception:
+            return False
+
+    def mark_variants_ready(self, relative_path: str) -> None:
+        clean = self.normalize_path(relative_path).lstrip('/')
+        try:
+            _variants_registry().set(_variant_marker_cache_key(clean), 1, timeout=None)
+        except Exception:
+            pass
+
+    def _lazy_probe_variants(self, clean_path: str) -> None:
+        """
+        Imagen elegible sin marca de variantes (anterior a esta función, o marca perdida): una sola vez cada 6 h
+        se agenda una tarea que verifica/genera las variantes. Mientras tanto la API devuelve el original.
+        """
+        if not getattr(settings, 'IMAGE_VARIANTS_LAZY_ENQUEUE', True):
+            return
+        try:
+            if _variants_registry().add(_variant_probe_cache_key(clean_path), 1, timeout=_IMAGE_VARIANT_PROBE_TTL):
+                from .core.image_variants import ensure_image_variants_task
+                ensure_image_variants_task.apply_async(args=[clean_path], ignore_result=True)
+        except Exception:
+            pass
+
+    def get_image_variants(self, relative_path: str, **url_kwargs) -> dict:
+        """
+        Devuelve `{'url', 'thumb_url', 'medium_url'}` para una imagen almacenada.
+        `url` es siempre el original (retrocompatible). `thumb_url` / `medium_url` apuntan a las variantes WebP
+        si ya existen; si todavía no, caen al original para que el cliente SIEMPRE tenga una URL válida.
+        """
+        url = self.get_url(relative_path, **url_kwargs) if relative_path else None
+        result = {'url': url, 'thumb_url': url, 'medium_url': url}
+        if not url:
+            return result
+        clean = self.normalize_path(relative_path).lstrip('/')
+        if not is_image_variant_eligible(clean):
+            return result
+        if self.variants_ready(clean):
+            result['thumb_url'] = self.get_url(image_variant_key(clean, 'thumb'), **url_kwargs) or url
+            result['medium_url'] = self.get_url(image_variant_key(clean, 'medium'), **url_kwargs) or url
+        else:
+            self._lazy_probe_variants(clean)
+        return result
+
+    def get_variant_url(self, relative_path: str, variant: str = 'thumb', **url_kwargs):
+        """URL de una variante (`thumb` | `medium`) con fallback al original. `None` si no hay imagen."""
+        data = self.get_image_variants(relative_path, **url_kwargs)
+        return data.get(f'{variant}_url') or data.get('url')
+
+    def get_image_variants_list(self, relative_paths) -> list:
+        """Igual que `get_image_variants` para una lista de rutas (omite vacías/inválidas)."""
+        out = []
+        for raw in (relative_paths or []):
+            if not raw:
+                continue
+            item = self.get_image_variants(raw)
+            if item.get('url'):
+                out.append(item)
+        return out
+
+    def put_bytes(self, full_path: str, data: bytes, content_type: str | None = None, public_cache: bool = True) -> bool:
+        """Sube bytes ya procesados (ej. variantes WebP) al bucket que corresponde a la ruta. Sin moderación ni compresión."""
+        clean = str(full_path or '').lstrip('/')
+        if not clean or data is None:
+            return False
+        if self.storage_type == 'aws':
+            target_bucket, resolved_private = self._resolve_bucket(clean)
+            extra_args = {}
+            if content_type:
+                extra_args['ContentType'] = content_type
+            if resolved_private:
+                extra_args['ServerSideEncryption'] = 'AES256'
+            elif public_cache:
+                extra_args['CacheControl'] = IMMUTABLE_CACHE_CONTROL
+            try:
+                self.s3_client.upload_fileobj(io.BytesIO(data), target_bucket, clean, ExtraArgs=extra_args)
+                return True
+            except ClientError as exc:
+                print(f"❌ Error subiendo bytes a AWS S3 ({target_bucket}/{clean}): {exc}")
+                return False
+        media_path = os.path.join(settings.MEDIA_ROOT, os.path.dirname(clean))
+        os.makedirs(media_path, exist_ok=True)
+        with open(os.path.join(settings.MEDIA_ROOT, clean), 'wb') as destination:
+            destination.write(data)
+        return True
+
+    def file_exists(self, relative_path: str) -> bool:
+        clean = self.normalize_path(relative_path).lstrip('/')
+        if not clean or clean.startswith(('http://', 'https://')):
+            return False
+        if self.storage_type == 'aws':
+            target_bucket, _ = self._resolve_bucket(clean)
+            try:
+                self.s3_client.head_object(Bucket=target_bucket, Key=clean)
+                return True
+            except ClientError:
+                return False
+        return os.path.isfile(os.path.join(settings.MEDIA_ROOT, clean))
+
+    def ensure_immutable_cache_control(self, relative_path: str) -> str:
+        """
+        Backfill: añade `Cache-Control: public, max-age=31536000, immutable` a un objeto público ya existente
+        (copia el objeto sobre sí mismo reemplazando metadatos). Devuelve 'updated' | 'ok' | 'skipped' | 'error'.
+        """
+        if self.storage_type != 'aws':
+            return 'skipped'
+        clean = self.normalize_path(relative_path).lstrip('/')
+        if not clean or clean.startswith(('http://', 'https://')):
+            return 'skipped'
+        target_bucket, resolved_private = self._resolve_bucket(clean)
+        if resolved_private:
+            return 'skipped'
+        try:
+            head = self.s3_client.head_object(Bucket=target_bucket, Key=clean)
+            if (head.get('CacheControl') or '').strip() == IMMUTABLE_CACHE_CONTROL:
+                return 'ok'
+            params = {
+                'Bucket': target_bucket,
+                'Key': clean,
+                'CopySource': {'Bucket': target_bucket, 'Key': clean},
+                'MetadataDirective': 'REPLACE',
+                'CacheControl': IMMUTABLE_CACHE_CONTROL,
+                'ContentType': head.get('ContentType') or self._guess_content_type(clean) or 'application/octet-stream',
+                'Metadata': head.get('Metadata') or {},
+            }
+            if head.get('ContentDisposition'):
+                params['ContentDisposition'] = head['ContentDisposition']
+            self.s3_client.copy_object(**params)
+            return 'updated'
+        except ClientError as exc:
+            print(f"⚠️ No se pudo actualizar Cache-Control de {clean}: {exc}")
+            return 'error'
 
     def cleanup_request_saved_files(self) -> int:
         """
@@ -662,6 +897,27 @@ class COS:
                 base_url += "/"
             return f"{base_url}{clean_path}"
 
+    def _delete_image_variants(self, clean_path: str) -> None:
+        """Borra thumb/medium de una imagen elegible y su marca de registro (best-effort)."""
+        if not is_image_variant_eligible(clean_path):
+            return
+        for variant in IMAGE_VARIANT_SPECS:
+            variant_path = image_variant_key(clean_path, variant)
+            try:
+                if self.storage_type == 'aws':
+                    target_bucket, _ = self._resolve_bucket(variant_path)
+                    self.s3_client.delete_object(Bucket=target_bucket, Key=variant_path)
+                else:
+                    local_variant = os.path.join(settings.MEDIA_ROOT, variant_path)
+                    if os.path.exists(local_variant):
+                        os.remove(local_variant)
+            except Exception:
+                pass
+        try:
+            _variants_registry().delete(_variant_marker_cache_key(clean_path))
+        except Exception:
+            pass
+
     def delete_file(self, relative_path: str, is_private: bool | None = None):
         """
         Elimina físicamente el objeto del bucket correspondiente (y limpia copias heredadas
@@ -673,6 +929,9 @@ class COS:
         clean_path = self.normalize_path(relative_path).lstrip('/')
         if not clean_path or clean_path.startswith(('http://', 'https://')):
             return False
+
+        # Las variantes (thumb/medium) viajan con el original: se borran juntas para no dejar huérfanos.
+        self._delete_image_variants(clean_path)
 
         if self.storage_type == 'aws':
             target_bucket, resolved_private = self._resolve_bucket(clean_path, is_private=is_private)

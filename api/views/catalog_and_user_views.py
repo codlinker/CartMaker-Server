@@ -2099,6 +2099,7 @@ class UserViewSet(mixins.RetrieveModelMixin,
             # 2. Borrado / anonimización del vector biométrico facial (512-D) y estado de verificación
             locked_user.cedula_document = None
             locked_user.biometric_vector = None
+            locked_user.biometric_model_version = 'mobilefacenet-fp32-v1'
             locked_user.cedula_verified = False
             locked_user.cedula_number = None
             locked_user.nacionality = None
