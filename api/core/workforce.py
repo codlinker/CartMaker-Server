@@ -49,6 +49,8 @@ from ..models import (
     SubCategory,
     InventoryItem,
     InventoryItemOffer,
+    ProductsCombo,
+    ProductsComboItem,
     CompanyVideoStory,
     EMPLOYEE_ROLE_SLUGS,
     INVITATION_SHORT_CODE_LENGTH,

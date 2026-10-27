@@ -1140,6 +1140,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         Devuelve el esquema dinámico de creación de producto para la subcategoría o categoría solicitada.
         GET /api/v1/products/schema/?subcategory_id=X
         """
+        from .maps_and_cache_views import CategoryProductSchemaAPI
         return CategoryProductSchemaAPI().get(request)
     
     @action(detail=False, methods=['post'])

@@ -16,6 +16,7 @@ from api.core.workforce import (
 )
 from api.core import *
 from django.contrib.gis.geos import Point
+from django.core.exceptions import ValidationError as DjangoValidationError
 from pgvector.django import CosineDistance
 from django.db import transaction
 

@@ -133,7 +133,7 @@ def _resolve_company_from_target(target_type: str, target_id: str, explicit_comp
         if target_type == ContentReport.TargetType.COMPANY:
             return Company.objects.filter(id=target_id).first()
         if target_type == ContentReport.TargetType.STORE:
-            store = Store.objects.select_related('company').filter(id=target_id).first()
+            store = CompanyStore.objects.select_related('company').filter(id=target_id).first()
             return store.company if store else None
         if target_type in (ContentReport.TargetType.PRODUCT, ContentReport.TargetType.COMBO):
             item = InventoryItem.objects.select_related('store__company').filter(id=target_id).first()

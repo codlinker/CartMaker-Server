@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional
 
 from openai import AsyncOpenAI
 from django.conf import settings
+from django.core.cache import cache
 from django.db.models import Count, Q
 from django.utils import timezone
 from datetime import timedelta
