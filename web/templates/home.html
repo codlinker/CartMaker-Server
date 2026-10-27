@@ -1,861 +1,247 @@
 {% extends 'base.html' %}
 {% load static %}
 
-{% block title %}CartMaker — Todo el comercio de tu zona en tiempo real{% endblock %}
+{% block title %}CartMaker — Lo que buscas, ya lo vende alguien cerca de ti{% endblock %}
 
 {% block extra_head %}
-    <link rel="stylesheet" href="{% static 'css/home.css' %}?v=20261020_feed_video">
-    <link rel="preload" as="image" href="{% static 'img/screenshots_app/card_feed_social_poster.jpg' %}">
+    <script>document.documentElement.classList.add('js');</script>
+    <link rel="stylesheet" href="{% static 'css/home.css' %}?v=20261027_ux4">
+    <link rel="preload" as="image" href="{% static 'img/screenshots_app/card_feed_social_poster.jpg' %}" fetchpriority="high">
 {% endblock %}
 
 {% block content %}
 <div id="landingRoot"
+     data-persona="buyer"
      data-has-commission="{{ has_sales_commission|yesno:'true,false' }}"
      data-commission-pct="{{ sales_commission_pct }}"
      data-commission-num="{{ sales_commission_num|stringformat:'f' }}">
 
-<!-- ==========================================================================
-     1. HERO SECTION — CLICKUP STYLE + INTERACTIVE PERSONA SWITCHER (MOBILE-FIRST)
-     ========================================================================== -->
-<section class="hero-section" id="inicio">
-    <div class="hero-bg-mesh" aria-hidden="true">
-        <div class="mesh-orb orb-purple"></div>
-        <div class="mesh-orb orb-pink"></div>
-        <div class="mesh-orb orb-cyan"></div>
-        <div class="hero-grid-pattern"></div>
-    </div>
-
-    <div class="container hero-container">
-        <!-- Badge Superior + Eslogan Firma -->
-        <div class="hero-top-pill-row">
-            <div class="live-pilot-badge">
-                <span class="pulse-dot"></span>
-                <span>Ecosistema Comercial Hiper-Local · Tu Zona en Vivo</span>
-            </div>
-            <div class="slogan-signature-pill">
-                <span class="material-symbols-rounded">spark</span>
-                <span>«Quién sabe, capaz tu vecino vende lo que buscas»</span>
-            </div>
-        </div>
-
-        <!-- Selector de Rol Interactivo (Comprador / Emprendedor / Comercio Local) -->
-        <div class="persona-switcher" role="tablist" aria-label="Selecciona tu perfil en CartMaker">
-            <button type="button" class="persona-tab active" role="tab" aria-selected="true" data-persona="buyer">
-                <span class="material-symbols-rounded">explore</span>
-                <span>Quiero Comprar en mi Zona</span>
-            </button>
-            <button type="button" class="persona-tab" role="tab" aria-selected="false" data-persona="home-seller">
-                <span class="material-symbols-rounded">home_work</span>
-                <span>Emprendo / Tienda Virtual</span>
-            </button>
-            <button type="button" class="persona-tab" role="tab" aria-selected="false" data-persona="shop-seller">
-                <span class="material-symbols-rounded">storefront</span>
-                <span>Tengo un Local o Empresa</span>
-            </button>
-        </div>
-
-        <div class="hero-main-grid">
-            <!-- Columna Izquierda: Copy Dinámico de Alto Impacto -->
-            <div class="hero-copy-col">
-                <h1 class="hero-headline" id="heroHeadline">
-                    Todo el comercio de <span class="text-gradient-clickup nowrap-phrase">tu zona</span> en tiempo real. <span class="nowrap-phrase">A minutos de ti.</span>
-                </h1>
-
-                <p class="hero-subheadline" id="heroSubheadline">
-                    Descubre en <strong>videos verticales de 30s</strong>, Mapa 3D y con <strong>Atlas IA</strong> qué tiendas, locales o emprendedores tienen exactamente lo que buscas en tu zona, con stock en vivo y precios claros en <strong>USD (BCV) y Bs.</strong> <em>Quién sabe, capaz tu vecino vende lo que buscas.</em>
-                </p>
-
-                <!-- Micro-beneficios dinámicos según el tab activo -->
-                <ul class="hero-value-pills" id="heroValuePills">
-                    <li>
-                        <span class="material-symbols-rounded">bolt</span>
-                        <span id="pillText1">Cero «¿Precio al DM?»: stock real, descuentos con Tokens y precios BCV al instante</span>
-                    </li>
-                    <li>
-                        <span class="material-symbols-rounded">photo_camera</span>
-                        <span id="pillText2">¿Vendes? Toma una foto y Atlas IA registra todo tu inventario en 15 segundos</span>
-                    </li>
-                    <li>
-                        <span class="material-symbols-rounded">verified_user</span>
-                        <span id="pillText3">Crear tu comercio es 100% Gratis{% if has_sales_commission %} · Solo {{ sales_commission_pct }}% de comisión por cada venta{% endif %}</span>
-                    </li>
-                </ul>
-
-                <!-- Botones Principales de Conversión -->
-                <div class="hero-cta-group" id="descargar">
-                    <a href="https://apps.apple.com" target="_blank" rel="noopener" class="btn-store-primary">
-                        <svg viewBox="0 0 384 512" class="store-svg" aria-hidden="true"><path fill="currentColor" d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>
-                        <div class="store-btn-labels">
-                            <small>Disponible en</small>
-                            <strong>App Store</strong>
-                        </div>
-                    </a>
-
-                    <a href="https://play.google.com/apps/testing/com.codlinker.cartmaker" target="_blank" rel="noopener" class="btn-store-primary btn-store-dark">
-                        <svg viewBox="0 0 512 512" class="store-svg" aria-hidden="true"><path fill="currentColor" d="M325.3 234.3L104.6 13l280.8 161.2-60.1 60.1zM47 0C34 6.8 25.3 19.2 25.3 35.3v441.3c0 16.1 8.7 28.5 21.7 35.3l256.6-256L47 0zm425.2 225.6l-58.9-34.1-65.7 64.5 65.7 64.5 60.1-34.1c18-14.3 18-46.5-1.2-60.8zM104.6 499l280.8-161.2-60.1-60.1L104.6 499z"/></svg>
-                        <div class="store-btn-labels">
-                            <small>Consíguelo en</small>
-                            <strong>Google Play</strong>
-                        </div>
-                    </a>
-
-                    <a href="#precios" class="btn-founder-outline">
-                        <span class="material-symbols-rounded">rocket_launch</span>
-                        <span>Crear mi Comercio (100% Gratis)</span>
-                    </a>
-                </div>
-
-                <!-- Micro-prueba de valor -->
-                <div class="hero-trust-strip">
-                    <div class="trust-stat">
-                        <strong>100% Gratis</strong>
-                        <span>Crear tu comercio ($0/mes)</span>
-                    </div>
-                    <div class="trust-divider"></div>
-                    {% if has_sales_commission %}
-                    <div class="trust-stat">
-                        <strong>{{ sales_commission_pct }}%</strong>
-                        <span>Comisión solo al vender</span>
-                    </div>
-                    <div class="trust-divider"></div>
-                    {% endif %}
-                    <div class="trust-stat">
-                        <strong>15 seg</strong>
-                        <span>Escaneo IA de inventario</span>
-                    </div>
-                    <div class="trust-divider"></div>
-                    <div class="trust-stat">
-                        <strong>30 seg</strong>
-                        <span>Videos en CartMaker TV</span>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Columna Derecha: Teléfono con Captura Pura + 2 Widgets Flotantes Externos -->
-            <div class="hero-visual-col">
-                <div class="phone-stage" data-tilt-card>
-                    <!-- Widget Externo 1: Vecino a 280 metros -->
-                    <div class="floating-badge badge-radar">
-                        <div class="f-badge-icon bg-emerald">
-                            <span class="material-symbols-rounded">my_location</span>
-                        </div>
-                        <div class="f-badge-info">
-                            <strong>Vecino a 280 metros</strong>
-                            <span>Mini ventilador portátil · $10.00</span>
-                        </div>
-                    </div>
-
-                    <!-- Widget Externo 2: Atlas IA -->
-                    <div class="floating-badge badge-atlas">
-                        <div class="f-badge-icon bg-atlas-gradient">
-                            <img src="{% static 'img/atlas.svg' %}" alt="Atlas IA" class="f-badge-atlas-img">
-                        </div>
-                        <div class="f-badge-info">
-                            <strong>Atlas IA · Motor en tu Zona</strong>
-                            <span>Busca al instante o crea tu inventario en 15s</span>
-                        </div>
-                    </div>
-
-                    <!-- Dispositivo Móvil: Muestra la grabación real del Feed en bucle -->
-                    <div class="phone-device-frame">
-                        <div class="phone-screen-pure">
-                            <video src="{% static 'video/card_feed_social.mp4' %}"
-                                   poster="{% static 'img/screenshots_app/card_feed_social_poster.jpg' %}"
-                                   data-video-src="{% static 'video/card_feed_social.mp4' %}"
-                                   autoplay
-                                   loop
-                                   muted
-                                   playsinline
-                                   webkit-playsinline
-                                   preload="auto"
-                                   disablePictureInPicture
-                                   aria-label="Pantalla de Inicio CartMaker — Ofertas en tu zona y Atlas IA"
-                                   class="phone-pure-screenshot zoomable-img autoplay-loop-video"></video>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</section>
+<div class="scroll-progress" id="scrollProgress" aria-hidden="true"><i></i></div>
 
 <!-- ==========================================================================
-     2. EL PROBLEMA DEL COMERCIO TRADICIONAL ("LA FRICCIÓN QUE ELIMINAMOS EN TU ZONA")
+     1. HERO — Video real de la app en reproducción automática
      ========================================================================== -->
-<section class="friction-section reveal-on-scroll" id="como-funciona">
-    <div class="container">
-        <div class="section-header-center" data-cart-stage data-cart-img="{% static 'img/logo_sin_letras.png' %}">
-            <span class="eyebrow-pill">EL FIN DE LA FRICCIÓN COMERCIAL</span>
-            <h2 class="section-title">
-                Por qué comprar o vender <span class="nowrap-phrase">en <span class="text-gradient-clickup">tu propia zona</span></span>
-                <span class="heading-line-block">necesitaba una verdadera evolución</span>
-            </h2>
-            <p class="section-subtitle">
-                Muchas veces terminas pagando un envío costoso desde el otro extremo de la ciudad por un repuesto, tecnología o producto que una tienda o emprendedor tenía listo en tu misma zona.
+<section class="hero" id="inicio">
+    <div class="hero-bg" aria-hidden="true">
+        <span class="orb orb-1"></span>
+        <span class="orb orb-2"></span>
+        <span class="orb orb-3"></span>
+        <span class="hero-grid"></span>
+    </div>
+
+    <div class="container hero-layout">
+        <div class="hero-copy">
+            <div class="hero-badges">
+                <span class="badge-live"><i class="pulse-dot"></i> Piloto activo · Estamos abriendo zonas</span>
+                <span class="badge-slogan"><span class="material-symbols-rounded" aria-hidden="true">auto_awesome</span> «Quién sabe, capaz tu vecino vende lo que buscas»</span>
+            </div>
+
+            <h1 class="hero-title">
+                Todo el comercio de <span class="text-grad nowrap">tu zona</span> en tiempo real. <span class="nowrap">A minutos de ti.</span>
+            </h1>
+
+            <p class="hero-lead">
+                Mira en video qué venden las tiendas y emprendedores cerca de ti, pregúntale a Atlas quién lo tiene abierto ahora y compra con precios claros en dólares (BCV) y bolívares. <strong>Sin escribir «¿precio?» y esperar horas.</strong>
             </p>
-        </div>
 
-        <div class="friction-bento-grid">
-            <!-- Dolor 1: Distancias y Envíos Innecesarios -->
-            <article class="friction-card" data-tilt-card>
-                <div class="friction-card-top">
-                    <span class="pain-tag">ANTES: COMPRAR A KILÓMETROS A CIEGAS</span>
-                    <div class="friction-icon-box icon-rose">
-                        <span class="material-symbols-rounded">two_wheeler</span>
-                    </div>
-                </div>
-                <h3>Cruzar toda la ciudad por algo que vendían en tu zona</h3>
-                <p class="pain-desc">
-                    En las redes tradicionales el algoritmo te muestra tiendas de otra ciudad, obligándote a pagar envíos caros y esperar horas.
-                </p>
-                <div class="solution-box">
-                    <span class="material-symbols-rounded">check_circle</span>
-                    <div>
-                        <strong>En CartMaker: Radar Hiper-Local + Ruta GPS 3D</strong>
-                        <p>Filtra comercios en tu zona actual, mira a cuántos kilómetros y minutos en vehículo están, o coordina el despacho con cálculo automático de ruta.</p>
-                    </div>
-                </div>
-            </article>
+            <ul class="hero-pills">
+                <li>
+                    <span class="material-symbols-rounded" aria-hidden="true">bolt</span>
+                    <span>Precios claros en $ (BCV) y Bs., horarios y unidades al instante</span>
+                </li>
+                <li>
+                    <span class="material-symbols-rounded" aria-hidden="true">photo_camera</span>
+                    <span>¿Vendes? Toma una foto y Atlas sube todos tus productos en segundos</span>
+                </li>
+                <li>
+                    <span class="material-symbols-rounded" aria-hidden="true">verified_user</span>
+                    <span>Abrir tu tienda es 100% gratis{% if has_sales_commission %} · Solo {{ sales_commission_pct }}% cuando concretas una venta{% endif %}</span>
+                </li>
+            </ul>
 
-            <!-- Dolor 2: El "¿Precio al DM?" -->
-            <article class="friction-card" data-tilt-card>
-                <div class="friction-card-top">
-                    <span class="pain-tag">ANTES: «¿PRECIO Y DISPONIBILIDAD AL DM?»</span>
-                    <div class="friction-icon-box icon-amber">
-                        <span class="material-symbols-rounded">hourglass_disabled</span>
-                    </div>
-                </div>
-                <h3>Esperar horas por una respuesta para saber si hay stock</h3>
-                <p class="pain-desc">
-                    Preguntas precio en comentarios y te contestan horas después cuando ya resolviste en otro lugar o el comercio cerró.
-                </p>
-                <div class="solution-box">
-                    <span class="material-symbols-rounded">check_circle</span>
-                    <div>
-                        <strong>En CartMaker: Stock, Horarios y Tokens en Vivo</strong>
-                        <p>Precios claros en USD (BCV) y Bs., unidades exactas disponibles, horario de atención en vivo y descuentos instantáneos con Club Tokens.</p>
-                    </div>
-                </div>
-            </article>
-
-            <!-- Dolor 3: Subir Inventario Manualmente -->
-            <article class="friction-card" data-tilt-card>
-                <div class="friction-card-top">
-                    <span class="pain-tag">ANTES: SEMANAS TRANSCRIBIENDO CATÁLOGOS</span>
-                    <div class="friction-icon-box icon-purple">
-                        <span class="material-symbols-rounded">auto_awesome</span>
-                    </div>
-                </div>
-                <h3>Perder días cargando productos uno por uno</h3>
-                <p class="pain-desc">
-                    Muchos comercios y emprendedores no digitalizan su negocio porque crear fichas de producto manualmente toma demasiado tiempo.
-                </p>
-                <div class="solution-box">
-                    <span class="material-symbols-rounded">check_circle</span>
-                    <div>
-                        <strong>En CartMaker: Todo tu Inventario en 15s con Atlas IA</strong>
-                        <p>Toma una sola foto a tus productos, estante o lista y Atlas IA reconoce todo lo que está en la imagen y te crea cada producto automáticamente.</p>
-                    </div>
-                </div>
-            </article>
-        </div>
-    </div>
-</section>
-
-<!-- ==========================================================================
-     3. SPOTLIGHT INTERACTIVO: ESCANEO DE INVENTARIO EN 15 SEGUNDOS CON ATLAS IA
-     ========================================================================== -->
-<section class="ai-inventory-section reveal-on-scroll" id="inventario-ia">
-    <div class="container">
-        <div class="ai-inventory-shell">
-            <div class="ai-inventory-copy">
-                <div class="atlas-brand-pill">
-                    <img src="{% static 'img/atlas.svg' %}" alt="Atlas IA" class="atlas-mini-icon">
-                    <span>ATLAS VISION IA · VELOCIDAD RÉCORD</span>
-                </div>
-                <h2>
-                    En <span class="text-gradient-clickup">15 segundos</span> ya registras todo tu inventario con una foto.
-                </h2>
-                <p>
-                    Olvídate de escribir nombres, descripciones y precios producto por producto. Con la función <strong>«Agregar varios ✨»</strong> impulsada por <strong>Atlas IA</strong>, solo tomas una foto a tu vitrina, factura o productos y nuestro motor neuronal detecta cada artículo y lo crea todo por ti.
-                </p>
-
-                <!-- Pasos Interactivos del Escaneo de 15s -->
-                <div class="scan-steps-interactive" id="scanStepsList">
-                    <button type="button" class="scan-step-card active" data-scan-step="1">
-                        <span class="step-num">01</span>
-                        <div class="step-info">
-                            <strong>Toma una foto desde la App (Seg 0 - 3)</strong>
-                            <span>Toca «Agregar varios ✨» en tu panel de inventario y captura tus productos o lista.</span>
-                        </div>
-                    </button>
-                    <button type="button" class="scan-step-card" data-scan-step="2">
-                        <span class="step-num">02</span>
-                        <div class="step-info">
-                            <strong>Atlas IA reconoce todo en la imagen (Seg 4 - 11)</strong>
-                            <span>Identifica marcas, modelos, categorías y precios sugeridos de múltiples ítems a la vez.</span>
-                        </div>
-                    </button>
-                    <button type="button" class="scan-step-card" data-scan-step="3">
-                        <span class="step-num">03</span>
-                        <div class="step-info">
-                            <strong>¡Catálogo creado y listo para vender! (Seg 15)</strong>
-                            <span>Tus productos quedan publicados en tu zona e indexados en el buscador de Atlas IA.</span>
-                        </div>
-                    </button>
-                </div>
-
-                <div class="scan-demo-actions">
-                    <button type="button" class="btn-run-scan-demo" id="btnTriggerScanDemo">
-                        <span class="material-symbols-rounded">play_arrow</span>
-                        <span>Simular Escaneo IA de 15s</span>
-                    </button>
-                    <div class="scan-timer-pill" id="scanTimerBadge">
-                        <span class="material-symbols-rounded">timer</span>
-                        <strong id="scanTimerText">15.0s · Listo al instante</strong>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Visualizador del Escáner + Captura Real de Inventarios -->
-            <div class="ai-inventory-visual">
-                <div class="scanner-showcase-frame" id="scannerFrame" data-tilt-card>
-                    <div class="scanner-laser-bar" id="scannerLaser"></div>
-                    <div class="scanner-top-hud">
-                        <span class="hud-chip-live">
-                            <span class="pulse-dot-cyan"></span>
-                            <span id="scannerHudStatus">Atlas Vision · Detección Múltiple Activa</span>
-                        </span>
-                        <span class="hud-chip-magic">Agregar varios ✨</span>
-                    </div>
-
-                    <div class="scanner-img-container">
-                        <img src="{% static 'img/screenshots_app/card_inventarios.jpg' %}"
-                             alt="Administrar Inventario y Agregar Varios con IA en CartMaker"
-                             class="scanner-screenshot zoomable-img">
-                        <button type="button" class="btn-zoom-preview" data-img="{% static 'img/screenshots_app/card_inventarios.jpg' %}" aria-label="Ampliar captura de inventario">
-                            <span class="material-symbols-rounded">open_in_full</span>
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</section>
-
-<!-- ==========================================================================
-     4. ECOSISTEMA INTERACTIVO (CLICKUP WORKSPACE TABS — #plataforma)
-     ========================================================================== -->
-<section class="workspace-section reveal-on-scroll" id="plataforma">
-    <div class="container">
-        <div class="section-header-center">
-            <span class="eyebrow-pill">UN ECOSISTEMA COMPLETO EN TU BOLSILLO</span>
-            <h2 class="section-title">
-                Cinco motores diseñados para <span class="text-gradient-clickup">activar tu zona</span>
-            </h2>
-            <p class="section-subtitle">
-                Explora cada módulo real de la aplicación. Toca cualquier captura para verla en pantalla completa.
-            </p>
-        </div>
-
-        <!-- Barra de Pestañas Estilo ClickUp -->
-        <div class="workspace-tabs-bar" role="tablist" aria-label="Módulos del Ecosistema CartMaker">
-            <button type="button" class="ws-tab-btn active" data-ws="tv" role="tab" aria-selected="true">
-                <span class="material-symbols-rounded">play_circle</span>
-                <span>CartMaker TV (30s)</span>
-            </button>
-            <button type="button" class="ws-tab-btn" data-ws="map" role="tab" aria-selected="false">
-                <span class="material-symbols-rounded">map</span>
-                <span>Mapa 3D &amp; Despacho GPS</span>
-            </button>
-            <button type="button" class="ws-tab-btn" data-ws="inventory" role="tab" aria-selected="false">
-                <span class="material-symbols-rounded">monitoring</span>
-                <span>Inventario IA &amp; Analíticas</span>
-            </button>
-            <button type="button" class="ws-tab-btn" data-ws="chat" role="tab" aria-selected="false">
-                <span class="material-symbols-rounded">forum</span>
-                <span>Chat &amp; Respuestas Rápidas</span>
-            </button>
-            <button type="button" class="ws-tab-btn" data-ws="tokens" role="tab" aria-selected="false">
-                <span class="material-symbols-rounded">toll</span>
-                <span>Club Tokens (-35% OFF)</span>
-            </button>
-        </div>
-
-        <!-- Panel 1: CartMaker TV (30s) & Feed de Zona -->
-        <div class="ws-panel active" id="ws-panel-tv">
-            <div class="ws-panel-grid">
-                <div class="ws-panel-copy">
-                    <span class="ws-badge">DESCUBRIMIENTO VISUAL EN 30 SEGUNDOS</span>
-                    <h3>Videos verticales de 30s e Historias con compra integrada en 1 toque</h3>
-                    <p>
-                        Desde una tarjeta gráfica <strong>RTX 5090</strong> hasta ofertas del día en tu zona. En <strong>CartMaker TV</strong> muestras tus productos en videos reales de <strong>30 segundos</strong> donde el cliente ve calificaciones, si aplican <strong>Tokens</strong>, resuelve dudas y agrega al carrito sin salir del video.
-                    </p>
-                    <ul class="ws-feature-list">
-                        <li>
-                            <span class="material-symbols-rounded">check</span>
-                            <span><strong>Videos de 30 segundos que convierten:</strong> Botón directo de «Al carrito», «Dudas», «Perfil» y etiqueta de «Tokens aplicables» sobre el reproductor.</span>
-                        </li>
-                        <li>
-                            <span class="material-symbols-rounded">check</span>
-                            <span><strong>Feed inteligente por zona:</strong> Secciones de <em>Ofertas en tu zona</em>, <em>Para ti</em>, <em>Podría gustarte</em> y acceso directo a Atlas IA.</span>
-                        </li>
-                        <li>
-                            <span class="material-symbols-rounded">check</span>
-                            <span><strong>Vende en CartMaker en 5 pasos:</strong> Flujo guiado dentro de la app para activar tu comercio gratis en minutos.</span>
-                        </li>
-                    </ul>
-                </div>
-                <div class="ws-panel-media">
-                    <div class="media-duo-showcase">
-                        <div class="media-card primary-media">
-                            <span class="media-card-label">Feed de Tu Zona</span>
-                            <video src="{% static 'video/card_feed_social.mp4' %}"
-                                   poster="{% static 'img/screenshots_app/card_feed_social_poster.jpg' %}"
-                                   data-video-src="{% static 'video/card_feed_social.mp4' %}"
-                                   autoplay
-                                   loop
-                                   muted
-                                   playsinline
-                                   webkit-playsinline
-                                   preload="metadata"
-                                   disablePictureInPicture
-                                   aria-label="Feed Principal CartMaker en tu zona"
-                                   class="zoomable-img autoplay-loop-video"></video>
-                            <button type="button" class="btn-zoom-preview" data-img="{% static 'video/card_feed_social.mp4' %}" aria-label="Ampliar vista del feed">
-                                <span class="material-symbols-rounded">open_in_full</span>
-                            </button>
-                        </div>
-                        <div class="media-card secondary-media">
-                            <span class="media-card-label">CartMaker TV (30s)</span>
-                            <img src="{% static 'img/screenshots_app/card_historias.jpg' %}" alt="Videos de 30s en CartMaker TV" class="zoomable-img">
-                            <button type="button" class="btn-zoom-preview" data-img="{% static 'img/screenshots_app/card_historias.jpg' %}" aria-label="Ampliar imagen">
-                                <span class="material-symbols-rounded">open_in_full</span>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Panel 2: Radar 3D & Logística de Despacho GPS -->
-        <div class="ws-panel" id="ws-panel-map">
-            <div class="ws-panel-grid">
-                <div class="ws-panel-copy">
-                    <span class="ws-badge">RADAR 3D + LOGÍSTICA DE DESPACHO</span>
-                    <h3>Explora sucursales en el Mapa 3D y calcula rutas de delivery al milímetro</h3>
-                    <p>
-                        Los clientes filtran por <strong>Más cercana</strong>, <strong>Malls</strong> o categoría en el radar nocturno 3D viendo distancia y tiempo en vehículo. Y al despachar un pedido, el módulo de <strong>Logística de Despacho</strong> traza la ruta GPS completa entre la tienda y el cliente.
-                    </p>
-                    <ul class="ws-feature-list">
-                        <li>
-                            <span class="material-symbols-rounded">check</span>
-                            <span><strong>Pines interactivos con foto y sucursales:</strong> Muestra si la tienda está en un Centro Comercial (ej. CC Vista Place), distancia exacta (`2.2 km`) y minutos en vehículo (`5 min`).</span>
-                        </li>
-                        <li>
-                            <span class="material-symbols-rounded">check</span>
-                            <span><strong>Logística de Despacho 3D para órdenes:</strong> Visualiza <em>Origen</em>, <em>Ruta Total</em> y <em>Cliente 3D</em> con kilómetros exactos, tiempo estimado en moto (ida y vuelta) y botón para <strong>Copiar GPS</strong>.</span>
-                        </li>
-                    </ul>
-                    <div class="store-formats-pills">
-                        <span class="format-chip"><span class="material-symbols-rounded">home</span> Tienda Virtual / En Casa</span>
-                        <span class="format-chip"><span class="material-symbols-rounded">local_mall</span> Malls (Por Piso)</span>
-                        <span class="format-chip"><span class="material-symbols-rounded">store</span> Local de Calle</span>
-                        <span class="format-chip"><span class="material-symbols-rounded">two_wheeler</span> Ruta GPS Delivery</span>
-                    </div>
-                </div>
-                <div class="ws-panel-media">
-                    <div class="media-duo-showcase">
-                        <div class="media-card primary-media">
-                            <span class="media-card-label">Radar 3D de Tiendas</span>
-                            <img src="{% static 'img/screenshots_app/card_mapa.jpg' %}" alt="Mapa 3D de Tiendas en tu Zona" class="zoomable-img">
-                            <button type="button" class="btn-zoom-preview" data-img="{% static 'img/screenshots_app/card_mapa.jpg' %}" aria-label="Ampliar imagen">
-                                <span class="material-symbols-rounded">open_in_full</span>
-                            </button>
-                        </div>
-                        <div class="media-card secondary-media">
-                            <span class="media-card-label">Logística y Ruta GPS</span>
-                            <img src="{% static 'img/screenshots_app/card_delivery.jpg' %}" alt="Logística de Despacho y Delivery 3D" class="zoomable-img">
-                            <button type="button" class="btn-zoom-preview" data-img="{% static 'img/screenshots_app/card_delivery.jpg' %}" aria-label="Ampliar imagen">
-                                <span class="material-symbols-rounded">open_in_full</span>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Panel 3: Inventario IA en 15s & Analíticas -->
-        <div class="ws-panel" id="ws-panel-inventory">
-            <div class="ws-panel-grid">
-                <div class="ws-panel-copy">
-                    <span class="ws-badge">INVENTARIO IA EN 15S + INTELIGENCIA DE NEGOCIO</span>
-                    <h3>Registra todo tu inventario en 15s y mide el ROI de cada venta</h3>
-                    <p>
-                        Gestiona tus pestañas de <strong>Productos</strong>, <strong>A la venta</strong> y <strong>Videos</strong> desde un solo lugar. Usa <strong>«Agregar varios ✨»</strong> para que Atlas IA cree tus productos desde una foto en 15 segundos, y monitorea tus 3 centros de analíticas.
-                    </p>
-                    <ul class="ws-feature-list">
-                        <li>
-                            <span class="material-symbols-rounded">check</span>
-                            <span><strong>Ventas y Atlas (Impacto y ROI):</strong> Descubre exactamente cuántas ventas y búsquedas te está generando Atlas IA en tu zona.</span>
-                        </li>
-                        <li>
-                            <span class="material-symbols-rounded">check</span>
-                            <span><strong>Historias (Rendimiento Visual):</strong> Mide vistas, retención y clics al carrito de tus videos verticales de 30 segundos.</span>
-                        </li>
-                        <li>
-                            <span class="material-symbols-rounded">check</span>
-                            <span><strong>Gamificación (Motor de Fidelidad):</strong> Analiza la recurrencia de clientes que canjean tus descuentos con Club Tokens.</span>
-                        </li>
-                    </ul>
-                </div>
-                <div class="ws-panel-media">
-                    <div class="media-duo-showcase">
-                        <div class="media-card primary-media">
-                            <span class="media-card-label">Inventario IA (15s)</span>
-                            <img src="{% static 'img/screenshots_app/card_inventarios.jpg' %}" alt="Administrar Inventario con IA en CartMaker" class="zoomable-img">
-                            <button type="button" class="btn-zoom-preview" data-img="{% static 'img/screenshots_app/card_inventarios.jpg' %}" aria-label="Ampliar imagen">
-                                <span class="material-symbols-rounded">open_in_full</span>
-                            </button>
-                        </div>
-                        <div class="media-card secondary-media">
-                            <span class="media-card-label">Analíticas y ROI</span>
-                            <img src="{% static 'img/screenshots_app/card_analiticas.jpg' %}" alt="Centro de Analíticas Ventas, Atlas, Historias y Gamificación" class="zoomable-img">
-                            <button type="button" class="btn-zoom-preview" data-img="{% static 'img/screenshots_app/card_analiticas.jpg' %}" aria-label="Ampliar imagen">
-                                <span class="material-symbols-rounded">open_in_full</span>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Panel 4: Chat Transaccional & Respuestas Rápidas -->
-        <div class="ws-panel" id="ws-panel-chat">
-            <div class="ws-panel-grid">
-                <div class="ws-panel-copy">
-                    <span class="ws-badge">COMUNICACIÓN CONECTADA AL PEDIDO</span>
-                    <h3>Chat por orden con notas de voz, Pago Móvil automático y Respuestas Rápidas</h3>
-                    <p>
-                        Cada pedido (ej. <em>Pedido #15</em>) abre un canal directo entre comprador y comercio sin exponer tu número personal. El comercio cuenta con una barra de <strong>⚡ Respuestas rápidas</strong> para enviar sus datos de Pago Móvil o bienvenida en un toque.
-                    </p>
-                    <ul class="ws-feature-list">
-                        <li>
-                            <span class="material-symbols-rounded">check</span>
-                            <span><strong>Datos de pago al instante:</strong> Envía tu cédula, teléfono y banco de Pago Móvil automáticamente al abrirse la orden.</span>
-                        </li>
-                        <li>
-                            <span class="material-symbols-rounded">check</span>
-                            <span><strong>⚡ Respuestas rápidas configurables:</strong> Crea e inserta plantillas (*Saludo Inicial*, *Datos de Pago*, *Pedido en Camino*) sin volver a escribir.</span>
-                        </li>
-                        <li>
-                            <span class="material-symbols-rounded">check</span>
-                            <span><strong>Notas de voz, galería y cámara:</strong> Envía audios y comprobantes de pago directamente dentro de la conversación del pedido.</span>
-                        </li>
-                    </ul>
-                </div>
-                <div class="ws-panel-media">
-                    <div class="media-duo-showcase">
-                        <div class="media-card primary-media">
-                            <span class="media-card-label">Vista Comprador</span>
-                            <img src="{% static 'img/screenshots_app/card_chat_1.jpg' %}" alt="Chat de Pedido Vista Comprador con Notas de Voz" class="zoomable-img">
-                            <button type="button" class="btn-zoom-preview" data-img="{% static 'img/screenshots_app/card_chat_1.jpg' %}" aria-label="Ampliar imagen">
-                                <span class="material-symbols-rounded">open_in_full</span>
-                            </button>
-                        </div>
-                        <div class="media-card secondary-media">
-                            <span class="media-card-label">Vista Comercio (Respuestas Rápidas)</span>
-                            <img src="{% static 'img/screenshots_app/card_chat_2.jpg' %}" alt="Chat de Pedido Vista Comercio con Respuestas Rápidas" class="zoomable-img">
-                            <button type="button" class="btn-zoom-preview" data-img="{% static 'img/screenshots_app/card_chat_2.jpg' %}" aria-label="Ampliar imagen">
-                                <span class="material-symbols-rounded">open_in_full</span>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Panel 5: Club Tokens -->
-        <div class="ws-panel" id="ws-panel-tokens">
-            <div class="ws-panel-grid">
-                <div class="ws-panel-copy">
-                    <span class="ws-badge">MOTOR DE FIDELIZACIÓN Y GAMIFICACIÓN</span>
-                    <h3>Canjea tus Tokens por descuentos reales de hasta 35% OFF en el acto</h3>
-                    <p>
-                        Observa cómo funciona en la vida real: un repuesto de <strong>$89.00</strong> baja automáticamente a <strong>$57.85 (35% OFF)</strong> al aplicar <strong>450 tokens</strong> desde la misma ficha del producto, mostrando tu saldo disponible (`8.860,00 tokens`) y los niveles de descuento configurados por el comercio.
-                    </p>
-                    <ul class="ws-feature-list">
-                        <li>
-                            <span class="material-symbols-rounded">check</span>
-                            <span><strong>Tramos de descuento flexibles:</strong> El comercio define ofertas como `-20% por 300 tokens` o `-35% por 450 tokens` para disparar su conversión.</span>
-                        </li>
-                        <li>
-                            <span class="material-symbols-rounded">check</span>
-                            <span><strong>Ficha de producto ultra-completa:</strong> Muestra stock exacto disponible, horario de atención de la tienda, botón de preguntas y compra inmediata.</span>
-                        </li>
-                    </ul>
-                </div>
-                <div class="ws-panel-media">
-                    <div class="media-single-showcase">
-                        <span class="media-card-label">Canje de Tokens en Vivo</span>
-                        <img src="{% static 'img/screenshots_app/card_tokens.jpg' %}" alt="Canje de Club Tokens con 35% de descuento en CartMaker" class="zoomable-img">
-                        <button type="button" class="btn-zoom-preview" data-img="{% static 'img/screenshots_app/card_tokens.jpg' %}" aria-label="Ampliar imagen">
-                            <span class="material-symbols-rounded">open_in_full</span>
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</section>
-
-<!-- ==========================================================================
-     5. ATLAS IA — DEMOSTRACIÓN REAL CON LAS 4 CAPTURAS EN VIVO (#atlas-ia)
-     ========================================================================== -->
-<section class="atlas-section reveal-on-scroll" id="atlas-ia">
-    <div class="container">
-        <div class="atlas-showcase-shell">
-            <div class="atlas-header-col">
-                <div class="atlas-brand-pill">
-                    <img src="{% static 'img/atlas.svg' %}" alt="Atlas IA" class="atlas-mini-icon">
-                    <span>ATLAS IA · ASISTENTE CONVERSACIONAL EN TU ZONA</span>
-                </div>
-                <h2 class="atlas-title">
-                    Habla con Atlas como con un pana experto que conoce cada tienda de tu zona.
-                </h2>
-                <p class="atlas-desc">
-                    Mira cómo responde <strong>Atlas IA</strong> en la app real: le dices <em>«Quiero mejorar mi computadora»</em> o <em>«Oye ¿y bujías? busca en todos lados»</em>, y en segundos compara precios reales de las tiendas de tu zona (tarjetas gráficas, RAM, procesadores o repuestos), te avisa si el local está abierto o cerrado y te muestra las tarjetas con el sello <strong>MUY CERCA</strong> para agregar al carrito con el botón naranja.
-                </p>
-
-                <!-- Selector Interactivo que cambia tanto la historia como la captura real de Atlas -->
-                <div class="atlas-prompt-selector" role="tablist" aria-label="Conversaciones reales con Atlas IA">
-                    <p class="selector-label">Explora las capturas reales de Atlas IA en acción:</p>
-
-                    <button type="button" class="atlas-prompt-btn active" data-atlas-slide="0">
-                        <span class="material-symbols-rounded">computer</span>
-                        <div>
-                            <strong>1. «¡Hola Atlas! Quiero mejorar mi computadora»</strong>
-                            <small>Atlas busca tiendas en tu zona y arma recomendaciones a medida</small>
-                        </div>
-                    </button>
-
-                    <button type="button" class="atlas-prompt-btn" data-atlas-slide="1">
-                        <span class="material-symbols-rounded">memory</span>
-                        <div>
-                            <strong>2. Comparativa de GPUs, RAM DDR5 y Procesador + Horarios</strong>
-                            <small>Compara RTX 5090 ($1750 vs $1800), RAM y te avisa si la tienda está cerrada</small>
-                        </div>
-                    </button>
-
-                    <button type="button" class="atlas-prompt-btn" data-atlas-slide="2">
-                        <span class="material-symbols-rounded">add_shopping_cart</span>
-                        <div>
-                            <strong>3. Tarjetas «MUY CERCA» con compra en 1 toque en el chat</strong>
-                            <small>Agrega productos al carrito tocando el botón naranja sin salir de Atlas</small>
-                        </div>
-                    </button>
-
-                    <button type="button" class="atlas-prompt-btn" data-atlas-slide="3">
-                        <span class="material-symbols-rounded">build</span>
-                        <div>
-                            <strong>4. Repuestos Automotrices: «¿Y bujías? Busca en todos lados»</strong>
-                            <small>Encuentra sensores y repuestos cercanos en Autopartes KRP C.A. al instante</small>
-                        </div>
-                    </button>
-                </div>
-            </div>
-
-            <!-- Visor Interactivo con las 4 Capturas Reales de Atlas IA -->
-            <div class="atlas-console-col">
-                <div class="atlas-live-gallery-card" data-tilt-card>
-                    <div class="terminal-topbar">
-                        <div class="terminal-dots">
-                            <span></span><span></span><span></span>
-                        </div>
-                        <div class="terminal-status">
-                            <span class="pulse-dot-cyan"></span>
-                            <span id="atlasSlideCaption">Captura Real 1/4 · Inicio de consulta en tu zona</span>
-                        </div>
-                    </div>
-
-                    <div class="atlas-screenshots-viewport">
-                        <div class="atlas-slide active" data-slide-index="0">
-                            <img src="{% static 'img/screenshots_app/card_atlas_1.jpg' %}" alt="Atlas IA — Hola Atlas quiero mejorar mi computadora" class="atlas-real-img zoomable-img">
-                        </div>
-                        <div class="atlas-slide" data-slide-index="1">
-                            <img src="{% static 'img/screenshots_app/card_atlas_2.jpg' %}" alt="Atlas IA — Comparativa detallada de componentes y aviso de tienda" class="atlas-real-img zoomable-img">
-                        </div>
-                        <div class="atlas-slide" data-slide-index="2">
-                            <img src="{% static 'img/screenshots_app/card_atlas_3.jpg' %}" alt="Atlas IA — Tarjetas de producto MUY CERCA con botón de carrito" class="atlas-real-img zoomable-img">
-                        </div>
-                        <div class="atlas-slide" data-slide-index="3">
-                            <img src="{% static 'img/screenshots_app/card_atlas.jpg' %}" alt="Atlas IA — Búsqueda de repuestos automotrices en tu zona" class="atlas-real-img zoomable-img">
-                        </div>
-                    </div>
-
-                    <div class="atlas-gallery-controls">
-                        <button type="button" class="atlas-nav-arrow" id="atlasPrevBtn" aria-label="Captura anterior">
-                            <span class="material-symbols-rounded">chevron_left</span>
-                        </button>
-                        <div class="atlas-dots-row" id="atlasDotsRow">
-                            <button type="button" class="atlas-dot active" data-atlas-slide="0" aria-label="Ver captura 1"></button>
-                            <button type="button" class="atlas-dot" data-atlas-slide="1" aria-label="Ver captura 2"></button>
-                            <button type="button" class="atlas-dot" data-atlas-slide="2" aria-label="Ver captura 3"></button>
-                            <button type="button" class="atlas-dot" data-atlas-slide="3" aria-label="Ver captura 4"></button>
-                        </div>
-                        <button type="button" class="atlas-nav-arrow" id="atlasNextBtn" aria-label="Siguiente captura">
-                            <span class="material-symbols-rounded">chevron_right</span>
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</section>
-
-<!-- ==========================================================================
-     6. PARA QUIÉN ES CARTMAKER (MATRIZ DE 3 REALIDADES — #para-quien)
-     ========================================================================== -->
-<section class="personas-section reveal-on-scroll" id="para-quien">
-    <div class="container">
-        <div class="section-header-center">
-            <span class="eyebrow-pill">DISEÑADO PARA CADA ACTOR DE TU ZONA</span>
-            <h2 class="section-title">
-                Un ecosistema para quien compra, quien <span class="text-gradient-clickup">emprende</span> y quien tiene un local
-            </h2>
-        </div>
-
-        <div class="personas-cards-grid">
-            <!-- Perfil 1: Comprador -->
-            <div class="persona-bento-card" data-tilt-card>
-                <div class="persona-card-header">
-                    <span class="persona-icon-wrap bg-cyan-soft">
-                        <span class="material-symbols-rounded">shopping_bag</span>
-                    </span>
-                    <span class="persona-role-tag">PARA EL COMPRADOR</span>
-                </div>
-                <h3>Consigue lo que buscas en tu zona hoy mismo y paga menos</h3>
-                <p>
-                    Ya sea tecnología, un repuesto urgente, comida o un regalo: pregúntale a Atlas IA o explora el Mapa 3D para encontrar quién lo vende a minutos de ti.
-                </p>
-                <ul class="persona-checklist">
-                    <li><span class="material-symbols-rounded">check_circle</span> Mira videos reales de 30s del producto antes de comprar.</li>
-                    <li><span class="material-symbols-rounded">check_circle</span> Canjea tus Club Tokens por descuentos directos de hasta 35% OFF.</li>
-                    <li><span class="material-symbols-rounded">check_circle</span> Retira cerca en minutos o recibe con logística GPS monitoreada.</li>
-                </ul>
-            </div>
-
-            <!-- Perfil 2: Emprendedor / Tienda Virtual (Destacado) -->
-            <div class="persona-bento-card featured-persona" data-tilt-card>
-                <div class="featured-ribbon">CERO COSTO DE APERTURA</div>
-                <div class="persona-card-header">
-                    <span class="persona-icon-wrap bg-purple-soft">
-                        <span class="material-symbols-rounded">cottage</span>
-                    </span>
-                    <span class="persona-role-tag">EMPRENDEDORES Y TIENDAS VIRTUALES</span>
-                </div>
-                <h3>Crea tu comercio 100% gratis y vende en toda tu zona sin pagar alquiler</h3>
-                <p>
-                    Si vendes desde casa o por internet, en CartMaker no necesitas local físico ni RIF jurídico para empezar. Te registras como Emprendedor con tu cédula y biometría en minutos.
-                </p>
-                <ul class="persona-checklist">
-                    <li>
-                        <span class="material-symbols-rounded">check_circle</span>
-                        <span><strong>Crear tu comercio es 100% Gratis:</strong> $0 de mensualidad{% if has_sales_commission %}, solo {{ sales_commission_pct }}% de comisión cuando concretas una venta{% endif %}.</span>
-                    </li>
-                    <li><span class="material-symbols-rounded">check_circle</span> Registra todo tu inventario en 15s tomando una foto con Atlas IA.</li>
-                    <li><span class="material-symbols-rounded">check_circle</span> Sube videos de 30s a CartMaker TV para que toda tu zona te descubra.</li>
-                </ul>
-                <a href="#precios" class="btn-persona-action">
-                    Ver modelo transparente <span class="material-symbols-rounded">arrow_forward</span>
+            <div class="hero-cta" id="descargar">
+                <a href="https://apps.apple.com" target="_blank" rel="noopener" class="store-btn" data-magnetic>
+                    <svg viewBox="0 0 384 512" class="store-svg" aria-hidden="true"><path fill="currentColor" d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>
+                    <span class="store-labels"><small>Descárgala en</small><strong>App Store</strong></span>
                 </a>
+                <a href="https://play.google.com/apps/testing/com.codlinker.cartmaker" target="_blank" rel="noopener" class="store-btn store-btn-dark" data-magnetic>
+                    <svg viewBox="0 0 512 512" class="store-svg" aria-hidden="true"><path fill="currentColor" d="M325.3 234.3L104.6 13l280.8 161.2-60.1 60.1zM47 0C34 6.8 25.3 19.2 25.3 35.3v441.3c0 16.1 8.7 28.5 21.7 35.3l256.6-256L47 0zm425.2 225.6l-58.9-34.1-65.7 64.5 65.7 64.5 60.1-34.1c18-14.3 18-46.5-1.2-60.8zM104.6 499l280.8-161.2-60.1-60.1L104.6 499z"/></svg>
+                    <span class="store-labels"><small>Disponible en</small><strong>Google Play</strong></span>
+                </a>
+                <a href="#para-ti" class="text-link">Elegir si compras o vendes <span class="material-symbols-rounded" aria-hidden="true">south</span></a>
             </div>
 
-            <!-- Perfil 3: Comercio Físico / Empresa -->
-            <div class="persona-bento-card" data-tilt-card>
-                <div class="persona-card-header">
-                    <span class="persona-icon-wrap bg-pink-soft">
-                        <span class="material-symbols-rounded">storefront</span>
-                    </span>
-                    <span class="persona-role-tag">LOCALES, MALLS Y EMPRESAS</span>
-                </div>
-                <h3>Conecta todas tus sucursales al radar de Atlas IA en tu zona</h3>
-                <p>
-                    Miles de compradores buscan en tu zona lo que tienes hoy en tu estante. Digitaliza tu catálogo en 15 segundos y aparece como primera opción cuando consulten a Atlas IA.
-                </p>
-                <ul class="persona-checklist">
-                    <li><span class="material-symbols-rounded">check_circle</span> Mapeo 3D multi-sucursal (Local de calle, Kiosco o Piso en Centro Comercial).</li>
-                    <li><span class="material-symbols-rounded">check_circle</span> Respuestas rápidas en el chat de pedidos y cálculo de ruta GPS para tu motorizado.</li>
-                    <li><span class="material-symbols-rounded">check_circle</span> Protección de marca con verificación de RIF SENIAT y Registro Mercantil.</li>
-                </ul>
-            </div>
-        </div>
-    </div>
-</section>
-
-<!-- ==========================================================================
-     7. SEGURIDAD BIOMÉTRICA 512-D & KYB MERCANTIL (#seguridad)
-     ========================================================================== -->
-<section class="security-section reveal-on-scroll" id="seguridad">
-    <div class="container">
-        <div class="security-banner-card">
-            <div class="security-copy-col">
-                <span class="eyebrow-pill eyebrow-dark">ARQUITECTURA ANTI-FRAUDE NIVEL BANCARIO</span>
-                <h2>
-                    Aquí sabes exactamente <span class="text-gradient-clickup">con quién estás tratando</span>.
-                </h2>
-                <p>
-                    En los marketplaces informales cualquiera crea perfiles falsos para estafar. En CartMaker blindamos cada cuenta con biometría vectorial de 512 dimensiones y validación mercantil.
-                </p>
-
-                <div class="security-pillars-grid">
-                    <div class="sec-pillar">
-                        <div class="sec-pillar-icon">
-                            <span class="material-symbols-rounded">face</span>
-                        </div>
-                        <div>
-                            <h4>Biometría Facial de 512 Dimensiones</h4>
-                            <p>Escaneo neuronal con prueba de vida (Liveness Detection) y validación de Cédula. Impide cuentas duplicadas o suplantación de identidad.</p>
-                        </div>
-                    </div>
-
-                    <div class="sec-pillar">
-                        <div class="sec-pillar-icon">
-                            <span class="material-symbols-rounded">domain_verification</span>
-                        </div>
-                        <div>
-                            <h4>Blindaje KYB con Registro Mercantil y SENIAT</h4>
-                            <p>Las empresas constituidas se validan mediante algoritmo Módulo-11 del RIF y auditoría criptográfica de su Acta Constitutiva y datos SAREN.</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="security-visual-col">
-                <div class="biometric-hud-card" data-tilt-card>
-                    <div class="hud-header">
-                        <span class="hud-status-badge">
-                            <span class="pulse-dot"></span> MOTOR BIOMÉTRICO 512-D ACTIVO
+            <div class="hero-socials" aria-label="Redes sociales oficiales de CartMaker">
+                <span class="hero-socials-label">Síguenos en redes</span>
+                <div class="hero-socials-links">
+                    <a href="https://www.instagram.com/cartmaker.ve/" target="_blank" rel="noopener noreferrer" class="social-pill social-ig" aria-label="Instagram oficial @cartmaker.ve">
+                        <span class="social-icon" aria-hidden="true">
+                            <svg viewBox="0 0 448 512" class="social-svg"><path fill="currentColor" d="M224.1 141c-63.6 0-114.9 51.3-114.9 114.9s51.3 114.9 114.9 114.9S339 319.5 339 255.9 287.7 141 224.1 141zm0 189.6c-41.1 0-74.7-33.5-74.7-74.7s33.5-74.7 74.7-74.7 74.7 33.5 74.7 74.7-33.6 74.7-74.7 74.7zm146.4-194.3c0 14.9-12 26.8-26.8 26.8-14.9 0-26.8-12-26.8-26.8s12-26.8 26.8-26.8 26.8 12 26.8 26.8zm76.1 27.2c-1.7-35.9-9.9-67.7-36.2-93.9-26.2-26.2-58-34.4-93.9-36.2-37-2.1-147.9-2.1-184.9 0-35.8 1.7-67.6 9.9-93.9 36.1s-34.4 58-36.2 93.9c-2.1 37-2.1 147.9 0 184.9 1.7 35.9 9.9 67.7 36.2 93.9s58 34.4 93.9 36.2c37 2.1 147.9 2.1 184.9 0 35.9-1.7 67.7-9.9 93.9-36.2 26.2-26.2 34.4-58 36.2-93.9 2.1-37 2.1-147.8 0-184.8zM398.8 388c-7.8 19.6-22.9 34.7-42.6 42.6-29.5 11.7-99.5 9-132.1 9s-102.7 2.6-132.1-9c-19.6-7.8-34.7-22.9-42.6-42.6-11.7-29.5-9-99.5-9-132.1s-2.6-102.7 9-132.1c7.8-19.6 22.9-34.7 42.6-42.6 29.5-11.7 99.5-9 132.1-9s102.7-2.6 132.1 9c19.6 7.8 34.7 22.9 42.6 42.6 11.7 29.5 9 99.5 9 132.1s2.7 102.7-9 132.1z"/></svg>
                         </span>
-                        <span class="hud-mono">COSINE_SIM &ge; 0.65</span>
+                        <span class="social-text"><small>Instagram</small><strong>@cartmaker.ve</strong></span>
+                    </a>
+                    <a href="https://www.tiktok.com/@cartmakerve" target="_blank" rel="noopener noreferrer" class="social-pill social-tt" aria-label="TikTok oficial @cartmakerve">
+                        <span class="social-icon" aria-hidden="true">
+                            <svg viewBox="0 0 448 512" class="social-svg"><path fill="currentColor" d="M448 209.9a210.1 210.1 0 0 1 -122.8-39.3V349.4A162.6 162.6 0 1 1 185 188.3V278.2a74.6 74.6 0 1 0 52.2 71.2V0l88 0a121.2 121.2 0 0 0 1.9 22.2h0A122.2 122.2 0 0 0 381 102.4a121.4 121.4 0 0 0 67 20.1z"/></svg>
+                        </span>
+                        <span class="social-text"><small>TikTok</small><strong>@cartmakerve</strong></span>
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Teléfono con el video real del inicio reproduciéndose en bucle -->
+        <div class="hero-visual">
+            <div class="phone-stage" data-tilt>
+                <div class="chip-float chip-a">
+                    <span class="chip-icon bg-green"><span class="material-symbols-rounded">my_location</span></span>
+                    <span class="chip-text"><strong>Vecino a 280 metros</strong><small>Mini ventilador portátil · $10.00</small></span>
+                </div>
+                <div class="chip-float chip-b">
+                    <span class="chip-icon bg-purple"><img src="{% static 'img/atlas.svg' %}" alt="" width="20" height="20"></span>
+                    <span class="chip-text"><strong>Atlas en tu zona</strong><small>Busca al instante o sube tu tienda</small></span>
+                </div>
+                <div class="chip-float chip-c">
+                    <span class="chip-icon bg-orange"><span class="material-symbols-rounded">verified</span></span>
+                    <span class="chip-text"><strong>Vendedores verificados</strong><small>Con cédula y selfie</small></span>
+                </div>
+
+                <div class="phone hero-video-phone">
+                    <div class="phone-glass" aria-hidden="true"></div>
+                    <div class="phone-screen">
+                        <video src="{% static 'video/card_feed_social.mp4' %}"
+                               poster="{% static 'img/screenshots_app/card_feed_social_poster.jpg' %}"
+                               data-video-src="{% static 'video/card_feed_social.mp4' %}"
+                               autoplay
+                               loop
+                               muted
+                               playsinline
+                               webkit-playsinline
+                               preload="auto"
+                               disablePictureInPicture
+                               aria-label="Pantalla de inicio de CartMaker mostrando ofertas cercanas y Atlas"
+                               class="hero-video autoplay-loop-video"
+                               data-zoom></video>
                     </div>
-                    <div class="hud-scanner-box">
-                        <div class="hud-face-ring">
-                            <span class="material-symbols-rounded">shield_person</span>
-                        </div>
-                        <div class="hud-metrics">
-                            <div class="hud-metric-row">
-                                <span>Vector Neuronal L2</span>
-                                <strong class="mono-val">512 Dimensiones</strong>
-                            </div>
-                            <div class="hud-metric-row">
-                                <span>Validación RIF SENIAT</span>
-                                <strong class="mono-val text-emerald">Módulo-11 Verificado</strong>
-                            </div>
-                            <div class="hud-metric-row">
-                                <span>Auditoría Mercantil SAREN</span>
-                                <strong class="mono-val text-emerald">Tomo &amp; Número Único</strong>
-                            </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Franja de confianza -->
+    <div class="container">
+        <ul class="trust-strip reveal">
+            <li><span class="material-symbols-rounded" aria-hidden="true">verified_user</span><span><strong>Vendedores verificados</strong><small>Con cédula y selfie</small></span></li>
+            <li><span class="material-symbols-rounded" aria-hidden="true">chat</span><span><strong>Chat dentro del pedido</strong><small>Sin dar tu número</small></span></li>
+            <li><span class="material-symbols-rounded" aria-hidden="true">schedule</span><span><strong>Sabes si está abierto</strong><small>Antes de salir de casa</small></span></li>
+            <li><span class="material-symbols-rounded" aria-hidden="true">currency_exchange</span><span><strong>Precios en $ y Bs.</strong><small>Al cambio BCV del día</small></span></li>
+        </ul>
+    </div>
+</section>
+
+<!-- ==========================================================================
+     2. ¿COMPRAS O VENDES? — Sección interactiva según lo que buscas hacer
+     ========================================================================== -->
+<section class="section persona-section" id="para-ti">
+    <div class="container">
+        <div class="persona-card reveal">
+            <div class="persona-copy">
+                <span class="eyebrow">HECHO PARA COMPRAR Y PARA VENDER</span>
+
+                <!-- Selector: ¿qué quieres hacer? -->
+                <div class="segmented" role="tablist" aria-label="¿Qué quieres hacer en CartMaker?" id="personaSwitch">
+                    <span class="segmented-thumb" aria-hidden="true"></span>
+                    <button type="button" class="segmented-btn is-active" role="tab" aria-selected="true" data-persona="buyer">
+                        <span class="material-symbols-rounded" aria-hidden="true">shopping_bag</span>
+                        <span>Quiero comprar</span>
+                    </button>
+                    <button type="button" class="segmented-btn" role="tab" aria-selected="false" data-persona="seller">
+                        <span class="material-symbols-rounded" aria-hidden="true">storefront</span>
+                        <span>Quiero vender</span>
+                    </button>
+                </div>
+
+                <h2 class="persona-title pane-stack">
+                    <span class="persona-pane is-active" data-pane="buyer">
+                        Lo que buscas, ya lo vende alguien <span class="text-grad">cerca de ti</span>.
+                    </span>
+                    <span class="persona-pane" data-pane="seller" aria-hidden="true">
+                        Vende a tus vecinos. <span class="text-grad">Abrir tu tienda es gratis.</span>
+                    </span>
+                </h2>
+
+                <div class="hero-sub pane-stack">
+                    <p class="persona-pane is-active" data-pane="buyer">
+                        Pregúntale a Atlas qué necesitas y mira al instante quién lo tiene en tu zona, a qué precio y en cuántos minutos llegas. <strong>Sin escribir «¿precio?» y esperar horas.</strong>
+                    </p>
+                    <p class="persona-pane" data-pane="seller" aria-hidden="true">
+                        Sube tus productos con una foto, muestra lo que vendes en un video de 30 segundos y recibe pedidos de gente de tu zona.{% if has_sales_commission %} <strong>Solo pagas {{ sales_commission_pct }}% cuando vendes.</strong>{% else %} <strong>No pagas por empezar.</strong>{% endif %}
+                    </p>
+                </div>
+
+                <div class="hero-points pane-stack">
+                    <ul class="persona-pane is-active" data-pane="buyer">
+                        <li><span class="material-symbols-rounded" aria-hidden="true">schedule</span> Sabes si está abierto antes de salir</li>
+                        <li><span class="material-symbols-rounded" aria-hidden="true">payments</span> Precios claros en dólares y bolívares</li>
+                        <li><span class="material-symbols-rounded" aria-hidden="true">forum</span> Hablas con la tienda sin dar tu número</li>
+                    </ul>
+                    <ul class="persona-pane" data-pane="seller" aria-hidden="true">
+                        <li><span class="material-symbols-rounded" aria-hidden="true">photo_camera</span> Tus productos listos con una foto</li>
+                        <li><span class="material-symbols-rounded" aria-hidden="true">travel_explore</span> Sabes qué busca tu zona y no halla</li>
+                        <li><span class="material-symbols-rounded" aria-hidden="true">home_work</span> Vendes desde casa o desde tu local</li>
+                    </ul>
+                </div>
+
+                <div class="pane-stack persona-actions-stack">
+                    <div class="persona-actions persona-pane is-active" data-pane="buyer">
+                        <a href="#comprar" class="btn btn-primary" data-magnetic>Ver cómo se compra <span class="material-symbols-rounded" aria-hidden="true">south</span></a>
+                        <a href="#atlas-ia" class="btn btn-ghost">Probar a Atlas</a>
+                    </div>
+                    <div class="persona-actions persona-pane" data-pane="seller" aria-hidden="true">
+                        <a href="#vender" class="btn btn-primary" data-magnetic>Ver cómo se vende <span class="material-symbols-rounded" aria-hidden="true">south</span></a>
+                        <a href="#precios" class="btn btn-ghost">Calcular cuánto gano</a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Teléfono con capturas reales + chips flotantes según el perfil -->
+            <div class="persona-visual">
+                <div class="phone-stage" data-tilt>
+                    <div class="chip-float chip-a" data-pane="buyer">
+                        <span class="chip-icon bg-purple"><span class="material-symbols-rounded">pin_drop</span></span>
+                        <span class="chip-text"><strong>2.9 km · 7 min</strong><small>en vehículo hasta la tienda</small></span>
+                    </div>
+                    <div class="chip-float chip-b" data-pane="buyer">
+                        <span class="chip-icon bg-green"><span class="material-symbols-rounded">verified</span></span>
+                        <span class="chip-text"><strong>Vendedor verificado</strong><small>Identidad comprobada</small></span>
+                    </div>
+                    <div class="chip-float chip-c" data-pane="buyer">
+                        <span class="chip-icon bg-orange"><span class="material-symbols-rounded">bolt</span></span>
+                        <span class="chip-text"><strong>Abierto ahora</strong><small>Lo tienen cerca de ti</small></span>
+                    </div>
+
+                    <div class="chip-float chip-a" data-pane="seller">
+                        <span class="chip-icon bg-purple"><span class="material-symbols-rounded">visibility</span></span>
+                        <span class="chip-text"><strong>Ya te están viendo</strong><small>Mira visitas, favoritos y compras</small></span>
+                    </div>
+                    <div class="chip-float chip-b" data-pane="seller">
+                        <span class="chip-icon bg-green"><span class="material-symbols-rounded">auto_awesome</span></span>
+                        <span class="chip-text"><strong>Atlas creó tus productos</strong><small>Desde una sola foto</small></span>
+                    </div>
+                    <div class="chip-float chip-c" data-pane="seller">
+                        <span class="chip-icon bg-orange"><span class="material-symbols-rounded">shopping_bag</span></span>
+                        <span class="chip-text"><strong>Nuevo pedido</strong><small>De un vecino de tu zona</small></span>
+                    </div>
+
+                    <div class="phone hero-phone">
+                        <div class="phone-glass" aria-hidden="true"></div>
+                        <div class="phone-screen">
+                            <button type="button" class="shot is-active zoomable" data-pane="buyer" data-zoom aria-label="Ampliar captura: pantalla de inicio de CartMaker">
+                                {% include 'landing/shot.html' with name='comprador_01_inicio' alt='Pantalla de inicio de CartMaker con ofertas cercanas, Atlas y mapa de tiendas' %}
+                            </button>
+                            <button type="button" class="shot zoomable" data-pane="seller" data-zoom aria-label="Ampliar captura: productos a la venta de tu tienda">
+                                {% include 'landing/shot.html' with name='vendedor_03_a_la_venta' alt='Lista de productos a la venta con visitas, favoritos y compras de cada uno' %}
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -865,320 +251,757 @@
 </section>
 
 <!-- ==========================================================================
-     8. PRECIOS TRANSPARENTES + CALCULADORA INTERACTIVA (#precios & #fundadores)
+     2. ANTES / CON CARTMAKER — lo que cambia en situaciones de todos los días
      ========================================================================== -->
-<section class="pricing-section reveal-on-scroll" id="precios">
+<section class="section compare" id="como-funciona">
     <div class="container">
-        <div class="section-header-center">
-            <span class="eyebrow-pill">TRANSPARENCIA TOTAL · CERO MENSUALIDADES OBLIGATORIAS</span>
-            <h2 class="section-title">
-                Crear tu comercio en CartMaker es <span class="text-gradient-clickup">100% Gratis</span>
-            </h2>
-            <p class="section-subtitle">
+        <header class="section-head reveal">
+            <span class="eyebrow">LO QUE CAMBIA</span>
+            <h2>Comprar y vender por redes <span class="text-grad">cansa</span>. Con CartMaker es más fácil.</h2>
+            <p>Toca el interruptor y mira la diferencia en 4 situaciones de todos los días.</p>
+        </header>
+
+        <div class="switch reveal is-after" role="group" aria-label="Comparar cómo es hoy con cómo es en CartMaker" id="compareSwitch">
+            <span class="switch-thumb" aria-hidden="true"></span>
+            <button type="button" class="switch-btn" data-mode="before" aria-pressed="false">
+                <span class="material-symbols-rounded" aria-hidden="true">sentiment_dissatisfied</span> Como es hoy
+            </button>
+            <button type="button" class="switch-btn is-active" data-mode="after" aria-pressed="true">
+                <span class="material-symbols-rounded" aria-hidden="true">sentiment_very_satisfied</span> Con CartMaker
+            </button>
+        </div>
+
+        <div class="compare-grid" id="compareGrid" data-mode="after">
+            <article class="compare-card reveal">
+                <div class="compare-icon"><span class="material-symbols-rounded" aria-hidden="true">sell</span></div>
+                <h3>Saber el precio</h3>
+                <div class="compare-faces">
+                    <div class="compare-face face-before"><span class="face-tag">Hoy</span><p>Escribes «¿precio?» y esperas horas a que te respondan.</p></div>
+                    <div class="compare-face face-after"><span class="face-tag">Con CartMaker</span><p>Ves el precio, cuántas unidades quedan y si la tienda está abierta. <strong>Al instante.</strong></p></div>
+                </div>
+            </article>
+
+            <article class="compare-card reveal">
+                <div class="compare-icon"><span class="material-symbols-rounded" aria-hidden="true">near_me</span></div>
+                <h3>Encontrar algo cerca</h3>
+                <div class="compare-faces">
+                    <div class="compare-face face-before"><span class="face-tag">Hoy</span><p>Te aparece una tienda al otro lado de la ciudad y pagas un envío carísimo.</p></div>
+                    <div class="compare-face face-after"><span class="face-tag">Con CartMaker</span><p>Ves <strong>primero lo que está cerca</strong> y cuántos minutos tardas en llegar.</p></div>
+                </div>
+            </article>
+
+            <article class="compare-card reveal">
+                <div class="compare-icon"><span class="material-symbols-rounded" aria-hidden="true">shield_person</span></div>
+                <h3>Confiar en el vendedor</h3>
+                <div class="compare-faces">
+                    <div class="compare-face face-before"><span class="face-tag">Hoy</span><p>No sabes si detrás del perfil hay una persona real o un estafador.</p></div>
+                    <div class="compare-face face-after"><span class="face-tag">Con CartMaker</span><p>Para vender hay que <strong>verificar la identidad</strong>. Sabes con quién tratas.</p></div>
+                </div>
+            </article>
+
+            <article class="compare-card reveal">
+                <div class="compare-icon"><span class="material-symbols-rounded" aria-hidden="true">inventory_2</span></div>
+                <h3>Publicar lo que vendes</h3>
+                <div class="compare-faces">
+                    <div class="compare-face face-before"><span class="face-tag">Hoy</span><p>Subir tus productos uno por uno te toma días.</p></div>
+                    <div class="compare-face face-after"><span class="face-tag">Con CartMaker</span><p>Le tomas <strong>una foto</strong> a tus productos y Atlas crea las fichas por ti.</p></div>
+                </div>
+            </article>
+        </div>
+    </div>
+</section>
+
+<!-- ==========================================================================
+     3. ATLAS — el asistente (demo conversacional interactiva)
+     ========================================================================== -->
+<section class="section atlas" id="atlas-ia">
+    <div class="atlas-bg" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div>
+    <div class="container atlas-layout">
+        <div class="atlas-copy">
+            <span class="eyebrow eyebrow-light reveal"><img src="{% static 'img/atlas.svg' %}" alt="" class="eyebrow-atlas" width="18" height="18"> CONOCE A ATLAS</span>
+            <h2 class="reveal">Dile a Atlas lo que necesitas, <span class="text-grad-light">como se lo dirías a un amigo.</span></h2>
+            <p class="lead reveal">Atlas es el asistente de CartMaker. Busca por ti en todas las tiendas de tu zona y te muestra solo lo que te sirve: <strong>lo más barato, lo más cercano y lo que está abierto ahora.</strong></p>
+
+            <p class="prompt-label reveal">Toca una pregunta y mira cómo responde:</p>
+            <div class="prompt-chips reveal" role="tablist" aria-label="Preguntas de ejemplo para Atlas" id="promptChips">
+                <button type="button" class="prompt-chip is-active" role="tab" aria-selected="true" data-prompt="0"
+                        data-user="Quiero grabar videos"
+                        data-bot="¡Fino! Para grabar videos te cuadré varias opciones en La Floresta, Caracas: el micrófono DJI Mic por $170, el lente Sony FE 50mm por $2599.99 y la cámara Sony Alpha FX3 por $4300. ¡Aprovecha que están abiertos!">
+                    <span class="material-symbols-rounded" aria-hidden="true">videocam</span>
+                    <span><strong>«Quiero grabar videos»</strong><small>Te arma opciones con precio y tienda</small></span>
+                </button>
+                <button type="button" class="prompt-chip" role="tab" aria-selected="false" data-prompt="1"
+                        data-user="Abiertos ahora"
+                        data-bot="Encontré 3 opciones disponibles para «Abiertos ahora» cerca de ti. Te marqué cuál tiene el mejor precio y cuál es la más cercana.">
+                    <span class="material-symbols-rounded" aria-hidden="true">schedule</span>
+                    <span><strong>«Abiertos ahora»</strong><small>Solo comercios que están atendiendo</small></span>
+                </button>
+            </div>
+
+            <div class="atlas-chat reveal" id="atlasChat" aria-live="polite">
+                <div class="chat-row chat-user"><span class="bubble" id="atlasUserBubble">Quiero grabar videos</span></div>
+                <div class="chat-row chat-bot">
+                    <img src="{% static 'img/atlas.svg' %}" alt="" class="chat-avatar" width="30" height="30">
+                    <div class="bubble" id="atlasBotBubble"><span class="typing"><i></i><i></i><i></i></span></div>
+                </div>
+            </div>
+
+            <ul class="atlas-benefits">
+                <li class="reveal"><span class="material-symbols-rounded" aria-hidden="true">emoji_events</span><span><strong>Te marca lo mejor.</strong> Etiquetas como «Mejor precio» y «Más cercano» para que decidas rápido.</span></li>
+                <li class="reveal"><span class="material-symbols-rounded" aria-hidden="true">schedule</span><span><strong>Te dice si está abierto.</strong> Filtra solo las tiendas que atienden ahora mismo.</span></li>
+                <li class="reveal"><span class="material-symbols-rounded" aria-hidden="true">route</span><span><strong>Te lleva hasta la tienda.</strong> Toca una tienda y Atlas te traza la ruta.</span></li>
+            </ul>
+
+            <p class="atlas-note reveal">Atlas es gratis: tienes {{ atlas_free_limit }} consultas al día. ¿Quieres más? Mira <a href="#precios">Atlas Plus</a>.</p>
+        </div>
+
+        <div class="atlas-visual reveal">
+            <div class="phone-stage" data-tilt>
+                <div class="chip-float chip-a chip-glass"><span class="chip-icon bg-orange"><span class="material-symbols-rounded">emoji_events</span></span><span class="chip-text"><strong>Mejor precio</strong></span></div>
+                <div class="chip-float chip-c chip-glass"><span class="chip-icon bg-purple"><span class="material-symbols-rounded">near_me</span></span><span class="chip-text"><strong>Más cercano</strong></span></div>
+                <div class="phone">
+                    <div class="phone-glass" aria-hidden="true"></div>
+                    <div class="phone-screen" id="atlasScreen">
+                        <button type="button" class="shot is-active" data-zoom data-shot="0" aria-label="Ampliar captura: conversación con Atlas">
+                            {% include 'landing/shot.html' with name='atlas_01_conversacion' alt='Conversación con Atlas: pide opciones para grabar videos y Atlas responde con tiendas, precios y tiempos' %}
+                        </button>
+                        <button type="button" class="shot" data-zoom data-shot="1" aria-label="Ampliar captura: Atlas muestra comercios abiertos ahora">
+                            {% include 'landing/shot.html' with name='atlas_02_abiertos_ahora' alt='Atlas muestra comercios abiertos ahora, con las etiquetas Mejor precio y Más cercano' %}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ==========================================================================
+     4. PARA QUIEN COMPRA — recorrido paso a paso con hotspots
+     ========================================================================== -->
+<section class="section buy" id="comprar">
+    <div class="container">
+        <header class="section-head reveal">
+            <span class="eyebrow">PARA QUIEN COMPRA</span>
+            <h2>Encuentra, compara y llega <span class="text-grad">en minutos</span>.</h2>
+            <p>Así de fácil es comprarle a tu zona. Toca cada paso y mira cómo se ve en la app.</p>
+        </header>
+
+        <div class="flow reveal" data-flow data-autoplay="7000">
+            <div class="flow-steps" role="tablist" aria-label="Pasos para comprar en CartMaker">
+                <button type="button" class="flow-step is-active" role="tab" aria-selected="true" data-step="0">
+                    <span class="flow-num">1</span>
+                    <span class="flow-step-main">
+                        <strong class="flow-step-title">Mira qué venden tus vecinos</strong>
+                        <span class="flow-step-text">Explora por departamento: tecnología, hogar, repuestos, comida y mucho más. Todo lo que ves está cerca de ti.</span>
+                    </span>
+                    <span class="flow-progress" aria-hidden="true"><i></i></span>
+                </button>
+                <button type="button" class="flow-step" role="tab" aria-selected="false" data-step="1">
+                    <span class="flow-num">2</span>
+                    <span class="flow-step-main">
+                        <strong class="flow-step-title">Ubica la tienda en el mapa</strong>
+                        <span class="flow-step-text">Mira qué tiendas tienes alrededor, a cuántos kilómetros están y si están abiertas o cerradas. Cero sorpresas al llegar.</span>
+                    </span>
+                    <span class="flow-progress" aria-hidden="true"><i></i></span>
+                </button>
+                <button type="button" class="flow-step" role="tab" aria-selected="false" data-step="2">
+                    <span class="flow-num">3</span>
+                    <span class="flow-step-main">
+                        <strong class="flow-step-title">Míralo en video antes de comprar</strong>
+                        <span class="flow-step-text">Cada producto puede tener un video corto de 30 segundos. Lo ves en acción, le preguntas tus dudas a la tienda y lo agregas al carrito sin salir del video.</span>
+                    </span>
+                    <span class="flow-progress" aria-hidden="true"><i></i></span>
+                </button>
+                <button type="button" class="flow-step" role="tab" aria-selected="false" data-step="3">
+                    <span class="flow-num">4</span>
+                    <span class="flow-step-main">
+                        <strong class="flow-step-title">Llega por el camino más corto</strong>
+                        <span class="flow-step-text">Toca la tienda y Atlas te traza la ruta por las calles, con el tiempo que tardas en llegar. Retira cerca o pide que te lo lleven.</span>
+                    </span>
+                    <span class="flow-progress" aria-hidden="true"><i></i></span>
+                </button>
+            </div>
+
+            <div class="flow-stage">
+                <div class="phone">
+                    <div class="phone-glass" aria-hidden="true"></div>
+                    <div class="phone-screen">
+                        <div class="shot is-active" data-step="0" data-zoom>
+                            {% include 'landing/shot.html' with name='comprador_02_departamentos' alt='Pantalla de inicio de CartMaker explorando por departamento: tecnología, hogar, carros y más' %}
+                            <button type="button" class="hotspot" style="--x:36%;--y:61%" data-align="start" aria-label="Más información" aria-expanded="false"><span class="hotspot-dot"></span><span class="hotspot-tip" role="tooltip">Toca un departamento y mira qué tiendas lo venden cerca de ti</span></button>
+                            <button type="button" class="hotspot" style="--x:50%;--y:30%" data-align="center" aria-label="Más información" aria-expanded="false"><span class="hotspot-dot"></span><span class="hotspot-tip" role="tooltip">Atlas te sugiere qué buscar y qué comercios siguen abiertos</span></button>
+                        </div>
+                        <div class="shot" data-step="1" data-zoom>
+                            {% include 'landing/shot.html' with name='comprador_03_mapa_tiendas' alt='Mapa con las tiendas cercanas, su distancia, el tiempo en vehículo y si están abiertas o cerradas' %}
+                            <button type="button" class="hotspot" style="--x:56%;--y:14%" data-align="center" data-side="bottom" aria-label="Más información" aria-expanded="false"><span class="hotspot-dot"></span><span class="hotspot-tip" role="tooltip">Filtra por más cercana, abiertas ahora o centros comerciales</span></button>
+                            <button type="button" class="hotspot" style="--x:89%;--y:72%" data-align="end" aria-label="Más información" aria-expanded="false"><span class="hotspot-dot"></span><span class="hotspot-tip" role="tooltip">Cuántos km y minutos hay hasta la tienda</span></button>
+                        </div>
+                        <div class="shot" data-step="2" data-zoom>
+                            {% include 'landing/shot.html' with name='comprador_04_video_producto' alt='Video vertical de un producto con botones para ver dudas, perfil de la tienda y agregar al carrito' %}
+                            <button type="button" class="hotspot" style="--x:89%;--y:67%" data-align="end" aria-label="Más información" aria-expanded="false"><span class="hotspot-dot"></span><span class="hotspot-tip" role="tooltip">¿Dudas? Pregúntale directo a la tienda</span></button>
+                            <button type="button" class="hotspot" style="--x:89%;--y:88%" data-align="end" data-side="top" aria-label="Más información" aria-expanded="false"><span class="hotspot-dot"></span><span class="hotspot-tip" role="tooltip">Agrégalo al carrito sin salir del video</span></button>
+                        </div>
+                        <div class="shot" data-step="3" data-zoom>
+                            {% include 'landing/shot.html' with name='comprador_05_ruta_a_la_tienda' alt='Atlas traza la ruta por las calles hasta la tienda y muestra los minutos de llegada' %}
+                            <button type="button" class="hotspot" style="--x:33%;--y:62%" data-align="start" aria-label="Más información" aria-expanded="false"><span class="hotspot-dot"></span><span class="hotspot-tip" role="tooltip">Atlas traza la ruta por las calles, no en línea recta</span></button>
+                            <button type="button" class="hotspot" style="--x:27%;--y:77%" data-align="start" data-side="top" aria-label="Más información" aria-expanded="false"><span class="hotspot-dot"></span><span class="hotspot-tip" role="tooltip">Mira cuántos minutos tardas en llegar</span></button>
+                        </div>
+                    </div>
+                </div>
+                <div class="flow-dots" aria-hidden="true"><i class="is-active"></i><i></i><i></i><i></i></div>
+                <p class="flow-hint"><span class="material-symbols-rounded" aria-hidden="true">touch_app</span> Toca los puntos de la pantalla o desliza para cambiar de paso</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Banda: de todo, cerca de ti -->
+    <div class="categories-band reveal">
+        <p class="categories-title">De todo, cerca de ti. <span>Lo que busques, alguien en tu zona lo vende.</span></p>
+        <div class="marquee" aria-hidden="true">
+            <div class="marquee-track">
+                {% for i in '12'|make_list %}
+                <ul class="marquee-group">
+                    <li><img src="{% static 'img/categories/tecnologia_y_electronica.jpg' %}" alt="" loading="lazy" width="150" height="210"><span>Tecnología</span></li>
+                    <li><img src="{% static 'img/categories/restaurantes_y_comida_preparada.jpg' %}" alt="" loading="lazy" width="150" height="210"><span>Restaurantes y comida</span></li>
+                    <li><img src="{% static 'img/categories/carros_motos_y_otros.jpg' %}" alt="" loading="lazy" width="150" height="210"><span>Carros y motos</span></li>
+                    <li><img src="{% static 'img/categories/hogar_muebles_y_jardin.jpg' %}" alt="" loading="lazy" width="150" height="210"><span>Hogar y jardín</span></li>
+                    <li><img src="{% static 'img/categories/salud_y_belleza.jpg' %}" alt="" loading="lazy" width="150" height="210"><span>Salud y belleza</span></li>
+                    <li><img src="{% static 'img/categories/ropa_y_accesorios.jpg' %}" alt="" loading="lazy" width="150" height="210"><span>Ropa y accesorios</span></li>
+                    <li><img src="{% static 'img/categories/mascotas.jpg' %}" alt="" loading="lazy" width="150" height="210"><span>Mascotas</span></li>
+                    <li><img src="{% static 'img/categories/alimentos_y_bebidas.jpg' %}" alt="" loading="lazy" width="150" height="210"><span>Alimentos y bebidas</span></li>
+                    <li><img src="{% static 'img/categories/deportes_y_fitness.jpg' %}" alt="" loading="lazy" width="150" height="210"><span>Deportes</span></li>
+                    <li><img src="{% static 'img/categories/juegos_y_juguetes.jpg' %}" alt="" loading="lazy" width="150" height="210"><span>Juguetes</span></li>
+                </ul>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ==========================================================================
+     5. PARA QUIEN VENDE
+     ========================================================================== -->
+<section class="section sell" id="vender">
+    <div class="container">
+        <header class="section-head reveal">
+            <span class="eyebrow">PARA QUIEN VENDE</span>
+            <h2>Abre tu tienda hoy. <span class="text-grad">Sin pagar por empezar.</span></h2>
+            <p>Tu primera tienda se arma en minutos, no en semanas. Y los compradores de tu zona te encuentran desde el primer día.</p>
+        </header>
+
+        <ul class="who-chips reveal" aria-label="CartMaker funciona para">
+            <li><span class="material-symbols-rounded" aria-hidden="true">cottage</span> Vendo desde casa</li>
+            <li><span class="material-symbols-rounded" aria-hidden="true">storefront</span> Tengo un local</li>
+            <li><span class="material-symbols-rounded" aria-hidden="true">local_mall</span> Estoy en un centro comercial</li>
+            <li><span class="material-symbols-rounded" aria-hidden="true">account_tree</span> Tengo varias sucursales</li>
+        </ul>
+
+        <h3 class="subhead reveal"><span class="subhead-num">1</span> Publica todos tus productos con una foto</h3>
+
+        <div class="flow flow-seller reveal" data-flow data-autoplay="7000">
+            <div class="flow-steps" role="tablist" aria-label="Pasos para publicar tus productos">
+                <button type="button" class="flow-step is-active" role="tab" aria-selected="true" data-step="0">
+                    <span class="flow-num">1</span>
+                    <span class="flow-step-main">
+                        <strong class="flow-step-title">Toca «Agregar varios»</strong>
+                        <span class="flow-step-text">Entra a «Administrar inventario» y toca el botón <b>Agregar varios ✨</b>. Es el atajo para cargar muchos productos de una sola vez.</span>
+                    </span>
+                    <span class="flow-progress" aria-hidden="true"><i></i></span>
+                </button>
+                <button type="button" class="flow-step" role="tab" aria-selected="false" data-step="1">
+                    <span class="flow-num">2</span>
+                    <span class="flow-step-main">
+                        <strong class="flow-step-title">Tómale una foto a tus productos</strong>
+                        <span class="flow-step-text">Ponlos juntos, con buena luz y sin que se tapen entre sí. Atlas reconoce cada uno y crea su ficha. También puedes elegir una foto de tu galería.</span>
+                    </span>
+                    <span class="flow-progress" aria-hidden="true"><i></i></span>
+                </button>
+                <button type="button" class="flow-step" role="tab" aria-selected="false" data-step="2">
+                    <span class="flow-num">3</span>
+                    <span class="flow-step-main">
+                        <strong class="flow-step-title">¡Listo, ya estás a la venta!</strong>
+                        <span class="flow-step-text">Cada producto aparece en tu tienda. Mira cuánta gente lo ve, lo guarda y lo compra. Suma stock o crea una oferta con un toque.</span>
+                    </span>
+                    <span class="flow-progress" aria-hidden="true"><i></i></span>
+                </button>
+            </div>
+
+            <div class="flow-stage">
+                <div class="phone">
+                    <div class="phone-glass" aria-hidden="true"></div>
+                    <div class="phone-screen">
+                        <div class="shot is-active" data-step="0" data-zoom>
+                            {% include 'landing/shot.html' with name='vendedor_01_agregar_varios' alt='Administrar inventario con el botón Agregar varios para cargar muchos productos a la vez' %}
+                            <button type="button" class="hotspot" style="--x:71%;--y:79%" data-align="end" data-side="top" aria-label="Más información" aria-expanded="false"><span class="hotspot-dot"></span><span class="hotspot-tip" role="tooltip">Toca «Agregar varios» para empezar</span></button>
+                            <button type="button" class="hotspot" style="--x:47%;--y:37%" data-align="center" aria-label="Más información" aria-expanded="false"><span class="hotspot-dot"></span><span class="hotspot-tip" role="tooltip">Este sello indica que el producto da descuentos con Club de Tokens</span></button>
+                        </div>
+                        <div class="shot" data-step="1" data-zoom>
+                            {% include 'landing/shot.html' with name='vendedor_02_escaneo_con_atlas' alt='Consejos para que Atlas detecte bien tus productos: que no se superpongan, buena luz y encuadre completo' %}
+                            <button type="button" class="hotspot" style="--x:50%;--y:60%" data-align="center" aria-label="Más información" aria-expanded="false"><span class="hotspot-dot"></span><span class="hotspot-tip" role="tooltip">Sigue estos 3 consejos y Atlas acertará más</span></button>
+                            <button type="button" class="hotspot" style="--x:85%;--y:90%" data-align="end" data-side="top" aria-label="Más información" aria-expanded="false"><span class="hotspot-dot"></span><span class="hotspot-tip" role="tooltip">Toma la foto en el momento o elige una de tu galería</span></button>
+                        </div>
+                        <div class="shot" data-step="2" data-zoom>
+                            {% include 'landing/shot.html' with name='vendedor_03_a_la_venta' alt='Productos a la venta con cuántas personas los ven, los guardan y los compran' %}
+                            <button type="button" class="hotspot" style="--x:50%;--y:40%" data-align="center" aria-label="Más información" aria-expanded="false"><span class="hotspot-dot"></span><span class="hotspot-tip" role="tooltip">Cuánta gente ve, guarda y compra cada producto</span></button>
+                            <button type="button" class="hotspot" style="--x:74%;--y:45%" data-align="end" data-side="bottom" aria-label="Más información" aria-expanded="false"><span class="hotspot-dot"></span><span class="hotspot-tip" role="tooltip">Crea una oferta con un solo toque</span></button>
+                        </div>
+                    </div>
+                </div>
+                <div class="flow-dots" aria-hidden="true"><i class="is-active"></i><i></i><i></i></div>
+                <p class="flow-hint"><span class="material-symbols-rounded" aria-hidden="true">touch_app</span> Toca los puntos de la pantalla o desliza para cambiar de paso</p>
+            </div>
+        </div>
+
+        <h3 class="subhead reveal"><span class="subhead-num">2</span> Después, crece con ayuda de Atlas</h3>
+
+        <div class="grow-grid">
+            <article class="grow-card spot reveal">
+                <div class="grow-visual tint-purple">
+                    <div class="peek" data-zoom>
+                        {% include 'landing/shot.html' with name='vendedor_04_atlas_negocios' alt='Atlas Negocios mostrando las ventas, visitas y recomendaciones de los últimos 30 días' %}
+                    </div>
+                </div>
+                <div class="grow-body">
+                    <span class="grow-tag">Entiende tus números</span>
+                    <h4>Atlas Negocios, tu asesor personal</h4>
+                    <p>Mira tus ventas y visitas de los últimos 30 días en un solo lugar. Atlas te da recomendaciones listas para aplicar con un toque.</p>
+                    <ul class="mini-checks">
+                        <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Ventas del mes y unidades vendidas</li>
+                        <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Cuántas visitas terminan en compra</li>
+                        <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Pregúntale a Atlas cómo mejorar tu tienda</li>
+                    </ul>
+                </div>
+            </article>
+
+            <article class="grow-card spot reveal">
+                <div class="grow-visual tint-orange">
+                    <div class="peek" data-zoom>
+                        {% include 'landing/shot.html' with name='vendedor_05_radar_de_demanda' alt='Radar de demanda: mapa de calor con las búsquedas cercanas que no encontraron producto' %}
+                    </div>
+                </div>
+                <div class="grow-body">
+                    <span class="grow-tag tag-orange">Descubre oportunidades</span>
+                    <h4>Radar de demanda: sabe qué busca tu zona</h4>
+                    <p>Mira qué productos busca la gente cerca de ti y no encuentra. Si nadie los vende, <strong>esa es tu oportunidad.</strong></p>
+                    <ul class="mini-checks">
+                        <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Mapa de calor de búsquedas sin resultado</li>
+                        <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Filtra por producto: cámaras, repuestos, dulces…</li>
+                        <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Atlas te sugiere por dónde empezar</li>
+                    </ul>
+                </div>
+            </article>
+
+            <article class="grow-card spot reveal">
+                <div class="grow-visual tint-green">
+                    <div class="peek" data-zoom>
+                        {% include 'landing/shot.html' with name='vendedor_06_equipo' alt='Equipo de trabajo con repartidores y asistentes, cada uno con sus permisos' %}
+                    </div>
+                </div>
+                <div class="grow-body">
+                    <span class="grow-tag tag-green">Trabaja en equipo</span>
+                    <h4>Tu equipo, con permisos a tu medida</h4>
+                    <p>Invita a tus repartidores y asistentes. Tú decides quién edita el catálogo, confirma pagos o despacha pedidos, y puedes ver todo lo que hizo cada uno.</p>
+                    <ul class="mini-checks">
+                        <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Repartidores y asistentes de tienda</li>
+                        <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Permisos distintos para cada persona</li>
+                        <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Bitácora de todo lo que hacen</li>
+                    </ul>
+                </div>
+            </article>
+        </div>
+
+        <div class="sell-cta reveal">
+            <a href="#descargar" class="btn btn-primary btn-lg" data-magnetic><span class="material-symbols-rounded" aria-hidden="true">rocket_launch</span> Crear mi tienda gratis</a>
+            <a href="#fundadores" class="btn btn-ghost btn-lg">Quiero ayuda para empezar</a>
+        </div>
+    </div>
+</section>
+
+<!-- ==========================================================================
+     6. SEGURIDAD — cómo te protegemos de las estafas (sin tecnicismos)
+     ========================================================================== -->
+<section class="section security" id="seguridad">
+    <div class="sec-bg" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div>
+    <div class="container">
+        <header class="section-head section-head-light reveal">
+            <span class="eyebrow eyebrow-light">COMPRA Y VENDE TRANQUILO</span>
+            <h2>Aquí sabes <span class="text-grad-light">con quién estás tratando</span>.</h2>
+            <p>En redes sociales y grupos de chat, cualquiera puede crear un perfil falso y estafar. En CartMaker, <strong>para vender primero hay que demostrar quién eres.</strong> Y si algo sale mal, no estás solo.</p>
+        </header>
+
+        <div class="seal-grid">
+            <article class="seal reveal spot">
+                <span class="seal-icon"><span class="material-symbols-rounded" aria-hidden="true">verified_user</span></span>
+                <h3>Vendedores con identidad verificada</h3>
+                <p>Antes de vender, cada persona verifica su cédula y se toma una selfie. Las empresas, además, validan su RIF y su Registro Mercantil.</p>
+            </article>
+            <article class="seal reveal spot">
+                <span class="seal-icon"><span class="material-symbols-rounded" aria-hidden="true">lock</span></span>
+                <h3>Chat dentro de tu pedido</h3>
+                <p>Hablas con la tienda sin compartir tu número personal. Los datos de pago y los comprobantes quedan en la conversación.</p>
+            </article>
+            <article class="seal reveal spot">
+                <span class="seal-icon"><span class="material-symbols-rounded" aria-hidden="true">support_agent</span></span>
+                <h3>Soporte que entra al chat</h3>
+                <p>Si hay un problema, reportas el pedido y una persona de soporte se une a la conversación para ayudarlos a resolverlo.</p>
+            </article>
+            <article class="seal reveal spot">
+                <span class="seal-icon"><span class="material-symbols-rounded" aria-hidden="true">flag</span></span>
+                <h3>Contenido revisado</h3>
+                <p>Revisamos fotos y videos para que no se publique contenido prohibido. Puedes reportar o bloquear a alguien en 1 toque.</p>
+            </article>
+        </div>
+
+        <div class="sec-interactive">
+            <div class="worry-panel reveal">
+                <h3>¿Qué te preocupa?</h3>
+                <p class="worry-sub">Toca tu duda y te contamos cómo te cuidamos.</p>
+
+                <div class="worry-chips" role="tablist" aria-label="Preocupaciones frecuentes" id="worryChips">
+                    <button type="button" class="worry-chip is-active" role="tab" aria-selected="true" data-worry="0">El vendedor es falso</button>
+                    <button type="button" class="worry-chip" role="tab" aria-selected="false" data-worry="1">Me piden mi número</button>
+                    <button type="button" class="worry-chip" role="tab" aria-selected="false" data-worry="2">Pago y no me responden</button>
+                    <button type="button" class="worry-chip" role="tab" aria-selected="false" data-worry="3">Me llega algo distinto</button>
+                    <button type="button" class="worry-chip" role="tab" aria-selected="false" data-worry="4">Soy vendedor y no me pagan</button>
+                    <button type="button" class="worry-chip" role="tab" aria-selected="false" data-worry="5">Mis datos personales</button>
+                </div>
+
+                <div class="worry-answers" id="worryAnswers">
+                    <div class="worry-card is-active" role="tabpanel" data-worry="0">
+                        <h4>¿Y si el vendedor es falso?</h4>
+                        <p>Por eso verificamos a todos los vendedores antes de dejarlos vender.</p>
+                        <ul>
+                            <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Cédula y selfie para comprobar que es una persona real</li>
+                            <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Las empresas validan su RIF y su Registro Mercantil</li>
+                            <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Una misma persona no puede abrir varias cuentas falsas</li>
+                        </ul>
+                    </div>
+                    <div class="worry-card" role="tabpanel" data-worry="1" hidden>
+                        <h4>¿Y si me piden mi número o hablar por fuera?</h4>
+                        <p>No hace falta. Todo pasa dentro de tu pedido.</p>
+                        <ul>
+                            <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Cada pedido tiene su propio chat</li>
+                            <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> No compartes tu número personal</li>
+                            <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Si alguien te presiona para salir de la app, repórtalo</li>
+                        </ul>
+                    </div>
+                    <div class="worry-card" role="tabpanel" data-worry="2" hidden>
+                        <h4>¿Y si pago y no me responden?</h4>
+                        <p>Tu pedido guarda todo lo que se habló y se pagó.</p>
+                        <ul>
+                            <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Los datos de pago llegan en el chat del pedido</li>
+                            <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Envías tu comprobante ahí mismo</li>
+                            <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Reportas el pedido y soporte entra a ayudarte</li>
+                        </ul>
+                    </div>
+                    <div class="worry-card" role="tabpanel" data-worry="3" hidden>
+                        <h4>¿Y si me llega algo distinto a lo que pedí?</h4>
+                        <p>Reporta el pedido desde la app. Soporte revisa la conversación y media entre ustedes.</p>
+                        <ul>
+                            <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Todo queda en el historial del chat</li>
+                            <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Una persona de soporte se une a la conversación</li>
+                            <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> El caso queda registrado hasta que se resuelva</li>
+                        </ul>
+                    </div>
+                    <div class="worry-card" role="tabpanel" data-worry="4" hidden>
+                        <h4>Soy vendedor: ¿y si el comprador no cumple?</h4>
+                        <p>Tú decides cuándo despachar.</p>
+                        <ul>
+                            <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Confirmas el pago antes de entregar</li>
+                            <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> El comprobante queda guardado en el chat del pedido</li>
+                            <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> En entregas a domicilio, la entrega se confirma con un PIN</li>
+                        </ul>
+                    </div>
+                    <div class="worry-card" role="tabpanel" data-worry="5" hidden>
+                        <h4>¿Y qué pasa con mis datos personales?</h4>
+                        <p>Son tuyos.</p>
+                        <ul>
+                            <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Usamos tus datos solo para verificar y cuidar tu cuenta</li>
+                            <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Puedes pedir que eliminemos tu cuenta y tus datos cuando quieras</li>
+                        </ul>
+                        <p class="worry-links"><a href="{% url 'web_privacy_policy' %}">Ver política de privacidad</a> · <a href="{% url 'web_account_deletion' %}">Eliminar mi cuenta</a></p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="order-demo reveal" id="orderDemo" role="img" aria-label="Ejemplo ilustrativo de un pedido protegido: chat con la tienda, datos de pago, comprobante, confirmación y soporte">
+                <div class="od-head">
+                    <span class="od-lock"><span class="material-symbols-rounded" aria-hidden="true">lock</span></span>
+                    <div><strong>Pedido #15</strong><small>Chat protegido</small></div>
+                    <span class="od-status">En curso</span>
+                </div>
+                <div class="od-body">
+                    <div class="od-msg od-sys" data-od="0"><span class="material-symbols-rounded" aria-hidden="true">shield</span> Aquí hablas con la tienda sin compartir tu número personal</div>
+                    <div class="od-msg od-them" data-od="1">¡Hola! Gracias por tu pedido 👋 Te envío los datos para el pago.</div>
+                    <div class="od-msg od-card" data-od="2"><span class="material-symbols-rounded" aria-hidden="true">account_balance</span><span><strong>Datos de Pago Móvil</strong><small>Banco · teléfono · cédula</small></span></div>
+                    <div class="od-msg od-me" data-od="3">¡Listo, ya pagué! 🙌 <span class="od-attach"><span class="material-symbols-rounded" aria-hidden="true">attach_file</span> comprobante.jpg</span></div>
+                    <div class="od-msg od-ok" data-od="4"><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> La tienda confirmó tu pago</div>
+                    <div class="od-msg od-support" data-od="5"><span class="material-symbols-rounded" aria-hidden="true">support_agent</span> ¿Algo salió mal? Soporte CartMaker entra a la conversación para ayudarlos</div>
+                </div>
+                <p class="od-caption">Ejemplo ilustrativo</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ==========================================================================
+     7. PRECIOS CLAROS
+     ========================================================================== -->
+<section class="section pricing" id="precios">
+    <div class="container">
+        <header class="section-head reveal">
+            <span class="eyebrow">PRECIOS CLAROS</span>
+            <h2>Abrir tu tienda en CartMaker es <span class="text-grad">gratis</span>.</h2>
+            <p>
                 {% if has_sales_commission %}
-                    Abrir tu tienda, digitalizar tu inventario en 15s con Atlas IA y publicar videos de 30s no cuesta nada ($0/mes). Solo ganamos cuando tú vendes: cada venta completada lleva una comisión transparente del <strong>{{ sales_commission_pct }}%</strong>.
+                    Crear tu tienda, subir tus productos y publicar videos no cuesta nada. Solo ganamos cuando tú vendes: <strong>{{ sales_commission_pct }}% por cada venta completada.</strong> Si un mes no vendes, no pagas.
                 {% else %}
-                    Abrir tu tienda, digitalizar tu inventario en 15s con Atlas IA, publicar videos de 30s y recibir pedidos en tu zona es <strong>100% gratis</strong>.
+                    Crear tu tienda, subir tus productos, publicar videos y recibir pedidos en tu zona es <strong>100% gratis.</strong>
                 {% endif %}
             </p>
-        </div>
+        </header>
 
-        <div class="pricing-cards-wrapper">
-            <!-- Tarjeta 1: Crear tu Comercio ($0 Apertura + Simulador Interactivo) -->
-            <div class="pricing-card card-merchant-free" data-tilt-card>
-                <div class="pricing-card-top">
-                    <div>
-                        <span class="plan-badge-free">PARA EMPRENDEDORES Y EMPRESAS</span>
-                        <h3>Comercio Oficial CartMaker</h3>
-                    </div>
-                    <div class="price-display">
-                        <span class="price-currency">$</span>
-                        <span class="price-number">0</span>
-                        <span class="price-period">/ crear y publicar</span>
-                    </div>
-                </div>
+        <div class="pricing-grid">
+            <article class="price-card price-main reveal spot">
+                <span class="price-badge">PARA VENDEDORES</span>
+                <h3>Tu tienda en CartMaker</h3>
+                <div class="price-amount"><span class="cur">$</span><span class="num">0</span><span class="per">para abrir y publicar</span></div>
 
-                {% if has_sales_commission %}
-                <div class="commission-transparency-banner">
-                    <div class="comm-icon">
-                        <span class="material-symbols-rounded">handshake</span>
+                <div class="calc" id="salesCalc">
+                    <div class="calc-head">
+                        <span>Si vendes al mes:</span>
+                        <strong id="calcSalesDisplay">$1,000 USD</strong>
                     </div>
-                    <div class="comm-text">
-                        <strong>Crear tu comercio es 100% gratis · {{ sales_commission_pct }}% de comisión por venta</strong>
-                        <span>Sin costos fijos ni alquileres mensuales. Si un mes no vendes, pagas $0.</span>
-                    </div>
-                </div>
-                {% else %}
-                <div class="commission-transparency-banner banner-zero-comm">
-                    <div class="comm-icon">
-                        <span class="material-symbols-rounded">verified</span>
-                    </div>
-                    <div class="comm-text">
-                        <strong>100% Gratis para crear y vender en tu zona</strong>
-                        <span>Sin costos de apertura ni mensualidades obligatorias para tu negocio.</span>
-                    </div>
-                </div>
-                {% endif %}
-
-                <!-- Calculadora Interactiva de Ventas en Vivo -->
-                <div class="interactive-sales-calc">
-                    <div class="calc-header">
-                        <span>Simula tus ventas mensuales en CartMaker:</span>
-                        <strong class="calc-sales-val" id="calcSalesDisplay">$1,000 USD</strong>
-                    </div>
-                    <input type="range" id="salesRangeSlider" class="calc-slider" min="100" max="5000" step="100" value="1000" aria-label="Monto de ventas mensuales">
-                    <div class="calc-breakdown-grid">
-                        <div class="calc-stat-box">
-                            <small>Costo de crear y mantener tienda</small>
-                            <strong class="text-emerald">$0.00 / mes</strong>
-                        </div>
+                    <input type="range" id="salesRangeSlider" min="100" max="5000" step="100" value="1000" aria-label="Cuánto vendes al mes en dólares">
+                    <div class="calc-rows">
+                        <div class="calc-row"><span>Pagas por tener tu tienda</span><strong class="ok">$0.00</strong></div>
                         {% if has_sales_commission %}
-                        <div class="calc-stat-box">
-                            <small>Comisión CartMaker ({{ sales_commission_pct }}%)</small>
-                            <strong id="calcCommissionDisplay">$25.00 USD</strong>
-                        </div>
+                        <div class="calc-row"><span>Comisión por tus ventas ({{ sales_commission_pct }}%)</span><strong id="calcCommissionDisplay">$25.00 USD</strong></div>
                         {% endif %}
-                        <div class="calc-stat-box highlight-net">
-                            <small>Tú recibes neto en tu cuenta</small>
-                            <strong id="calcNetDisplay">{% if has_sales_commission %}$975.00 USD{% else %}$1,000.00 USD{% endif %}</strong>
-                        </div>
+                        <div class="calc-row calc-net"><span>Te queda</span><strong id="calcNetDisplay">{% if has_sales_commission %}$975.00 USD{% else %}$1,000.00 USD{% endif %}</strong></div>
                     </div>
                 </div>
 
-                <ul class="pricing-features-grid">
-                    <li><span class="material-symbols-rounded">check_circle</span> Escaneo de inventario en 15s por foto con Atlas IA</li>
-                    <li><span class="material-symbols-rounded">check_circle</span> Videos verticales de 30s en CartMaker TV e Historias</li>
-                    <li><span class="material-symbols-rounded">check_circle</span> Ubicación en Mapa 3D y módulo de Logística GPS</li>
-                    <li><span class="material-symbols-rounded">check_circle</span> Modo Emprendedor (Cédula) o Empresa (KYB Mercantil)</li>
-                    <li><span class="material-symbols-rounded">check_circle</span> Precios automáticos en USD (BCV) y Bs.</li>
-                    <li><span class="material-symbols-rounded">check_circle</span> Chat por pedido con notas de voz y Respuestas Rápidas</li>
-                    <li><span class="material-symbols-rounded">check_circle</span> Analíticas de Ventas/Atlas, Historias y Gamificación</li>
-                    <li><span class="material-symbols-rounded">check_circle</span> Fidelización con Club Tokens y descuentos automáticos</li>
+                <ul class="price-list">
+                    <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Productos listos con una foto, gracias a Atlas</li>
+                    <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Videos de 30 segundos para mostrar lo que vendes</li>
+                    <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Tu tienda en el mapa, con ruta para tus clientes</li>
+                    <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Vendes desde casa o con local: tú eliges</li>
+                    <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Precios en dólares y bolívares, automáticos</li>
+                    <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Chat por pedido con respuestas rápidas</li>
+                    <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Estadísticas de tus ventas y visitas</li>
+                    <li><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Descuentos con Club de Tokens para fidelizar clientes</li>
                 </ul>
+                <a href="#descargar" class="btn btn-primary btn-block" data-magnetic>Descargar la app y crear mi tienda</a>
+            </article>
 
-                <div class="pricing-card-footer">
-                    <a href="#descargar" class="btn-pricing-primary">
-                        Descargar App y Crear mi Comercio Gratis
-                    </a>
-                </div>
-            </div>
-
-            <!-- Tarjeta 2: Atlas Plus AI -->
-            <div class="pricing-card card-atlas-plus" data-tilt-card>
-                <div class="pricing-card-top">
-                    <div>
-                        <span class="plan-badge-atlas">SUSCRIPCIÓN OPCIONAL DE IA</span>
-                        <h3>Atlas Plus AI</h3>
-                    </div>
-                    <div class="price-display">
-                        <span class="price-currency">$</span>
-                        <span class="price-number">{{ atlas_plus_price|floatformat:2 }}</span>
-                        <span class="price-period">/ mes (BCV)</span>
-                    </div>
-                </div>
-
-                <p class="pricing-card-desc">
-                    Potencia opcional para usuarios y comercios que desean multiplicar su capacidad diaria de consultas y escaneos con el motor cognitivo de Atlas IA.
-                </p>
-
-                <ul class="pricing-features-single">
-                    <li>
-                        <span class="material-symbols-rounded">auto_awesome</span>
-                        <span>Hasta <strong>{{ atlas_plus_limit }} consultas e interacciones diarias</strong> con Atlas IA (vs. {{ atlas_free_limit }} diarias gratuitas).</span>
-                    </li>
-                    <li>
-                        <span class="material-symbols-rounded">photo_camera</span>
-                        <span><strong>Búsqueda y Escaneo Multimodal:</strong> Analiza fotos de productos, repuestos o listas de inventario a máxima velocidad.</span>
-                    </li>
-                    <li>
-                        <span class="material-symbols-rounded">radar</span>
-                        <span><strong>Comparativas profundas en tu zona:</strong> Arma combos completos (como PCs o listas de compras) comparando precios automáticamente.</span>
-                    </li>
-                    <li>
-                        <span class="material-symbols-rounded">account_balance</span>
-                        <span>Pagadero en <strong>Bolívares a tasa BCV</strong> mediante Pago Móvil o transferencia directamente desde la app.</span>
-                    </li>
+            <article class="price-card price-atlas reveal spot">
+                <span class="price-badge badge-atlas">OPCIONAL</span>
+                <h3>Atlas Plus</h3>
+                <div class="price-amount"><span class="cur">$</span><span class="num">{{ atlas_plus_price|floatformat:2 }}</span><span class="per">al mes (tasa BCV)</span></div>
+                <p class="price-desc">Para quienes usan Atlas todos los días y quieren más consultas.</p>
+                <ul class="price-list">
+                    <li><span class="material-symbols-rounded" aria-hidden="true">auto_awesome</span> <span>Hasta <strong>{{ atlas_plus_limit }} consultas al día</strong> (gratis: {{ atlas_free_limit }})</span></li>
+                    <li><span class="material-symbols-rounded" aria-hidden="true">photo_camera</span> <span>Busca con una foto del producto que necesitas</span></li>
+                    <li><span class="material-symbols-rounded" aria-hidden="true">checklist</span> <span>Arma listas completas (como una PC) comparando precios por ti</span></li>
+                    <li><span class="material-symbols-rounded" aria-hidden="true">account_balance</span> <span>Pagas en bolívares con Pago Móvil o transferencia, desde la app</span></li>
                 </ul>
-
-                <div class="pricing-card-footer">
-                    <a href="#descargar" class="btn-pricing-atlas">
-                        Activar Atlas Plus desde la App
-                    </a>
-                </div>
-            </div>
+                <a href="#descargar" class="btn btn-light btn-block">Activar desde la app</a>
+            </article>
         </div>
 
-        <!-- Banner Programa Vendedor Fundador (#fundadores) -->
-        <div class="founders-program-banner" id="fundadores">
-            <div class="founders-content">
-                <span class="founders-pill">
-                    <span class="material-symbols-rounded">workspace_premium</span>
-                    PROGRAMA VENDEDOR FUNDADOR · ACTIVA TU ZONA
-                </span>
-                <h3>¿Tienes un negocio o emprendimiento y quieres ser de los primeros en tu zona?</h3>
-                <p>
-                    Si te unes hoy como <strong>Vendedor Fundador</strong>, nuestro equipo te acompaña personalmente para <strong>escanear todo tu inventario en segundos con Atlas IA y producir tus primeros videos verticales de 30s totalmente GRATIS</strong>.
-                </p>
-                <div class="founders-perks">
-                    <span><span class="material-symbols-rounded">verified</span> Insignia de Comercio Fundador</span>
-                    <span><span class="material-symbols-rounded">videocam</span> Asistencia en tus primeros videos de 30s</span>
-                    <span><span class="material-symbols-rounded">auto_awesome</span> Digitalización completa de catálogo con IA</span>
-                </div>
+        <p class="buyer-note reveal"><span class="material-symbols-rounded" aria-hidden="true">shopping_bag</span> <span><strong>¿Vas a comprar?</strong> Usar la app es gratis. Solo pagas tu pedido (y el delivery, si lo pides).</span></p>
+
+        <!-- Vendedor fundador -->
+        <div class="founders reveal" id="fundadores">
+            <div class="founders-copy">
+                <span class="founders-pill"><span class="material-symbols-rounded" aria-hidden="true">workspace_premium</span> VENDEDOR FUNDADOR</span>
+                <h3>¿Quieres ser de los primeros en tu zona? Te ayudamos a empezar.</h3>
+                <p>Si te unes hoy, nuestro equipo te acompaña de tú a tú: <strong>cargamos tu catálogo contigo y te ayudamos a grabar tus primeros videos. Gratis.</strong></p>
+                <ul class="founders-perks">
+                    <li><span class="material-symbols-rounded" aria-hidden="true">verified</span> Insignia de Comercio Fundador</li>
+                    <li><span class="material-symbols-rounded" aria-hidden="true">videocam</span> Ayuda con tus primeros videos</li>
+                    <li><span class="material-symbols-rounded" aria-hidden="true">auto_awesome</span> Tu catálogo cargado con Atlas</li>
+                </ul>
             </div>
-            <div class="founders-cta-box">
-                <a href="https://wa.me/584222383498?text=Hola%20equipo%20CartMaker,%20quiero%20postularme%20como%20Vendedor%20Fundador%20en%20mi%20zona" target="_blank" rel="noopener" class="btn-founder-whatsapp">
-                    <span class="material-symbols-rounded">chat</span>
-                    <span>Postularme por WhatsApp</span>
+            <div class="founders-cta">
+                <a href="https://wa.me/584222383498?text=Hola%20equipo%20CartMaker,%20quiero%20postularme%20como%20Vendedor%20Fundador%20en%20mi%20zona" target="_blank" rel="noopener" class="btn btn-whatsapp btn-lg" data-magnetic>
+                    <span class="material-symbols-rounded" aria-hidden="true">chat</span> Escribirnos por WhatsApp
                 </a>
-                <small>Atención directa por nuestro equipo · 100% Gratuito</small>
+                <small>Te respondemos personalmente · Sin costo</small>
             </div>
         </div>
     </div>
 </section>
 
 <!-- ==========================================================================
-     9. LIDERAZGO E INGENIERÍA (#team) + FAQ INTERACTIVO (#faq) + CONTACTO DIRECTO (#contacto)
+     8. HISTORIA — por qué existe CartMaker
      ========================================================================== -->
-<section class="founder-section reveal-on-scroll" id="team">
+<section class="section story" id="historia">
     <div class="container">
-        <div class="founder-card">
-            <div class="founder-avatar-col">
-                <div class="founder-img-ring">
-                    <img src="{% static 'img/ceo_profile.jpg' %}" alt="Atreyus Reyes — CEO & Founder de CartMaker" class="founder-img">
-                </div>
-                <span class="founder-role-chip">CEO &amp; Lead Architect</span>
+        <div class="story-card reveal">
+            <div class="story-photo">
+                <div class="story-ring"><img src="{% static 'img/ceo_profile.jpg' %}" alt="Atreyus Reyes, fundador de CartMaker" width="160" height="160" loading="lazy"></div>
             </div>
-            <div class="founder-quote-col">
-                <span class="eyebrow-pill">VISIÓN Y ARQUITECTURA</span>
-                <h3>Construido desde cero para digitalizar el comercio real de cada zona</h3>
-                <p>
-                    «Creamos CartMaker para eliminar la distancia entre quien busca un producto y el comercio o emprendedor que ya lo tiene listo en su misma zona. Al combinar el escaneo de inventarios en 15 segundos con Atlas IA, videos de 30s, cartografía 3D y biometría de 512 dimensiones, hacemos que abrir y escalar un negocio sea inmediato, seguro y accesible para todos.»
-                </p>
-                <div class="founder-signature">
-                    <strong>Atreyus Reyes</strong>
-                    <span>Fundador &amp; Arquitecto Principal de Software · CartMaker</span>
-                </div>
+            <div class="story-text">
+                <span class="eyebrow">POR QUÉ HICIMOS CARTMAKER</span>
+                <blockquote>
+                    «Muchas veces lo que necesitas está a dos cuadras de tu casa y no lo sabes. Y muchos vecinos con buenos productos no tienen cómo mostrarlos. Hicimos CartMaker para que se encuentren: que tú compres rápido y tranquilo, y que quien emprende pueda vender sin complicarse.»
+                </blockquote>
+                <p class="story-sign"><strong>Atreyus Reyes</strong><span>Fundador de CartMaker</span></p>
             </div>
         </div>
     </div>
 </section>
 
-<!-- Preguntas Frecuentes (FAQ) -->
-<section class="faq-section reveal-on-scroll" id="faq">
-    <div class="container faq-container">
-        <div class="section-header-center">
-            <span class="eyebrow-pill">RESPUESTAS CLARAS</span>
-            <h2 class="section-title">Preguntas Frecuentes</h2>
-        </div>
-
-        <div class="faq-accordion">
-            <div class="faq-item active">
-                <button type="button" class="faq-question" aria-expanded="true">
-                    <span>¿Cuánto cuesta crear mi comercio y publicar en CartMaker?</span>
-                    <span class="material-symbols-rounded faq-icon">expand_more</span>
-                </button>
-                <div class="faq-answer">
-                    {% if has_sales_commission %}
-                    <p>Crear tu comercio, escanear tu inventario con Atlas IA, aparecer en el Mapa 3D y publicar videos de 30s es <strong>100% gratis ($0 de mensualidad)</strong>. CartMaker únicamente aplica un <strong>{{ sales_commission_pct }}% de comisión sobre cada venta completada</strong>. Si no realizas ventas, no pagas absolutamente nada.</p>
-                    {% else %}
-                    <p>Crear tu comercio, escanear tu inventario con Atlas IA, aparecer en el Mapa 3D, publicar videos de 30s y vender en tu zona es <strong>100% gratis</strong>, sin costos de apertura ni suscripciones mensuales obligatorias.</p>
-                    {% endif %}
-                </div>
-            </div>
-
-            <div class="faq-item">
-                <button type="button" class="faq-question" aria-expanded="false">
-                    <span>¿Cómo funciona el registro de inventario en 15 segundos con Atlas IA?</span>
-                    <span class="material-symbols-rounded faq-icon">expand_more</span>
-                </button>
-                <div class="faq-answer">
-                    <p>Dentro de la sección <strong>Administrar inventario</strong> de la app, tocas el botón <strong>«Agregar varios ✨»</strong> y tomas una foto a tus productos, estante o lista de precios. En unos <strong>15 segundos</strong>, Atlas IA reconoce todos los productos de la foto y crea sus fichas automáticamente para que no tengas que escribirlos uno por uno.</p>
-                </div>
-            </div>
-
-            <div class="faq-item">
-                <button type="button" class="faq-question" aria-expanded="false">
-                    <span>No tengo local físico, vendo desde casa o tienda virtual. ¿Puedo registrarme?</span>
-                    <span class="material-symbols-rounded faq-icon">expand_more</span>
-                </button>
-                <div class="faq-answer">
-                    <p>¡Sí! Al crear tu comercio eliges la modalidad <strong>Emprendedor</strong> y el formato <strong>Tienda Virtual / Desde Casa</strong>. Solo necesitas verificar tu identidad biométrica con tu cédula, sin necesidad de RIF jurídico ni Registro Mercantil.</p>
-                </div>
-            </div>
-
-            <div class="faq-item">
-                <button type="button" class="faq-question" aria-expanded="false">
-                    <span>¿Cómo protege CartMaker a las empresas constituidas contra cuentas falsas?</span>
-                    <span class="material-symbols-rounded faq-icon">expand_more</span>
-                </button>
-                <div class="faq-answer">
-                    <p>Para registrarse como <strong>Empresa Constituida</strong>, nuestro sistema valida matemáticamente el RIF bajo la norma Módulo-11 del SENIAT y verifica la Oficina de Registro Mercantil (SAREN), Número y Tomo del Acta Constitutiva, además del vector biométrico de 512 dimensiones del representante legal.</p>
-                </div>
-            </div>
-        </div>
+<!-- Cinta de marca -->
+<div class="ticker" aria-hidden="true">
+    <div class="ticker-track">
+        {% for i in '12'|make_list %}
+        <span class="ticker-group">
+            <span>Quién sabe, capaz tu vecino vende lo que buscas</span><i class="material-symbols-rounded">auto_awesome</i>
+            <span>Quién sabe, capaz tu vecino vende lo que buscas</span><i class="material-symbols-rounded">auto_awesome</i>
+            <span>Quién sabe, capaz tu vecino vende lo que buscas</span><i class="material-symbols-rounded">auto_awesome</i>
+        </span>
+        {% endfor %}
     </div>
-</section>
-
-<!-- Sección de Contacto Directo (#contacto) — Envía directo a Correo o WhatsApp -->
-<section class="contact-section reveal-on-scroll" id="contacto">
-    <div class="container">
-        <div class="contact-box">
-            <div class="contact-copy">
-                <span class="eyebrow-pill">CANALES DIRECTOS</span>
-                <h2>¿Listo para impulsar el comercio en tu zona o tienes alguna duda?</h2>
-                <p>Toca cualquiera de las opciones para enviarnos un correo electrónico o abrir una conversación directa en nuestro WhatsApp Oficial.</p>
-            </div>
-
-            <div class="contact-actions-row">
-                <a href="mailto:contact@cartmaker.app?subject=Consulta%20sobre%20CartMaker" class="contact-pill-btn contact-pill-email">
-                    <span class="material-symbols-rounded">mail</span>
-                    <div class="contact-pill-text">
-                        <small>Correo Corporativo · Toca para escribirnos</small>
-                        <strong>contact@cartmaker.app</strong>
-                    </div>
-                    <span class="contact-go-badge">
-                        Enviar correo <span class="material-symbols-rounded">arrow_outward</span>
-                    </span>
-                </a>
-
-                <a href="https://wa.me/584222383498?text=Hola%20equipo%20de%20CartMaker,%20quiero%20m%C3%A1s%20informaci%C3%B3n" target="_blank" rel="noopener" class="contact-pill-btn contact-pill-whatsapp">
-                    <span class="material-symbols-rounded">chat</span>
-                    <div class="contact-pill-text">
-                        <small>WhatsApp Oficial · Toca para abrir chat</small>
-                    </div>
-                    <span class="contact-go-badge badge-wa">
-                        Abrir WhatsApp <span class="material-symbols-rounded">open_in_new</span>
-                    </span>
-                </a>
-            </div>
-        </div>
-    </div>
-</section>
-
-<!-- Barra Inferior Flotante Mobile-First (Solo en pantallas móviles) -->
-<div class="mobile-sticky-cta-bar">
-    <a href="#descargar" class="sticky-btn-download">
-        <span class="material-symbols-rounded">download</span>
-        <span>Descargar App</span>
-    </a>
-    <a href="#precios" class="sticky-btn-founder">
-        <span class="material-symbols-rounded">storefront</span>
-        <span>Crear Comercio Gratis</span>
-    </a>
 </div>
 
-<!-- Modal Lightbox para Ampliar Capturas y Videos de la App -->
-<div class="image-modal-backdrop" id="imageModal" role="dialog" aria-modal="true" aria-label="Vista ampliada de la aplicación">
-    <button type="button" class="modal-close-btn" id="modalClose" aria-label="Cerrar vista previa">
-        <span class="material-symbols-rounded">close</span>
-    </button>
-    <img src="" alt="Vista previa de CartMaker App" class="modal-preview-img" id="modalImg">
-    <video src="" class="modal-preview-img modal-preview-video" id="modalVideo" loop muted playsinline webkit-playsinline disablePictureInPicture hidden></video>
+<!-- ==========================================================================
+     9. PREGUNTAS FRECUENTES
+     ========================================================================== -->
+<section class="section faq" id="faq">
+    <div class="container faq-container">
+        <header class="section-head reveal">
+            <span class="eyebrow">RESPUESTAS CLARAS</span>
+            <h2>Lo que más nos preguntan</h2>
+        </header>
+
+        <div class="faq-list">
+            <div class="faq-item is-open reveal">
+                <button type="button" class="faq-q" aria-expanded="true"><span>¿Cuánto cuesta abrir mi tienda?</span><span class="material-symbols-rounded faq-chevron" aria-hidden="true">expand_more</span></button>
+                <div class="faq-a"><div>
+                    {% if has_sales_commission %}
+                    <p>Abrir tu tienda, subir tus productos y publicar videos es <strong>gratis</strong>. CartMaker solo cobra <strong>{{ sales_commission_pct }}% por cada venta completada</strong>. Si un mes no vendes, no pagas nada.</p>
+                    {% else %}
+                    <p>Abrir tu tienda, subir tus productos, publicar videos y recibir pedidos es <strong>gratis</strong>, sin costos de apertura ni mensualidades obligatorias.</p>
+                    {% endif %}
+                </div></div>
+            </div>
+
+            <div class="faq-item reveal">
+                <button type="button" class="faq-q" aria-expanded="false"><span>No tengo local, vendo desde casa. ¿Puedo registrarme?</span><span class="material-symbols-rounded faq-chevron" aria-hidden="true">expand_more</span></button>
+                <div class="faq-a"><div>
+                    <p>¡Claro que sí! Eliges <strong>Emprendedor</strong> y el formato <strong>Tienda virtual / desde casa</strong>. Para registrarte solo necesitas verificar tu identidad con tu cédula y una selfie. No necesitas RIF de empresa ni Registro Mercantil.</p>
+                </div></div>
+            </div>
+
+            <div class="faq-item reveal">
+                <button type="button" class="faq-q" aria-expanded="false"><span>¿Cómo subo mis productos sin perder días?</span><span class="material-symbols-rounded faq-chevron" aria-hidden="true">expand_more</span></button>
+                <div class="faq-a"><div>
+                    <p>En «Administrar inventario» tocas <strong>Agregar varios ✨</strong> y le tomas una foto a tus productos. Atlas reconoce cada uno y crea sus fichas por ti. Tú solo revisas y publicas.</p>
+                </div></div>
+            </div>
+
+            <div class="faq-item reveal">
+                <button type="button" class="faq-q" aria-expanded="false"><span>¿Cómo sé que una tienda es real?</span><span class="material-symbols-rounded faq-chevron" aria-hidden="true">expand_more</span></button>
+                <div class="faq-a"><div>
+                    <p>Todos los vendedores verifican su identidad con cédula y selfie antes de vender. Las empresas, además, validan su RIF y su Registro Mercantil. Eso evita los perfiles falsos que ves en redes.</p>
+                </div></div>
+            </div>
+
+            <div class="faq-item reveal">
+                <button type="button" class="faq-q" aria-expanded="false"><span>¿Cómo pago lo que compro?</span><span class="material-symbols-rounded faq-chevron" aria-hidden="true">expand_more</span></button>
+                <div class="faq-a"><div>
+                    <p>Pagas directamente a la tienda con los métodos que ella te indique en el chat de tu pedido (por ejemplo, Pago Móvil). Envías tu comprobante ahí mismo y la tienda confirma tu pago.</p>
+                </div></div>
+            </div>
+
+            <div class="faq-item reveal">
+                <button type="button" class="faq-q" aria-expanded="false"><span>¿Qué pasa si algo sale mal con mi pedido?</span><span class="material-symbols-rounded faq-chevron" aria-hidden="true">expand_more</span></button>
+                <div class="faq-a"><div>
+                    <p>Reportas el pedido desde la app. Una persona de soporte de CartMaker se une al chat, revisa la conversación y ayuda a ambas partes a resolverlo.</p>
+                </div></div>
+            </div>
+
+            <div class="faq-item reveal">
+                <button type="button" class="faq-q" aria-expanded="false"><span>¿Ya funciona en mi ciudad?</span><span class="material-symbols-rounded faq-chevron" aria-hidden="true">expand_more</span></button>
+                <div class="faq-a"><div>
+                    <p>Estamos en piloto y abriendo zonas poco a poco. En el mapa verás las tiendas activas cerca de ti. Si tu zona todavía tiene pocas, es tu oportunidad de ser de los primeros: mira el programa <a href="#fundadores">Vendedor Fundador</a>.</p>
+                </div></div>
+            </div>
+
+            <div class="faq-item reveal">
+                <button type="button" class="faq-q" aria-expanded="false"><span>¿Qué pasa con mis datos? ¿Puedo borrar mi cuenta?</span><span class="material-symbols-rounded faq-chevron" aria-hidden="true">expand_more</span></button>
+                <div class="faq-a"><div>
+                    <p>Tus datos son tuyos. Los usamos solo para verificar y cuidar tu cuenta, y puedes pedir que eliminemos tu cuenta y tus datos cuando quieras desde <a href="{% url 'web_account_deletion' %}">esta página</a>. Lee también nuestra <a href="{% url 'web_privacy_policy' %}">política de privacidad</a>.</p>
+                </div></div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ==========================================================================
+     10. CIERRE: DESCARGA + CONTACTO
+     ========================================================================== -->
+<section class="section final-cta" id="empezar">
+    <div class="final-bg" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div>
+    <div class="container final-inner reveal">
+        <h2>Tu zona ya está <span class="text-grad-light">vendiendo</span>. Entra y descúbrela.</h2>
+        <p>Descarga CartMaker gratis y mira qué tienen tus vecinos a minutos de ti. ¿Tienes un negocio? Ábrelo hoy, sin pagar por empezar.</p>
+        <div class="hero-cta final-stores">
+            <a href="https://apps.apple.com" target="_blank" rel="noopener" class="store-btn" data-magnetic>
+                <svg viewBox="0 0 384 512" class="store-svg" aria-hidden="true"><path fill="currentColor" d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>
+                <span class="store-labels"><small>Descárgala en</small><strong>App Store</strong></span>
+            </a>
+            <a href="https://play.google.com/apps/testing/com.codlinker.cartmaker" target="_blank" rel="noopener" class="store-btn store-btn-dark" data-magnetic>
+                <svg viewBox="0 0 512 512" class="store-svg" aria-hidden="true"><path fill="currentColor" d="M325.3 234.3L104.6 13l280.8 161.2-60.1 60.1zM47 0C34 6.8 25.3 19.2 25.3 35.3v441.3c0 16.1 8.7 28.5 21.7 35.3l256.6-256L47 0zm425.2 225.6l-58.9-34.1-65.7 64.5 65.7 64.5 60.1-34.1c18-14.3 18-46.5-1.2-60.8zM104.6 499l280.8-161.2-60.1-60.1L104.6 499z"/></svg>
+                <span class="store-labels"><small>Disponible en</small><strong>Google Play</strong></span>
+            </a>
+        </div>
+    </div>
+</section>
+
+<section class="section contact" id="contacto">
+    <div class="container">
+        <div class="contact-box reveal">
+            <div class="contact-copy">
+                <span class="eyebrow">¿TIENES DUDAS?</span>
+                <h2>Escríbenos, te respondemos personalmente</h2>
+                <p>Toca una opción para enviarnos un correo o abrir un chat de WhatsApp.</p>
+            </div>
+            <div class="contact-actions">
+                <a href="https://wa.me/584222383498?text=Hola%20equipo%20de%20CartMaker,%20quiero%20m%C3%A1s%20informaci%C3%B3n" target="_blank" rel="noopener" class="contact-btn contact-wa">
+                    <span class="material-symbols-rounded" aria-hidden="true">chat</span>
+                    <span><small>WhatsApp oficial</small><strong>Abrir chat</strong></span>
+                    <span class="material-symbols-rounded go" aria-hidden="true">arrow_outward</span>
+                </a>
+                <a href="mailto:contact@cartmaker.app?subject=Consulta%20sobre%20CartMaker" class="contact-btn contact-mail">
+                    <span class="material-symbols-rounded" aria-hidden="true">mail</span>
+                    <span><small>Correo</small><strong>contact@cartmaker.app</strong></span>
+                    <span class="material-symbols-rounded go" aria-hidden="true">arrow_outward</span>
+                </a>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Barra fija inferior (solo móvil) -->
+<div class="sticky-cta" id="stickyCta" aria-hidden="true">
+    <a href="#descargar" class="sticky-btn sticky-main"><span class="material-symbols-rounded" aria-hidden="true">download</span><span id="stickyMainLabel">Descargar app</span></a>
+    <a href="#vender" class="sticky-btn sticky-alt" id="stickyAlt"><span class="material-symbols-rounded" aria-hidden="true">storefront</span><span>Vender gratis</span></a>
+</div>
+
+<!-- Visor de capturas y videos -->
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Vista ampliada de la app" hidden>
+    <button type="button" class="lightbox-close" id="lightboxClose" aria-label="Cerrar"><span class="material-symbols-rounded" aria-hidden="true">close</span></button>
+    <img src="" alt="" class="lightbox-img" id="lightboxImg">
+    <video src="" class="lightbox-img lightbox-video" id="lightboxVideo" loop muted playsinline webkit-playsinline disablePictureInPicture hidden></video>
 </div>
 
 </div>
 {% endblock %}
 
 {% block extra_scripts %}
-    <script src="{% static 'js/home.js' %}?v=20261020_feed_video"></script>
+    <script src="{% static 'js/home.js' %}?v=20261027_ux3" defer></script>
 {% endblock %}

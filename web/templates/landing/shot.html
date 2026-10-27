@@ -1,0 +1,12 @@
+{% load static %}{% comment %}
+  Captura de la app optimizada: WebP liviano (720x1560) + JPG original como respaldo y para el zoom.
+  Parámetros: name (sin extensión), alt, eager (opcional: carga prioritaria).
+{% endcomment %}<picture>
+    <source type="image/webp" srcset="{% static 'img/screenshots_app/'|add:name|add:'.webp' %}">
+    <img src="{% static 'img/screenshots_app/'|add:name|add:'.jpg' %}"
+         alt="{{ alt }}"
+         width="720" height="1560"
+         decoding="async"
+         {% if eager %}fetchpriority="high"{% else %}loading="lazy"{% endif %}
+         draggable="false">
+</picture>

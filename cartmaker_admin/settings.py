@@ -121,6 +121,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     # Compresión gzip de las respuestas de TEXTO (JSON de cache/*, listados, etc.; no recomprime imágenes/videos).
     # Debe ir ANTES de cualquier middleware que lea o escriba el cuerpo. Si nginx ya comprime, no se recomprime.
     'cartmaker_admin.gzip_middleware.SelectiveGZipMiddleware',
@@ -129,7 +130,6 @@ MIDDLEWARE = [
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     "django.middleware.locale.LocaleMiddleware",
-    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'cartmaker_admin.security_middleware.CartMakerClientGatekeeperMiddleware',
@@ -144,8 +144,18 @@ TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
         'DIRS': ['templates'],
-        'APP_DIRS': True,
+        'APP_DIRS': not DEBUG,
         'OPTIONS': {
+            **(
+                {
+                    'loaders': [
+                        'django.template.loaders.filesystem.Loader',
+                        'django.template.loaders.app_directories.Loader',
+                    ],
+                }
+                if DEBUG
+                else {}
+            ),
             'context_processors': [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',

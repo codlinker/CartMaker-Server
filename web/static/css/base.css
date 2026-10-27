@@ -458,6 +458,31 @@ img {
     display: none;
 }
 
+/* Pantallas muy angostas (≤380px): evita que el menú se salga del borde */
+@media (max-width: 380px) {
+    .public-navbar {
+        padding: 8px 10px;
+        gap: 6px;
+    }
+
+    .nav-brand {
+        gap: 8px;
+        min-width: 0;
+    }
+
+    .nav-brand-tag {
+        display: none;
+    }
+
+    .nav-right-actions {
+        gap: 6px;
+    }
+
+    .btn-nav-primary {
+        padding: 9px 11px;
+    }
+}
+
 .hide-tablet {
     display: none;
 }

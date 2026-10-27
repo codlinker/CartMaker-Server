@@ -18,7 +18,9 @@ _COMPRESSIBLE_PREFIXES = (
 
 class SelectiveGZipMiddleware(GZipMiddleware):
     def process_response(self, request, response):
+        if response.status_code != 200:
+            return response
         content_type = (response.headers.get('Content-Type') or '').split(';')[0].strip().lower()
-        if content_type and not content_type.startswith(_COMPRESSIBLE_PREFIXES):
+        if not content_type.startswith(_COMPRESSIBLE_PREFIXES):
             return response
         return super().process_response(request, response)
