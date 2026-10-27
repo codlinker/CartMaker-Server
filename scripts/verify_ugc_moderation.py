@@ -99,7 +99,11 @@ try:
         for txt in ['Empanada de pollo', 'Pantalón Slim Fit', 'Pipa de agua para plomería',
                     'Disfraz de pirata con espada de juguete', 'Cámara fotográfica Canon', 'Pistola de silicón caliente',
                     'Pistola de pintura', 'Cartera de cuero', 'Hamburguesa XXL', 'Camisa talla XXL',
-                    'Cable HDMI 3 metros', 'Taza de café']:
+                    'Cable HDMI 3 metros', 'Taza de café',
+                    'Preservativos Durex Caja x3 Ultra Sensible', 'Condones Prudence Sabores y Texturizados',
+                    'Gel Lubricante Íntimo K-Y 50ml a base de agua', 'Prueba de Embarazo Clearblue Digital',
+                    'Pastillas Anticonceptivas caja x28', 'Óvulos para infección de la vagina',
+                    'Jabón líquido para higiene de la vagina', 'Preservativos para el pene de látex']:
             try:
                 cm.moderate_text(txt)
                 check(f'permite "{txt}"', True)

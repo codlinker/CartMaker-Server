@@ -206,6 +206,7 @@ _TEXT_RULES: Tuple[Tuple[str, re.Pattern], ...] = (
 
 
 # Frases legítimas que contienen términos sensibles y NO deben bloquearse (se eliminan antes de evaluar):
+#  - Salud sexual y ginecología de farmacia (preservativos, lubricantes íntimos, óvulos, cremas o higiene íntima).
 #  - Terapia de reemplazo de nicotina (farmacia): parches, chicles, gomas, pastillas, spray.
 #  - Perfumería / velas / café / cosmética con "notas", "aroma" o "sabor" a tabaco.
 #  - Artículos de juguete o decoración: "pistola de juguete/agua/silicon/pintura/clavos/grapas".
@@ -215,7 +216,10 @@ _SAFE_CONTEXT_PATTERN = re.compile(
     r"(?:de\s+|para\s+)?(?:reemplazo\s+de\s+)?nicotina|"
     r"(?:nota|notas|aroma|aromas|sabor|sabores|esencia|fragancia)\s+(?:a\s+|de\s+)tabaco|"
     r"pistola\s+de\s+(?:juguete|agua|silicon|silicona|pintura|clavos|grapas)|"
-    r"municion\s+de\s+(?:airsoft|paintball)"
+    r"municion\s+de\s+(?:airsoft|paintball)|"
+    r"(?:infeccion|infecciones|flora|hidratante|crema|gel|ovulo|ovulos|ducha|jabon|higiene|salud|cuidado)\s+"
+    r"(?:de\s+|en\s+)?(?:la\s+)?vagina|"
+    r"(?:preservativo|preservativos|condon|condones)\s+(?:para\s+|de\s+)?(?:el\s+)?pene"
     r")\b",
     re.IGNORECASE,
 )
@@ -351,9 +355,9 @@ def _check_with_aws_rekognition(image_bytes: bytes) -> Optional[Tuple[bool, str,
                 return False, ModerationCategory.ADULT_TOYS, name
             if any(k in combined for k in ("explicit nudity", "genitalia", "sexual activity", "nudity", "illustrated explicit")):
                 return False, ModerationCategory.NUDITY_OR_SEXUAL, name
-            if any(k in combined for k in ("tobacco", "smoking", "vaping", "cigarette", "pills")):
+            if any(k in combined for k in ("tobacco", "smoking", "vaping", "cigarette")):
                 return False, ModerationCategory.TOBACCO_OR_VAPE, name
-            if any(k in combined for k in ("drugs", "drug", "narcotics", "cannabis")):
+            if any(k in combined for k in ("drugs", "narcotics", "cannabis")) and "pills" not in name:
                 return False, ModerationCategory.DRUGS_OR_NARCOTICS, name
             if any(k in combined for k in ("weapons", "weapon", "firearm", "graphic violence", "gore", "corpses")):
                 return False, ModerationCategory.WEAPONS_OR_VIOLENCE, name
@@ -435,11 +439,15 @@ def _check_with_openrouter_vision(image_bytes: bytes) -> Optional[Tuple[bool, st
             '{"allowed": true|false, "category": "SAFE"|"NUDITY_OR_SEXUAL"|"ADULT_TOYS"|"TOBACCO_OR_VAPE"|"DRUGS_OR_NARCOTICS"|"WEAPONS_OR_VIOLENCE"}\n'
             "Marca allowed=false si la imagen muestra cualquiera de estos elementos:\n"
             "1. NUDITY_OR_SEXUAL: Desnudez humana, genitales (pene, vagina), pezones femeninos descubiertos, glúteos desnudos explícitos, pornografía o actos sexuales.\n"
-            "2. ADULT_TOYS: Juguetes sexuales, consoladores, dildos, vibradores sexuales, muñecas sexuales o artículos de sex-shop.\n"
+            "2. ADULT_TOYS: Juguetes sexuales, consoladores, dildos, vibradores sexuales, muñecas sexuales o artículos eróticos de sex-shop con formas fálicas/anatómicas.\n"
             "3. TOBACCO_OR_VAPE: Cigarrillos, cajetillas de cigarros, tabaco, vapers, cigarrillos electrónicos, pods de nicotina o narguiles/hookahs.\n"
             "4. DRUGS_OR_NARCOTICS: Marihuana, cannabis, cocaína, pastillas ilícitas, drogas o bongs.\n"
             "5. WEAPONS_OR_VIOLENCE: Armas de fuego reales (pistolas, rifles, escopetas), municiones reales, explosivos o violencia sangrienta.\n"
-            "Para cualquier otro producto comercial normal (comida, ropa, calzado, electrónica, hogar, repuestos, cosméticos, etc.), responde allowed=true y category='SAFE'."
+            "EXCEPCIÓN DE FARMACIA Y SALUD SEXUAL (PERMITIDO): Los productos farmacéuticos de Salud Sexual y Planificación Familiar en su empaque comercial "
+            "(cajas de preservativos/condones como Durex/Prudence/Duo, geles y lubricantes íntimos de farmacia como K-Y, pruebas de embarazo como Clearblue, "
+            "pastillas anticonceptivas, óvulos, copas menstruales y jabones de higiene íntima) SÍ están permitidos: para ellos responde allowed=true y category='SAFE' "
+            "siempre que no muestren desnudez humana ni juguetes sexuales.\n"
+            "Para cualquier otro producto comercial normal (comida, ropa, calzado, electrónica, hogar, repuestos, cosméticos, farmacia, etc.), responde allowed=true y category='SAFE'."
         )
 
         resp = requests.post(
