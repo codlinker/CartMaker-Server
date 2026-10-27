@@ -533,13 +533,17 @@ class Command(BaseCommand):
             malls_data = json.load(f)
 
         existing_malls = set(Mall.objects.values_list('name', flat=True))
+        official_mall_names = set()
         malls_to_create = []
 
         for estado, ciudades in malls_data.items():
             for ciudad, malls in ciudades.items():
                 for mall in malls:
-                    # Si el nombre ya existe en la BD, lo saltamos automáticamente
-                    if mall['name'] in existing_malls:
+                    mall_name = (mall.get('name') or '').strip()[:60]
+                    if not mall_name:
+                        continue
+                    official_mall_names.add(mall_name)
+                    if mall_name in existing_malls:
                         continue
                     
                     if mall.get('lat') and mall.get('lng'):
@@ -550,13 +554,14 @@ class Command(BaseCommand):
                             
                             malls_to_create.append(
                                 Mall(
-                                    name=mall['name'],
+                                    name=mall_name,
                                     coordinates=ubicacion,
-                                    floors_quantity=mall['floors_quantity'],
+                                    floors_quantity=mall.get('floors_quantity', 1) or 1,
                                 )
                             )
+                            existing_malls.add(mall_name)
                         except (ValueError, TypeError):
-                            self.stdout.write(self.style.WARNING(f"  [!] Error en coordenadas para: {mall['name']}. Saltando..."))
+                            self.stdout.write(self.style.WARNING(f"  [!] Error en coordenadas para: {mall_name}. Saltando..."))
                             continue
 
         if malls_to_create:
@@ -564,4 +569,12 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(f'  [+] Se crearon {len(malls_to_create)} registros en Mall.'))
         else:
             self.stdout.write(self.style.WARNING('  [-] Sin cambios en Mall. Los registros ya existen o no tienen coordenadas válidas.'))
+
+        obsolete_malls_deleted, _ = (
+            Mall.objects.exclude(name__in=official_mall_names)
+            .filter(stores__isnull=True)
+            .delete()
+        )
+        if obsolete_malls_deleted:
+            self.stdout.write(self.style.SUCCESS(f'  [+] Se limpiaron {obsolete_malls_deleted} registros obsoletos de Mall sin tiendas asociadas.'))
         cache.delete("cartmaker:global:malls")
