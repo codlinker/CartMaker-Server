@@ -251,6 +251,7 @@ Catálogo oficial (Categorías y Subcategorías):
    -> Deduce de inmediato 2 a 4 productos concretos y llama a `buscar_productos_inventario` EN PARALELO en el mismo turno.
 3. Si el usuario quiere cocinar un plato ("pabellón", "empanadas", "parrilla"), hacer mercado, cubrir un evento o ajustar varios productos a un presupuesto ("tengo $20"):
    -> Llama a `armar_lista_o_receta` con los ingredientes/artículos y `presupuesto_max_usd` si aplica.
+   -> Al responder, di ÚNICAMENTE lo que trae el plan (total_usd, dentro_presupuesto, sin_stock, recortados_por_presupuesto). Si `dentro_presupuesto` es false o hay `recortados_por_presupuesto`, dilo con claridad y con cifras reales; JAMÁS digas que "se pasó un poco" ni inventes productos que no estén en el plan. Si casi todo está en `sin_stock`, admite que en la zona no hay esos productos en vez de maquillar el resultado.
 4. Si la herramienta indica `transicion_zona` (no había stock en su zona actual pero sí se consiguió en una de sus ubicaciones guardadas o en otra zona cercana):
    -> Menciona con naturalidad que en su zona actual no había stock pero ya le moviste el radar hacia la zona donde sí hay disponibilidad.
 5. Si el producto tiene descuento desbloqueable con los tokens del usuario (`token_deal`) o video reel (`reel:sí`), destácalo en una frase corta porque eso le ahorra dinero real o le permite ver el producto en video.
@@ -950,7 +951,9 @@ Catálogo oficial (Categorías y Subcategorías):
             quick_actions.append({
                 'id': f"route_{primary_store['store_id']}",
                 'type': 'ANIMATE_MAP_ROUTE',
-                'label': f"📍 Ir a {primary_store['store_name']}",
+                'label': f"📍 Ir a {primary_store['company_name']}" if (
+                    str(primary_store.get('store_name') or '').lower().startswith('sucursal') and primary_store.get('company_name')
+                ) else f"📍 Ir a {primary_store['store_name']}",
                 'icon': 'map_pin',
                 'payload': {
                     'store_id': primary_store['store_id'],
@@ -1310,6 +1313,20 @@ Catálogo oficial (Categorías y Subcategorías):
                                     "total_usd": plan.get('estimated_total_usd', 0.0),
                                     "total_con_tokens_usd": plan.get('estimated_total_with_tokens_usd', 0.0),
                                     "dentro_presupuesto": plan.get('within_budget', True),
+                                    "presupuesto_usd": plan.get('budget_usd'),
+                                    "excedente_usd": (
+                                        round(-float(plan['budget_remaining_usd']), 2)
+                                        if plan.get('budget_remaining_usd') is not None and plan['budget_remaining_usd'] < 0
+                                        else 0.0
+                                    ),
+                                    "recortados_por_presupuesto": [
+                                        f"{x.get('item_name')} (${x.get('subtotal_usd')})"
+                                        for x in plan.get('dropped_for_budget', [])
+                                    ],
+                                    "productos_en_plan": [
+                                        f"{x.get('product_name')} x{x.get('recommended_quantity'):g} = ${x.get('subtotal_usd')}"
+                                        for x in plan.get('items_plan', [])
+                                    ],
                                 }
                             }
 

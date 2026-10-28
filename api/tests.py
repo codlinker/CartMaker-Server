@@ -669,3 +669,43 @@ class HomeSeasonsCatalogConsistencyTests(SimpleTestCase):
         }
         for (y, m, d, h), expected in cases.items():
             self.assertEqual(resolve_active_campaign(datetime(y, m, d, h))["id"], expected, (y, m, d, h))
+
+
+class AtlasShoppingListRegressionTests(SimpleTestCase):
+    """Regresiones del armado de mercado de Atlas (cantidades, variantes y relevancia)."""
+
+    def test_weight_on_unit_product_is_one_package_not_250_units(self):
+        from api.core.product_search_engine import ProductSearchEngine as E
+        unit_product = {'selling_unit': 'unit', 'allow_fractional_quantity': False, 'min_order_quantity': 1}
+        self.assertEqual(E._parse_requested_quantity('250g', unit_product), 1.0)
+        self.assertEqual(E._parse_requested_quantity('1 litro', unit_product), 1.0)
+        self.assertEqual(E._parse_requested_quantity('500 ml', unit_product), 1.0)
+        self.assertEqual(E._parse_requested_quantity('3', unit_product), 3.0)
+        self.assertEqual(E._parse_requested_quantity('9999', unit_product), 24.0)
+
+    def test_weight_on_kg_product_still_converts(self):
+        from api.core.product_search_engine import ProductSearchEngine as E
+        kg_product = {'selling_unit': 'kg', 'allow_fractional_quantity': True, 'min_order_quantity': 0.25}
+        self.assertEqual(E._parse_requested_quantity('500g', kg_product), 0.5)
+        self.assertEqual(E._parse_requested_quantity('1 kg', kg_product), 1.0)
+
+    def test_variant_matching_ignores_noise_tokens(self):
+        from api.core.product_search_engine import ProductSearchEngine as E
+        product = {'variants': [
+            {'id': 'a', 'name': '100 cm', 'options': {'variant': '100 cm'}, 'is_available': True},
+            {'id': 'b', 'name': 'Individual / Solo colchón', 'options': {'bed_size': 'Individual'}, 'is_available': True},
+        ]}
+        # '1 unidad' no debe elegir '100 cm' ni 'jamón' (partido en 'jam'+'n') elegir 'colchón'
+        self.assertIsNone(E._match_variant_for_query(product, 'atún enlatado', '1 unidad'))
+        self.assertIsNone(E._match_variant_for_query(product, 'jamón de espalda', '250g'))
+        self.assertEqual(E._match_variant_for_query(product, 'colchón individual', '')['id'], 'b')
+
+    def test_name_relevance_needs_head_noun_not_description_or_synonyms(self):
+        from api.core.product_search_engine import ProductSearchEngine as E
+        mirror = {'product': {'name': 'Espejo Redondo Decorativo 80 cm Marco Dorado',
+                              'category': {'name': 'Decoración, Cuadros y Espejos'}}}
+        tuna = {'product': {'name': 'Atún en Aceite 170 g', 'category': {'name': 'Enlatados y Conservas'}}}
+        sardine = {'product': {'name': 'Sardinas en Salsa de Tomate', 'category': {'name': 'Enlatados y Conservas'}}}
+        self.assertFalse(E._candidate_name_matches_need(mirror, 'atún enlatado'))
+        self.assertTrue(E._candidate_name_matches_need(tuna, 'atún enlatado'))
+        self.assertFalse(E._candidate_name_matches_need(sardine, 'atún enlatado'))

@@ -18,6 +18,7 @@ from django.core.cache import cache
 from api.models import *
 from api.core.ve_commerce_lexicon import (
     expand_search_variants,
+    tokenize_query,
     significant_tokens,
     is_short_term,
     word_boundary_regex,
@@ -1194,17 +1195,31 @@ class ProductSearchEngine:
         variants = product_json.get('variants') or []
         if not variants or not isinstance(variants, list):
             return None
-        combined = f"{query or ''} {attr_filter or ''}".strip().lower()
+        combined = f"{query or ''} {attr_filter or ''}".strip()
         if not combined:
             return None
-        tokens = [t for t in re.findall(r'[a-z0-9ñ.]+', combined) if len(t) >= 1]
+        # Se pliegan tildes ('jamón' -> 'jamon') para no partir palabras en fragmentos de 1 letra
+        # y se exige palabra completa: '1' ya no coincide con '100 cm', ni 'n' con 'colchón'.
+        folded = combined.lower()
+        for src, dst in (('á', 'a'), ('é', 'e'), ('í', 'i'), ('ó', 'o'), ('ú', 'u'), ('ü', 'u'), ('ñ', 'n')):
+            folded = folded.replace(src, dst)
+        ignore = {'unidad', 'unidades', 'und', 'un', 'una', 'uno', 'de', 'del', 'la', 'el', 'en', 'con', 'para', 'por', 'y'}
+        tokens = [
+            t for t in re.findall(r'[a-z0-9.]+', folded)
+            if t not in ignore and (len(t) >= 3 or t.isdigit() and len(t) >= 2 or t in ('xl', 'xs', 'xxl', 'kg', 'gr', 'ml', 'lt', 'm', 'l', 's'))
+        ]
+        if not tokens:
+            return None
         best_var = None
         best_hits = 0
         for v in variants:
             if not isinstance(v, dict) or not v.get('is_available', True):
                 continue
             v_text = f"{v.get('name', '')} {' '.join(str(val) for val in (v.get('options') or {}).values())}".lower()
-            hits = sum(1 for t in tokens if t in v_text)
+            for src, dst in (('á', 'a'), ('é', 'e'), ('í', 'i'), ('ó', 'o'), ('ú', 'u'), ('ü', 'u'), ('ñ', 'n')):
+                v_text = v_text.replace(src, dst)
+            v_words = set(re.findall(r'[a-z0-9.]+', v_text))
+            hits = sum(1 for t in tokens if t in v_words)
             if hits > best_hits:
                 best_hits = hits
                 best_var = v
@@ -1877,9 +1892,12 @@ class ProductSearchEngine:
             mall_name = display_mall_name(mall.name)
             mall_floor = location.mall_floor
         else:
-            nearby_mall = find_mall_near(coordinates.y, coordinates.x)
-            if nearby_mall:
-                mall_name = nearby_mall['name']
+            # Solo se deduce centro comercial por cercanía para tiendas que SÍ están en un C.C.
+            # Un local a pie de calle cerca de un mall (ej. Calle Madrid ~ Ceres) NO está dentro de él.
+            if getattr(item.store, 'store_type', None) == StoreType.IN_MALL:
+                nearby_mall = find_mall_near(coordinates.y, coordinates.x)
+                if nearby_mall:
+                    mall_name = nearby_mall['name']
         return {
             'zone': describe_zone(coordinates.y, coordinates.x),
             'address': (location.name or '').strip() or None,
@@ -1976,6 +1994,13 @@ class ProductSearchEngine:
             return min_qty if allow_frac else max(1.0, round(min_qty))
 
         raw = str(qty_str).strip().lower().replace(',', '.')
+
+        # "250g" / "500 ml" / "1 litro" sobre un producto que se vende por UNIDAD describe el tamaño
+        # del empaque, no el número de unidades: antes se interpretaba como 250 unidades.
+        has_measure = bool(re.search(r'\d\s*(kg|kilos?|gr?|gramos?|ml|lts?|litros?|l|lb|libras?|oz|onzas?|cm|mm|m)\b', raw))
+        if has_measure and selling_unit in ('unit', 'und', 'unidad', ''):
+            return float(max(1, round(min_qty))) if not allow_frac else float(max(1.0, min_qty))
+
         if 'medio' in raw or '1/2' in raw:
             num = 0.5
         elif 'cuarto' in raw or '1/4' in raw:
@@ -1993,8 +2018,33 @@ class ProductSearchEngine:
             num = round(num / 1000.0, 3)
 
         if not allow_frac:
-            return float(max(1, int(round(num))))
+            # Tope de cordura: ningún mercado/receta pide más de 24 unidades de un mismo artículo.
+            return float(min(24, max(1, int(round(num)))))
         return float(max(min_qty, round(num, 3)))
+
+    @staticmethod
+    def _candidate_name_matches_need(candidate: dict, query: str) -> bool:
+        product = candidate.get('product') or {}
+        category = product.get('category') or {}
+        texts = [
+            product.get('name') or candidate.get('name'),
+            category.get('name'),
+            category.get('parent_category_name'),
+        ]
+        # Solo palabras literales del pedido (sin sinónimos del léxico): 'atún' ~ 'dorado' (pez) haría
+        # coincidir un 'Espejo con Marco Dorado'. Los sinónimos siguen valiendo en la búsqueda normal.
+        # Se exige la frase completa o el SUSTANTIVO PRINCIPAL (primera palabra significativa:
+        # 'atún enlatado' -> 'atún'), así 'enlatado' solo no convierte unas sardinas en atún.
+        phrase = str(query or '').strip()
+        tokens = tokenize_query(query)
+        terms = [phrase] if phrase else []
+        if tokens:
+            head = tokens[0]
+            terms.append(head)
+            terms.append(head + 's')
+            if head.endswith('s') and len(head) > 4:
+                terms.append(head[:-1])
+        return lexical_match(texts, terms)
 
     def resolve_shopping_list(
         self,
@@ -2028,6 +2078,9 @@ class ProductSearchEngine:
                 location_label=location_label,
                 mode=mode,
             )
+            # Para listas de compras la coincidencia debe estar en el NOMBRE o la CATEGORÍA del producto
+            # (no basta una palabra suelta en la descripción: 'espalda' no convierte un colchón en jamón).
+            candidates = [c for c in candidates if self._candidate_name_matches_need(c, query)]
             buckets.append({'query': query, 'cantidad': qty, 'candidates': candidates})
 
         store_coverage = {}
@@ -2117,18 +2170,38 @@ class ProductSearchEngine:
         total_with_tokens_usd = 0.0
         stops_map = {}
 
+        # 1) Calcular cada línea del plan (cantidad, variante, precio) sin agregarla todavía.
+        lines = []
+        seen_line_ids = set()
         for item in found_items:
             item_id_str = str(item['id'])
+            if item_id_str in seen_line_ids:
+                continue
+            seen_line_ids.add(item_id_str)
             need_query, raw_qty_str = need_qty_by_item_id.get(item_id_str, (item.get('match_query', ''), ''))
             prod_json = item.get('product') or {}
             matched_var = self._match_variant_for_query(prod_json, need_query, raw_qty_str)
             qty_val = self._parse_requested_quantity(raw_qty_str, prod_json)
 
-            unit_price = float(
-                matched_var.get('price')
-                if (matched_var and matched_var.get('price') is not None)
-                else (item.get('effective_price') or 0.0)
-            )
+            # Nunca pedir más unidades que el stock disponible del comercio.
+            try:
+                stock_val = item.get('stock')
+                if stock_val is None:
+                    stock_val = prod_json.get('stock')
+                if matched_var and matched_var.get('stock') is not None:
+                    stock_val = matched_var.get('stock')
+                if stock_val is not None and float(stock_val) > 0:
+                    qty_val = float(min(qty_val, float(stock_val)))
+            except (TypeError, ValueError):
+                pass
+
+            # Una variante con precio 0/ausente es un dato incompleto del comercio: se usa el precio del ítem.
+            var_price = matched_var.get('price') if matched_var else None
+            try:
+                var_price = float(var_price) if var_price is not None else None
+            except (TypeError, ValueError):
+                var_price = None
+            unit_price = float(var_price if (var_price is not None and var_price > 0) else (item.get('effective_price') or 0.0))
             line_subtotal = round(unit_price * qty_val, 2)
 
             tok_opp = item.get('token_opportunity') or {}
@@ -2136,11 +2209,58 @@ class ProductSearchEngine:
             line_token_savings = float(best_tok['savings_usd']) if best_tok else 0.0
             line_net_with_tokens = round(max(0.0, line_subtotal - line_token_savings), 2)
 
+            lines.append({
+                'item': item,
+                'item_id_str': item_id_str,
+                'need_query': need_query,
+                'raw_qty_str': raw_qty_str,
+                'prod_json': prod_json,
+                'matched_var': matched_var,
+                'qty_val': qty_val,
+                'unit_price': unit_price,
+                'subtotal': line_subtotal,
+                'net_tokens': line_net_with_tokens,
+                'best_tok': best_tok,
+            })
+
+        # 2) Ajuste a presupuesto: si el plan lo excede, se descartan las líneas más caras
+        #    (siempre quedando al menos 1) y se informa cuáles se recortaron.
+        dropped_for_budget = []
+        if budget_usd is not None:
+            try:
+                budget_cap = float(budget_usd)
+            except (TypeError, ValueError):
+                budget_cap = None
+            if budget_cap is not None and budget_cap > 0:
+                while len(lines) > 1 and sum(l['subtotal'] for l in lines) > budget_cap:
+                    worst = max(lines, key=lambda l: l['subtotal'])
+                    lines.remove(worst)
+                    dropped_for_budget.append({
+                        'query': worst['need_query'],
+                        'item_name': worst['prod_json'].get('name', ''),
+                        'subtotal_usd': worst['subtotal'],
+                    })
+                kept_ids = {l['item_id_str'] for l in lines}
+                found_items = [it for it in found_items if str(it['id']) in kept_ids]
+
+        # 3) Armar plan, paradas y lotes 1-Tap Cart con las líneas finales.
+        for ln in lines:
+            item = ln['item']
+            item_id_str = ln['item_id_str']
+            prod_json = ln['prod_json']
+            matched_var = ln['matched_var']
+            best_tok = ln['best_tok']
+            qty_val = ln['qty_val']
+            raw_qty_str = ln['raw_qty_str']
+            unit_price = ln['unit_price']
+            line_subtotal = ln['subtotal']
+            line_net_with_tokens = ln['net_tokens']
+
             total_usd = round(total_usd + line_subtotal, 2)
             total_with_tokens_usd = round(total_with_tokens_usd + line_net_with_tokens, 2)
 
             plan_entry = {
-                'need_query': need_query,
+                'need_query': ln['need_query'],
                 'requested_amount_text': raw_qty_str or f"{qty_val:g} {prod_json.get('unit_label', 'und')}",
                 'inventory_item_id': item_id_str,
                 'product_id': str(prod_json.get('id', '')),
@@ -2189,6 +2309,18 @@ class ProductSearchEngine:
                     if best_tok else None
                 ),
                 'isFromAtlas': True,
+                # Datos de presentación para que la tarjeta "Combo Inteligente" no dependa de re-consultar.
+                'name': plan_entry['product_name'],
+                'product_name': plan_entry['product_name'],
+                'image': plan_entry['product_image'],
+                'store_name': item.get('company_name') or item.get('store_name'),
+                'company_name': item.get('company_name'),
+                'unit_label': plan_entry['unit_label'],
+                'unit_price': plan_entry['unit_price_usd'],
+                'unit_price_usd': plan_entry['unit_price_usd'],
+                'price': plan_entry['unit_price_usd'],
+                'subtotal': line_subtotal,
+                'subtotal_usd': line_subtotal,
             })
 
         # Ordenar las paradas geográficamente desde la más cercana hasta la más lejana
@@ -2252,6 +2384,7 @@ class ProductSearchEngine:
             'budget_usd': float(budget_usd) if budget_usd is not None else None,
             'within_budget': within_budget,
             'budget_remaining_usd': round(float(budget_usd) - total_usd, 2) if budget_usd is not None else None,
+            'dropped_for_budget': dropped_for_budget,
             'injected': injected[:16],
             'needs': [{'query': b['query'], 'cantidad': b.get('cantidad', '')} for b in buckets],
         }
