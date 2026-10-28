@@ -1,0 +1,1258 @@
+[
+ {
+  "company": "soy-techno",
+  "kind": "logo",
+  "file": "soy-techno/_logo.jpg",
+  "prompt": "minimal modern circular logo icon for a smartphone store called Soy Techno, stylized phone with a smile, electric blue and white, flat vector design, centered, plain background, no text except optional tiny brand initials",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "store",
+  "file": "soy-techno/_store.jpg",
+  "prompt": "photograph of a modern small smartphone store front on a Caracas city street, glass windows with phones on display, blue illuminated sign without readable text, daytime, realistic",
+  "aspect": "4:3"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "iphone-15-128",
+  "name": "iPhone 15 128 GB",
+  "n": 1,
+  "file": "soy-techno/iphone-15-128_1.jpg",
+  "prompt": "professional e-commerce product photograph, a brand new smartphone similar to an iPhone 15 in blue color, front and back view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "iphone-15-128",
+  "name": "iPhone 15 128 GB",
+  "n": 2,
+  "file": "soy-techno/iphone-15-128_2.jpg",
+  "prompt": "close-up of the dual camera module of a modern premium smartphone, pastel blue aluminum frame, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "galaxy-s24-256",
+  "name": "Samsung Galaxy S24 256 GB",
+  "n": 1,
+  "file": "soy-techno/galaxy-s24-256_1.jpg",
+  "prompt": "professional e-commerce product photograph, a modern flagship Android smartphone in violet color, front and back view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "galaxy-s24-256",
+  "name": "Samsung Galaxy S24 256 GB",
+  "n": 2,
+  "file": "soy-techno/galaxy-s24-256_2.jpg",
+  "prompt": "flagship Android smartphone held in a hand, bright AMOLED screen showing colorful abstract wallpaper, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "redmi-note-13-pro",
+  "name": "Xiaomi Redmi Note 13 Pro 256 GB",
+  "n": 1,
+  "file": "soy-techno/redmi-note-13-pro_1.jpg",
+  "prompt": "professional e-commerce product photograph, a mid-range Android smartphone in midnight black, large camera module, front and back view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "redmi-note-13-pro",
+  "name": "Xiaomi Redmi Note 13 Pro 256 GB",
+  "n": 2,
+  "file": "soy-techno/redmi-note-13-pro_2.jpg",
+  "prompt": "mid-range smartphone showing camera app, taking a photo of a colorful city street, bokeh background, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "tecno-spark-20-pro",
+  "name": "Tecno Spark 20 Pro 256 GB",
+  "n": 1,
+  "file": "soy-techno/tecno-spark-20-pro_1.jpg",
+  "prompt": "professional e-commerce product photograph, an affordable Android smartphone in green color, large display, front and back view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "tecno-spark-20-pro",
+  "name": "Tecno Spark 20 Pro 256 GB",
+  "n": 2,
+  "file": "soy-techno/tecno-spark-20-pro_2.jpg",
+  "prompt": "affordable smartphone lying on a wooden desk next to earbuds and a coffee cup, top view, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "moto-g54-5g",
+  "name": "Motorola Moto G54 5G 128 GB",
+  "n": 1,
+  "file": "soy-techno/moto-g54-5g_1.jpg",
+  "prompt": "professional e-commerce product photograph, a 5G Android smartphone in pearl blue color, front and back view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "moto-g54-5g",
+  "name": "Motorola Moto G54 5G 128 GB",
+  "n": 2,
+  "file": "soy-techno/moto-g54-5g_2.jpg",
+  "prompt": "5G smartphone with large battery concept, lifestyle photo with a person using it outdoors, soft light, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "ipad-10-64",
+  "name": "iPad 10.ª generación 64 GB Wi-Fi",
+  "n": 1,
+  "file": "soy-techno/ipad-10-64_1.jpg",
+  "prompt": "professional e-commerce product photograph, a modern 10.9 inch tablet in silver color, front view with colorful home screen, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "ipad-10-64",
+  "name": "iPad 10.ª generación 64 GB Wi-Fi",
+  "n": 2,
+  "file": "soy-techno/ipad-10-64_2.jpg",
+  "prompt": "tablet on a desk with a stylus and notebook, student working, soft window light, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "audifonos-tws-pro",
+  "name": "Audífonos Inalámbricos TWS Pro con Cancelación de Ruido",
+  "n": 1,
+  "file": "soy-techno/audifonos-tws-pro_1.jpg",
+  "prompt": "professional e-commerce product photograph, a pair of white true wireless earbuds with a charging case open, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "audifonos-tws-pro",
+  "name": "Audífonos Inalámbricos TWS Pro con Cancelación de Ruido",
+  "n": 2,
+  "file": "soy-techno/audifonos-tws-pro_2.jpg",
+  "prompt": "wireless earbuds in a charging case on a marble surface, soft light, minimalist, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "powerbank-20000",
+  "name": "Powerbank 20.000 mAh Carga Rápida 22.5W",
+  "n": 1,
+  "file": "soy-techno/powerbank-20000_1.jpg",
+  "prompt": "professional e-commerce product photograph, a slim black 20000mAh power bank with digital LED display and USB cable, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "powerbank-20000",
+  "name": "Powerbank 20.000 mAh Carga Rápida 22.5W",
+  "n": 2,
+  "file": "soy-techno/powerbank-20000_2.jpg",
+  "prompt": "power bank charging a smartphone on a desk, cable connected, warm light, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "cargador-gan-65w",
+  "name": "Cargador Rápido GaN 65W USB-C + USB-A",
+  "n": 1,
+  "file": "soy-techno/cargador-gan-65w_1.jpg",
+  "prompt": "professional e-commerce product photograph, a compact white GaN 65W wall charger with USB-C and USB-A ports, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "cargador-gan-65w",
+  "name": "Cargador Rápido GaN 65W USB-C + USB-A",
+  "n": 2,
+  "file": "soy-techno/cargador-gan-65w_2.jpg",
+  "prompt": "compact fast wall charger plugged into a socket charging a laptop and a phone, desk scene, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "cable-usbc-pack2",
+  "name": "Pack 2 Cables USB-C Trenzados 1 m Carga Rápida",
+  "n": 1,
+  "file": "soy-techno/cable-usbc-pack2_1.jpg",
+  "prompt": "professional e-commerce product photograph, two braided USB-C charging cables coiled neatly, one black and one gray, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "cable-usbc-pack2",
+  "name": "Pack 2 Cables USB-C Trenzados 1 m Carga Rápida",
+  "n": 2,
+  "file": "soy-techno/cable-usbc-pack2_2.jpg",
+  "prompt": "braided USB-C cable plugged into a smartphone, close-up of the connector, soft light, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "amazfit-bip-5",
+  "name": "Smartwatch Amazfit Bip 5",
+  "n": 1,
+  "file": "soy-techno/amazfit-bip-5_1.jpg",
+  "prompt": "professional e-commerce product photograph, a modern black smartwatch with large square display showing a colorful watch face, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "amazfit-bip-5",
+  "name": "Smartwatch Amazfit Bip 5",
+  "n": 2,
+  "file": "soy-techno/amazfit-bip-5_2.jpg",
+  "prompt": "smartwatch on the wrist of a runner, outdoor park, motion, natural light, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "ssd-nvme-1tb",
+  "name": "SSD NVMe M.2 1 TB Kingston NV2",
+  "n": 1,
+  "file": "soy-techno/ssd-nvme-1tb_1.jpg",
+  "prompt": "professional e-commerce product photograph, an M.2 NVMe SSD stick with a black PCB and a sticker label, no readable text, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "ssd-nvme-1tb",
+  "name": "SSD NVMe M.2 1 TB Kingston NV2",
+  "n": 2,
+  "file": "soy-techno/ssd-nvme-1tb_2.jpg",
+  "prompt": "M.2 NVMe SSD being installed into a laptop motherboard, macro shot, technician hands, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "pendrive-128gb",
+  "name": "Pendrive 128 GB USB 3.2 SanDisk Ultra",
+  "n": 1,
+  "file": "soy-techno/pendrive-128gb_1.jpg",
+  "prompt": "professional e-commerce product photograph, a small black and red USB flash drive with sliding connector, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "pendrive-128gb",
+  "name": "Pendrive 128 GB USB 3.2 SanDisk Ultra",
+  "n": 2,
+  "file": "soy-techno/pendrive-128gb_2.jpg",
+  "prompt": "USB flash drive plugged into a laptop USB port, close-up, desk, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "combo-teclado-mouse",
+  "name": "Combo Teclado y Mouse Inalámbrico",
+  "n": 1,
+  "file": "soy-techno/combo-teclado-mouse_1.jpg",
+  "prompt": "professional e-commerce product photograph, a black wireless keyboard and a matching ergonomic wireless mouse, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "combo-teclado-mouse",
+  "name": "Combo Teclado y Mouse Inalámbrico",
+  "n": 2,
+  "file": "soy-techno/combo-teclado-mouse_2.jpg",
+  "prompt": "wireless keyboard and mouse on a tidy home office desk with a laptop, top view, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "router-wifi6-ax1800",
+  "name": "Router Wi-Fi 6 AX1800 Doble Banda",
+  "n": 1,
+  "file": "soy-techno/router-wifi6-ax1800_1.jpg",
+  "prompt": "professional e-commerce product photograph, a white Wi-Fi 6 router with four antennas, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "soy-techno",
+  "kind": "product",
+  "slug": "router-wifi6-ax1800",
+  "name": "Router Wi-Fi 6 AX1800 Doble Banda",
+  "n": 2,
+  "file": "soy-techno/router-wifi6-ax1800_2.jpg",
+  "prompt": "white Wi-Fi router on a shelf in a bright living room, subtle blue status lights, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "logo",
+  "file": "epa/_logo.jpg",
+  "prompt": "bold flat vector logo icon for a hardware store called EPA, crossed hammer and wrench inside a hexagon, safety orange and dark gray, centered, plain background, no text",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "store",
+  "file": "epa/_store.jpg",
+  "prompt": "photograph of a hardware store (ferretería) front on a busy Caracas avenue, tools and paint buckets displayed outside, orange awning without readable text, daytime, realistic",
+  "aspect": "4:3"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "taladro-percutor-13mm",
+  "name": "Taladro Percutor 13 mm 650 W",
+  "n": 1,
+  "file": "epa/taladro-percutor-13mm_1.jpg",
+  "prompt": "professional e-commerce product photograph, a corded electric hammer drill in blue and black with side handle, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "taladro-percutor-13mm",
+  "name": "Taladro Percutor 13 mm 650 W",
+  "n": 2,
+  "file": "epa/taladro-percutor-13mm_2.jpg",
+  "prompt": "electric drill drilling into a concrete wall, dust particles, workshop light, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "esmeril-angular-4-5",
+  "name": "Esmeril Angular 4½\" 850 W",
+  "n": 1,
+  "file": "epa/esmeril-angular-4-5_1.jpg",
+  "prompt": "professional e-commerce product photograph, a corded angle grinder with side handle, yellow and black body, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "esmeril-angular-4-5",
+  "name": "Esmeril Angular 4½\" 850 W",
+  "n": 2,
+  "file": "epa/esmeril-angular-4-5_2.jpg",
+  "prompt": "angle grinder cutting metal with bright sparks flying, safety gloves, dark workshop, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "taladro-inalambrico-20v",
+  "name": "Taladro Atornillador Inalámbrico 20V con 2 Baterías",
+  "n": 1,
+  "file": "epa/taladro-inalambrico-20v_1.jpg",
+  "prompt": "professional e-commerce product photograph, a cordless drill driver 20V with two batteries, charger and carrying case open, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "taladro-inalambrico-20v",
+  "name": "Taladro Atornillador Inalámbrico 20V con 2 Baterías",
+  "n": 2,
+  "file": "epa/taladro-inalambrico-20v_2.jpg",
+  "prompt": "cordless drill screwing a screw into wood plank, workbench, warm light, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "llaves-combinadas-12",
+  "name": "Juego de Llaves Combinadas 12 Piezas (8-19 mm)",
+  "n": 1,
+  "file": "epa/llaves-combinadas-12_1.jpg",
+  "prompt": "professional e-commerce product photograph, a set of twelve chrome vanadium combination wrenches arranged in a fan shape, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "llaves-combinadas-12",
+  "name": "Juego de Llaves Combinadas 12 Piezas (8-19 mm)",
+  "n": 2,
+  "file": "epa/llaves-combinadas-12_2.jpg",
+  "prompt": "combination wrenches in a rolled canvas pouch on a wooden workbench, top view, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "martillo-una-16oz",
+  "name": "Martillo de Uña 16 oz Mango de Fibra",
+  "n": 1,
+  "file": "epa/martillo-una-16oz_1.jpg",
+  "prompt": "professional e-commerce product photograph, a claw hammer with a fiberglass handle with black rubber grip, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "martillo-una-16oz",
+  "name": "Martillo de Uña 16 oz Mango de Fibra",
+  "n": 2,
+  "file": "epa/martillo-una-16oz_2.jpg",
+  "prompt": "claw hammer and a few nails on a rustic wooden plank, close-up, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "kit-herramientas-120",
+  "name": "Kit de Herramientas 120 Piezas con Maletín",
+  "n": 1,
+  "file": "epa/kit-herramientas-120_1.jpg",
+  "prompt": "professional e-commerce product photograph, a large open red and black toolbox case with 120 piece socket and tool set neatly organized, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "kit-herramientas-120",
+  "name": "Kit de Herramientas 120 Piezas con Maletín",
+  "n": 2,
+  "file": "epa/kit-herramientas-120_2.jpg",
+  "prompt": "tool kit case open on a garage floor with sockets and screwdrivers, overhead view, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "cinta-metrica-5m",
+  "name": "Cinta Métrica 5 m x 19 mm",
+  "n": 1,
+  "file": "epa/cinta-metrica-5m_1.jpg",
+  "prompt": "professional e-commerce product photograph, a yellow tape measure with locking button and belt clip, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "cinta-metrica-5m",
+  "name": "Cinta Métrica 5 m x 19 mm",
+  "n": 2,
+  "file": "epa/cinta-metrica-5m_2.jpg",
+  "prompt": "tape measure being pulled out over a wooden board, close-up with metric markings, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "cable-thhn-12",
+  "name": "Cable Eléctrico THHN #12 AWG (por metro)",
+  "n": 1,
+  "file": "epa/cable-thhn-12_1.jpg",
+  "prompt": "professional e-commerce product photograph, a coil of black insulated electrical copper wire, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "cable-thhn-12",
+  "name": "Cable Eléctrico THHN #12 AWG (por metro)",
+  "n": 2,
+  "file": "epa/cable-thhn-12_2.jpg",
+  "prompt": "colored electrical wires red black white green coiled together, close-up, workshop, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "breaker-1p",
+  "name": "Breaker Termomagnético 1 Polo",
+  "n": 1,
+  "file": "epa/breaker-1p_1.jpg",
+  "prompt": "professional e-commerce product photograph, a white single pole circuit breaker DIN rail mount, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "breaker-1p",
+  "name": "Breaker Termomagnético 1 Polo",
+  "n": 2,
+  "file": "epa/breaker-1p_2.jpg",
+  "prompt": "electrical panel with several circuit breakers installed, close-up, technician hand, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "bombillo-led-9w-x4",
+  "name": "Bombillo LED 9 W E27 (Pack x4)",
+  "n": 1,
+  "file": "epa/bombillo-led-9w-x4_1.jpg",
+  "prompt": "professional e-commerce product photograph, four LED light bulbs E27 arranged in a row, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "bombillo-led-9w-x4",
+  "name": "Bombillo LED 9 W E27 (Pack x4)",
+  "n": 2,
+  "file": "epa/bombillo-led-9w-x4_2.jpg",
+  "prompt": "warm glowing LED bulb in a ceiling socket lighting a cozy room, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "reflector-led-50w",
+  "name": "Reflector LED 50 W IP65 Exterior",
+  "n": 1,
+  "file": "epa/reflector-led-50w_1.jpg",
+  "prompt": "professional e-commerce product photograph, a flat rectangular LED floodlight 50W with aluminum housing and bracket, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "reflector-led-50w",
+  "name": "Reflector LED 50 W IP65 Exterior",
+  "n": 2,
+  "file": "epa/reflector-led-50w_2.jpg",
+  "prompt": "LED floodlight illuminating the exterior wall of a house at night, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "pintura-caucho-galon",
+  "name": "Pintura de Caucho Clase A Interior/Exterior",
+  "n": 1,
+  "file": "epa/pintura-caucho-galon_1.jpg",
+  "prompt": "professional e-commerce product photograph, a one gallon white paint bucket with metal handle and a paint brush on the lid, blank label, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "pintura-caucho-galon",
+  "name": "Pintura de Caucho Clase A Interior/Exterior",
+  "n": 2,
+  "file": "epa/pintura-caucho-galon_2.jpg",
+  "prompt": "roller painting a wall with fresh white paint, room being renovated, natural light, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "cemento-gris-42kg",
+  "name": "Cemento Gris Portland 42.5 kg",
+  "n": 1,
+  "file": "epa/cemento-gris-42kg_1.jpg",
+  "prompt": "professional e-commerce product photograph, a gray paper cement bag, 42.5 kg, blank label, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "cemento-gris-42kg",
+  "name": "Cemento Gris Portland 42.5 kg",
+  "n": 2,
+  "file": "epa/cemento-gris-42kg_2.jpg",
+  "prompt": "stack of cement bags at a construction site with bricks, daylight, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "candado-alta-seguridad",
+  "name": "Candado de Alta Seguridad 60 mm",
+  "n": 1,
+  "file": "epa/candado-alta-seguridad_1.jpg",
+  "prompt": "professional e-commerce product photograph, a heavy duty steel padlock with hardened shackle and brass keys, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "candado-alta-seguridad",
+  "name": "Candado de Alta Seguridad 60 mm",
+  "n": 2,
+  "file": "epa/candado-alta-seguridad_2.jpg",
+  "prompt": "padlock securing a metal gate chain, close-up, outdoor light, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "botas-seguridad-punta-acero",
+  "name": "Botas de Seguridad Punta de Acero",
+  "n": 1,
+  "file": "epa/botas-seguridad-punta-acero_1.jpg",
+  "prompt": "professional e-commerce product photograph, a pair of brown leather safety work boots with steel toe, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "epa",
+  "kind": "product",
+  "slug": "botas-seguridad-punta-acero",
+  "name": "Botas de Seguridad Punta de Acero",
+  "n": 2,
+  "file": "epa/botas-seguridad-punta-acero_2.jpg",
+  "prompt": "worker wearing safety boots standing at a construction site, low angle shot of boots, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "logo",
+  "file": "movilhogar/_logo.jpg",
+  "prompt": "elegant flat vector logo icon for a furniture and home goods store called MovilHogar, minimal house shaped like an armchair, warm terracotta and cream colors, centered, plain background, no text",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "store",
+  "file": "movilhogar/_store.jpg",
+  "prompt": "photograph of a stylish furniture showroom front on a tree lined street in Caracas, large windows showing sofas and lamps, warm lighting, no readable text, realistic",
+  "aspect": "4:3"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "sofa-3-puestos",
+  "name": "Sofá 3 Puestos en Tela Antifluidos",
+  "n": 1,
+  "file": "movilhogar/sofa-3-puestos_1.jpg",
+  "prompt": "professional e-commerce product photograph, a modern three seater fabric sofa in light gray with wooden legs, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "sofa-3-puestos",
+  "name": "Sofá 3 Puestos en Tela Antifluidos",
+  "n": 2,
+  "file": "movilhogar/sofa-3-puestos_2.jpg",
+  "prompt": "gray fabric sofa in a bright modern living room with cushions, plant and rug, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "comedor-6-puestos",
+  "name": "Juego de Comedor 6 Puestos Madera y Vidrio",
+  "n": 1,
+  "file": "movilhogar/comedor-6-puestos_1.jpg",
+  "prompt": "professional e-commerce product photograph, a modern dining set with a glass top rectangular table and six upholstered chairs, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "comedor-6-puestos",
+  "name": "Juego de Comedor 6 Puestos Madera y Vidrio",
+  "n": 2,
+  "file": "movilhogar/comedor-6-puestos_2.jpg",
+  "prompt": "dining table with glass top and six chairs in an elegant dining room with a pendant lamp, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "mesa-centro-roble",
+  "name": "Mesa de Centro Roble con Estante",
+  "n": 1,
+  "file": "movilhogar/mesa-centro-roble_1.jpg",
+  "prompt": "professional e-commerce product photograph, a minimalist oak coffee table with lower shelf and black metal legs, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "mesa-centro-roble",
+  "name": "Mesa de Centro Roble con Estante",
+  "n": 2,
+  "file": "movilhogar/mesa-centro-roble_2.jpg",
+  "prompt": "oak coffee table in front of a sofa with a book and vase, cozy living room, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "rack-tv-65",
+  "name": "Mueble Rack para TV hasta 65\"",
+  "n": 1,
+  "file": "movilhogar/rack-tv-65_1.jpg",
+  "prompt": "professional e-commerce product photograph, a modern TV stand cabinet with doors and open shelves in walnut and white, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "rack-tv-65",
+  "name": "Mueble Rack para TV hasta 65\"",
+  "n": 2,
+  "file": "movilhogar/rack-tv-65_2.jpg",
+  "prompt": "TV stand with a large TV on, decor items and plants, living room, warm light, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "colchon-ortopedico-pillow",
+  "name": "Colchón Ortopédico Pillow Top",
+  "n": 1,
+  "file": "movilhogar/colchon-ortopedico-pillow_1.jpg",
+  "prompt": "professional e-commerce product photograph, a thick white pillow top mattress seen from a three quarter angle, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "colchon-ortopedico-pillow",
+  "name": "Colchón Ortopédico Pillow Top",
+  "n": 2,
+  "file": "movilhogar/colchon-ortopedico-pillow_2.jpg",
+  "prompt": "mattress cross section showing layers of foam and springs, studio, soft light, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "box-spring-matrimonial",
+  "name": "Base de Cama Box Spring",
+  "n": 1,
+  "file": "movilhogar/box-spring-matrimonial_1.jpg",
+  "prompt": "professional e-commerce product photograph, a upholstered gray box spring bed base with wooden feet, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "box-spring-matrimonial",
+  "name": "Base de Cama Box Spring",
+  "n": 2,
+  "file": "movilhogar/box-spring-matrimonial_2.jpg",
+  "prompt": "bedroom with a box spring bed base and neatly made white bedding, minimal decor, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "sabanas-microfibra-4pz",
+  "name": "Juego de Sábanas Microfibra 4 Piezas",
+  "n": 1,
+  "file": "movilhogar/sabanas-microfibra-4pz_1.jpg",
+  "prompt": "professional e-commerce product photograph, a neatly folded stack of microfibre bed sheets in light blue with matching pillowcases, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "sabanas-microfibra-4pz",
+  "name": "Juego de Sábanas Microfibra 4 Piezas",
+  "n": 2,
+  "file": "movilhogar/sabanas-microfibra-4pz_2.jpg",
+  "prompt": "bed with fresh microfibre sheets in soft blue, morning light, bedroom, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "edredon-reversible-queen",
+  "name": "Edredón Reversible Comforter",
+  "n": 1,
+  "file": "movilhogar/edredon-reversible-queen_1.jpg",
+  "prompt": "professional e-commerce product photograph, a folded reversible comforter in beige and charcoal gray with two matching pillow covers, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "edredon-reversible-queen",
+  "name": "Edredón Reversible Comforter",
+  "n": 2,
+  "file": "movilhogar/edredon-reversible-queen_2.jpg",
+  "prompt": "bed dressed with a reversible comforter in warm beige, decorative pillows, cozy bedroom, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "toallas-algodon-x6",
+  "name": "Set de 6 Toallas 100% Algodón",
+  "n": 1,
+  "file": "movilhogar/toallas-algodon-x6_1.jpg",
+  "prompt": "professional e-commerce product photograph, a stack of six fluffy cotton towels in white and gray, rolled and folded, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "toallas-algodon-x6",
+  "name": "Set de 6 Toallas 100% Algodón",
+  "n": 2,
+  "file": "movilhogar/toallas-algodon-x6_2.jpg",
+  "prompt": "fluffy towels on a wooden stool in a bright bathroom with a plant, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "bateria-cocina-7pz",
+  "name": "Batería de Cocina Antiadherente 7 Piezas",
+  "n": 1,
+  "file": "movilhogar/bateria-cocina-7pz_1.jpg",
+  "prompt": "professional e-commerce product photograph, a set of black non-stick cookware pots and pans with glass lids and utensils, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "bateria-cocina-7pz",
+  "name": "Batería de Cocina Antiadherente 7 Piezas",
+  "n": 2,
+  "file": "movilhogar/bateria-cocina-7pz_2.jpg",
+  "prompt": "non-stick frying pan with vegetables cooking on a stove in a modern kitchen, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "licuadora-1200w",
+  "name": "Licuadora 1200 W Jarra de Vidrio 1.5 L",
+  "n": 1,
+  "file": "movilhogar/licuadora-1200w_1.jpg",
+  "prompt": "professional e-commerce product photograph, a modern blender with glass jar and black base, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "licuadora-1200w",
+  "name": "Licuadora 1200 W Jarra de Vidrio 1.5 L",
+  "n": 2,
+  "file": "movilhogar/licuadora-1200w_2.jpg",
+  "prompt": "blender making a strawberry smoothie, fruits around on a kitchen counter, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "freidora-aire-5l",
+  "name": "Freidora de Aire Digital 5.5 L",
+  "n": 1,
+  "file": "movilhogar/freidora-aire-5l_1.jpg",
+  "prompt": "professional e-commerce product photograph, a black digital air fryer with a front touch panel and removable basket, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "freidora-aire-5l",
+  "name": "Freidora de Aire Digital 5.5 L",
+  "n": 2,
+  "file": "movilhogar/freidora-aire-5l_2.jpg",
+  "prompt": "air fryer with golden crispy french fries and chicken on the kitchen counter, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "ventilador-pedestal-18",
+  "name": "Ventilador de Pedestal 18\" 3 Velocidades",
+  "n": 1,
+  "file": "movilhogar/ventilador-pedestal-18_1.jpg",
+  "prompt": "professional e-commerce product photograph, a white pedestal fan with adjustable height standing on a white background, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "ventilador-pedestal-18",
+  "name": "Ventilador de Pedestal 18\" 3 Velocidades",
+  "n": 2,
+  "file": "movilhogar/ventilador-pedestal-18_2.jpg",
+  "prompt": "pedestal fan in a warm living room with curtains moving in the breeze, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "espejo-redondo-80",
+  "name": "Espejo Redondo Decorativo 80 cm Marco Dorado",
+  "n": 1,
+  "file": "movilhogar/espejo-redondo-80_1.jpg",
+  "prompt": "professional e-commerce product photograph, a round wall mirror with a thin matte gold metal frame, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "espejo-redondo-80",
+  "name": "Espejo Redondo Decorativo 80 cm Marco Dorado",
+  "n": 2,
+  "file": "movilhogar/espejo-redondo-80_2.jpg",
+  "prompt": "round gold framed mirror on a living room wall above a console table with a vase, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "cuadros-abstractos-x3",
+  "name": "Set de 3 Cuadros Decorativos Abstractos",
+  "n": 1,
+  "file": "movilhogar/cuadros-abstractos-x3_1.jpg",
+  "prompt": "professional e-commerce product photograph, three abstract art canvases in earth tones with thin wooden frames leaning together, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "movilhogar",
+  "kind": "product",
+  "slug": "cuadros-abstractos-x3",
+  "name": "Set de 3 Cuadros Decorativos Abstractos",
+  "n": 2,
+  "file": "movilhogar/cuadros-abstractos-x3_2.jpg",
+  "prompt": "triptych of three abstract canvas paintings hung above a sofa in a modern living room, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "logo",
+  "file": "hero/_logo.jpg",
+  "prompt": "bold dynamic flat vector logo icon for a sportswear brand called HERO, stylized lightning bolt inside a shield, black and neon green, centered, plain background, no text",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "store",
+  "file": "hero/_store.jpg",
+  "prompt": "photograph of a sportswear store front on a Caracas street, mannequins wearing athletic clothes in the window, black and neon green sign without readable text, daytime, realistic",
+  "aspect": "4:3"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "conjunto-seamless-dama",
+  "name": "Conjunto Deportivo Seamless Dama (Top + Legging)",
+  "n": 1,
+  "file": "hero/conjunto-seamless-dama_1.jpg",
+  "prompt": "professional e-commerce product photograph, a seamless women sports set top and high waisted leggings in dusty rose displayed flat, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "conjunto-seamless-dama",
+  "name": "Conjunto Deportivo Seamless Dama (Top + Legging)",
+  "n": 2,
+  "file": "hero/conjunto-seamless-dama_2.jpg",
+  "prompt": "woman wearing a seamless pink sports set doing yoga stretch in a bright studio, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "legging-push-up",
+  "name": "Legging Levanta Cola Alta Compresión",
+  "n": 1,
+  "file": "hero/legging-push-up_1.jpg",
+  "prompt": "professional e-commerce product photograph, high waisted black sports leggings displayed flat with a subtle scrunch seam on the back, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "legging-push-up",
+  "name": "Legging Levanta Cola Alta Compresión",
+  "n": 2,
+  "file": "hero/legging-push-up_2.jpg",
+  "prompt": "woman wearing black high waisted leggings in a gym, back view, natural gym light, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "top-deportivo-soporte-medio",
+  "name": "Top Deportivo Soporte Medio",
+  "n": 1,
+  "file": "hero/top-deportivo-soporte-medio_1.jpg",
+  "prompt": "professional e-commerce product photograph, a black medium support sports bra top with Y back displayed flat, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "top-deportivo-soporte-medio",
+  "name": "Top Deportivo Soporte Medio",
+  "n": 2,
+  "file": "hero/top-deportivo-soporte-medio_2.jpg",
+  "prompt": "woman doing a workout wearing a sports top, gym background, side angle, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "biker-short-dama",
+  "name": "Short Biker Deportivo Dama",
+  "n": 1,
+  "file": "hero/biker-short-dama_1.jpg",
+  "prompt": "professional e-commerce product photograph, black high waisted biker shorts with a side pocket displayed flat, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "biker-short-dama",
+  "name": "Short Biker Deportivo Dama",
+  "n": 2,
+  "file": "hero/biker-short-dama_2.jpg",
+  "prompt": "woman wearing black biker shorts and a top stretching in a park, golden hour, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "franela-dryfit-running",
+  "name": "Franela Dry-Fit Caballero Running",
+  "n": 1,
+  "file": "hero/franela-dryfit-running_1.jpg",
+  "prompt": "professional e-commerce product photograph, a men sports running t-shirt in royal blue dry fit mesh displayed flat, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "franela-dryfit-running",
+  "name": "Franela Dry-Fit Caballero Running",
+  "n": 2,
+  "file": "hero/franela-dryfit-running_2.jpg",
+  "prompt": "male runner wearing a blue dry fit running shirt on an urban street at sunrise, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "mono-jogger-caballero",
+  "name": "Mono Jogger Algodón Caballero",
+  "n": 1,
+  "file": "hero/mono-jogger-caballero_1.jpg",
+  "prompt": "professional e-commerce product photograph, gray cotton jogger sweatpants with elastic cuffs displayed flat, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "mono-jogger-caballero",
+  "name": "Mono Jogger Algodón Caballero",
+  "n": 2,
+  "file": "hero/mono-jogger-caballero_2.jpg",
+  "prompt": "man wearing gray jogger sweatpants and sneakers walking in the city, lower body shot, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "chaqueta-rompevientos-unisex",
+  "name": "Chaqueta Rompevientos Unisex",
+  "n": 1,
+  "file": "hero/chaqueta-rompevientos-unisex_1.jpg",
+  "prompt": "professional e-commerce product photograph, a lightweight windbreaker jacket in black with neon yellow details and hood, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "chaqueta-rompevientos-unisex",
+  "name": "Chaqueta Rompevientos Unisex",
+  "n": 2,
+  "file": "hero/chaqueta-rompevientos-unisex_2.jpg",
+  "prompt": "runner wearing a black windbreaker jacket on a mountain trail, windy day, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "short-gym-2en1",
+  "name": "Short Deportivo 2 en 1 Doble Capa",
+  "n": 1,
+  "file": "hero/short-gym-2en1_1.jpg",
+  "prompt": "professional e-commerce product photograph, black sports shorts 2 in 1 with inner compression liner displayed flat, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "short-gym-2en1",
+  "name": "Short Deportivo 2 en 1 Doble Capa",
+  "n": 2,
+  "file": "hero/short-gym-2en1_2.jpg",
+  "prompt": "man doing squats in a gym wearing black sports shorts, side view, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "franela-compresion-ml",
+  "name": "Franela de Compresión Manga Larga",
+  "n": 1,
+  "file": "hero/franela-compresion-ml_1.jpg",
+  "prompt": "professional e-commerce product photograph, a black long sleeve compression athletic shirt displayed flat, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "franela-compresion-ml",
+  "name": "Franela de Compresión Manga Larga",
+  "n": 2,
+  "file": "hero/franela-compresion-ml_2.jpg",
+  "prompt": "athletic man in black compression shirt flexing in a dark gym with dramatic light, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "zapatos-running-ligeros",
+  "name": "Zapatos Running Ligeros Hero Pro",
+  "n": 1,
+  "file": "hero/zapatos-running-ligeros_1.jpg",
+  "prompt": "professional e-commerce product photograph, a single lightweight running shoe in white and electric blue, side profile, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "zapatos-running-ligeros",
+  "name": "Zapatos Running Ligeros Hero Pro",
+  "n": 2,
+  "file": "hero/zapatos-running-ligeros_2.jpg",
+  "prompt": "pair of running shoes on an asphalt track with a runner blurred in the background, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "zapatos-training-crossfit",
+  "name": "Zapatos Training / Crossfit",
+  "n": 1,
+  "file": "hero/zapatos-training-crossfit_1.jpg",
+  "prompt": "professional e-commerce product photograph, a single black and red training cross fit shoe side profile, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "zapatos-training-crossfit",
+  "name": "Zapatos Training / Crossfit",
+  "n": 2,
+  "file": "hero/zapatos-training-crossfit_2.jpg",
+  "prompt": "cross fit athlete wearing training shoes lifting a barbell in a gym, low angle on shoes, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "balon-futbol-n5",
+  "name": "Balón de Fútbol N°5 Profesional",
+  "n": 1,
+  "file": "hero/balon-futbol-n5_1.jpg",
+  "prompt": "professional e-commerce product photograph, a classic black and white soccer ball size 5, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "balon-futbol-n5",
+  "name": "Balón de Fútbol N°5 Profesional",
+  "n": 2,
+  "file": "hero/balon-futbol-n5_2.jpg",
+  "prompt": "soccer ball on a green grass pitch near the goal at sunset, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "mancuernas-hexagonales",
+  "name": "Mancuernas Hexagonales Engomadas (Par)",
+  "n": 1,
+  "file": "hero/mancuernas-hexagonales_1.jpg",
+  "prompt": "professional e-commerce product photograph, a pair of black rubber coated hexagonal dumbbells with chrome handles, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "mancuernas-hexagonales",
+  "name": "Mancuernas Hexagonales Engomadas (Par)",
+  "n": 2,
+  "file": "hero/mancuernas-hexagonales_2.jpg",
+  "prompt": "rack of hexagonal dumbbells in a gym, close-up in dramatic light, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "proteina-whey-2lb",
+  "name": "Proteína Whey 2 lb Sabor Chocolate",
+  "n": 1,
+  "file": "hero/proteina-whey-2lb_1.jpg",
+  "prompt": "professional e-commerce product photograph, a black plastic protein powder tub with scoop, blank label, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "proteina-whey-2lb",
+  "name": "Proteína Whey 2 lb Sabor Chocolate",
+  "n": 2,
+  "file": "hero/proteina-whey-2lb_2.jpg",
+  "prompt": "protein shake in a shaker bottle next to a tub of protein powder on a gym bench, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "termo-botella-acero-1l",
+  "name": "Termo Botella Deportiva Acero Inoxidable 1 L",
+  "n": 1,
+  "file": "hero/termo-botella-acero-1l_1.jpg",
+  "prompt": "professional e-commerce product photograph, a matte black stainless steel insulated sports water bottle with a carrying handle lid, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "hero",
+  "kind": "product",
+  "slug": "termo-botella-acero-1l",
+  "name": "Termo Botella Deportiva Acero Inoxidable 1 L",
+  "n": 2,
+  "file": "hero/termo-botella-acero-1l_2.jpg",
+  "prompt": "insulated sports bottle on a gym bench next to a towel and sneakers, soft light, second angle / lifestyle detail shot, soft natural lighting, shallow depth of field, realistic photo, no text, no watermark",
+  "aspect": "1:1"
+ }
+]
