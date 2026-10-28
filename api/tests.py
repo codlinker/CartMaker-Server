@@ -630,3 +630,42 @@ class DeliveryRealtimeProtocolTests(SimpleTestCase):
         # c1 tarda 120s (5 entregas hoy), c2 tarda 150s (1 entrega hoy -> diferencia < 60s, gana c2!)
         ranked = rank_candidates([c1, c2, c3], [120.0, 150.0, 400.0], {1: 5, 2: 1, 3: 0})
         self.assertEqual([r['employee'].id for r in ranked], [2, 1, 3])
+
+
+class HomeSeasonsCatalogConsistencyTests(SimpleTestCase):
+    """El calendario del Home debe usar solo subcategorías oficiales y resolver bien las fechas."""
+
+    def test_all_campaign_subcategories_exist_in_catalog(self):
+        from api.core.category_schemas import CATALOGO_ESTRUCTURA
+        from api.core.home_seasons import SEASONAL_CAMPAIGNS, DAILY_MODES
+
+        official = {
+            sub["nombre"] for cat in CATALOGO_ESTRUCTURA for sub in cat["subcategorias"]
+        }
+        for camp in list(SEASONAL_CAMPAIGNS) + list(DAILY_MODES):
+            missing = [n for n in camp["subcategories"] if n not in official]
+            self.assertEqual(missing, [], f"{camp['id']} usa subcategorías inexistentes: {missing}")
+
+    def test_resolve_by_date_and_hour(self):
+        from datetime import datetime
+        from api.core.home_seasons import resolve_active_campaign
+
+        cases = {
+            (2026, 10, 28, 10): "halloween",
+            (2026, 11, 10, 10): "navidad",
+            (2026, 11, 25, 10): "black_friday",
+            (2026, 12, 24, 10): "navidad",
+            (2026, 1, 5, 10): "reyes_magos",
+            (2026, 2, 14, 10): "san_valentin",
+            (2026, 3, 10, 10): "carnaval_playa",
+            (2026, 5, 10, 10): "dia_de_la_madre",
+            (2026, 6, 15, 10): "dia_del_padre",
+            (2026, 7, 10, 10): "dia_del_nino",
+            (2026, 9, 1, 10): "regreso_a_clases",
+            (2026, 1, 20, 8): "daily_morning",
+            (2026, 1, 20, 13): "daily_afternoon",
+            (2026, 1, 20, 22): "daily_night",
+            (2026, 1, 20, 3): "daily_night",
+        }
+        for (y, m, d, h), expected in cases.items():
+            self.assertEqual(resolve_active_campaign(datetime(y, m, d, h))["id"], expected, (y, m, d, h))

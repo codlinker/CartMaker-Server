@@ -24,6 +24,7 @@ from api.core.ve_commerce_lexicon import (
     substring_regex,
     lexical_match,
 )
+from api.core.home_seasons import resolve_active_campaign
 from api.core.ve_geo import describe_zone, proximity_label
 from api.core.ve_malls import find_mall_near, display_mall_name
 
@@ -2851,8 +2852,12 @@ class ProductSearchEngine:
         affinity_hash = self._get_affinity_hash()
         excl_scope = self._get_merchant_exclusion_scope()
 
+        # Campaña/evento activo (Halloween, Día de la Madre, modo diario por hora...). Forma parte de la
+        # llave para que el bundle cambie solo al cambiar de evento, sin intervención manual.
+        active_campaign = resolve_active_campaign()
+
         struct_cache_key = (
-            f"cartmaker:struct:home:{approx_lat}:{approx_lng}:sections:v1:{affinity_hash}{excl_scope}"
+            f"cartmaker:struct:home:{approx_lat}:{approx_lng}:sections:v2:{active_campaign['id']}:{affinity_hash}{excl_scope}"
         )
         structural_bundle = cache.get(struct_cache_key)
 
@@ -2948,7 +2953,31 @@ class ProductSearchEngine:
             )
             very_close_products = very_close_combined[:8]
 
-            # 5. DYNAMIC SUBCATEGORY SECTIONS (Hasta 4 bloques de subcategorías con stock activo)
+            # 4b. SEASONAL EVENT PRODUCTS (hasta 12 productos de las subcategorías protagonistas del evento activo,
+            #     repartidos round-robin entre subcategorías y con prevención de monopolio por comercio)
+            seasonal_event_products = []
+            seasonal_sub_names = list(active_campaign.get("subcategories") or [])
+            if seasonal_sub_names:
+                seasonal_ranked_qs = self._apply_monopoly_prevention(
+                    self._annotate_ranking_score(
+                        items_source_qs.filter(product__category__name__in=seasonal_sub_names)
+                    )
+                )
+                buckets = {}
+                for it in seasonal_ranked_qs[:80]:
+                    buckets.setdefault(it.product.category_id, []).append(it)
+                bucket_lists = list(buckets.values())
+                picked, seen_seasonal = [], set()
+                depth = 0
+                while len(picked) < 12 and any(depth < len(b) for b in bucket_lists):
+                    for b in bucket_lists:
+                        if depth < len(b) and len(picked) < 12 and str(b[depth].id) not in seen_seasonal:
+                            picked.append(b[depth])
+                            seen_seasonal.add(str(b[depth].id))
+                    depth += 1
+                seasonal_event_products = [_serialize_item(it) for it in picked]
+
+            # 5. DYNAMIC SUBCATEGORY SECTIONS (Hasta 8 bloques de subcategorías con stock activo)
             subcat_counts = list(
                 items_source_qs.values(
                     'product__category_id',
@@ -2975,16 +3004,16 @@ class ProductSearchEngine:
             chosen_subcats = []
             used_parents = set()
             for entry in subcat_counts:
-                if len(chosen_subcats) >= 4:
+                if len(chosen_subcats) >= 8:
                     break
                 p_id = entry['product__category__parent_category_id']
                 if p_id not in used_parents:
                     chosen_subcats.append(entry)
                     used_parents.add(p_id)
-            if len(chosen_subcats) < 4:
+            if len(chosen_subcats) < 8:
                 chosen_ids = {e['product__category_id'] for e in chosen_subcats}
                 for entry in subcat_counts:
-                    if len(chosen_subcats) >= 4:
+                    if len(chosen_subcats) >= 8:
                         break
                     if entry['product__category_id'] not in chosen_ids:
                         chosen_subcats.append(entry)
@@ -3140,6 +3169,7 @@ class ProductSearchEngine:
                 "flash_offers": flash_offers,
                 "very_close_products": very_close_products,
                 "dynamic_subcategory_sections": dynamic_subcategory_sections,
+                "seasonal_event_products": seasonal_event_products,
                 "under_25_products": under_25_products,
                 "top_rated_products": top_rated_products,
                 "more_to_explore": more_to_explore,
@@ -3158,6 +3188,7 @@ class ProductSearchEngine:
             "under_25_products",
             "top_rated_products",
             "more_to_explore",
+            "seasonal_event_products",
         )
         unique_items_map = {}
         for sk in section_keys:
@@ -3265,6 +3296,13 @@ class ProductSearchEngine:
         hydrated_sections["token_stores"] = token_stores
         hydrated_sections["local_merchants_and_tokens"] = token_stores
         hydrated_sections["offers"] = hydrated_sections["flash_offers"]
+        hydrated_sections["seasonal_event"] = {
+            "id": active_campaign["id"],
+            "name": active_campaign["name"],
+            "kind": active_campaign["kind"],
+            "subcategories": active_campaign["subcategories"],
+            "items": hydrated_sections["seasonal_event_products"],
+        }
 
         # Favoritos del usuario autenticado (con fallback global si no están dentro del radio inmediato)
         if self.user and self.user.is_authenticated:

@@ -941,6 +941,8 @@ class HomeCacheAPI(APIView):
             "under_25_products": sections.get("under_25_products", []),
             "top_rated_products": sections.get("top_rated_products", []),
             "more_to_explore": sections.get("more_to_explore", []),
+            "seasonal_event_products": sections.get("seasonal_event_products", []),
+            "seasonal_event": sections.get("seasonal_event", {}),
         }
 
         # --- Opciones opt-in para aligerar el payload (la forma por defecto no cambia) ---
@@ -953,6 +955,7 @@ class HomeCacheAPI(APIView):
                 "departments", "selected_for_you", "zone_combos", "flash_offers", "offers", "token_stores",
                 "local_merchants_and_tokens", "very_close_products", "dynamic_subcategory_sections", "favorites",
                 "under_25_products", "top_rated_products", "more_to_explore",
+                "seasonal_event_products", "seasonal_event",
             ):
                 payload.pop(mirrored_key, None)
             if isinstance(payload.get("sections"), dict):
@@ -961,7 +964,8 @@ class HomeCacheAPI(APIView):
             _swap_images_for_thumbnails(payload.get("sections"))
             _swap_images_for_thumbnails(payload.get("stories"))
             for mirrored_key in ("selected_for_you", "zone_combos", "flash_offers", "offers", "very_close_products",
-                                 "under_25_products", "top_rated_products", "more_to_explore", "favorites"):
+                                 "under_25_products", "top_rated_products", "more_to_explore", "favorites",
+                                 "seasonal_event_products", "seasonal_event"):
                 _swap_images_for_thumbnails(payload.get(mirrored_key))
         return Response(payload, status=status.HTTP_200_OK)
 
