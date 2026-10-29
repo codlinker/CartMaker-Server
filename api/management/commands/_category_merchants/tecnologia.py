@@ -1,0 +1,213 @@
+# -*- coding: utf-8 -*-
+"""Catálogo demo de Pixel Store Caracas (Tecnología y Electrónica): 20 productos."""
+from ._helpers import ALT, STUDIO, TOK_A, TOK_B, TOK_C, M, P, V, grid, sizes  # noqa: F401
+
+CAT = 'Tecnología y Electrónica'
+
+PRODUCTS = [
+    # ------------------------------------------------------------------ Teléfonos y Tablets
+    P('samsung-galaxy-a55-5g', 'Samsung Galaxy A55 5G', 'Teléfonos y Tablets', CAT, 389.00,
+      'Pantalla Super AMOLED de 6.6" a 120 Hz, marco de aluminio, resistencia IP67 y cámara principal de 50 MP con '
+      'estabilización óptica. Nuevo, sellado y liberado para Movistar, Digitel y Movilnet, con 1 año de garantía.',
+      (STUDIO.format(what='a modern mid-range Android smartphone in light blue color with a triple camera, front and back view'),
+       ALT.format(what='person holding a light blue smartphone on a sunny Caracas balcony, green mountain blurred behind')),
+      attrs={'marca': 'Samsung', 'modelo': 'Galaxy A55 5G', 'almacenamiento': '128 GB', 'ram': '8 GB',
+             'dual_sim': 'Dual SIM Física (Liberado)', 'condicion': 'Nuevo (Sellado)', 'garantia': '1 año'},
+      variants=[V({'storage': '128 GB', 'ram': '8 GB', 'color': 'Azul'}, 7),
+                V({'storage': '128 GB', 'ram': '8 GB', 'color': 'Negro'}, 9),
+                V({'storage': '256 GB', 'ram': '8 GB', 'color': 'Azul'}, 4, 439.00),
+                V({'storage': '256 GB', 'ram': '8 GB', 'color': 'Morado'}, 0, 439.00)],
+      tokens=TOK_B),
+    P('iphone-16-pro-256', 'iPhone 16 Pro 256 GB', 'Teléfonos y Tablets', CAT, 1249.00,
+      'Chip A18 Pro, pantalla Super Retina XDR ProMotion de 6.3", cuerpo de titanio, botón de Control de Cámara y '
+      'zoom óptico 5x. Equipo nuevo y sellado, liberado de fábrica, con 1 año de garantía en tienda.',
+      (STUDIO.format(what='a premium titanium smartphone with a triple camera module in natural titanium finish, front and back view'),
+       ALT.format(what='close-up of a premium titanium smartphone camera module resting on a dark walnut desk')),
+      attrs={'marca': 'Apple', 'modelo': 'iPhone 16 Pro', 'almacenamiento': '256 GB', 'ram': '8 GB',
+             'dual_sim': 'SIM Física + eSIM', 'condicion': 'Nuevo (Sellado)', 'garantia': '1 año'},
+      variants=grid('storage', ['256 GB'], 'color', ['Titanio Natural', 'Titanio Desierto', 'Negro', 'Blanco'],
+                    stock=4, sold_out=[('256 GB', 'Blanco')]),
+      tokens=TOK_C),
+    P('xiaomi-redmi-pad-se-128', 'Tablet Xiaomi Redmi Pad SE 11" 128 GB', 'Teléfonos y Tablets', CAT, 179.00,
+      'Tablet con pantalla FHD+ de 11" a 90 Hz, 4 altavoces con Dolby Atmos, 8 GB de RAM y batería de 8000 mAh. '
+      'Perfecta para clases en línea, series y lectura. Nueva, sellada, con 6 meses de garantía.',
+      (STUDIO.format(what='a slim 11 inch Android tablet in graphite gray with a colorful home screen, front and back view'),
+       ALT.format(what='teenager watching an online class on an 11 inch tablet at a kitchen table, notebook beside it')),
+      attrs={'marca': 'Xiaomi / Redmi / POCO', 'modelo': 'Redmi Pad SE', 'almacenamiento': '128 GB', 'ram': '8 GB',
+             'dual_sim': 'Solo Wi-Fi (Tablet)', 'condicion': 'Nuevo (Sellado)', 'garantia': '6 meses'},
+      offer=10, stock=11),
+    # ------------------------------------------------------------------ Computadoras y Laptops
+    P('macbook-air-m3-13', 'MacBook Air 13" Chip M3', 'Computadoras y Laptops', CAT, 1149.00,
+      'Laptop ultraligera de 1.24 kg con chip Apple M3, pantalla Liquid Retina de 13.6" y hasta 18 horas de batería. '
+      'Teclado en inglés con retroiluminación y Touch ID. Nueva y sellada, 1 año de garantía.',
+      (STUDIO.format(what='an ultra thin aluminum laptop in midnight blue, opened at 110 degrees showing a colorful wallpaper'),
+       ALT.format(what='thin aluminum laptop on a coffee shop table with a cappuccino, freelancer typing, morning light')),
+      attrs={'marca': 'Apple', 'modelo': 'MacBook Air 13 M3', 'procesador': 'Apple M3 de 8 núcleos', 'ram': '8 GB',
+             'almacenamiento': '256 GB SSD', 'pantalla': '13.6" Liquid Retina 2560x1664', 'tarjeta_grafica': 'GPU M3 de 8 núcleos',
+             'condicion': 'Nuevo (Sellado)', 'garantia': '1 año'},
+      variants=[V({'config': '8GB RAM / 256GB SSD', 'color': 'Azul Medianoche'}, 3),
+                V({'config': '8GB RAM / 256GB SSD', 'color': 'Plata'}, 4),
+                V({'config': '16GB RAM / 512GB SSD', 'color': 'Azul Medianoche'}, 2, 1449.00),
+                V({'config': '16GB RAM / 512GB SSD', 'color': 'Gris Espacial'}, 0, 1449.00)],
+      tokens=TOK_C),
+    P('lenovo-ideapad-slim-3-i5', 'Laptop Lenovo IdeaPad Slim 3 15" Core i5', 'Computadoras y Laptops', CAT, 579.00,
+      'Intel Core i5-12450H, 16 GB de RAM, SSD NVMe de 512 GB y pantalla Full HD IPS de 15.6". Teclado en español con '
+      'letra Ñ y Windows 11 Home activado. Ideal para oficina, universidad y teletrabajo. 1 año de garantía.',
+      (STUDIO.format(what='a slim 15 inch laptop in arctic gray with a full size keyboard and numeric pad, opened, three quarter view'),
+       ALT.format(what='university student working on a gray 15 inch laptop in a bright library, spreadsheets on screen')),
+      attrs={'marca': 'Lenovo', 'modelo': 'IdeaPad Slim 3 15IAH8', 'procesador': 'Intel Core i5-12450H', 'ram': '16 GB',
+             'almacenamiento': '512 GB SSD NVMe', 'pantalla': '15.6" Full HD IPS', 'tarjeta_grafica': 'Intel UHD integrada',
+             'condicion': 'Nuevo (Sellado)', 'garantia': '1 año'},
+      offer=8, stock=6),
+    # ------------------------------------------------------------------ Monitores y Televisores
+    P('monitor-lg-ultragear-27-165hz', 'Monitor Gamer LG UltraGear 27" 165 Hz', 'Monitores y Televisores', CAT, 249.00,
+      'Panel IPS de 27" con resolución QHD 2560x1440, 165 Hz, 1 ms y compatibilidad con G-Sync y FreeSync Premium. '
+      'Base ajustable en altura e inclinación, entradas HDMI y DisplayPort. 1 año de garantía.',
+      (STUDIO.format(what='a 27 inch gaming monitor with thin bezels and a red accented stand, showing a colorful game landscape'),
+       ALT.format(what='gaming desk setup at night with a 27 inch monitor, mechanical keyboard and soft purple ambient light')),
+      attrs={'tipo_pantalla': 'Monitor Gamer (Alta tasa Hz)', 'marca': 'LG', 'tamano_pulgadas': '27"',
+             'resolucion': '2K QHD', 'sistema_operativo': 'No aplica (Monitor)', 'condicion': 'Nuevo (Sellado)',
+             'garantia': '1 año'},
+      tokens=TOK_A, stock=7),
+    P('samsung-crystal-uhd-4k-du7000', 'Smart TV Samsung Crystal UHD 4K DU7000', 'Monitores y Televisores', CAT, 429.00,
+      'Televisor 4K con procesador Crystal 4K, HDR10+, sistema Tizen con Netflix, YouTube y Disney+ y control por voz. '
+      'Diseño AirSlim. Incluye base de mesa; la instalación en pared se coordina aparte. 1 año de garantía.',
+      (STUDIO.format(what='a modern slim 4K smart TV on a minimalist stand showing a vibrant tropical beach image'),
+       ALT.format(what='family living room with a large smart TV mounted on the wall, sofa and plants, evening warm light')),
+      attrs={'tipo_pantalla': 'Smart TV / Televisor', 'marca': 'Samsung', 'tamano_pulgadas': '50" / 55" / 65"',
+             'resolucion': '4K UHD', 'sistema_operativo': 'Tizen (Samsung)', 'condicion': 'Nuevo (Sellado)',
+             'garantia': '1 año'},
+      variants=[V({'size': '50"', 'refresh_or_res': '4K UHD'}, 6),
+                V({'size': '55"', 'refresh_or_res': '4K UHD'}, 5, 499.00),
+                V({'size': '65"', 'refresh_or_res': '4K UHD'}, 2, 699.00)],
+      offer=12),
+    # ------------------------------------------------------------------ Consolas y Videojuegos
+    P('playstation-5-slim', 'Consola PlayStation 5 Slim 1 TB', 'Consolas y Videojuegos', CAT, 549.00,
+      'Nuevo modelo Slim con SSD de 1 TB, gráficos hasta 4K a 120 fps, Ray Tracing y control inalámbrico DualSense '
+      'incluido. Elige la edición con lector de discos o la digital. Nueva y sellada, 1 año de garantía.',
+      (STUDIO.format(what='a white next generation game console slim model standing vertically next to a white wireless controller'),
+       ALT.format(what='young adults playing a video game on a couch with wireless controllers, TV glow, cozy living room')),
+      attrs={'plataforma': 'PlayStation 5 (PS5)', 'tipo_producto': 'Consola', 'almacenamiento': '1 TB SSD',
+             'condicion': 'Nuevo (Sellado)', 'garantia': '1 año'},
+      variants=[V({'edition': 'Edición con Lector de Disco'}, 5, 599.00),
+                V({'edition': 'Edición Digital'}, 6)],
+      tokens=TOK_C),
+    P('control-dualsense-ps5', 'Control Inalámbrico DualSense PS5', 'Consolas y Videojuegos', CAT, 74.00,
+      'Control original de Sony con retroalimentación háptica, gatillos adaptativos, micrófono integrado y batería '
+      'recargable por USB-C. Compatible con PS5 y PC. Nuevo y sellado, 6 meses de garantía.',
+      (STUDIO.format(what='a modern ergonomic wireless game controller with a touchpad, shown in white, black and red versions'),
+       ALT.format(what='hands holding a red wireless game controller in front of a blurred TV screen, dramatic lighting')),
+      attrs={'plataforma': 'PlayStation 5 (PS5)', 'tipo_producto': 'Control / Mando', 'condicion': 'Nuevo (Sellado)',
+             'garantia': '6 meses'},
+      variants=sizes('edition', ['Blanco', 'Negro Medianoche', 'Rojo Cósmico', 'Azul'], stock=6, sold_out=('Azul',)),
+      offer=10),
+    # ------------------------------------------------------------------ Teclados y Mouse
+    P('headset-hyperx-cloud-ii', 'Audífonos Gamer HyperX Cloud II 7.1', 'Teclados y Mouse', CAT, 79.00,
+      'Headset con sonido envolvente 7.1 virtual, drivers de 53 mm, almohadillas de espuma viscoelástica y micrófono '
+      'desmontable con cancelación de ruido. Conexión USB y jack 3.5 mm para PC, PS5 y Switch. 1 año de garantía.',
+      (STUDIO.format(what='a black and red over-ear gaming headset with a detachable microphone and memory foam ear cushions'),
+       ALT.format(what='gamer wearing an over-ear headset with microphone in front of a monitor, RGB desk lights')),
+      attrs={'tipo_periferico': 'Audífonos / Headset', 'marca': 'HyperX', 'conectividad': 'Cableado USB',
+             'idioma_distribucion': 'No aplica', 'garantia': '1 año'},
+      tokens=TOK_A, stock=12),
+    P('teclado-redragon-kumara-k552', 'Teclado Mecánico Redragon Kumara K552 RGB', 'Teclados y Mouse', CAT, 45.00,
+      'Teclado mecánico compacto TKL de 87 teclas con iluminación RGB, estructura metálica y teclas anti-ghosting. '
+      'Distribución en español con Ñ. Elige tu switch: rojo silencioso o azul con clic. 6 meses de garantía.',
+      (STUDIO.format(what='a compact tenkeyless mechanical keyboard with rainbow RGB backlight and a metal top plate'),
+       ALT.format(what='macro shot of mechanical keyboard switches and keycaps glowing in RGB colors, dark desk')),
+      attrs={'tipo_periferico': 'Teclado Mecánico', 'marca': 'Redragon', 'conectividad': 'Cableado USB',
+             'idioma_distribucion': 'Español (Con letra Ñ)', 'garantia': '6 meses'},
+      variants=grid('color', ['Negro', 'Blanco'], 'switch_or_conn', ['Switch Rojo (Lineal)', 'Switch Azul (Clicky)'],
+                    stock=8, sold_out=[('Blanco', 'Switch Azul (Clicky)')]),
+      tokens=TOK_A),
+    P('mouse-logitech-mx-master-3s', 'Mouse Logitech MX Master 3S', 'Teclados y Mouse', CAT, 99.00,
+      'Mouse ergonómico inalámbrico con sensor de 8000 DPI que funciona hasta sobre vidrio, clics silenciosos, rueda '
+      'MagSpeed y conexión a 3 equipos por Bluetooth o receptor Logi Bolt. Batería hasta 70 días. 1 año de garantía.',
+      (STUDIO.format(what='an ergonomic sculpted wireless mouse in graphite color with a metal scroll wheel and thumb wheel'),
+       ALT.format(what='designer hand using an ergonomic wireless mouse next to a laptop on a clean wooden desk')),
+      attrs={'tipo_periferico': 'Mouse Inalámbrico / Gamer', 'marca': 'Logitech',
+             'conectividad': 'Inalámbrico 2.4GHz + Bluetooth', 'idioma_distribucion': 'No aplica', 'garantia': '1 año'},
+      variants=sizes('color', ['Gris', 'Blanco'], stock=5)),
+    # ------------------------------------------------------------------ Smartwatches y Wearables
+    P('apple-watch-se-2-gps', 'Apple Watch SE (2.ª gen.) GPS', 'Smartwatches y Wearables', CAT, 269.00,
+      'Reloj inteligente con detección de caídas y choques, monitoreo de frecuencia cardíaca, seguimiento de sueño y '
+      'resistencia al agua de 50 m. Requiere iPhone. Correa deportiva incluida. Nuevo, 1 año de garantía.',
+      (STUDIO.format(what='a square smartwatch with an aluminum case and a sport band, colorful activity rings on the screen'),
+       ALT.format(what='smartwatch on the wrist of a woman jogging on a tree lined park path in the early morning')),
+      attrs={'marca': 'Apple', 'modelo': 'Watch SE 2.ª generación', 'compatibilidad': 'Solo iOS (iPhone)',
+             'condicion': 'Nuevo', 'garantia': '1 año'},
+      variants=[V({'case_size': '40 mm', 'color': 'Blanco Estelar'}, 4),
+                V({'case_size': '40 mm', 'color': 'Negro'}, 5),
+                V({'case_size': '44 mm', 'color': 'Negro'}, 3, 299.00),
+                V({'case_size': '44 mm', 'color': 'Plata'}, 2, 299.00)],
+      tokens=TOK_B),
+    # ------------------------------------------------------------------ Cámaras y Fotografía
+    P('dron-dji-mini-4k', 'Dron DJI Mini 4K', 'Cámaras y Fotografía', CAT, 329.00,
+      'Dron de menos de 249 g con cámara 4K/30fps, estabilizador mecánico de 3 ejes, transmisión de video hasta 10 km y '
+      '31 minutos de vuelo. Regreso automático al punto de despegue. Nuevo, 1 año de garantía.',
+      (STUDIO.format(what='a compact foldable gray camera drone with four propellers unfolded and a remote controller beside it'),
+       ALT.format(what='small camera drone flying over a green mountain ridge at golden hour, city in the distance')),
+      attrs={'marca': 'DJI', 'modelo': 'Mini 4K', 'resolucion': 'Video 4K / Foto 12 MP', 'condicion': 'Nuevo',
+             'garantia': '1 año'},
+      variants=[V({'kit': 'Solo Cuerpo (Body)'}, 4), V({'kit': 'Fly More Combo'}, 3, 439.00)],
+      tokens=TOK_B),
+    # ------------------------------------------------------------------ Smart Home y Domótica
+    P('amazon-echo-dot-5', 'Parlante Inteligente Amazon Echo Dot 5.ª gen.', 'Smart Home y Domótica', CAT, 59.00,
+      'Parlante con Alexa, sonido más nítido y graves mejorados, sensor de temperatura y control de bombillos y enchufes '
+      'inteligentes por voz. Configuración en español desde la app Alexa. 6 meses de garantía.',
+      (STUDIO.format(what='a small spherical smart speaker in charcoal fabric with a glowing blue light ring at the base'),
+       ALT.format(what='round smart speaker on a bedside table next to a lamp and a book, cozy bedroom at night')),
+      attrs={'marca': 'Amazon', 'ecosistema': 'Amazon Alexa', 'garantia': '6 meses'},
+      offer=15, stock=14),
+    # ------------------------------------------------------------------ Seguridad y Cámaras de Vigilancia
+    P('camara-wifi-imou-ranger-2', 'Cámara Wi-Fi Imou Ranger 2 con Giro 360°', 'Seguridad y Cámaras de Vigilancia', CAT, 36.00,
+      'Cámara de seguridad para interiores con giro horizontal de 360°, visión nocturna, audio bidireccional, '
+      'detección de personas y alertas al celular. Ideal para cuidar a los niños, mascotas o el negocio. 6 meses de garantía.',
+      (STUDIO.format(what='a white indoor pan tilt security camera with a round black lens dome'),
+       ALT.format(what='indoor security camera on a living room shelf watching over a sleeping dog, soft daylight')),
+      attrs={'marca': 'Imou', 'ubicacion_uso': 'Interior', 'conectividad_app': 'Wi-Fi 2.4 GHz, app Imou Life',
+             'garantia': '6 meses'},
+      variants=[V({'resolution': 'Full HD 1080p (2MP)', 'memory': 'Sin Memoria'}, 15),
+                V({'resolution': 'Full HD 1080p (2MP)', 'memory': 'Con MicroSD 64GB'}, 10, 44.00),
+                V({'resolution': '2K (3MP / 4MP)', 'memory': 'Con MicroSD 64GB'}, 6, 52.00)],
+      tokens=TOK_A),
+    # ------------------------------------------------------------------ Reguladores, Protectores y UPS
+    P('mini-ups-router-fibra-10400', 'Mini UPS para Router y Fibra Óptica 10.400 mAh', 'Reguladores, Protectores y UPS', CAT, 29.00,
+      'Mantén el internet encendido durante los cortes de luz: alimenta tu router y la ONU de fibra hasta 6 horas. '
+      'Salidas de 5 V, 9 V y 12 V más puerto PoE, con cables incluidos. 3 meses de garantía.',
+      (STUDIO.format(what='a small white rectangular mini UPS battery box with DC output ports and short cables'),
+       ALT.format(what='mini UPS battery connected to a wifi router and fiber modem on a shelf, lights on, dim room during a blackout')),
+      attrs={'tipo_proteccion': 'Mini UPS para Router y Fibra Óptica', 'marca': 'WGP',
+             'voltaje': 'Salidas 5V / 9V / 12V + PoE (Mini UPS)', 'capacidad_va_w': '10.400 mAh / 36 W',
+             'garantia': '3 meses'},
+      tokens=TOK_A, stock=30),
+    # ------------------------------------------------------------------ Almacenamiento y Memorias
+    P('disco-externo-wd-elements-2tb', 'Disco Duro Externo WD Elements 2 TB USB 3.0', 'Almacenamiento y Memorias', CAT, 72.00,
+      'Disco portátil de 2 TB para respaldar fotos, videos y documentos. Conexión USB 3.0 plug and play, compatible con '
+      'Windows y Mac (con formateo). Tamaño de bolsillo. 1 año de garantía.',
+      (STUDIO.format(what='a compact black portable external hard drive with a short USB cable coiled beside it'),
+       ALT.format(what='portable external hard drive connected to a laptop on a desk, photo backup in progress')),
+      attrs={'tipo_memoria': 'Disco Duro Externo Portátil', 'marca': 'Western Digital', 'capacidad': '2 TB',
+             'garantia': '1 año'},
+      offer=5, stock=9),
+    # ------------------------------------------------------------------ Cargadores, Cables y Powerbanks
+    P('cargador-inalambrico-3en1-magsafe', 'Base de Carga Inalámbrica 3 en 1 MagSafe', 'Cargadores, Cables y Powerbanks', CAT, 39.00,
+      'Carga a la vez tu iPhone (imán MagSafe de 15 W), Apple Watch y AirPods. Plegable para viajar, con adaptador de '
+      'pared de 30 W incluido. También carga teléfonos Android con carga Qi. 3 meses de garantía.',
+      (STUDIO.format(what='a foldable 3 in 1 wireless charging stand holding a smartphone, a smartwatch and wireless earbuds'),
+       ALT.format(what='3 in 1 wireless charging stand on a nightstand charging a phone and a watch, warm bedside lamp')),
+      attrs={'tipo_accesorio': 'Cargador Inalámbrico / MagSafe', 'marca': 'Anker', 'potencia_capacidad': '15 W + 5 W + 5 W',
+             'garantia': '3 meses'},
+      offer=10, stock=16),
+    # ------------------------------------------------------------------ Redes, Routers y Conectividad
+    P('tp-link-deco-x20-mesh', 'Sistema Wi-Fi Mesh TP-Link Deco X20 AX1800', 'Redes, Routers y Conectividad', CAT, 119.00,
+      'Wi-Fi 6 en toda la casa sin zonas muertas: cada nodo cubre hasta 190 m² y todos forman una sola red. Compatible '
+      'con los proveedores de fibra de Caracas. Configuración en minutos desde la app Deco. 1 año de garantía.',
+      (STUDIO.format(what='two white cylindrical wifi mesh router units side by side with soft status lights'),
+       ALT.format(what='white mesh wifi unit on a hallway console table in a modern apartment, plants and soft daylight')),
+      unit='set',
+      attrs={'tipo_equipo_red': 'Sistema Wi-Fi Mesh', 'marca': 'TP-Link',
+             'puertos_velocidad': 'AX1800, 2 puertos Gigabit por nodo', 'garantia': '1 año'},
+      variants=[V({'version': 'Pack x2 Mesh'}, 6), V({'version': 'Pack x3 Mesh'}, 3, 169.00)],
+      tokens=TOK_B),
+]

@@ -1,0 +1,3212 @@
+[
+ {
+  "company": "bodegon-altamira",
+  "kind": "logo",
+  "file": "bodegon-altamira/_logo.jpg",
+  "prompt": "flat vector logo icon for a gourmet grocery store, a shopping basket with a baguette and a wine bottle, deep green and gold, centered, plain light background, minimal and modern, no text, no letters",
+  "aspect": "1:1"
+ },
+ {
+  "company": "bodegon-altamira",
+  "kind": "store",
+  "file": "bodegon-altamira/_store.jpg",
+  "prompt": "realistic daytime photograph of a small gourmet grocery store (bodegón) with shelves of imported products at street level on a tree lined street in the east of Caracas (Chacao / Altamira area), Venezuela, glass storefront, sign without readable text, no people in focus",
+  "aspect": "4:3"
+ },
+ {
+  "company": "bodegon-altamira",
+  "kind": "product",
+  "slug": "harina-pan-1kg",
+  "name": "Harina PAN Blanca 1 kg",
+  "n": 1,
+  "file": "bodegon-altamira/harina-pan-1kg.jpg",
+  "prompt": "professional e-commerce product photograph, a 1 kg paper package of white precooked corn flour standing upright, yellow and white packaging without readable text, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "bodegon-altamira",
+  "kind": "product",
+  "slug": "atun-margarita-aceite-140g",
+  "name": "Atún Margarita en Aceite 140 g",
+  "n": 1,
+  "file": "bodegon-altamira/atun-margarita-aceite-140g.jpg",
+  "prompt": "professional e-commerce product photograph, a small round tin can of tuna in oil with an easy open pull ring lid, red label without readable text, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "bodegon-altamira",
+  "kind": "product",
+  "slug": "jamon-pierna-plumrose-kg",
+  "name": "Jamón de Pierna Plumrose Premium",
+  "n": 1,
+  "file": "bodegon-altamira/jamon-pierna-plumrose-kg.jpg",
+  "prompt": "professional e-commerce product photograph, a whole cooked ham leg log next to neatly stacked thin pink ham slices on parchment paper, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "bodegon-altamira",
+  "kind": "product",
+  "slug": "tabla-charcuteria-gourmet",
+  "name": "Tabla de Charcutería Gourmet para Compartir",
+  "n": 1,
+  "file": "bodegon-altamira/tabla-charcuteria-gourmet.jpg",
+  "prompt": "professional e-commerce product photograph, a wooden charcuterie board with cured ham, salami slices, cheese cubes, grapes, olives and nuts, top view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "bodegon-altamira",
+  "kind": "product",
+  "slug": "jamon-serrano-loncheado-100g",
+  "name": "Jamón Serrano Español Loncheado 100 g",
+  "n": 1,
+  "file": "bodegon-altamira/jamon-serrano-loncheado-100g.jpg",
+  "prompt": "professional e-commerce product photograph, a vacuum sealed pack of thin cured Spanish serrano ham slices arranged in waves, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "bodegon-altamira",
+  "kind": "product",
+  "slug": "queso-guayanes-artesanal-kg",
+  "name": "Queso Guayanés Artesanal",
+  "n": 1,
+  "file": "bodegon-altamira/queso-guayanes-artesanal-kg.jpg",
+  "prompt": "professional e-commerce product photograph, a round soft fresh white Venezuelan guayanes cheese wheel, glossy surface, on a banana leaf, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "bodegon-altamira",
+  "kind": "product",
+  "slug": "huevos-gallina-carton",
+  "name": "Huevos de Gallina Tamaño AA",
+  "n": 1,
+  "file": "bodegon-altamira/huevos-gallina-carton.jpg",
+  "prompt": "professional e-commerce product photograph, a cardboard egg tray filled with fresh brown and white chicken eggs, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "bodegon-altamira",
+  "kind": "product",
+  "slug": "queso-parmesano-reggiano",
+  "name": "Queso Parmigiano Reggiano Importado",
+  "n": 1,
+  "file": "bodegon-altamira/queso-parmesano-reggiano.jpg",
+  "prompt": "professional e-commerce product photograph, a wedge of aged parmigiano reggiano cheese with a crumbly texture and a small cheese knife, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "bodegon-altamira",
+  "kind": "product",
+  "slug": "cafe-fama-america-500g",
+  "name": "Café Fama de América Molido 500 g",
+  "n": 1,
+  "file": "bodegon-altamira/cafe-fama-america-500g.jpg",
+  "prompt": "professional e-commerce product photograph, a 500 g foil coffee bag standing next to a small pile of roasted coffee beans, no readable text, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "bodegon-altamira",
+  "kind": "product",
+  "slug": "cacao-polvo-el-rey-250g",
+  "name": "Cacao en Polvo 100 % El Rey 250 g",
+  "n": 1,
+  "file": "bodegon-altamira/cacao-polvo-el-rey-250g.jpg",
+  "prompt": "professional e-commerce product photograph, a stand-up pouch of pure dark cocoa powder next to a small bowl of cocoa powder and cacao pods, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "bodegon-altamira",
+  "kind": "product",
+  "slug": "maltin-polar-six-pack",
+  "name": "Maltín Polar Lata 355 ml",
+  "n": 1,
+  "file": "bodegon-altamira/maltin-polar-six-pack.jpg",
+  "prompt": "professional e-commerce product photograph, a cold aluminum soda can of dark malt beverage with condensation droplets, no readable text, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "bodegon-altamira",
+  "kind": "product",
+  "slug": "agua-minalba-1-5l",
+  "name": "Agua Mineral Minalba 1.5 L",
+  "n": 1,
+  "file": "bodegon-altamira/agua-minalba-1-5l.jpg",
+  "prompt": "professional e-commerce product photograph, a clear 1.5 liter plastic bottle of mineral water with a blue cap and blank label, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "bodegon-altamira",
+  "kind": "product",
+  "slug": "ron-santa-teresa-1796",
+  "name": "Ron Santa Teresa 1796 Solera 0.70 L",
+  "n": 1,
+  "file": "bodegon-altamira/ron-santa-teresa-1796.jpg",
+  "prompt": "professional e-commerce product photograph, an elegant bottle of extra aged dark amber rum with a cork stopper, label without readable text, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "bodegon-altamira",
+  "kind": "product",
+  "slug": "ron-diplomatico-reserva-exclusiva",
+  "name": "Ron Diplomático Reserva Exclusiva",
+  "n": 1,
+  "file": "bodegon-altamira/ron-diplomatico-reserva-exclusiva.jpg",
+  "prompt": "professional e-commerce product photograph, a short round bottle of premium dark rum with a wooden stopper, amber liquid, blank label, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "bodegon-altamira",
+  "kind": "product",
+  "slug": "cerveza-polar-pilsen-lata",
+  "name": "Cerveza Polar Pilsen Lata 355 ml",
+  "n": 1,
+  "file": "bodegon-altamira/cerveza-polar-pilsen-lata.jpg",
+  "prompt": "professional e-commerce product photograph, a six pack of cold aluminum beer cans with condensation droplets, blank design, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "bodegon-altamira",
+  "kind": "product",
+  "slug": "vino-pomar-reserva-tinto",
+  "name": "Vino Tinto Pomar Reserva 750 ml",
+  "n": 1,
+  "file": "bodegon-altamira/vino-pomar-reserva-tinto.jpg",
+  "prompt": "professional e-commerce product photograph, a bottle of red wine with a dark glass and a burgundy foil capsule, blank label, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "bodegon-altamira",
+  "kind": "product",
+  "slug": "chocolate-el-rey-barra-80g",
+  "name": "Chocolate El Rey Barra 80 g",
+  "n": 1,
+  "file": "bodegon-altamira/chocolate-el-rey-barra-80g.jpg",
+  "prompt": "professional e-commerce product photograph, a premium dark chocolate bar partially unwrapped showing chocolate squares, blank wrapper, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "bodegon-altamira",
+  "kind": "product",
+  "slug": "cocosette-display-12",
+  "name": "Cocosette Nestlé Display x12",
+  "n": 1,
+  "file": "bodegon-altamira/cocosette-display-12.jpg",
+  "prompt": "professional e-commerce product photograph, a display box of individually wrapped coconut cream wafer cookies, blank wrappers, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "bodegon-altamira",
+  "kind": "product",
+  "slug": "aceite-oliva-borges-extra-virgen",
+  "name": "Aceite de Oliva Extra Virgen Borges",
+  "n": 1,
+  "file": "bodegon-altamira/aceite-oliva-borges-extra-virgen.jpg",
+  "prompt": "professional e-commerce product photograph, a tall glass bottle of golden green extra virgin olive oil with a black cap, blank label, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "bodegon-altamira",
+  "kind": "product",
+  "slug": "tequenos-congelados-queso",
+  "name": "Tequeños de Queso Blanco Congelados",
+  "n": 1,
+  "file": "bodegon-altamira/tequenos-congelados-queso.jpg",
+  "prompt": "professional e-commerce product photograph, a tray of golden fried Venezuelan tequenos cheese sticks with a small bowl of dipping sauce, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sabor-avila",
+  "kind": "logo",
+  "file": "sabor-avila/_logo.jpg",
+  "prompt": "flat vector logo icon for a Venezuelan food restaurant, a golden arepa in front of a green mountain, warm orange, green and cream, centered, plain light background, minimal and modern, no text, no letters",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sabor-avila",
+  "kind": "store",
+  "file": "sabor-avila/_store.jpg",
+  "prompt": "realistic daytime photograph of a cozy Venezuelan restaurant with an open terrace and wooden tables at street level on a tree lined street in the east of Caracas (Chacao / Altamira area), Venezuela, glass storefront, sign without readable text, no people in focus",
+  "aspect": "4:3"
+ },
+ {
+  "company": "sabor-avila",
+  "kind": "product",
+  "slug": "arepa-reina-pepeada",
+  "name": "Arepa Reina Pepeada",
+  "n": 1,
+  "file": "sabor-avila/arepa-reina-pepeada.jpg",
+  "prompt": "professional e-commerce product photograph, a Venezuelan arepa stuffed with creamy chicken and avocado salad, on a rustic plate, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sabor-avila",
+  "kind": "product",
+  "slug": "arepa-rellena-a-tu-gusto",
+  "name": "Arepa Rellena a tu Gusto",
+  "n": 1,
+  "file": "sabor-avila/arepa-rellena-a-tu-gusto.jpg",
+  "prompt": "professional e-commerce product photograph, three Venezuelan arepas with different fillings: black beans and white cheese, shredded beef, scrambled eggs, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sabor-avila",
+  "kind": "product",
+  "slug": "cachapa-queso-de-mano",
+  "name": "Cachapa con Queso de Mano",
+  "n": 1,
+  "file": "sabor-avila/cachapa-queso-de-mano.jpg",
+  "prompt": "professional e-commerce product photograph, a golden sweet corn cachapa pancake folded over a thick slice of soft white cheese, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sabor-avila",
+  "kind": "product",
+  "slug": "desayuno-criollo-completo",
+  "name": "Desayuno Criollo Completo",
+  "n": 1,
+  "file": "sabor-avila/desayuno-criollo-completo.jpg",
+  "prompt": "professional e-commerce product photograph, a Venezuelan breakfast plate with scrambled eggs with tomato, black beans, grated white cheese, fried sweet plantain and small arepas, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sabor-avila",
+  "kind": "product",
+  "slug": "empanada-de-maiz",
+  "name": "Empanada de Maíz",
+  "n": 1,
+  "file": "sabor-avila/empanada-de-maiz.jpg",
+  "prompt": "professional e-commerce product photograph, two golden crispy fried Venezuelan corn empanadas, one cut open showing shredded beef filling, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sabor-avila",
+  "kind": "product",
+  "slug": "pastelitos-andinos-racion",
+  "name": "Pastelitos Andinos (Ración de 3)",
+  "n": 1,
+  "file": "sabor-avila/pastelitos-andinos-racion.jpg",
+  "prompt": "professional e-commerce product photograph, three golden flaky fried Andean pastelitos with bubbly crispy dough on a plate, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sabor-avila",
+  "kind": "product",
+  "slug": "tequenos-queso-blanco",
+  "name": "Tequeños de Queso Blanco",
+  "n": 1,
+  "file": "sabor-avila/tequenos-queso-blanco.jpg",
+  "prompt": "professional e-commerce product photograph, golden fried tequenos cheese sticks, one broken showing stretchy melted white cheese, with garlic dipping sauce, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sabor-avila",
+  "kind": "product",
+  "slug": "tostones-playeros-queso",
+  "name": "Tostones Playeros con Queso",
+  "n": 1,
+  "file": "sabor-avila/tostones-playeros-queso.jpg",
+  "prompt": "professional e-commerce product photograph, crispy smashed green plantain tostones topped with grated white cheese, shredded cabbage and pink sauce, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sabor-avila",
+  "kind": "product",
+  "slug": "parrilla-mixta-sabor-avila",
+  "name": "Parrilla Mixta Sabor del Ávila",
+  "n": 1,
+  "file": "sabor-avila/parrilla-mixta-sabor-avila.jpg",
+  "prompt": "professional e-commerce product photograph, a mixed grill platter with grilled beef, chicken, pork, chorizo sausage, boiled cassava and green guasacaca sauce, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sabor-avila",
+  "kind": "product",
+  "slug": "punta-trasera-parrilla-300g",
+  "name": "Punta Trasera a la Parrilla 300 g",
+  "n": 1,
+  "file": "sabor-avila/punta-trasera-parrilla-300g.jpg",
+  "prompt": "professional e-commerce product photograph, a juicy sliced grilled picanha beef steak with fat cap, chimichurri sauce and cassava fries, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sabor-avila",
+  "kind": "product",
+  "slug": "pabellon-criollo",
+  "name": "Pabellón Criollo",
+  "n": 1,
+  "file": "sabor-avila/pabellon-criollo.jpg",
+  "prompt": "professional e-commerce product photograph, a traditional Venezuelan pabellon criollo plate with shredded beef, white rice, black beans with grated cheese and fried sweet plantains, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sabor-avila",
+  "kind": "product",
+  "slug": "asado-negro-arroz-platano",
+  "name": "Asado Negro con Arroz y Plátano",
+  "n": 1,
+  "file": "sabor-avila/asado-negro-arroz-platano.jpg",
+  "prompt": "professional e-commerce product photograph, slices of Venezuelan asado negro beef in dark glossy sauce with white rice and fried plantain, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sabor-avila",
+  "kind": "product",
+  "slug": "almuerzo-ejecutivo-del-dia",
+  "name": "Almuerzo Ejecutivo del Día",
+  "n": 1,
+  "file": "sabor-avila/almuerzo-ejecutivo-del-dia.jpg",
+  "prompt": "professional e-commerce product photograph, a Venezuelan executive lunch set with a bowl of soup, a plate of grilled chicken with rice and salad, and a glass of fruit juice, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sabor-avila",
+  "kind": "product",
+  "slug": "hervido-criollo",
+  "name": "Hervido Criollo",
+  "n": 1,
+  "file": "sabor-avila/hervido-criollo.jpg",
+  "prompt": "professional e-commerce product photograph, a big bowl of Venezuelan sancocho soup with beef ribs, cassava, corn on the cob, pumpkin and cilantro, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sabor-avila",
+  "kind": "product",
+  "slug": "pargo-frito-tostones",
+  "name": "Pargo Rojo Frito con Tostones",
+  "n": 1,
+  "file": "sabor-avila/pargo-frito-tostones.jpg",
+  "prompt": "professional e-commerce product photograph, a whole crispy fried red snapper fish with green plantain tostones, shredded cabbage salad and lime wedges, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sabor-avila",
+  "kind": "product",
+  "slug": "papelon-con-limon",
+  "name": "Papelón con Limón 16 oz",
+  "n": 1,
+  "file": "sabor-avila/papelon-con-limon.jpg",
+  "prompt": "professional e-commerce product photograph, a tall glass of iced amber papelon con limon drink with lime slices and ice cubes, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sabor-avila",
+  "kind": "product",
+  "slug": "chicha-venezolana",
+  "name": "Chicha Venezolana",
+  "n": 1,
+  "file": "sabor-avila/chicha-venezolana.jpg",
+  "prompt": "professional e-commerce product photograph, a tall plastic cup of creamy Venezuelan rice chicha drink topped with condensed milk and cinnamon, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sabor-avila",
+  "kind": "product",
+  "slug": "jugo-natural-frutas",
+  "name": "Jugo Natural de Frutas",
+  "n": 1,
+  "file": "sabor-avila/jugo-natural-frutas.jpg",
+  "prompt": "professional e-commerce product photograph, three tall glasses of fresh tropical fruit juices in yellow, white and red colors with fruits, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sabor-avila",
+  "kind": "product",
+  "slug": "quesillo-criollo-porcion",
+  "name": "Quesillo Criollo (Porción)",
+  "n": 1,
+  "file": "sabor-avila/quesillo-criollo-porcion.jpg",
+  "prompt": "professional e-commerce product photograph, a slice of Venezuelan quesillo caramel flan with golden caramel sauce dripping, on a small plate, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sabor-avila",
+  "kind": "product",
+  "slug": "torta-tres-leches",
+  "name": "Torta Tres Leches",
+  "n": 1,
+  "file": "sabor-avila/torta-tres-leches.jpg",
+  "prompt": "professional e-commerce product photograph, a moist slice of tres leches cake with whipped meringue topping and cinnamon dust, milk pooling, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "pixel-store",
+  "kind": "logo",
+  "file": "pixel-store/_logo.jpg",
+  "prompt": "flat vector logo icon for a technology store, a stylized pixel square forming a play button, electric violet and cyan, centered, plain light background, minimal and modern, no text, no letters",
+  "aspect": "1:1"
+ },
+ {
+  "company": "pixel-store",
+  "kind": "store",
+  "file": "pixel-store/_store.jpg",
+  "prompt": "realistic daytime photograph of a modern electronics store with laptops, phones and headphones on display at street level on a tree lined street in the east of Caracas (Chacao / Altamira area), Venezuela, glass storefront, sign without readable text, no people in focus",
+  "aspect": "4:3"
+ },
+ {
+  "company": "pixel-store",
+  "kind": "product",
+  "slug": "samsung-galaxy-a55-5g",
+  "name": "Samsung Galaxy A55 5G",
+  "n": 1,
+  "file": "pixel-store/samsung-galaxy-a55-5g.jpg",
+  "prompt": "professional e-commerce product photograph, a modern mid-range Android smartphone in light blue color with a triple camera, front and back view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "pixel-store",
+  "kind": "product",
+  "slug": "iphone-16-pro-256",
+  "name": "iPhone 16 Pro 256 GB",
+  "n": 1,
+  "file": "pixel-store/iphone-16-pro-256.jpg",
+  "prompt": "professional e-commerce product photograph, a premium titanium smartphone with a triple camera module in natural titanium finish, front and back view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "pixel-store",
+  "kind": "product",
+  "slug": "xiaomi-redmi-pad-se-128",
+  "name": "Tablet Xiaomi Redmi Pad SE 11\" 128 GB",
+  "n": 1,
+  "file": "pixel-store/xiaomi-redmi-pad-se-128.jpg",
+  "prompt": "professional e-commerce product photograph, a slim 11 inch Android tablet in graphite gray with a colorful home screen, front and back view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "pixel-store",
+  "kind": "product",
+  "slug": "macbook-air-m3-13",
+  "name": "MacBook Air 13\" Chip M3",
+  "n": 1,
+  "file": "pixel-store/macbook-air-m3-13.jpg",
+  "prompt": "professional e-commerce product photograph, an ultra thin aluminum laptop in midnight blue, opened at 110 degrees showing a colorful wallpaper, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "pixel-store",
+  "kind": "product",
+  "slug": "lenovo-ideapad-slim-3-i5",
+  "name": "Laptop Lenovo IdeaPad Slim 3 15\" Core i5",
+  "n": 1,
+  "file": "pixel-store/lenovo-ideapad-slim-3-i5.jpg",
+  "prompt": "professional e-commerce product photograph, a slim 15 inch laptop in arctic gray with a full size keyboard and numeric pad, opened, three quarter view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "pixel-store",
+  "kind": "product",
+  "slug": "monitor-lg-ultragear-27-165hz",
+  "name": "Monitor Gamer LG UltraGear 27\" 165 Hz",
+  "n": 1,
+  "file": "pixel-store/monitor-lg-ultragear-27-165hz.jpg",
+  "prompt": "professional e-commerce product photograph, a 27 inch gaming monitor with thin bezels and a red accented stand, showing a colorful game landscape, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "pixel-store",
+  "kind": "product",
+  "slug": "samsung-crystal-uhd-4k-du7000",
+  "name": "Smart TV Samsung Crystal UHD 4K DU7000",
+  "n": 1,
+  "file": "pixel-store/samsung-crystal-uhd-4k-du7000.jpg",
+  "prompt": "professional e-commerce product photograph, a modern slim 4K smart TV on a minimalist stand showing a vibrant tropical beach image, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "pixel-store",
+  "kind": "product",
+  "slug": "playstation-5-slim",
+  "name": "Consola PlayStation 5 Slim 1 TB",
+  "n": 1,
+  "file": "pixel-store/playstation-5-slim.jpg",
+  "prompt": "professional e-commerce product photograph, a white next generation game console slim model standing vertically next to a white wireless controller, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "pixel-store",
+  "kind": "product",
+  "slug": "control-dualsense-ps5",
+  "name": "Control Inalámbrico DualSense PS5",
+  "n": 1,
+  "file": "pixel-store/control-dualsense-ps5.jpg",
+  "prompt": "professional e-commerce product photograph, a modern ergonomic wireless game controller with a touchpad, shown in white, black and red versions, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "pixel-store",
+  "kind": "product",
+  "slug": "headset-hyperx-cloud-ii",
+  "name": "Audífonos Gamer HyperX Cloud II 7.1",
+  "n": 1,
+  "file": "pixel-store/headset-hyperx-cloud-ii.jpg",
+  "prompt": "professional e-commerce product photograph, a black and red over-ear gaming headset with a detachable microphone and memory foam ear cushions, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "pixel-store",
+  "kind": "product",
+  "slug": "teclado-redragon-kumara-k552",
+  "name": "Teclado Mecánico Redragon Kumara K552 RGB",
+  "n": 1,
+  "file": "pixel-store/teclado-redragon-kumara-k552.jpg",
+  "prompt": "professional e-commerce product photograph, a compact tenkeyless mechanical keyboard with rainbow RGB backlight and a metal top plate, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "pixel-store",
+  "kind": "product",
+  "slug": "mouse-logitech-mx-master-3s",
+  "name": "Mouse Logitech MX Master 3S",
+  "n": 1,
+  "file": "pixel-store/mouse-logitech-mx-master-3s.jpg",
+  "prompt": "professional e-commerce product photograph, an ergonomic sculpted wireless mouse in graphite color with a metal scroll wheel and thumb wheel, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "pixel-store",
+  "kind": "product",
+  "slug": "apple-watch-se-2-gps",
+  "name": "Apple Watch SE (2.ª gen.) GPS",
+  "n": 1,
+  "file": "pixel-store/apple-watch-se-2-gps.jpg",
+  "prompt": "professional e-commerce product photograph, a square smartwatch with an aluminum case and a sport band, colorful activity rings on the screen, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "pixel-store",
+  "kind": "product",
+  "slug": "dron-dji-mini-4k",
+  "name": "Dron DJI Mini 4K",
+  "n": 1,
+  "file": "pixel-store/dron-dji-mini-4k.jpg",
+  "prompt": "professional e-commerce product photograph, a compact foldable gray camera drone with four propellers unfolded and a remote controller beside it, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "pixel-store",
+  "kind": "product",
+  "slug": "amazon-echo-dot-5",
+  "name": "Parlante Inteligente Amazon Echo Dot 5.ª gen.",
+  "n": 1,
+  "file": "pixel-store/amazon-echo-dot-5.jpg",
+  "prompt": "professional e-commerce product photograph, a small spherical smart speaker in charcoal fabric with a glowing blue light ring at the base, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "pixel-store",
+  "kind": "product",
+  "slug": "camara-wifi-imou-ranger-2",
+  "name": "Cámara Wi-Fi Imou Ranger 2 con Giro 360°",
+  "n": 1,
+  "file": "pixel-store/camara-wifi-imou-ranger-2.jpg",
+  "prompt": "professional e-commerce product photograph, a white indoor pan tilt security camera with a round black lens dome, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "pixel-store",
+  "kind": "product",
+  "slug": "mini-ups-router-fibra-10400",
+  "name": "Mini UPS para Router y Fibra Óptica 10.400 mAh",
+  "n": 1,
+  "file": "pixel-store/mini-ups-router-fibra-10400.jpg",
+  "prompt": "professional e-commerce product photograph, a small white rectangular mini UPS battery box with DC output ports and short cables, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "pixel-store",
+  "kind": "product",
+  "slug": "disco-externo-wd-elements-2tb",
+  "name": "Disco Duro Externo WD Elements 2 TB USB 3.0",
+  "n": 1,
+  "file": "pixel-store/disco-externo-wd-elements-2tb.jpg",
+  "prompt": "professional e-commerce product photograph, a compact black portable external hard drive with a short USB cable coiled beside it, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "pixel-store",
+  "kind": "product",
+  "slug": "cargador-inalambrico-3en1-magsafe",
+  "name": "Base de Carga Inalámbrica 3 en 1 MagSafe",
+  "n": 1,
+  "file": "pixel-store/cargador-inalambrico-3en1-magsafe.jpg",
+  "prompt": "professional e-commerce product photograph, a foldable 3 in 1 wireless charging stand holding a smartphone, a smartwatch and wireless earbuds, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "pixel-store",
+  "kind": "product",
+  "slug": "tp-link-deco-x20-mesh",
+  "name": "Sistema Wi-Fi Mesh TP-Link Deco X20 AX1800",
+  "n": 1,
+  "file": "pixel-store/tp-link-deco-x20-mesh.jpg",
+  "prompt": "professional e-commerce product photograph, two white cylindrical wifi mesh router units side by side with soft status lights, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "moda-urbana",
+  "kind": "logo",
+  "file": "moda-urbana/_logo.jpg",
+  "prompt": "flat vector logo icon for an urban fashion boutique, a minimalist clothes hanger with a sneaker, black and coral, centered, plain light background, minimal and modern, no text, no letters",
+  "aspect": "1:1"
+ },
+ {
+  "company": "moda-urbana",
+  "kind": "store",
+  "file": "moda-urbana/_store.jpg",
+  "prompt": "realistic daytime photograph of a trendy clothing boutique with mannequins in the window at street level on a tree lined street in the east of Caracas (Chacao / Altamira area), Venezuela, glass storefront, sign without readable text, no people in focus",
+  "aspect": "4:3"
+ },
+ {
+  "company": "moda-urbana",
+  "kind": "product",
+  "slug": "blusa-lino-manga-globo",
+  "name": "Blusa de Lino Manga Globo",
+  "n": 1,
+  "file": "moda-urbana/blusa-lino-manga-globo.jpg",
+  "prompt": "professional e-commerce product photograph, a women linen blouse with puff sleeves and covered front buttons, white color, folded and flat lay, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "moda-urbana",
+  "kind": "product",
+  "slug": "crop-top-acanalado-basico",
+  "name": "Crop Top Acanalado Básico",
+  "n": 1,
+  "file": "moda-urbana/crop-top-acanalado-basico.jpg",
+  "prompt": "professional e-commerce product photograph, three ribbed cotton crop tops in black, white and pink, neatly arranged flat lay, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "moda-urbana",
+  "kind": "product",
+  "slug": "vestido-midi-satinado-tiritas",
+  "name": "Vestido Midi Satinado de Tiritas",
+  "n": 1,
+  "file": "moda-urbana/vestido-midi-satinado-tiritas.jpg",
+  "prompt": "professional e-commerce product photograph, a burgundy satin midi slip dress with thin adjustable straps on an invisible mannequin, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "moda-urbana",
+  "kind": "product",
+  "slug": "jean-levanta-cola-horma-colombiana",
+  "name": "Jean Levanta Cola Horma Colombiana",
+  "n": 1,
+  "file": "moda-urbana/jean-levanta-cola-horma-colombiana.jpg",
+  "prompt": "professional e-commerce product photograph, a pair of dark blue high waisted skinny push up jeans for women, front and back view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "moda-urbana",
+  "kind": "product",
+  "slug": "pantalon-palazzo-lino",
+  "name": "Pantalón Palazzo de Lino",
+  "n": 1,
+  "file": "moda-urbana/pantalon-palazzo-lino.jpg",
+  "prompt": "professional e-commerce product photograph, beige linen wide leg palazzo pants for women, high waist, displayed flat with soft folds, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "moda-urbana",
+  "kind": "product",
+  "slug": "franela-oversize-algodon-pesado",
+  "name": "Franela Oversize de Algodón Pesado",
+  "n": 1,
+  "file": "moda-urbana/franela-oversize-algodon-pesado.jpg",
+  "prompt": "professional e-commerce product photograph, a heavyweight oversized cotton t-shirt in olive green with dropped shoulders, flat lay, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "moda-urbana",
+  "kind": "product",
+  "slug": "chemise-tommy-pique-slim",
+  "name": "Chemise Tommy Hilfiger Piqué Slim Fit",
+  "n": 1,
+  "file": "moda-urbana/chemise-tommy-pique-slim.jpg",
+  "prompt": "professional e-commerce product photograph, a navy blue cotton pique polo shirt for men, slim fit, small embroidered flag on chest, front view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "moda-urbana",
+  "kind": "product",
+  "slug": "jean-levis-511-slim-fit",
+  "name": "Jean Levi's 511 Slim Fit",
+  "n": 1,
+  "file": "moda-urbana/jean-levis-511-slim-fit.jpg",
+  "prompt": "professional e-commerce product photograph, a pair of dark indigo slim fit men jeans, folded showing the waistband and leather patch area, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "moda-urbana",
+  "kind": "product",
+  "slug": "conjunto-deportivo-legging-top",
+  "name": "Conjunto Deportivo Dama Legging + Top",
+  "n": 1,
+  "file": "moda-urbana/conjunto-deportivo-legging-top.jpg",
+  "prompt": "professional e-commerce product photograph, a women activewear set with high waisted leggings and matching sports bra in purple, flat lay, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "moda-urbana",
+  "kind": "product",
+  "slug": "kimono-salida-playa-estampado",
+  "name": "Kimono Salida de Playa Estampado",
+  "n": 1,
+  "file": "moda-urbana/kimono-salida-playa-estampado.jpg",
+  "prompt": "professional e-commerce product photograph, a long lightweight chiffon beach kimono cover-up with tropical leaf print and fringe hem, hanging, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "moda-urbana",
+  "kind": "product",
+  "slug": "pack-3-medias-tobilleras",
+  "name": "Pack x3 Medias Tobilleras Deportivas",
+  "n": 1,
+  "file": "moda-urbana/pack-3-medias-tobilleras.jpg",
+  "prompt": "professional e-commerce product photograph, three pairs of cotton ankle sport socks in white, black and grey, neatly arranged, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "moda-urbana",
+  "kind": "product",
+  "slug": "nike-air-force-1-07-blanco",
+  "name": "Nike Air Force 1 '07 Blanco",
+  "n": 1,
+  "file": "moda-urbana/nike-air-force-1-07-blanco.jpg",
+  "prompt": "professional e-commerce product photograph, a pair of classic all white leather low top basketball sneakers, side and three quarter view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "moda-urbana",
+  "kind": "product",
+  "slug": "sandalias-tacon-trenzadas",
+  "name": "Sandalias de Tacón Trenzadas",
+  "n": 1,
+  "file": "moda-urbana/sandalias-tacon-trenzadas.jpg",
+  "prompt": "professional e-commerce product photograph, a pair of women block heel sandals with braided straps and ankle strap in nude beige, side view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "moda-urbana",
+  "kind": "product",
+  "slug": "mocasines-cuero-caballero",
+  "name": "Mocasines de Cuero para Caballero",
+  "n": 1,
+  "file": "moda-urbana/mocasines-cuero-caballero.jpg",
+  "prompt": "professional e-commerce product photograph, a pair of men cognac brown genuine leather penny loafers, side and top view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "moda-urbana",
+  "kind": "product",
+  "slug": "cartera-tote-semicuero-camel",
+  "name": "Cartera Tote de Semicuero Camel",
+  "n": 1,
+  "file": "moda-urbana/cartera-tote-semicuero-camel.jpg",
+  "prompt": "professional e-commerce product photograph, a large camel brown faux leather tote handbag with magnetic closure, front view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "moda-urbana",
+  "kind": "product",
+  "slug": "bandolera-mini-acolchada",
+  "name": "Bandolera Mini Acolchada",
+  "n": 1,
+  "file": "moda-urbana/bandolera-mini-acolchada.jpg",
+  "prompt": "professional e-commerce product photograph, a small black quilted crossbody bag with chain and leather strap, front view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "moda-urbana",
+  "kind": "product",
+  "slug": "reloj-casio-vintage-a158w",
+  "name": "Reloj Casio Vintage A158W Plateado",
+  "n": 1,
+  "file": "moda-urbana/reloj-casio-vintage-a158w.jpg",
+  "prompt": "professional e-commerce product photograph, a classic retro silver digital wrist watch with stainless steel bracelet, front view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "moda-urbana",
+  "kind": "product",
+  "slug": "lentes-sol-polarizados-aviador",
+  "name": "Lentes de Sol Polarizados Estilo Aviador",
+  "n": 1,
+  "file": "moda-urbana/lentes-sol-polarizados-aviador.jpg",
+  "prompt": "professional e-commerce product photograph, aviator sunglasses with thin gold metal frame and dark green polarized lenses, folded, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "moda-urbana",
+  "kind": "product",
+  "slug": "gorra-trucker-bordada-caracas",
+  "name": "Gorra Trucker Bordada Caracas",
+  "n": 1,
+  "file": "moda-urbana/gorra-trucker-bordada-caracas.jpg",
+  "prompt": "professional e-commerce product photograph, a black trucker cap with mesh back and an embroidered mountain silhouette on the front panel, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "moda-urbana",
+  "kind": "product",
+  "slug": "correa-cuero-reversible",
+  "name": "Correa de Cuero Reversible Negro/Marrón",
+  "n": 1,
+  "file": "moda-urbana/correa-cuero-reversible.jpg",
+  "prompt": "professional e-commerce product photograph, a reversible men leather belt black and brown with a silver rotating buckle, coiled, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "glow-beauty",
+  "kind": "logo",
+  "file": "glow-beauty/_logo.jpg",
+  "prompt": "flat vector logo icon for a beauty and skincare shop, a shining drop with a small sparkle, blush pink and rose gold, centered, plain light background, minimal and modern, no text, no letters",
+  "aspect": "1:1"
+ },
+ {
+  "company": "glow-beauty",
+  "kind": "store",
+  "file": "glow-beauty/_store.jpg",
+  "prompt": "realistic daytime photograph of a bright beauty and skincare shop with cosmetics shelves at street level on a tree lined street in the east of Caracas (Chacao / Altamira area), Venezuela, glass storefront, sign without readable text, no people in focus",
+  "aspect": "4:3"
+ },
+ {
+  "company": "glow-beauty",
+  "kind": "product",
+  "slug": "cerave-limpiador-espumoso",
+  "name": "CeraVe Limpiador Facial Espumoso",
+  "n": 1,
+  "file": "glow-beauty/cerave-limpiador-espumoso.jpg",
+  "prompt": "professional e-commerce product photograph, a white and blue pump bottle of foaming facial cleanser gel, dermatological skincare, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "glow-beauty",
+  "kind": "product",
+  "slug": "la-roche-posay-effaclar-duo",
+  "name": "La Roche-Posay Effaclar Duo+M 40 ml",
+  "n": 1,
+  "file": "glow-beauty/la-roche-posay-effaclar-duo.jpg",
+  "prompt": "professional e-commerce product photograph, a white squeeze tube of anti-blemish face cream with blue cap, dermatological brand style, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "glow-beauty",
+  "kind": "product",
+  "slug": "anthelios-uvmune-400-fluido-spf50",
+  "name": "La Roche-Posay Anthelios UVMune 400 Fluido SPF 50+",
+  "n": 1,
+  "file": "glow-beauty/anthelios-uvmune-400-fluido-spf50.jpg",
+  "prompt": "professional e-commerce product photograph, a small orange and white bottle of fluid facial sunscreen SPF 50, dermatological skincare, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "glow-beauty",
+  "kind": "product",
+  "slug": "the-ordinary-niacinamida-zinc",
+  "name": "The Ordinary Niacinamida 10% + Zinc 1%",
+  "n": 1,
+  "file": "glow-beauty/the-ordinary-niacinamida-zinc.jpg",
+  "prompt": "professional e-commerce product photograph, a small clear glass dropper bottle of facial serum with white minimalist label, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "glow-beauty",
+  "kind": "product",
+  "slug": "garnier-serum-vitamina-c",
+  "name": "Garnier Express Aclara Sérum Vitamina C 30 ml",
+  "n": 1,
+  "file": "glow-beauty/garnier-serum-vitamina-c.jpg",
+  "prompt": "professional e-commerce product photograph, an orange tinted glass dropper bottle of vitamin C facial serum surrounded by orange slices, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "glow-beauty",
+  "kind": "product",
+  "slug": "maybelline-fit-me-base-matte",
+  "name": "Maybelline Fit Me Base Matte + Poreless",
+  "n": 1,
+  "file": "glow-beauty/maybelline-fit-me-base-matte.jpg",
+  "prompt": "professional e-commerce product photograph, a glass bottle of liquid matte foundation with pump, beige liquid swatch next to it, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "glow-beauty",
+  "kind": "product",
+  "slug": "maybelline-sky-high-mascara",
+  "name": "Maybelline Lash Sensational Sky High Rímel",
+  "n": 1,
+  "file": "glow-beauty/maybelline-sky-high-mascara.jpg",
+  "prompt": "professional e-commerce product photograph, a slim pink mascara tube with its wand and black mascara brush, beauty product shot, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "glow-beauty",
+  "kind": "product",
+  "slug": "maybelline-superstay-matte-ink",
+  "name": "Maybelline SuperStay Matte Ink Labial Líquido",
+  "n": 1,
+  "file": "glow-beauty/maybelline-superstay-matte-ink.jpg",
+  "prompt": "professional e-commerce product photograph, several liquid matte lipstick tubes in nude, pink, red and burgundy shades with swatches, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "glow-beauty",
+  "kind": "product",
+  "slug": "set-brochas-maquillaje-12",
+  "name": "Set de 12 Brochas de Maquillaje con Estuche",
+  "n": 1,
+  "file": "glow-beauty/set-brochas-maquillaje-12.jpg",
+  "prompt": "professional e-commerce product photograph, a set of twelve makeup brushes with wooden handles and rose gold ferrules in a roll-up case, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "glow-beauty",
+  "kind": "product",
+  "slug": "anyeluz-mascarilla-keratina",
+  "name": "Anyeluz Mascarilla Capilar de Keratina",
+  "n": 1,
+  "file": "glow-beauty/anyeluz-mascarilla-keratina.jpg",
+  "prompt": "professional e-commerce product photograph, a white jar of creamy hair mask treatment with keratin, open lid showing the cream, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "glow-beauty",
+  "kind": "product",
+  "slug": "loreal-excellence-creme-tinte",
+  "name": "L'Oréal Paris Excellence Creme Tinte Permanente",
+  "n": 1,
+  "file": "glow-beauty/loreal-excellence-creme-tinte.jpg",
+  "prompt": "professional e-commerce product photograph, a hair color box kit with developer bottle, color cream tube, gloves and conditioner sachet, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "glow-beauty",
+  "kind": "product",
+  "slug": "revlon-one-step-secador-voluminizador",
+  "name": "Revlon One-Step Secador y Voluminizador",
+  "n": 1,
+  "file": "glow-beauty/revlon-one-step-secador-voluminizador.jpg",
+  "prompt": "professional e-commerce product photograph, a black and pink oval hot air brush hair dryer volumizer, side view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "glow-beauty",
+  "kind": "product",
+  "slug": "victorias-secret-body-mist-250",
+  "name": "Victoria's Secret Body Mist 250 ml",
+  "n": 1,
+  "file": "glow-beauty/victorias-secret-body-mist-250.jpg",
+  "prompt": "professional e-commerce product photograph, several tall translucent body mist spray bottles in pastel colors, fragrance product shot, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "glow-beauty",
+  "kind": "product",
+  "slug": "carolina-herrera-good-girl-edp",
+  "name": "Carolina Herrera Good Girl Eau de Parfum",
+  "n": 1,
+  "file": "glow-beauty/carolina-herrera-good-girl-edp.jpg",
+  "prompt": "professional e-commerce product photograph, a luxurious dark blue glass perfume bottle shaped like a stiletto heel, elegant product shot, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "glow-beauty",
+  "kind": "product",
+  "slug": "paco-rabanne-1-million-edt-100",
+  "name": "Paco Rabanne 1 Million Eau de Toilette 100 ml",
+  "n": 1,
+  "file": "glow-beauty/paco-rabanne-1-million-edt-100.jpg",
+  "prompt": "professional e-commerce product photograph, a gold ingot shaped men perfume bottle, luxury fragrance product shot, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "glow-beauty",
+  "kind": "product",
+  "slug": "esmalte-masglo-13-5-ml",
+  "name": "Esmalte de Uñas Masglo 13,5 ml",
+  "n": 1,
+  "file": "glow-beauty/esmalte-masglo-13-5-ml.jpg",
+  "prompt": "professional e-commerce product photograph, a row of small glass nail polish bottles in red, burgundy, nude, black and clear shades, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "glow-beauty",
+  "kind": "product",
+  "slug": "lampara-uv-led-48w-unas",
+  "name": "Lámpara UV/LED 48 W para Uñas",
+  "n": 1,
+  "file": "glow-beauty/lampara-uv-led-48w-unas.jpg",
+  "prompt": "professional e-commerce product photograph, a white compact UV LED nail lamp with display and opening for hand, front view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "glow-beauty",
+  "kind": "product",
+  "slug": "dove-desodorante-original",
+  "name": "Dove Desodorante Antitranspirante Original",
+  "n": 1,
+  "file": "glow-beauty/dove-desodorante-original.jpg",
+  "prompt": "professional e-commerce product photograph, white antiperspirant deodorant products in roll-on, aerosol spray and stick formats, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "glow-beauty",
+  "kind": "product",
+  "slug": "gillette-mach3-maquina-2-repuestos",
+  "name": "Gillette Mach3 Máquina + 2 Repuestos",
+  "n": 1,
+  "file": "glow-beauty/gillette-mach3-maquina-2-repuestos.jpg",
+  "prompt": "professional e-commerce product photograph, a three blade men razor with ergonomic handle and two spare cartridges, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "glow-beauty",
+  "kind": "product",
+  "slug": "natures-bounty-hair-skin-nails-gomitas",
+  "name": "Nature's Bounty Hair, Skin & Nails Gomitas x80",
+  "n": 1,
+  "file": "glow-beauty/natures-bounty-hair-skin-nails-gomitas.jpg",
+  "prompt": "professional e-commerce product photograph, a supplement bottle with pink strawberry gummies spilled in front of it, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "casa-avila",
+  "kind": "logo",
+  "file": "casa-avila/_logo.jpg",
+  "prompt": "flat vector logo icon for a home decor store, a simple house outline with a leaf inside, terracotta and sage green, centered, plain light background, minimal and modern, no text, no letters",
+  "aspect": "1:1"
+ },
+ {
+  "company": "casa-avila",
+  "kind": "store",
+  "file": "casa-avila/_store.jpg",
+  "prompt": "realistic daytime photograph of a home decor and furniture showroom with sofas, lamps and plants at street level on a tree lined street in the east of Caracas (Chacao / Altamira area), Venezuela, glass storefront, sign without readable text, no people in focus",
+  "aspect": "4:3"
+ },
+ {
+  "company": "casa-avila",
+  "kind": "product",
+  "slug": "sofa-3-puestos-lino-avila",
+  "name": "Sofá 3 Puestos Ávila Tapizado en Lino",
+  "n": 1,
+  "file": "casa-avila/sofa-3-puestos-lino-avila.jpg",
+  "prompt": "professional e-commerce product photograph, a modern three-seater sofa upholstered in light gray linen fabric with wooden legs, front three-quarter view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "casa-avila",
+  "kind": "product",
+  "slug": "juego-comedor-6-puestos-madera",
+  "name": "Juego de Comedor 6 Puestos en Madera Maciza",
+  "n": 1,
+  "file": "casa-avila/juego-comedor-6-puestos-madera.jpg",
+  "prompt": "professional e-commerce product photograph, a solid wood rectangular dining table with six upholstered wooden chairs, three-quarter view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "casa-avila",
+  "kind": "product",
+  "slug": "mesa-centro-roble-vidrio",
+  "name": "Mesa de Centro Nórdica Roble y Vidrio Templado",
+  "n": 1,
+  "file": "casa-avila/mesa-centro-roble-vidrio.jpg",
+  "prompt": "professional e-commerce product photograph, a scandinavian style coffee table with tempered glass top, light oak lower shelf and tapered wooden legs, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "casa-avila",
+  "kind": "product",
+  "slug": "butaca-acento-terciopelo",
+  "name": "Butaca de Acento en Terciopelo Verde Esmeralda",
+  "n": 1,
+  "file": "casa-avila/butaca-acento-terciopelo.jpg",
+  "prompt": "professional e-commerce product photograph, an emerald green velvet accent armchair with tufted back and slim golden metal legs, three-quarter view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "casa-avila",
+  "kind": "product",
+  "slug": "rack-tv-flotante-180",
+  "name": "Mueble para TV Flotante 180 cm",
+  "n": 1,
+  "file": "casa-avila/rack-tv-flotante-180.jpg",
+  "prompt": "professional e-commerce product photograph, a modern floating TV stand cabinet 180 cm wide with two flip-down doors and an open middle shelf, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "casa-avila",
+  "kind": "product",
+  "slug": "colchon-ortopedico-resortes-pocket",
+  "name": "Colchón Ortopédico Lujo Resortes Pocket",
+  "n": 1,
+  "file": "casa-avila/colchon-ortopedico-resortes-pocket.jpg",
+  "prompt": "professional e-commerce product photograph, a thick orthopedic pocket spring mattress with white quilted jacquard fabric, three-quarter view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "casa-avila",
+  "kind": "product",
+  "slug": "almohada-viscoelastica-memory-foam",
+  "name": "Almohada Viscoelástica Memory Foam",
+  "n": 1,
+  "file": "casa-avila/almohada-viscoelastica-memory-foam.jpg",
+  "prompt": "professional e-commerce product photograph, a white memory foam pillow with a soft quilted bamboo cover, slightly angled view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "casa-avila",
+  "kind": "product",
+  "slug": "juego-sabanas-algodon-400-hilos",
+  "name": "Juego de Sábanas 400 Hilos 100% Algodón",
+  "n": 1,
+  "file": "casa-avila/juego-sabanas-algodon-400-hilos.jpg",
+  "prompt": "professional e-commerce product photograph, a neatly folded set of white cotton percale bed sheets with two pillowcases stacked, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "casa-avila",
+  "kind": "product",
+  "slug": "edredon-reversible-microfibra",
+  "name": "Edredón Reversible de Microfibra",
+  "n": 1,
+  "file": "casa-avila/edredon-reversible-microfibra.jpg",
+  "prompt": "professional e-commerce product photograph, a folded reversible microfiber comforter showing two different solid colors on each side, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "casa-avila",
+  "kind": "product",
+  "slug": "set-toallas-algodon-6-piezas",
+  "name": "Set de 6 Toallas de Algodón Egipcio",
+  "n": 1,
+  "file": "casa-avila/set-toallas-algodon-6-piezas.jpg",
+  "prompt": "professional e-commerce product photograph, a stack of six fluffy cotton towels in three sizes, neatly folded, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "casa-avila",
+  "kind": "product",
+  "slug": "set-ollas-acero-inoxidable-10-piezas",
+  "name": "Batería de Ollas Tramontina 10 Piezas Acero Inoxidable",
+  "n": 1,
+  "file": "casa-avila/set-ollas-acero-inoxidable-10-piezas.jpg",
+  "prompt": "professional e-commerce product photograph, a ten-piece stainless steel cookware set with glass lids, pots and a frying pan arranged together, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "casa-avila",
+  "kind": "product",
+  "slug": "sarten-antiadherente-granito",
+  "name": "Sartén Antiadherente Efecto Granito Imusa",
+  "n": 1,
+  "file": "casa-avila/sarten-antiadherente-granito.jpg",
+  "prompt": "professional e-commerce product photograph, a granite-effect non-stick frying pan with a soft-touch black handle, top angled view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "casa-avila",
+  "kind": "product",
+  "slug": "set-cuchillos-tramontina-base",
+  "name": "Set de Cuchillos Tramontina con Base de Madera",
+  "n": 1,
+  "file": "casa-avila/set-cuchillos-tramontina-base.jpg",
+  "prompt": "professional e-commerce product photograph, a kitchen knife set with stainless steel blades in a wooden knife block, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "casa-avila",
+  "kind": "product",
+  "slug": "freidora-aire-oster-4l",
+  "name": "Freidora de Aire Oster 4 Litros",
+  "n": 1,
+  "file": "casa-avila/freidora-aire-oster-4l.jpg",
+  "prompt": "professional e-commerce product photograph, a modern digital air fryer with a 4 liter basket and touch control panel, front three-quarter view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "casa-avila",
+  "kind": "product",
+  "slug": "espejo-redondo-marco-dorado",
+  "name": "Espejo Redondo con Marco Metálico Dorado",
+  "n": 1,
+  "file": "casa-avila/espejo-redondo-marco-dorado.jpg",
+  "prompt": "professional e-commerce product photograph, a round wall mirror with a thin brushed gold metal frame, front view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "casa-avila",
+  "kind": "product",
+  "slug": "cuadro-triptico-abstracto-canvas",
+  "name": "Cuadro Tríptico Abstracto en Canvas",
+  "n": 1,
+  "file": "casa-avila/cuadro-triptico-abstracto-canvas.jpg",
+  "prompt": "professional e-commerce product photograph, a set of three abstract canvas paintings in earth tones with organic shapes, displayed side by side, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "casa-avila",
+  "kind": "product",
+  "slug": "lampara-pie-arco-marmol",
+  "name": "Lámpara de Pie Tipo Arco con Base de Mármol",
+  "n": 1,
+  "file": "casa-avila/lampara-pie-arco-marmol.jpg",
+  "prompt": "professional e-commerce product photograph, a modern arc floor lamp with a dome metal shade and a round white marble base, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "casa-avila",
+  "kind": "product",
+  "slug": "set-accesorios-bano-4-piezas",
+  "name": "Set de Accesorios de Baño 4 Piezas",
+  "n": 1,
+  "file": "casa-avila/set-accesorios-bano-4-piezas.jpg",
+  "prompt": "professional e-commerce product photograph, a four-piece bathroom accessory set with soap dispenser, tumbler, soap dish and toothbrush holder, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "casa-avila",
+  "kind": "product",
+  "slug": "manguera-jardin-reforzada-20m",
+  "name": "Manguera de Jardín Reforzada 20 m con Pistola",
+  "n": 1,
+  "file": "casa-avila/manguera-jardin-reforzada-20m.jpg",
+  "prompt": "professional e-commerce product photograph, a coiled green reinforced garden hose with a multi-pattern spray nozzle and quick connectors, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "casa-avila",
+  "kind": "product",
+  "slug": "juego-terraza-ratan-4-piezas",
+  "name": "Juego de Terraza en Ratán Sintético 4 Piezas",
+  "n": 1,
+  "file": "casa-avila/juego-terraza-ratan-4-piezas.jpg",
+  "prompt": "professional e-commerce product photograph, a four-piece synthetic rattan patio furniture set with cream cushions and a glass top coffee table, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "ferre-dos-caminos",
+  "kind": "logo",
+  "file": "ferre-dos-caminos/_logo.jpg",
+  "prompt": "flat vector logo icon for a hardware store, a hammer and a screwdriver crossed inside a circle, safety yellow and charcoal, centered, plain light background, minimal and modern, no text, no letters",
+  "aspect": "1:1"
+ },
+ {
+  "company": "ferre-dos-caminos",
+  "kind": "store",
+  "file": "ferre-dos-caminos/_store.jpg",
+  "prompt": "realistic daytime photograph of a neighborhood hardware store with tools and paint cans displayed at street level on a tree lined street in the east of Caracas (Chacao / Altamira area), Venezuela, glass storefront, sign without readable text, no people in focus",
+  "aspect": "4:3"
+ },
+ {
+  "company": "ferre-dos-caminos",
+  "kind": "product",
+  "slug": "juego-destornilladores-stanley-6",
+  "name": "Juego de Destornilladores Stanley 6 Piezas",
+  "n": 1,
+  "file": "ferre-dos-caminos/juego-destornilladores-stanley-6.jpg",
+  "prompt": "professional e-commerce product photograph, a set of six screwdrivers with yellow and black ergonomic handles arranged in a fan shape, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "ferre-dos-caminos",
+  "kind": "product",
+  "slug": "alicate-universal-truper-8",
+  "name": "Alicate Universal Truper 8\"",
+  "n": 1,
+  "file": "ferre-dos-caminos/alicate-universal-truper-8.jpg",
+  "prompt": "professional e-commerce product photograph, an 8 inch lineman combination plier with orange and black insulated grips, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "ferre-dos-caminos",
+  "kind": "product",
+  "slug": "llave-ajustable-perico-truper",
+  "name": "Llave Ajustable (Perico) Truper",
+  "n": 1,
+  "file": "ferre-dos-caminos/llave-ajustable-perico-truper.jpg",
+  "prompt": "professional e-commerce product photograph, three chrome adjustable wrenches of different sizes laid side by side, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "ferre-dos-caminos",
+  "kind": "product",
+  "slug": "rotomartillo-bosch-gbh-2-24",
+  "name": "Rotomartillo Bosch GBH 2-24 D SDS Plus 790 W",
+  "n": 1,
+  "file": "ferre-dos-caminos/rotomartillo-bosch-gbh-2-24.jpg",
+  "prompt": "professional e-commerce product photograph, a professional blue SDS plus rotary hammer drill with auxiliary handle next to its hard carrying case, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "ferre-dos-caminos",
+  "kind": "product",
+  "slug": "sierra-circular-dewalt-7-1-4",
+  "name": "Sierra Circular DeWalt 7-1/4\" 1800 W",
+  "n": 1,
+  "file": "ferre-dos-caminos/sierra-circular-dewalt-7-1-4.jpg",
+  "prompt": "professional e-commerce product photograph, a yellow and black 7-1/4 inch circular saw with a carbide blade and aluminum shoe, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "ferre-dos-caminos",
+  "kind": "product",
+  "slug": "soldadora-inversora-lincoln-200a",
+  "name": "Soldadora Inversora Lincoln Electric 200 A Bivoltaje",
+  "n": 1,
+  "file": "ferre-dos-caminos/soldadora-inversora-lincoln-200a.jpg",
+  "prompt": "professional e-commerce product photograph, a compact red inverter arc welding machine with welding cables, electrode holder and ground clamp, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "ferre-dos-caminos",
+  "kind": "product",
+  "slug": "tomacorriente-doble-leviton",
+  "name": "Tomacorriente Doble con Tapa Leviton",
+  "n": 1,
+  "file": "ferre-dos-caminos/tomacorriente-doble-leviton.jpg",
+  "prompt": "professional e-commerce product photograph, a white duplex wall electrical outlet with its cover plate and mounting screws, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "ferre-dos-caminos",
+  "kind": "product",
+  "slug": "panel-led-empotrable-18w",
+  "name": "Panel LED Empotrable Redondo 18 W",
+  "n": 1,
+  "file": "ferre-dos-caminos/panel-led-empotrable-18w.jpg",
+  "prompt": "professional e-commerce product photograph, a round ultra slim recessed LED ceiling panel light, white frame, shown from front and side, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "ferre-dos-caminos",
+  "kind": "product",
+  "slug": "lampara-emergencia-recargable-60led",
+  "name": "Lámpara de Emergencia Recargable 60 LED",
+  "n": 1,
+  "file": "ferre-dos-caminos/lampara-emergencia-recargable-60led.jpg",
+  "prompt": "professional e-commerce product photograph, a white rectangular rechargeable emergency light with two rows of LEDs and a carry handle, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "ferre-dos-caminos",
+  "kind": "product",
+  "slug": "griferia-monomando-fregadero-inox",
+  "name": "Grifería Monomando para Fregadero Acero Inoxidable",
+  "n": 1,
+  "file": "ferre-dos-caminos/griferia-monomando-fregadero-inox.jpg",
+  "prompt": "professional e-commerce product photograph, a modern high arc single handle stainless steel kitchen faucet with satin finish, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "ferre-dos-caminos",
+  "kind": "product",
+  "slug": "tubo-pvc-aguas-blancas-tubrica",
+  "name": "Tubo PVC Aguas Blancas Tubrica 3 m",
+  "n": 1,
+  "file": "ferre-dos-caminos/tubo-pvc-aguas-blancas-tubrica.jpg",
+  "prompt": "professional e-commerce product photograph, several white PVC pressure pipes of different diameters stacked neatly, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "ferre-dos-caminos",
+  "kind": "product",
+  "slug": "bomba-periferica-pedrollo-pkm",
+  "name": "Bomba de Agua Periférica Pedrollo PKm",
+  "n": 1,
+  "file": "ferre-dos-caminos/bomba-periferica-pedrollo-pkm.jpg",
+  "prompt": "professional e-commerce product photograph, a compact blue peripheral electric water pump with brass inlet and outlet fittings, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "ferre-dos-caminos",
+  "kind": "product",
+  "slug": "esmalte-anticorrosivo-montana",
+  "name": "Esmalte Anticorrosivo Montana",
+  "n": 1,
+  "file": "ferre-dos-caminos/esmalte-anticorrosivo-montana.jpg",
+  "prompt": "professional e-commerce product photograph, two metal paint cans, a quart and a gallon, with plain unlabeled glossy black lids, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "ferre-dos-caminos",
+  "kind": "product",
+  "slug": "impermeabilizante-elastomerico-4gal",
+  "name": "Impermeabilizante Elastomérico para Techos Cuñete 4 Galones",
+  "n": 1,
+  "file": "ferre-dos-caminos/impermeabilizante-elastomerico-4gal.jpg",
+  "prompt": "professional e-commerce product photograph, a large white plastic paint bucket of roof waterproofing coating with a plain unlabeled lid, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "ferre-dos-caminos",
+  "kind": "product",
+  "slug": "kit-pintura-rodillo-bandeja-brocha",
+  "name": "Kit de Pintura: Rodillo 9\" + Bandeja + Brocha 3\"",
+  "n": 1,
+  "file": "ferre-dos-caminos/kit-pintura-rodillo-bandeja-brocha.jpg",
+  "prompt": "professional e-commerce product photograph, a paint roller kit with a 9 inch roller, a plastic paint tray and a 3 inch brush, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "ferre-dos-caminos",
+  "kind": "product",
+  "slug": "pego-ceramica-porcelanato-20kg",
+  "name": "Pego para Cerámica y Porcelanato Saco 20 kg",
+  "n": 1,
+  "file": "ferre-dos-caminos/pego-ceramica-porcelanato-20kg.jpg",
+  "prompt": "professional e-commerce product photograph, a 20 kg paper bag of gray tile adhesive mortar with a plain unlabeled design, standing upright, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "ferre-dos-caminos",
+  "kind": "product",
+  "slug": "tornillos-drywall-punta-fina",
+  "name": "Tornillos para Drywall Punta Fina",
+  "n": 1,
+  "file": "ferre-dos-caminos/tornillos-drywall-punta-fina.jpg",
+  "prompt": "professional e-commerce product photograph, a pile of black phosphate drywall screws with bugle heads, a few standing upright, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "ferre-dos-caminos",
+  "kind": "product",
+  "slug": "cerradura-pomo-cisa-alcoba-bano",
+  "name": "Cerradura de Pomo Cisa Acero Inoxidable",
+  "n": 1,
+  "file": "ferre-dos-caminos/cerradura-pomo-cisa-alcoba-bano.jpg",
+  "prompt": "professional e-commerce product photograph, a brushed stainless steel door knob lock set with three keys and latch mechanism, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "ferre-dos-caminos",
+  "kind": "product",
+  "slug": "cerradura-sobreponer-porton-cisa",
+  "name": "Cerradura de Sobreponer para Portón Cisa",
+  "n": 1,
+  "file": "ferre-dos-caminos/cerradura-sobreponer-porton-cisa.jpg",
+  "prompt": "professional e-commerce product photograph, a heavy duty surface mounted gate lock with a steel body, keyhole cylinder and three keys, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "ferre-dos-caminos",
+  "kind": "product",
+  "slug": "guantes-carnaza-reforzados",
+  "name": "Guantes de Carnaza Reforzados",
+  "n": 1,
+  "file": "ferre-dos-caminos/guantes-carnaza-reforzados.jpg",
+  "prompt": "professional e-commerce product photograph, a pair of tan split leather work gloves with reinforced palms and fabric cuffs, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "autopartes-california",
+  "kind": "logo",
+  "file": "autopartes-california/_logo.jpg",
+  "prompt": "flat vector logo icon for an auto parts store, a gear combined with a car wheel rim, racing red and steel gray, centered, plain light background, minimal and modern, no text, no letters",
+  "aspect": "1:1"
+ },
+ {
+  "company": "autopartes-california",
+  "kind": "store",
+  "file": "autopartes-california/_store.jpg",
+  "prompt": "realistic daytime photograph of an auto parts store with tires, motor oil and car accessories at street level on a tree lined street in the east of Caracas (Chacao / Altamira area), Venezuela, glass storefront, sign without readable text, no people in focus",
+  "aspect": "4:3"
+ },
+ {
+  "company": "autopartes-california",
+  "kind": "product",
+  "slug": "caucho-pirelli-p400-evo",
+  "name": "Caucho Pirelli P400 Evo Rin 13 a 15",
+  "n": 1,
+  "file": "autopartes-california/caucho-pirelli-p400-evo.jpg",
+  "prompt": "professional e-commerce product photograph, a new black passenger car tire with an asymmetric tread pattern, standing upright, three quarter view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "autopartes-california",
+  "kind": "product",
+  "slug": "caucho-general-grabber-at3",
+  "name": "Caucho General Grabber AT3 Todo Terreno",
+  "n": 1,
+  "file": "autopartes-california/caucho-general-grabber-at3.jpg",
+  "prompt": "professional e-commerce product photograph, a rugged all terrain SUV tire with aggressive block tread and raised sidewall pattern, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "autopartes-california",
+  "kind": "product",
+  "slug": "aceite-venoco-mineral-20w50",
+  "name": "Aceite de Motor Mineral Venoco 20W-50",
+  "n": 1,
+  "file": "autopartes-california/aceite-venoco-mineral-20w50.jpg",
+  "prompt": "professional e-commerce product photograph, two plain unlabeled motor oil plastic bottles, a quart and a gallon, golden amber color, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "autopartes-california",
+  "kind": "product",
+  "slug": "aceite-mobil-1-5w30-sintetico",
+  "name": "Aceite Sintético Mobil 1 5W-30 Pimpina 4.73 L",
+  "n": 1,
+  "file": "autopartes-california/aceite-mobil-1-5w30-sintetico.jpg",
+  "prompt": "professional e-commerce product photograph, a plain unlabeled 5 quart plastic jug of synthetic motor oil, dark gray color, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "autopartes-california",
+  "kind": "product",
+  "slug": "filtro-aceite-wix-51515",
+  "name": "Filtro de Aceite Wix 51515",
+  "n": 1,
+  "file": "autopartes-california/filtro-aceite-wix-51515.jpg",
+  "prompt": "professional e-commerce product photograph, a spin-on automotive oil filter canister with a plain white body and threaded base, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "autopartes-california",
+  "kind": "product",
+  "slug": "bujias-ngk-iridium-x4",
+  "name": "Juego de 4 Bujías NGK Iridium IX",
+  "n": 1,
+  "file": "autopartes-california/bujias-ngk-iridium-x4.jpg",
+  "prompt": "professional e-commerce product photograph, four iridium spark plugs lined up in a row with white ceramic insulators, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "autopartes-california",
+  "kind": "product",
+  "slug": "amortiguadores-gabriel-aveo",
+  "name": "Par de Amortiguadores Gabriel para Chevrolet Aveo",
+  "n": 1,
+  "file": "autopartes-california/amortiguadores-gabriel-aveo.jpg",
+  "prompt": "professional e-commerce product photograph, a pair of automotive gas shock absorbers struts with springs mounts, red and black finish, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "autopartes-california",
+  "kind": "product",
+  "slug": "bateria-duncan-22mf-900",
+  "name": "Batería Duncan 22MF-900 Libre de Mantenimiento",
+  "n": 1,
+  "file": "autopartes-california/bateria-duncan-22mf-900.jpg",
+  "prompt": "professional e-commerce product photograph, a black sealed maintenance free 12V car battery with red and black terminal caps, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "autopartes-california",
+  "kind": "product",
+  "slug": "kit-correa-tiempo-gates-fiesta",
+  "name": "Kit de Correa de Tiempo Gates Ford Fiesta / Ka 1.6",
+  "n": 1,
+  "file": "autopartes-california/kit-correa-tiempo-gates-fiesta.jpg",
+  "prompt": "professional e-commerce product photograph, an automotive timing belt kit with a black toothed belt, tensioner pulley and idler pulley, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "autopartes-california",
+  "kind": "product",
+  "slug": "pastillas-freno-ceramicas-bosch",
+  "name": "Pastillas de Freno Cerámicas Bosch QuietCast",
+  "n": 1,
+  "file": "autopartes-california/pastillas-freno-ceramicas-bosch.jpg",
+  "prompt": "professional e-commerce product photograph, a set of four ceramic brake pads with metal backing plates and anti noise shims, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "autopartes-california",
+  "kind": "product",
+  "slug": "casco-integral-ls2-rapid",
+  "name": "Casco Integral LS2 Rapid Certificado",
+  "n": 1,
+  "file": "autopartes-california/casco-integral-ls2-rapid.jpg",
+  "prompt": "professional e-commerce product photograph, a full face motorcycle helmet in matte black with a clear visor, three quarter side view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "autopartes-california",
+  "kind": "product",
+  "slug": "kit-arrastre-moto-reforzado",
+  "name": "Kit de Arrastre Reforzado para Moto",
+  "n": 1,
+  "file": "autopartes-california/kit-arrastre-moto-reforzado.jpg",
+  "prompt": "professional e-commerce product photograph, a motorcycle chain and sprocket kit with a steel rear sprocket, small front sprocket and coiled chain, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "autopartes-california",
+  "kind": "product",
+  "slug": "bombillos-led-faro-csp",
+  "name": "Bombillos LED para Faros 12.000 Lúmenes (Par)",
+  "n": 1,
+  "file": "autopartes-california/bombillos-led-faro-csp.jpg",
+  "prompt": "professional e-commerce product photograph, a pair of LED headlight bulbs with aluminum heat sinks and small cooling fans, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "autopartes-california",
+  "kind": "product",
+  "slug": "barra-led-32-doble-fila",
+  "name": "Barra LED 32\" Doble Fila 180 W",
+  "n": 1,
+  "file": "autopartes-california/barra-led-32-doble-fila.jpg",
+  "prompt": "professional e-commerce product photograph, a 32 inch double row LED light bar with black aluminum housing and mounting brackets, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "autopartes-california",
+  "kind": "product",
+  "slug": "radio-android-9-carplay",
+  "name": "Radio Android 9\" con CarPlay y Android Auto",
+  "n": 1,
+  "file": "autopartes-california/radio-android-9-carplay.jpg",
+  "prompt": "professional e-commerce product photograph, a 9 inch touchscreen car stereo head unit showing a navigation map, with a small rear view camera, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "autopartes-california",
+  "kind": "product",
+  "slug": "cornetas-pioneer-ts-a6970f",
+  "name": "Cornetas Pioneer TS-A6970F 6x9\" 5 Vías (Par)",
+  "n": 1,
+  "file": "autopartes-california/cornetas-pioneer-ts-a6970f.jpg",
+  "prompt": "professional e-commerce product photograph, a pair of 6x9 inch oval coaxial car speakers with multiple tweeters and black grilles beside them, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "autopartes-california",
+  "kind": "product",
+  "slug": "alarma-viper-3105v",
+  "name": "Alarma Viper 3105V con 2 Controles",
+  "n": 1,
+  "file": "autopartes-california/alarma-viper-3105v.jpg",
+  "prompt": "professional e-commerce product photograph, a car alarm kit with two remote key fobs, a siren, a control module and wiring harness, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "autopartes-california",
+  "kind": "product",
+  "slug": "papel-ahumado-3m-por-metro",
+  "name": "Papel Ahumado 3M para Vidrios (por metro)",
+  "n": 1,
+  "file": "autopartes-california/papel-ahumado-3m-por-metro.jpg",
+  "prompt": "professional e-commerce product photograph, a roll of dark window tint film partially unrolled showing its smoky translucent surface, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "autopartes-california",
+  "kind": "product",
+  "slug": "champu-cera-meguiars-gold-class",
+  "name": "Champú con Cera Meguiar's Gold Class 1.89 L",
+  "n": 1,
+  "file": "autopartes-california/champu-cera-meguiars-gold-class.jpg",
+  "prompt": "professional e-commerce product photograph, a plain unlabeled amber bottle of car wash shampoo next to a microfiber mitt and a bucket, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "autopartes-california",
+  "kind": "product",
+  "slug": "ambientador-little-trees-x3",
+  "name": "Ambientador Little Trees (Pack x3)",
+  "n": 1,
+  "file": "autopartes-california/ambientador-little-trees-x3.jpg",
+  "prompt": "professional e-commerce product photograph, three tree shaped hanging car air fresheners in different colors, no readable text, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "zona-fit",
+  "kind": "logo",
+  "file": "zona-fit/_logo.jpg",
+  "prompt": "flat vector logo icon for a sports and fitness store, a dumbbell forming a lightning bolt, lime green and navy, centered, plain light background, minimal and modern, no text, no letters",
+  "aspect": "1:1"
+ },
+ {
+  "company": "zona-fit",
+  "kind": "store",
+  "file": "zona-fit/_store.jpg",
+  "prompt": "realistic daytime photograph of a sports and fitness store with sportswear, balls and gym gear at street level on a tree lined street in the east of Caracas (Chacao / Altamira area), Venezuela, glass storefront, sign without readable text, no people in focus",
+  "aspect": "4:3"
+ },
+ {
+  "company": "zona-fit",
+  "kind": "product",
+  "slug": "mancuernas-hexagonales-caucho-par",
+  "name": "Par de Mancuernas Hexagonales Engomadas",
+  "n": 1,
+  "file": "zona-fit/mancuernas-hexagonales-caucho-par.jpg",
+  "prompt": "professional e-commerce product photograph, a pair of black rubber coated hexagonal dumbbells with knurled chrome handles, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "zona-fit",
+  "kind": "product",
+  "slug": "kettlebell-hierro-fundido-20lb",
+  "name": "Kettlebell de Hierro Fundido 20 lb",
+  "n": 1,
+  "file": "zona-fit/kettlebell-hierro-fundido-20lb.jpg",
+  "prompt": "professional e-commerce product photograph, a black cast iron kettlebell with a wide handle and flat base, side view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "zona-fit",
+  "kind": "product",
+  "slug": "set-bandas-resistencia-5-niveles",
+  "name": "Set de 5 Bandas de Resistencia con Accesorios",
+  "n": 1,
+  "file": "zona-fit/set-bandas-resistencia-5-niveles.jpg",
+  "prompt": "professional e-commerce product photograph, a set of five colorful latex resistance tubes with foam handles, ankle straps and a door anchor, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "zona-fit",
+  "kind": "product",
+  "slug": "mat-yoga-tpe-6mm",
+  "name": "Mat de Yoga TPE 6 mm Antideslizante",
+  "n": 1,
+  "file": "zona-fit/mat-yoga-tpe-6mm.jpg",
+  "prompt": "professional e-commerce product photograph, a rolled purple TPE yoga mat with a carrying strap, partially unrolled to show texture, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "zona-fit",
+  "kind": "product",
+  "slug": "guante-beisbol-rawlings-select-pro",
+  "name": "Guante de Béisbol Rawlings Select Pro Lite",
+  "n": 1,
+  "file": "zona-fit/guante-beisbol-rawlings-select-pro.jpg",
+  "prompt": "professional e-commerce product photograph, a tan brown leather baseball glove with an I-web pocket, open palm view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "zona-fit",
+  "kind": "product",
+  "slug": "bate-aluminio-easton-32-29",
+  "name": "Bate de Aluminio Easton 32\" / 29 oz",
+  "n": 1,
+  "file": "zona-fit/bate-aluminio-easton-32-29.jpg",
+  "prompt": "professional e-commerce product photograph, a sleek silver and black aluminum baseball bat lying diagonally, full length view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "zona-fit",
+  "kind": "product",
+  "slug": "caja-12-pelotas-beisbol-entrenamiento",
+  "name": "Caja de 12 Pelotas de Béisbol de Entrenamiento",
+  "n": 1,
+  "file": "zona-fit/caja-12-pelotas-beisbol-entrenamiento.jpg",
+  "prompt": "professional e-commerce product photograph, an open box of twelve white leather baseballs with red stitching, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "zona-fit",
+  "kind": "product",
+  "slug": "balon-futbol-adidas-league",
+  "name": "Balón de Fútbol adidas League",
+  "n": 1,
+  "file": "zona-fit/balon-futbol-adidas-league.jpg",
+  "prompt": "professional e-commerce product photograph, a white soccer ball with colorful geometric panels, thermally bonded, front view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "zona-fit",
+  "kind": "product",
+  "slug": "tacos-futbol-nike-phantom-fg",
+  "name": "Tacos de Fútbol Nike Phantom Club FG",
+  "n": 1,
+  "file": "zona-fit/tacos-futbol-nike-phantom-fg.jpg",
+  "prompt": "professional e-commerce product photograph, a pair of black and neon soccer cleats with conical studs, side profile view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "zona-fit",
+  "kind": "product",
+  "slug": "balon-basket-spalding-tf-1000",
+  "name": "Balón de Básquet Spalding TF-1000 Legacy",
+  "n": 1,
+  "file": "zona-fit/balon-basket-spalding-tf-1000.jpg",
+  "prompt": "professional e-commerce product photograph, an orange composite leather basketball with deep black channels, front view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "zona-fit",
+  "kind": "product",
+  "slug": "aro-basket-reglamentario-malla",
+  "name": "Aro de Básquet Reglamentario con Malla",
+  "n": 1,
+  "file": "zona-fit/aro-basket-reglamentario-malla.jpg",
+  "prompt": "professional e-commerce product photograph, an orange steel basketball rim with a white nylon net and mounting bracket, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "zona-fit",
+  "kind": "product",
+  "slug": "pala-padel-bullpadel",
+  "name": "Pala de Pádel Bullpadel Vertex",
+  "n": 1,
+  "file": "zona-fit/pala-padel-bullpadel.jpg",
+  "prompt": "professional e-commerce product photograph, a modern carbon fiber padel racket with a perforated face and a protective cover beside it, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "zona-fit",
+  "kind": "product",
+  "slug": "tubo-3-pelotas-padel-head",
+  "name": "Tubo de 3 Pelotas de Pádel Head Pro",
+  "n": 1,
+  "file": "zona-fit/tubo-3-pelotas-padel-head.jpg",
+  "prompt": "professional e-commerce product photograph, a clear pressurized tube with three yellow padel balls inside, one ball beside it, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "zona-fit",
+  "kind": "product",
+  "slug": "bicicleta-montana-gw-rin-29",
+  "name": "Bicicleta de Montaña GW Hyena Rin 29",
+  "n": 1,
+  "file": "zona-fit/bicicleta-montana-gw-rin-29.jpg",
+  "prompt": "professional e-commerce product photograph, an aluminum hardtail mountain bike with 29 inch wheels, disc brakes and front suspension, side view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "zona-fit",
+  "kind": "product",
+  "slug": "licra-deportiva-dama-tiro-alto",
+  "name": "Licra Deportiva Dama Tiro Alto",
+  "n": 1,
+  "file": "zona-fit/licra-deportiva-dama-tiro-alto.jpg",
+  "prompt": "professional e-commerce product photograph, high-waisted women athletic leggings in black, flat lay with side pocket visible, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "zona-fit",
+  "kind": "product",
+  "slug": "franela-dry-fit-caballero-under-armour",
+  "name": "Franela Dry Fit Caballero Under Armour Tech",
+  "n": 1,
+  "file": "zona-fit/franela-dry-fit-caballero-under-armour.jpg",
+  "prompt": "professional e-commerce product photograph, a men athletic short sleeve dry-fit t-shirt, folded neatly, front view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "zona-fit",
+  "kind": "product",
+  "slug": "zapatos-running-nike-revolution-7",
+  "name": "Zapatos Running Nike Revolution 7",
+  "n": 1,
+  "file": "zona-fit/zapatos-running-nike-revolution-7.jpg",
+  "prompt": "professional e-commerce product photograph, a lightweight running shoe with breathable mesh upper and foam midsole, side profile, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "zona-fit",
+  "kind": "product",
+  "slug": "termo-stanley-quencher-40oz",
+  "name": "Termo Stanley Quencher 40 oz",
+  "n": 1,
+  "file": "zona-fit/termo-stanley-quencher-40oz.jpg",
+  "prompt": "professional e-commerce product photograph, a 40 oz stainless steel insulated tumbler with handle, lid and straw, side view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "zona-fit",
+  "kind": "product",
+  "slug": "proteina-whey-gold-standard-5lb",
+  "name": "Proteína Whey Gold Standard Optimum Nutrition 5 lb",
+  "n": 1,
+  "file": "zona-fit/proteina-whey-gold-standard-5lb.jpg",
+  "prompt": "professional e-commerce product photograph, a large 5 lb tub of whey protein powder next to a scoop with powder, plain label, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "zona-fit",
+  "kind": "product",
+  "slug": "creatina-monohidratada-nutrex-300g",
+  "name": "Creatina Monohidratada Nutrex 300 g",
+  "n": 1,
+  "file": "zona-fit/creatina-monohidratada-nutrex-300g.jpg",
+  "prompt": "professional e-commerce product photograph, a white tub of micronized creatine monohydrate powder with an open lid and a scoop, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mi-bebe-feliz",
+  "kind": "logo",
+  "file": "mi-bebe-feliz/_logo.jpg",
+  "prompt": "flat vector logo icon for a baby store, a smiling baby face inside a cloud, baby blue and soft yellow, centered, plain light background, minimal and modern, no text, no letters",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mi-bebe-feliz",
+  "kind": "store",
+  "file": "mi-bebe-feliz/_store.jpg",
+  "prompt": "realistic daytime photograph of a cheerful baby store with strollers, cribs and baby clothes at street level on a tree lined street in the east of Caracas (Chacao / Altamira area), Venezuela, glass storefront, sign without readable text, no people in focus",
+  "aspect": "4:3"
+ },
+ {
+  "company": "mi-bebe-feliz",
+  "kind": "product",
+  "slug": "panales-huggies-active-sec",
+  "name": "Pañales Huggies Active Sec",
+  "n": 1,
+  "file": "mi-bebe-feliz/panales-huggies-active-sec.jpg",
+  "prompt": "professional e-commerce product photograph, a large plastic pack of baby diapers with a happy baby pictured, next to a single folded diaper, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mi-bebe-feliz",
+  "kind": "product",
+  "slug": "toallitas-huggies-cuidado-puro-x3",
+  "name": "Toallitas Húmedas Huggies Cuidado Puro Pack x3",
+  "n": 1,
+  "file": "mi-bebe-feliz/toallitas-huggies-cuidado-puro-x3.jpg",
+  "prompt": "professional e-commerce product photograph, three soft packs of baby wet wipes stacked, one open showing a white wipe, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mi-bebe-feliz",
+  "kind": "product",
+  "slug": "crema-desitin-maxima-duracion-113g",
+  "name": "Crema Antipañalitis Desitin Máxima Duración 113 g",
+  "n": 1,
+  "file": "mi-bebe-feliz/crema-desitin-maxima-duracion-113g.jpg",
+  "prompt": "professional e-commerce product photograph, a blue and white tube of thick zinc oxide diaper rash cream with a dab of white cream, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mi-bebe-feliz",
+  "kind": "product",
+  "slug": "tetero-philips-avent-natural-response",
+  "name": "Tetero Philips Avent Natural Response",
+  "n": 1,
+  "file": "mi-bebe-feliz/tetero-philips-avent-natural-response.jpg",
+  "prompt": "professional e-commerce product photograph, a transparent baby feeding bottle with wide soft silicone nipple and white cap, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mi-bebe-feliz",
+  "kind": "product",
+  "slug": "esterilizador-avent-vapor-3-en-1",
+  "name": "Esterilizador Eléctrico a Vapor Philips Avent 3 en 1",
+  "n": 1,
+  "file": "mi-bebe-feliz/esterilizador-avent-vapor-3-en-1.jpg",
+  "prompt": "professional e-commerce product photograph, a white electric steam baby bottle sterilizer with several bottles inside, lid open, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mi-bebe-feliz",
+  "kind": "product",
+  "slug": "extractor-leche-electrico-momcozy",
+  "name": "Extractor de Leche Eléctrico Momcozy",
+  "n": 1,
+  "file": "mi-bebe-feliz/extractor-leche-electrico-momcozy.jpg",
+  "prompt": "professional e-commerce product photograph, a white electric breast pump with collection bottles and tubing, modern design, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mi-bebe-feliz",
+  "kind": "product",
+  "slug": "bolsas-lansinoh-leche-materna-x50",
+  "name": "Bolsas Lansinoh para Leche Materna x50",
+  "n": 1,
+  "file": "mi-bebe-feliz/bolsas-lansinoh-leche-materna-x50.jpg",
+  "prompt": "professional e-commerce product photograph, a box of breast milk storage bags with a few filled bags lying flat next to it, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mi-bebe-feliz",
+  "kind": "product",
+  "slug": "formula-nan-optipro",
+  "name": "Fórmula Infantil Nestlé NAN Optipro",
+  "n": 1,
+  "file": "mi-bebe-feliz/formula-nan-optipro.jpg",
+  "prompt": "professional e-commerce product photograph, a metal can of infant milk formula powder with measuring scoop and white powder beside it, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mi-bebe-feliz",
+  "kind": "product",
+  "slug": "similac-sensitive-sin-lactosa-400g",
+  "name": "Fórmula Similac Sensitive Sin Lactosa 400 g",
+  "n": 1,
+  "file": "mi-bebe-feliz/similac-sensitive-sin-lactosa-400g.jpg",
+  "prompt": "professional e-commerce product photograph, a can of lactose free infant formula powder with purple accents and a measuring scoop, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mi-bebe-feliz",
+  "kind": "product",
+  "slug": "compota-heinz-113g-pack-4",
+  "name": "Compota Heinz 113 g Pack x4",
+  "n": 1,
+  "file": "mi-bebe-feliz/compota-heinz-113g-pack-4.jpg",
+  "prompt": "professional e-commerce product photograph, four small glass baby food jars with fruit puree, fresh apple, pear and banana around them, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mi-bebe-feliz",
+  "kind": "product",
+  "slug": "coche-travel-system-infanti",
+  "name": "Coche Travel System Infanti con Portabebé",
+  "n": 1,
+  "file": "mi-bebe-feliz/coche-travel-system-infanti.jpg",
+  "prompt": "professional e-commerce product photograph, a modern grey baby travel system stroller with an infant car seat attached, side view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mi-bebe-feliz",
+  "kind": "product",
+  "slug": "silla-carro-graco-contender-65",
+  "name": "Silla para Carro Convertible Graco Contender 65",
+  "n": 1,
+  "file": "mi-bebe-feliz/silla-carro-graco-contender-65.jpg",
+  "prompt": "professional e-commerce product photograph, a black convertible child car seat with five point harness, three quarter view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mi-bebe-feliz",
+  "kind": "product",
+  "slug": "portabebe-ergonomico-infanti",
+  "name": "Portabebé Ergonómico Infanti 3 Posiciones",
+  "n": 1,
+  "file": "mi-bebe-feliz/portabebe-ergonomico-infanti.jpg",
+  "prompt": "professional e-commerce product photograph, an ergonomic baby carrier with padded waist belt and shoulder straps, grey fabric, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mi-bebe-feliz",
+  "kind": "product",
+  "slug": "corral-graco-pack-n-play-cambiador",
+  "name": "Corral Cuna Graco Pack 'n Play con Cambiador",
+  "n": 1,
+  "file": "mi-bebe-feliz/corral-graco-pack-n-play-cambiador.jpg",
+  "prompt": "professional e-commerce product photograph, a grey portable baby playard crib with bassinet insert and changing table attachment, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mi-bebe-feliz",
+  "kind": "product",
+  "slug": "moises-colecho-altura-ajustable",
+  "name": "Moisés Colecho con Altura Ajustable",
+  "n": 1,
+  "file": "mi-bebe-feliz/moises-colecho-altura-ajustable.jpg",
+  "prompt": "professional e-commerce product photograph, a white bedside co-sleeper bassinet with mesh sides and fold down side panel, side view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mi-bebe-feliz",
+  "kind": "product",
+  "slug": "banera-plegable-termometro",
+  "name": "Bañera Plegable con Termómetro",
+  "n": 1,
+  "file": "mi-bebe-feliz/banera-plegable-termometro.jpg",
+  "prompt": "professional e-commerce product photograph, a light blue foldable baby bathtub with built-in thermometer, open, top three quarter view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mi-bebe-feliz",
+  "kind": "product",
+  "slug": "champu-johnsons-baby-original",
+  "name": "Champú Johnson's Baby Original",
+  "n": 1,
+  "file": "mi-bebe-feliz/champu-johnsons-baby-original.jpg",
+  "prompt": "professional e-commerce product photograph, a transparent golden baby shampoo bottle with flip cap, classic baby care, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mi-bebe-feliz",
+  "kind": "product",
+  "slug": "set-5-bodies-carters-manga-corta",
+  "name": "Set de 5 Bodies Carter's Manga Corta",
+  "n": 1,
+  "file": "mi-bebe-feliz/set-5-bodies-carters-manga-corta.jpg",
+  "prompt": "professional e-commerce product photograph, five baby cotton short sleeve bodysuits with cute assorted prints, neatly folded in a row, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mi-bebe-feliz",
+  "kind": "product",
+  "slug": "pijama-enterizo-algodon-con-pie",
+  "name": "Pijama Enterizo (Monillo) de Algodón con Pie",
+  "n": 1,
+  "file": "mi-bebe-feliz/pijama-enterizo-algodon-con-pie.jpg",
+  "prompt": "professional e-commerce product photograph, a soft cotton footed baby sleepsuit with front zipper in light blue, flat lay, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mi-bebe-feliz",
+  "kind": "product",
+  "slug": "monitor-bebe-vtech-camara",
+  "name": "Monitor de Bebé VTech con Cámara",
+  "n": 1,
+  "file": "mi-bebe-feliz/monitor-bebe-vtech-camara.jpg",
+  "prompt": "professional e-commerce product photograph, a white baby video monitor camera with a handheld parent display unit showing a sleeping baby, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mundo-magico",
+  "kind": "logo",
+  "file": "mundo-magico/_logo.jpg",
+  "prompt": "flat vector logo icon for a toy store, a colorful spinning top with stars, bright red, yellow and blue, centered, plain light background, minimal and modern, no text, no letters",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mundo-magico",
+  "kind": "store",
+  "file": "mundo-magico/_store.jpg",
+  "prompt": "realistic daytime photograph of a colorful toy store with plush toys, board games and building blocks at street level on a tree lined street in the east of Caracas (Chacao / Altamira area), Venezuela, glass storefront, sign without readable text, no people in focus",
+  "aspect": "4:3"
+ },
+ {
+  "company": "mundo-magico",
+  "kind": "product",
+  "slug": "barbie-fashionista",
+  "name": "Barbie Fashionista Surtida",
+  "n": 1,
+  "file": "mundo-magico/barbie-fashionista.jpg",
+  "prompt": "professional e-commerce product photograph, a fashion doll with long hair wearing a colorful trendy outfit, standing, full body view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mundo-magico",
+  "kind": "product",
+  "slug": "bebe-interactivo-tetero",
+  "name": "Bebé Interactivo que Llora y Toma Tetero",
+  "n": 1,
+  "file": "mundo-magico/bebe-interactivo-tetero.jpg",
+  "prompt": "professional e-commerce product photograph, a soft baby doll wearing pastel pajamas with a small feeding bottle and pacifier, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mundo-magico",
+  "kind": "product",
+  "slug": "casa-munecas-madera-3-pisos",
+  "name": "Casa de Muñecas de Madera 3 Pisos con Muebles",
+  "n": 1,
+  "file": "mundo-magico/casa-munecas-madera-3-pisos.jpg",
+  "prompt": "professional e-commerce product photograph, a three story wooden dollhouse painted in white and pink with tiny furniture inside, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mundo-magico",
+  "kind": "product",
+  "slug": "oso-peluche-teddy",
+  "name": "Oso de Peluche Teddy",
+  "n": 1,
+  "file": "mundo-magico/oso-peluche-teddy.jpg",
+  "prompt": "professional e-commerce product photograph, a fluffy light brown teddy bear with a red satin bow sitting upright, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mundo-magico",
+  "kind": "product",
+  "slug": "peluche-stitch-30",
+  "name": "Peluche Stitch 30 cm",
+  "n": 1,
+  "file": "mundo-magico/peluche-stitch-30.jpg",
+  "prompt": "professional e-commerce product photograph, a cute blue alien plush toy with big ears and large dark eyes, sitting, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mundo-magico",
+  "kind": "product",
+  "slug": "peluche-pikachu-25",
+  "name": "Peluche Pikachu Pokémon 25 cm",
+  "n": 1,
+  "file": "mundo-magico/peluche-pikachu-25.jpg",
+  "prompt": "professional e-commerce product photograph, a yellow electric mouse plush toy with red cheeks and a lightning shaped tail, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mundo-magico",
+  "kind": "product",
+  "slug": "figura-marvel-titan-hero",
+  "name": "Figura Marvel Titan Hero Series 30 cm",
+  "n": 1,
+  "file": "mundo-magico/figura-marvel-titan-hero.jpg",
+  "prompt": "professional e-commerce product photograph, a 30 cm superhero action figure in a red and blue suit in a dynamic pose, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mundo-magico",
+  "kind": "product",
+  "slug": "figura-dragon-ball-z",
+  "name": "Figura Dragon Ball Z 18 cm",
+  "n": 1,
+  "file": "mundo-magico/figura-dragon-ball-z.jpg",
+  "prompt": "professional e-commerce product photograph, an anime martial arts action figure with spiky golden hair and orange outfit, fighting pose, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mundo-magico",
+  "kind": "product",
+  "slug": "paw-patrol-pack-6-figuras",
+  "name": "Set de Figuras Paw Patrol x6",
+  "n": 1,
+  "file": "mundo-magico/paw-patrol-pack-6-figuras.jpg",
+  "prompt": "professional e-commerce product photograph, six small cartoon rescue puppy figures in colorful uniforms standing in a row, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mundo-magico",
+  "kind": "product",
+  "slug": "lego-classic-caja-mediana",
+  "name": "LEGO Classic Caja Mediana de Ladrillos Creativos",
+  "n": 1,
+  "file": "mundo-magico/lego-classic-caja-mediana.jpg",
+  "prompt": "professional e-commerce product photograph, a plastic storage box full of colorful interlocking toy bricks, some built models in front, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mundo-magico",
+  "kind": "product",
+  "slug": "lego-city-estacion-policia",
+  "name": "LEGO City Estación de Policía",
+  "n": 1,
+  "file": "mundo-magico/lego-city-estacion-policia.jpg",
+  "prompt": "professional e-commerce product photograph, a built toy brick police station set with a police car, motorcycle and small minifigures, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mundo-magico",
+  "kind": "product",
+  "slug": "bloques-magneticos",
+  "name": "Bloques Magnéticos de Construcción",
+  "n": 1,
+  "file": "mundo-magico/bloques-magneticos.jpg",
+  "prompt": "professional e-commerce product photograph, colorful translucent magnetic building tiles assembled into a small castle, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mundo-magico",
+  "kind": "product",
+  "slug": "mesa-actividades-bebe",
+  "name": "Mesa de Actividades Musical para Bebé",
+  "n": 1,
+  "file": "mundo-magico/mesa-actividades-bebe.jpg",
+  "prompt": "professional e-commerce product photograph, a colorful baby activity table with buttons, a small piano, gears and a toy phone, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mundo-magico",
+  "kind": "product",
+  "slug": "monopoly-clasico",
+  "name": "Monopoly Clásico",
+  "n": 1,
+  "file": "mundo-magico/monopoly-clasico.jpg",
+  "prompt": "professional e-commerce product photograph, a classic property trading board game with colorful paper money, dice and tiny houses, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mundo-magico",
+  "kind": "product",
+  "slug": "domino-doble-seis",
+  "name": "Dominó Doble Seis",
+  "n": 1,
+  "file": "mundo-magico/domino-doble-seis.jpg",
+  "prompt": "professional e-commerce product photograph, a set of ivory domino tiles arranged in a fan shape next to a wooden case, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mundo-magico",
+  "kind": "product",
+  "slug": "uno-cartas-clasico",
+  "name": "UNO Cartas Clásico",
+  "n": 1,
+  "file": "mundo-magico/uno-cartas-clasico.jpg",
+  "prompt": "professional e-commerce product photograph, a deck of colorful card game cards fanned out in red, yellow, green and blue, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mundo-magico",
+  "kind": "product",
+  "slug": "jenga-clasico",
+  "name": "Jenga Clásico 54 Bloques",
+  "n": 1,
+  "file": "mundo-magico/jenga-clasico.jpg",
+  "prompt": "professional e-commerce product photograph, a tall tower of natural wooden stacking blocks with a few blocks pulled out, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mundo-magico",
+  "kind": "product",
+  "slug": "carro-rc-monster-truck-4x4",
+  "name": "Carro a Control Remoto Monster Truck 4x4 Recargable",
+  "n": 1,
+  "file": "mundo-magico/carro-rc-monster-truck-4x4.jpg",
+  "prompt": "professional e-commerce product photograph, a remote control monster truck with big rubber tires and a remote controller beside it, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mundo-magico",
+  "kind": "product",
+  "slug": "scooter-3-ruedas-led",
+  "name": "Scooter Monopatín 3 Ruedas con Luces LED",
+  "n": 1,
+  "file": "mundo-magico/scooter-3-ruedas-led.jpg",
+  "prompt": "professional e-commerce product photograph, a kids three wheel kick scooter with glowing LED wheels and adjustable handlebar, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "mundo-magico",
+  "kind": "product",
+  "slug": "piscina-inflable-intex",
+  "name": "Piscina Inflable Intex",
+  "n": 1,
+  "file": "mundo-magico/piscina-inflable-intex.jpg",
+  "prompt": "professional e-commerce product photograph, a blue round inflatable family swimming pool with three rings, empty, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "patitas-felices",
+  "kind": "logo",
+  "file": "patitas-felices/_logo.jpg",
+  "prompt": "flat vector logo icon for a pet shop, a dog paw print with a small heart, teal and warm orange, centered, plain light background, minimal and modern, no text, no letters",
+  "aspect": "1:1"
+ },
+ {
+  "company": "patitas-felices",
+  "kind": "store",
+  "file": "patitas-felices/_store.jpg",
+  "prompt": "realistic daytime photograph of a friendly pet shop with pet food bags, toys and accessories at street level on a tree lined street in the east of Caracas (Chacao / Altamira area), Venezuela, glass storefront, sign without readable text, no people in focus",
+  "aspect": "4:3"
+ },
+ {
+  "company": "patitas-felices",
+  "kind": "product",
+  "slug": "dog-chow-adultos-medianos-grandes",
+  "name": "Perrarina Dog Chow Adultos Medianos y Grandes",
+  "n": 1,
+  "file": "patitas-felices/dog-chow-adultos-medianos-grandes.jpg",
+  "prompt": "professional e-commerce product photograph, a large bag of dry dog food kibble with a bowl of brown croquettes in front, plain packaging, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "patitas-felices",
+  "kind": "product",
+  "slug": "perrarina-granel-super-can-kg",
+  "name": "Perrarina Super Can Adultos a Granel (por kg)",
+  "n": 1,
+  "file": "patitas-felices/perrarina-granel-super-can-kg.jpg",
+  "prompt": "professional e-commerce product photograph, a pile of brown dry dog food kibble in a clear bag on a kitchen scale, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "patitas-felices",
+  "kind": "product",
+  "slug": "royal-canin-mini-adult",
+  "name": "Royal Canin Mini Adult",
+  "n": 1,
+  "file": "patitas-felices/royal-canin-mini-adult.jpg",
+  "prompt": "professional e-commerce product photograph, a premium bag of small breed adult dog food with tiny kibbles spilled in front, plain label, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "patitas-felices",
+  "kind": "product",
+  "slug": "cat-chow-adultos",
+  "name": "Gatarina Cat Chow Adultos",
+  "n": 1,
+  "file": "patitas-felices/cat-chow-adultos.jpg",
+  "prompt": "professional e-commerce product photograph, a bag of dry cat food with a bowl of colorful fish-shaped kibbles in front, plain packaging, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "patitas-felices",
+  "kind": "product",
+  "slug": "whiskas-sobre-humedo-85g",
+  "name": "Alimento Húmedo Whiskas Sobre 85 g",
+  "n": 1,
+  "file": "patitas-felices/whiskas-sobre-humedo-85g.jpg",
+  "prompt": "professional e-commerce product photograph, a few wet cat food pouches beside a small bowl with meat chunks in gravy, plain pouches, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "patitas-felices",
+  "kind": "product",
+  "slug": "pro-plan-kitten-1kg",
+  "name": "Pro Plan Kitten Pollo 1 kg",
+  "n": 1,
+  "file": "patitas-felices/pro-plan-kitten-1kg.jpg",
+  "prompt": "professional e-commerce product photograph, a small premium bag of kitten dry food with tiny kibbles in a bowl, plain label, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "patitas-felices",
+  "kind": "product",
+  "slug": "pedigree-dentastix-7-barras",
+  "name": "Pedigree Dentastix 7 Barras",
+  "n": 1,
+  "file": "patitas-felices/pedigree-dentastix-7-barras.jpg",
+  "prompt": "professional e-commerce product photograph, a few X-shaped dental chew sticks for dogs arranged on a white surface next to a plain pouch, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "patitas-felices",
+  "kind": "product",
+  "slug": "churu-snack-cremoso-4-tubos",
+  "name": "Snack Cremoso para Gatos Churu Pack x4 Tubos",
+  "n": 1,
+  "file": "patitas-felices/churu-snack-cremoso-4-tubos.jpg",
+  "prompt": "professional e-commerce product photograph, four squeezable creamy cat treat tubes fanned out, plain wrappers, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "patitas-felices",
+  "kind": "product",
+  "slug": "arena-aglomerante-america-litter",
+  "name": "Arena Aglomerante América Litter Ultra Odor Seal",
+  "n": 1,
+  "file": "patitas-felices/arena-aglomerante-america-litter.jpg",
+  "prompt": "professional e-commerce product photograph, a bag of clumping cat litter with a scoop of fine gray bentonite granules in front, plain bag, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "patitas-felices",
+  "kind": "product",
+  "slug": "arenera-cubierta-con-pala",
+  "name": "Arenera Cubierta con Filtro y Pala",
+  "n": 1,
+  "file": "patitas-felices/arenera-cubierta-con-pala.jpg",
+  "prompt": "professional e-commerce product photograph, a covered plastic cat litter box with a swing door, top handle and a scoop beside it, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "patitas-felices",
+  "kind": "product",
+  "slug": "nexgard-tableta-antipulgas",
+  "name": "NexGard Tableta Masticable Antipulgas y Garrapatas",
+  "n": 1,
+  "file": "patitas-felices/nexgard-tableta-antipulgas.jpg",
+  "prompt": "professional e-commerce product photograph, a blister pack of chewable flea and tick tablets for dogs next to its plain box, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "patitas-felices",
+  "kind": "product",
+  "slug": "frontline-plus-pipeta-gatos",
+  "name": "Frontline Plus Pipeta para Gatos",
+  "n": 1,
+  "file": "patitas-felices/frontline-plus-pipeta-gatos.jpg",
+  "prompt": "professional e-commerce product photograph, a single spot-on flea treatment pipette for cats next to its plain box, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "patitas-felices",
+  "kind": "product",
+  "slug": "champu-avena-aloe-perros",
+  "name": "Champú de Avena y Aloe Vera para Perros",
+  "n": 1,
+  "file": "patitas-felices/champu-avena-aloe-perros.jpg",
+  "prompt": "professional e-commerce product photograph, a bottle of oatmeal and aloe dog shampoo with oats and an aloe leaf beside it, plain label, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "patitas-felices",
+  "kind": "product",
+  "slug": "cepillo-slicker-autolimpiante",
+  "name": "Cepillo Slicker Autolimpiante para Perros y Gatos",
+  "n": 1,
+  "file": "patitas-felices/cepillo-slicker-autolimpiante.jpg",
+  "prompt": "professional e-commerce product photograph, a self-cleaning slicker pet brush with fine steel bristles and an ergonomic handle, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "patitas-felices",
+  "kind": "product",
+  "slug": "cama-donut-antiestres",
+  "name": "Cama Donut Antiestrés de Peluche",
+  "n": 1,
+  "file": "patitas-felices/cama-donut-antiestres.jpg",
+  "prompt": "professional e-commerce product photograph, a round fluffy donut pet bed with raised rim in light gray faux fur, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "patitas-felices",
+  "kind": "product",
+  "slug": "transportadora-petmate-kennel-m",
+  "name": "Transportadora Petmate Kennel Talla M",
+  "n": 1,
+  "file": "patitas-felices/transportadora-petmate-kennel-m.jpg",
+  "prompt": "professional e-commerce product photograph, a hard plastic pet travel crate with a metal wire door and side ventilation, three-quarter view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "patitas-felices",
+  "kind": "product",
+  "slug": "pechera-acolchada-reflectiva",
+  "name": "Pechera Acolchada Reflectiva con Correa",
+  "n": 1,
+  "file": "patitas-felices/pechera-acolchada-reflectiva.jpg",
+  "prompt": "professional e-commerce product photograph, a padded mesh dog harness with reflective trim and a matching leash, flat lay, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "patitas-felices",
+  "kind": "product",
+  "slug": "fuente-agua-automatica-gatos-2-5l",
+  "name": "Fuente de Agua Automática para Gatos 2.5 L",
+  "n": 1,
+  "file": "patitas-felices/fuente-agua-automatica-gatos-2-5l.jpg",
+  "prompt": "professional e-commerce product photograph, an automatic pet water fountain with flowing water and a carbon filter, white plastic, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "patitas-felices",
+  "kind": "product",
+  "slug": "juguete-kong-classic",
+  "name": "Juguete KONG Classic Rellenable",
+  "n": 1,
+  "file": "patitas-felices/juguete-kong-classic.jpg",
+  "prompt": "professional e-commerce product photograph, a red natural rubber snowman-shaped dog chew toy, front view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "patitas-felices",
+  "kind": "product",
+  "slug": "alimento-peces-tropicales-tetramin",
+  "name": "Alimento en Hojuelas TetraMin para Peces Tropicales",
+  "n": 1,
+  "file": "patitas-felices/alimento-peces-tropicales-tetramin.jpg",
+  "prompt": "professional e-commerce product photograph, a small canister of tropical fish flake food with colorful flakes spilled beside it, plain label, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "papeleria-altamira",
+  "kind": "logo",
+  "file": "papeleria-altamira/_logo.jpg",
+  "prompt": "flat vector logo icon for a bookstore and stationery shop, an open book with a pencil, royal blue and mustard, centered, plain light background, minimal and modern, no text, no letters",
+  "aspect": "1:1"
+ },
+ {
+  "company": "papeleria-altamira",
+  "kind": "store",
+  "file": "papeleria-altamira/_store.jpg",
+  "prompt": "realistic daytime photograph of a bookstore and stationery shop with notebooks, books and art supplies at street level on a tree lined street in the east of Caracas (Chacao / Altamira area), Venezuela, glass storefront, sign without readable text, no people in focus",
+  "aspect": "4:3"
+ },
+ {
+  "company": "papeleria-altamira",
+  "kind": "product",
+  "slug": "cuaderno-cosido-100-hojas",
+  "name": "Cuaderno Cosido Escolar 100 Hojas",
+  "n": 1,
+  "file": "papeleria-altamira/cuaderno-cosido-100-hojas.jpg",
+  "prompt": "professional e-commerce product photograph, a stack of school notebooks with glossy colorful covers, one open showing ruled pages, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "papeleria-altamira",
+  "kind": "product",
+  "slug": "cuaderno-espiral-5-materias",
+  "name": "Cuaderno Espiral 5 Materias 200 Hojas",
+  "n": 1,
+  "file": "papeleria-altamira/cuaderno-espiral-5-materias.jpg",
+  "prompt": "professional e-commerce product photograph, a thick spiral bound notebook with a dark blue plastic cover and colored tab dividers, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "papeleria-altamira",
+  "kind": "product",
+  "slug": "agenda-ejecutiva-2027",
+  "name": "Agenda Ejecutiva 2027 Tapa Dura",
+  "n": 1,
+  "file": "papeleria-altamira/agenda-ejecutiva-2027.jpg",
+  "prompt": "professional e-commerce product photograph, a closed hardcover executive planner in dark brown faux leather with a ribbon bookmark, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "papeleria-altamira",
+  "kind": "product",
+  "slug": "colores-faber-castell",
+  "name": "Colores Faber-Castell Ecolápices",
+  "n": 1,
+  "file": "papeleria-altamira/colores-faber-castell.jpg",
+  "prompt": "professional e-commerce product photograph, a box of colored pencils open with pencils arranged in a rainbow gradient, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "papeleria-altamira",
+  "kind": "product",
+  "slug": "boligrafos-bic-cristal-x12",
+  "name": "Bolígrafos BIC Cristal Punta Media Caja x12",
+  "n": 1,
+  "file": "papeleria-altamira/boligrafos-bic-cristal-x12.jpg",
+  "prompt": "professional e-commerce product photograph, a row of clear hexagonal ballpoint pens with colored caps next to their cardboard box, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "papeleria-altamira",
+  "kind": "product",
+  "slug": "resaltadores-stabilo-x4",
+  "name": "Resaltadores Stabilo Boss Original Pack x4",
+  "n": 1,
+  "file": "papeleria-altamira/resaltadores-stabilo-x4.jpg",
+  "prompt": "professional e-commerce product photograph, four fluorescent highlighter markers in yellow, green, pink and orange laid side by side, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "papeleria-altamira",
+  "kind": "product",
+  "slug": "resma-papel-bond-75g",
+  "name": "Resma de Papel Bond 75 g",
+  "n": 1,
+  "file": "papeleria-altamira/resma-papel-bond-75g.jpg",
+  "prompt": "professional e-commerce product photograph, a sealed ream of white printer paper next to a few loose white sheets, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "papeleria-altamira",
+  "kind": "product",
+  "slug": "cartulina-escolar-pliego",
+  "name": "Cartulina Escolar por Pliego",
+  "n": 1,
+  "file": "papeleria-altamira/cartulina-escolar-pliego.jpg",
+  "prompt": "professional e-commerce product photograph, large sheets of colored cardstock paper fanned out in white, yellow, blue, green, red and black, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "papeleria-altamira",
+  "kind": "product",
+  "slug": "morral-combo-3-en-1",
+  "name": "Morral Escolar Combo 3 en 1",
+  "n": 1,
+  "file": "papeleria-altamira/morral-combo-3-en-1.jpg",
+  "prompt": "professional e-commerce product photograph, a matching set of a kids school backpack, insulated lunch bag and pencil case, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "papeleria-altamira",
+  "kind": "product",
+  "slug": "morral-totto-laptop-15",
+  "name": "Morral Totto para Laptop 15.6\"",
+  "n": 1,
+  "file": "papeleria-altamira/morral-totto-laptop-15.jpg",
+  "prompt": "professional e-commerce product photograph, a sleek black laptop backpack with padded straps and a side water bottle pocket, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "papeleria-altamira",
+  "kind": "product",
+  "slug": "foami-escarchado-carta-x10",
+  "name": "Foami Escarchado Tamaño Carta Pack x10",
+  "n": 1,
+  "file": "papeleria-altamira/foami-escarchado-carta-x10.jpg",
+  "prompt": "professional e-commerce product photograph, a fan of glitter foam sheets in gold, silver and assorted bright colors, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "papeleria-altamira",
+  "kind": "product",
+  "slug": "set-pinturas-acrilicas-12",
+  "name": "Set de Pinturas Acrílicas 12 Colores",
+  "n": 1,
+  "file": "papeleria-altamira/set-pinturas-acrilicas-12.jpg",
+  "prompt": "professional e-commerce product photograph, a set of twelve acrylic paint tubes in a row with two small brushes, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "papeleria-altamira",
+  "kind": "product",
+  "slug": "carpetas-manila-x25",
+  "name": "Carpetas Manila Paquete x25",
+  "n": 1,
+  "file": "papeleria-altamira/carpetas-manila-x25.jpg",
+  "prompt": "professional e-commerce product photograph, a stack of beige manila file folders with tabs, slightly fanned, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "papeleria-altamira",
+  "kind": "product",
+  "slug": "archivador-palanca-lomo-ancho",
+  "name": "Archivador de Palanca Lomo Ancho",
+  "n": 1,
+  "file": "papeleria-altamira/archivador-palanca-lomo-ancho.jpg",
+  "prompt": "professional e-commerce product photograph, a black lever arch file binder with a wide spine and metal ring mechanism open, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "papeleria-altamira",
+  "kind": "product",
+  "slug": "calculadora-casio-fx-82la-x",
+  "name": "Calculadora Científica Casio fx-82LA X",
+  "n": 1,
+  "file": "papeleria-altamira/calculadora-casio-fx-82la-x.jpg",
+  "prompt": "professional e-commerce product photograph, a gray scientific calculator with a natural display and protective slide cover, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "papeleria-altamira",
+  "kind": "product",
+  "slug": "engrapadora-metalica",
+  "name": "Engrapadora de Escritorio Metálica",
+  "n": 1,
+  "file": "papeleria-altamira/engrapadora-metalica.jpg",
+  "prompt": "professional e-commerce product photograph, a sturdy black metal desktop stapler with a box of staples beside it, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "papeleria-altamira",
+  "kind": "product",
+  "slug": "silla-oficina-ergonomica-malla",
+  "name": "Silla de Oficina Ergonómica en Malla",
+  "n": 1,
+  "file": "papeleria-altamira/silla-oficina-ergonomica-malla.jpg",
+  "prompt": "professional e-commerce product photograph, an ergonomic office chair with mesh backrest, lumbar support and padded armrests, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "papeleria-altamira",
+  "kind": "product",
+  "slug": "dona-barbara-romulo-gallegos",
+  "name": "Doña Bárbara - Rómulo Gallegos",
+  "n": 1,
+  "file": "papeleria-altamira/dona-barbara-romulo-gallegos.jpg",
+  "prompt": "professional e-commerce product photograph, a classic novel book with an illustrated cover of the Venezuelan plains at sunset, no readable text, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "papeleria-altamira",
+  "kind": "product",
+  "slug": "cien-anos-de-soledad",
+  "name": "Cien Años de Soledad - Gabriel García Márquez",
+  "n": 1,
+  "file": "papeleria-altamira/cien-anos-de-soledad.jpg",
+  "prompt": "professional e-commerce product photograph, a paperback novel with a colorful magical realism illustrated cover, no readable text, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "papeleria-altamira",
+  "kind": "product",
+  "slug": "libro-nacho-lee",
+  "name": "Libro Nacho Lee - Método de Lectura Inicial",
+  "n": 1,
+  "file": "papeleria-altamira/libro-nacho-lee.jpg",
+  "prompt": "professional e-commerce product photograph, a children early reading primer book with a colorful illustrated cover of a smiling boy, no readable text, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sonido-criollo",
+  "kind": "logo",
+  "file": "sonido-criollo/_logo.jpg",
+  "prompt": "flat vector logo icon for a music instruments store, a Venezuelan cuatro guitar with sound waves, burgundy and gold, centered, plain light background, minimal and modern, no text, no letters",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sonido-criollo",
+  "kind": "store",
+  "file": "sonido-criollo/_store.jpg",
+  "prompt": "realistic daytime photograph of a music instruments store with guitars, cuatros and keyboards on the walls at street level on a tree lined street in the east of Caracas (Chacao / Altamira area), Venezuela, glass storefront, sign without readable text, no people in focus",
+  "aspect": "4:3"
+ },
+ {
+  "company": "sonido-criollo",
+  "kind": "product",
+  "slug": "cuatro-venezolano-cedro",
+  "name": "Cuatro Venezolano Profesional de Cedro",
+  "n": 1,
+  "file": "sonido-criollo/cuatro-venezolano-cedro.jpg",
+  "prompt": "professional e-commerce product photograph, a handcrafted Venezuelan cuatro, a small four string guitar with natural cedar wood finish, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sonido-criollo",
+  "kind": "product",
+  "slug": "cuatro-escolar-principiante",
+  "name": "Cuatro Escolar para Principiantes con Forro",
+  "n": 1,
+  "file": "sonido-criollo/cuatro-escolar-principiante.jpg",
+  "prompt": "professional e-commerce product photograph, a small student Venezuelan cuatro guitar in light wood with a padded gig bag beside it, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sonido-criollo",
+  "kind": "product",
+  "slug": "maracas-llaneras-tapara",
+  "name": "Maracas Llaneras de Tapara (Par)",
+  "n": 1,
+  "file": "sonido-criollo/maracas-llaneras-tapara.jpg",
+  "prompt": "professional e-commerce product photograph, a pair of traditional Venezuelan maracas made of natural dried gourds with wooden handles, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sonido-criollo",
+  "kind": "product",
+  "slug": "furruco-tradicional-gaitas",
+  "name": "Furruco Tradicional para Gaitas",
+  "n": 1,
+  "file": "sonido-criollo/furruco-tradicional-gaitas.jpg",
+  "prompt": "professional e-commerce product photograph, a traditional Venezuelan friction drum with a wooden body, goatskin head and a cane stick in the center, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sonido-criollo",
+  "kind": "product",
+  "slug": "bandola-llanera-4-cuerdas",
+  "name": "Bandola Llanera de 4 Cuerdas",
+  "n": 1,
+  "file": "sonido-criollo/bandola-llanera-4-cuerdas.jpg",
+  "prompt": "professional e-commerce product photograph, a pear shaped Venezuelan bandola, a four string folk lute with natural wood finish, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sonido-criollo",
+  "kind": "product",
+  "slug": "arpa-llanera-32-cuerdas",
+  "name": "Arpa Llanera de 32 Cuerdas",
+  "n": 1,
+  "file": "sonido-criollo/arpa-llanera-32-cuerdas.jpg",
+  "prompt": "professional e-commerce product photograph, a traditional Venezuelan llanera harp with natural wood finish and thirty two nylon strings, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sonido-criollo",
+  "kind": "product",
+  "slug": "guitarra-clasica-yamaha-c40",
+  "name": "Guitarra Clásica Yamaha C40",
+  "n": 1,
+  "file": "sonido-criollo/guitarra-clasica-yamaha-c40.jpg",
+  "prompt": "professional e-commerce product photograph, a classical nylon string acoustic guitar with natural spruce top, full front view, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sonido-criollo",
+  "kind": "product",
+  "slug": "guitarra-fender-cd60sce",
+  "name": "Guitarra Electroacústica Fender CD-60SCE",
+  "n": 1,
+  "file": "sonido-criollo/guitarra-fender-cd60sce.jpg",
+  "prompt": "professional e-commerce product photograph, a dreadnought cutaway acoustic electric guitar with a sunburst finish, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sonido-criollo",
+  "kind": "product",
+  "slug": "guitarra-squier-sonic-strat",
+  "name": "Guitarra Eléctrica Squier Sonic Stratocaster",
+  "n": 1,
+  "file": "sonido-criollo/guitarra-squier-sonic-strat.jpg",
+  "prompt": "professional e-commerce product photograph, a classic double cutaway electric guitar with three single coil pickups and a white pickguard, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sonido-criollo",
+  "kind": "product",
+  "slug": "bajo-ibanez-gsr200",
+  "name": "Bajo Eléctrico Ibanez GSR200 4 Cuerdas",
+  "n": 1,
+  "file": "sonido-criollo/bajo-ibanez-gsr200.jpg",
+  "prompt": "professional e-commerce product photograph, a four string electric bass guitar with a black body and rosewood fingerboard, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sonido-criollo",
+  "kind": "product",
+  "slug": "teclado-yamaha-psr-e383",
+  "name": "Teclado Yamaha PSR-E383 61 Teclas",
+  "n": 1,
+  "file": "sonido-criollo/teclado-yamaha-psr-e383.jpg",
+  "prompt": "professional e-commerce product photograph, a black 61 key portable digital keyboard with control buttons and speakers, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sonido-criollo",
+  "kind": "product",
+  "slug": "controlador-midi-akai-mpk-mini",
+  "name": "Controlador MIDI Akai MPK Mini MK3 25 Teclas",
+  "n": 1,
+  "file": "sonido-criollo/controlador-midi-akai-mpk-mini.jpg",
+  "prompt": "professional e-commerce product photograph, a compact 25 mini key MIDI controller with backlit drum pads and rotary knobs, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sonido-criollo",
+  "kind": "product",
+  "slug": "amplificador-fender-frontman",
+  "name": "Amplificador para Guitarra Fender Frontman",
+  "n": 1,
+  "file": "sonido-criollo/amplificador-fender-frontman.jpg",
+  "prompt": "professional e-commerce product photograph, a small black guitar practice amplifier with a silver grille and control knobs on top, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sonido-criollo",
+  "kind": "product",
+  "slug": "bateria-acustica-mapex-5-piezas",
+  "name": "Batería Acústica Mapex Tornado 5 Piezas",
+  "n": 1,
+  "file": "sonido-criollo/bateria-acustica-mapex-5-piezas.jpg",
+  "prompt": "professional e-commerce product photograph, a complete five piece acoustic drum kit with cymbals, stool and hardware, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sonido-criollo",
+  "kind": "product",
+  "slug": "bongos-lp-aspire",
+  "name": "Bongós LP Aspire de Madera",
+  "n": 1,
+  "file": "sonido-criollo/bongos-lp-aspire.jpg",
+  "prompt": "professional e-commerce product photograph, a pair of wooden bongo drums with natural skin heads and chrome tuning lugs, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sonido-criollo",
+  "kind": "product",
+  "slug": "flauta-dulce-yamaha-yrs-24b",
+  "name": "Flauta Dulce Soprano Yamaha YRS-24B",
+  "n": 1,
+  "file": "sonido-criollo/flauta-dulce-yamaha-yrs-24b.jpg",
+  "prompt": "professional e-commerce product photograph, a cream colored plastic soprano recorder flute with its cleaning rod and soft case, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sonido-criollo",
+  "kind": "product",
+  "slug": "microfono-shure-sm58",
+  "name": "Micrófono Vocal Shure SM58",
+  "n": 1,
+  "file": "sonido-criollo/microfono-shure-sm58.jpg",
+  "prompt": "professional e-commerce product photograph, a classic dynamic vocal microphone with a silver ball grille and black handle, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sonido-criollo",
+  "kind": "product",
+  "slug": "audifonos-audio-technica-m20x",
+  "name": "Audífonos de Monitoreo Audio-Technica ATH-M20x",
+  "n": 1,
+  "file": "sonido-criollo/audifonos-audio-technica-m20x.jpg",
+  "prompt": "professional e-commerce product photograph, black closed back over ear studio monitor headphones with a coiled cable, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sonido-criollo",
+  "kind": "product",
+  "slug": "cuerdas-cuatro-aquila",
+  "name": "Juego de Cuerdas para Cuatro Venezolano",
+  "n": 1,
+  "file": "sonido-criollo/cuerdas-cuatro-aquila.jpg",
+  "prompt": "professional e-commerce product photograph, a set of four nylon strings for a small folk guitar, coiled in a neat circle, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "sonido-criollo",
+  "kind": "product",
+  "slug": "cuerdas-guitarra-electrica-daddario",
+  "name": "Cuerdas para Guitarra Eléctrica D'Addario EXL",
+  "n": 1,
+  "file": "sonido-criollo/cuerdas-guitarra-electrica-daddario.jpg",
+  "prompt": "professional e-commerce product photograph, a set of coiled nickel electric guitar strings next to their paper envelopes, no readable text, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "la-fiesta",
+  "kind": "logo",
+  "file": "la-fiesta/_logo.jpg",
+  "prompt": "flat vector logo icon for a party supplies store, a colorful piñata star with confetti, magenta, turquoise and yellow, centered, plain light background, minimal and modern, no text, no letters",
+  "aspect": "1:1"
+ },
+ {
+  "company": "la-fiesta",
+  "kind": "store",
+  "file": "la-fiesta/_store.jpg",
+  "prompt": "realistic daytime photograph of a party supplies store (piñatería) with balloons, piñatas and decorations at street level on a tree lined street in the east of Caracas (Chacao / Altamira area), Venezuela, glass storefront, sign without readable text, no people in focus",
+  "aspect": "4:3"
+ },
+ {
+  "company": "la-fiesta",
+  "kind": "product",
+  "slug": "pinata-tradicional-personaje",
+  "name": "Piñata Tradicional de Personaje Mediana",
+  "n": 1,
+  "file": "la-fiesta/pinata-tradicional-personaje.jpg",
+  "prompt": "professional e-commerce product photograph, a colorful handmade Venezuelan party pinata shaped like a cute cartoon unicorn, made of crepe paper fringes, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "la-fiesta",
+  "kind": "product",
+  "slug": "pinata-numero-metalizada",
+  "name": "Piñata de Número Metalizada",
+  "n": 1,
+  "file": "la-fiesta/pinata-numero-metalizada.jpg",
+  "prompt": "professional e-commerce product photograph, a party pinata shaped like the number one covered in shiny gold metallic fringe paper, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "la-fiesta",
+  "kind": "product",
+  "slug": "relleno-pinata-surtido",
+  "name": "Relleno para Piñata Surtido",
+  "n": 1,
+  "file": "la-fiesta/relleno-pinata-surtido.jpg",
+  "prompt": "professional e-commerce product photograph, a pile of assorted wrapped candies, lollipops, small plastic toys and whistles for a pinata, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "la-fiesta",
+  "kind": "product",
+  "slug": "globos-latex-r12-x50",
+  "name": "Globos de Látex R12 Sempertex x50",
+  "n": 1,
+  "file": "la-fiesta/globos-latex-r12-x50.jpg",
+  "prompt": "professional e-commerce product photograph, a pile of glossy 12 inch latex party balloons in assorted pastel colors, uninflated and inflated, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "la-fiesta",
+  "kind": "product",
+  "slug": "globo-metalizado-numero-40",
+  "name": "Globo Metalizado de Número 40\" Dorado",
+  "n": 1,
+  "file": "la-fiesta/globo-metalizado-numero-40.jpg",
+  "prompt": "professional e-commerce product photograph, a giant shiny gold foil balloon shaped like a number, inflated, standing upright, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "la-fiesta",
+  "kind": "product",
+  "slug": "kit-arco-organico-globos",
+  "name": "Kit Arco Orgánico de Globos (100 piezas)",
+  "n": 1,
+  "file": "la-fiesta/kit-arco-organico-globos.jpg",
+  "prompt": "professional e-commerce product photograph, a balloon garland kit with assorted size latex balloons, a plastic strip and glue dots laid out, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "la-fiesta",
+  "kind": "product",
+  "slug": "cotillon-infantil-x12",
+  "name": "Cotillón Infantil Surtido x12",
+  "n": 1,
+  "file": "la-fiesta/cotillon-infantil-x12.jpg",
+  "prompt": "professional e-commerce product photograph, colorful kids party favors set: cone party hats, whistles, masks, streamers and rattles, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "la-fiesta",
+  "kind": "product",
+  "slug": "velas-chispitas-x4",
+  "name": "Velas Chispitas para Torta x4",
+  "n": 1,
+  "file": "la-fiesta/velas-chispitas-x4.jpg",
+  "prompt": "professional e-commerce product photograph, four sparkler birthday candles in a small pack, thin metal sticks, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "la-fiesta",
+  "kind": "product",
+  "slug": "canon-confeti-metalizado-30cm",
+  "name": "Cañón de Confeti Metalizado 30 cm",
+  "n": 1,
+  "file": "la-fiesta/canon-confeti-metalizado-30cm.jpg",
+  "prompt": "professional e-commerce product photograph, a cardboard confetti cannon party popper tube with metallic confetti spilling out, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "la-fiesta",
+  "kind": "product",
+  "slug": "banderin-feliz-cumpleanos",
+  "name": "Banderín de Feliz Cumpleaños Metalizado",
+  "n": 1,
+  "file": "la-fiesta/banderin-feliz-cumpleanos.jpg",
+  "prompt": "professional e-commerce product photograph, a shiny gold metallic letter bunting garland banner with pennant shapes, letters not readable, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "la-fiesta",
+  "kind": "product",
+  "slug": "inflador-manual-globos",
+  "name": "Inflador Manual de Globos Doble Acción",
+  "n": 1,
+  "file": "la-fiesta/inflador-manual-globos.jpg",
+  "prompt": "professional e-commerce product photograph, a handheld double action plastic balloon air pump with nozzle, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "la-fiesta",
+  "kind": "product",
+  "slug": "vasos-plasticos-darnel",
+  "name": "Vasos Plásticos Darnel x50",
+  "n": 1,
+  "file": "la-fiesta/vasos-plasticos-darnel.jpg",
+  "prompt": "professional e-commerce product photograph, a stack of clear disposable plastic cups in a sleeve, several sizes, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "la-fiesta",
+  "kind": "product",
+  "slug": "platos-carton-decorados",
+  "name": "Platos de Cartón Decorados x20",
+  "n": 1,
+  "file": "la-fiesta/platos-carton-decorados.jpg",
+  "prompt": "professional e-commerce product photograph, a stack of colorful party paper plates with polka dot and stripe borders, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "la-fiesta",
+  "kind": "product",
+  "slug": "servilletas-decoradas-x20",
+  "name": "Servilletas Decoradas de Fiesta x20",
+  "n": 1,
+  "file": "la-fiesta/servilletas-decoradas-x20.jpg",
+  "prompt": "professional e-commerce product photograph, a stack of folded colorful printed paper party napkins with confetti pattern, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "la-fiesta",
+  "kind": "product",
+  "slug": "envases-anime-pasapalos-x25",
+  "name": "Envases de Anime para Comida x25",
+  "n": 1,
+  "file": "la-fiesta/envases-anime-pasapalos-x25.jpg",
+  "prompt": "professional e-commerce product photograph, a stack of white foam hinged takeaway food containers, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "la-fiesta",
+  "kind": "product",
+  "slug": "cubiertos-plasticos-x50",
+  "name": "Cucharitas y Tenedores Plásticos x50",
+  "n": 1,
+  "file": "la-fiesta/cubiertos-plasticos-x50.jpg",
+  "prompt": "professional e-commerce product photograph, a pile of white disposable plastic spoons and forks, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "la-fiesta",
+  "kind": "product",
+  "slug": "bolsas-regalo-kraft-x12",
+  "name": "Bolsas de Regalo Kraft con Asa x12",
+  "n": 1,
+  "file": "la-fiesta/bolsas-regalo-kraft-x12.jpg",
+  "prompt": "professional e-commerce product photograph, a set of brown kraft paper gift bags with twisted paper handles in three sizes, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "la-fiesta",
+  "kind": "product",
+  "slug": "bolsas-celofan-sorpresas-x100",
+  "name": "Bolsas de Celofán para Sorpresas x100",
+  "n": 1,
+  "file": "la-fiesta/bolsas-celofan-sorpresas-x100.jpg",
+  "prompt": "professional e-commerce product photograph, a pack of clear cellophane treat bags with colorful twist ties, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "la-fiesta",
+  "kind": "product",
+  "slug": "caja-torta-con-ventana",
+  "name": "Caja para Torta con Ventana",
+  "n": 1,
+  "file": "la-fiesta/caja-torta-con-ventana.jpg",
+  "prompt": "professional e-commerce product photograph, a white cardboard cake box with a clear plastic window on the lid, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ },
+ {
+  "company": "la-fiesta",
+  "kind": "product",
+  "slug": "decoracion-arco-globos-domicilio",
+  "name": "Decoración con Arco de Globos a Domicilio",
+  "n": 1,
+  "file": "la-fiesta/decoracion-arco-globos-domicilio.jpg",
+  "prompt": "professional e-commerce product photograph, an elegant organic balloon arch in pink, gold and white framing a round party backdrop panel, centered, clean white seamless studio background, soft natural shadow, sharp focus, high detail, no text, no logos overlay, no watermark",
+  "aspect": "1:1"
+ }
+]

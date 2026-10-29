@@ -690,6 +690,11 @@ class COS:
         clean = self.normalize_path(relative_path).lstrip('/')
         if not clean or clean.startswith(('http://', 'https://')):
             return False
+        if clean.startswith('static/'):
+            return (
+                os.path.isfile(os.path.join(settings.BASE_DIR, 'api', *clean.split('/')))
+                or os.path.isfile(os.path.join(settings.BASE_DIR, *clean.split('/')))
+            )
         if self.storage_type == 'aws':
             target_bucket, _ = self._resolve_bucket(clean)
             try:
@@ -762,6 +767,15 @@ class COS:
         if not clean_path or clean_path.startswith(('http://', 'https://')):
             return None
         try:
+            if clean_path.startswith('static/'):
+                for candidate in (
+                    os.path.join(settings.BASE_DIR, 'api', *clean_path.split('/')),
+                    os.path.join(settings.BASE_DIR, *clean_path.split('/')),
+                ):
+                    if os.path.isfile(candidate):
+                        with open(candidate, 'rb') as fh:
+                            return fh.read(max_bytes)
+                return None
             if self.storage_type == 'aws':
                 target_bucket, _ = self._resolve_bucket(clean_path)
                 obj = self.s3_client.get_object(Bucket=target_bucket, Key=clean_path)
@@ -823,6 +837,22 @@ class COS:
             return normalized
 
         clean_path = normalized.lstrip('/')
+
+        # Activos bajo `static/` (categorías y comercios demo locales del repositorio) se sirven SIEMPRE
+        # desde el servidor local, independientemente de si `STORAGE_TYPE` es 'aws' o 'local'.
+        if clean_path.startswith('static/'):
+            domain = (getattr(settings, 'DOMAIN', '') or '').rstrip('/')
+            base_url = f"{domain}/{clean_path}" if domain else f"/{clean_path}"
+            local_file = os.path.join(settings.BASE_DIR, 'api', *clean_path.split('/'))
+            if not os.path.exists(local_file):
+                local_file = os.path.join(settings.BASE_DIR, *clean_path.split('/'))
+            if os.path.exists(local_file):
+                try:
+                    mtime = int(os.path.getmtime(local_file))
+                    return f"{base_url}?v={mtime}"
+                except Exception:
+                    pass
+            return base_url
 
         if self.storage_type == 'aws':
             target_bucket, resolved_private = self._resolve_bucket(clean_path, is_private=is_private)

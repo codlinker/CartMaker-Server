@@ -5,11 +5,13 @@ deterministas que referencia `python manage.py seed_demo_merchants`.
 
   * Comprime cada imagen a <= 50 KB (mismo motor que la API) y sube original + variantes thumb/medium (WebP).
   * Idempotente: omite las que ya existen en el bucket (usa --force para volver a subirlas).
+  * `--dataset categories` (por defecto) = 1 comercio por categoría; `--dataset legacy` = los 4 comercios originales.
 
 Uso (desde la raíz del proyecto, con `source variables.sh` cargado):
 
     python scripts/demo_merchants/upload_images.py --dry-run
     python scripts/demo_merchants/upload_images.py
+    python scripts/demo_merchants/upload_images.py --dataset legacy
 """
 import argparse
 import io
@@ -27,12 +29,14 @@ django.setup()
 
 from api.core.image_variants import generate_image_variants  # noqa: E402
 from api.cos import compress_uploaded_image_stream, storage_manager  # noqa: E402
-from api.management.commands import _demo_merchants_data as data  # noqa: E402
+from api.management.commands import _category_merchants as category_data  # noqa: E402
+from api.management.commands import _demo_merchants_data as legacy_data  # noqa: E402
 
+DATASETS = {'categories': category_data, 'legacy': legacy_data}
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
-def build_targets():
+def build_targets(data):
     """[(archivo_local_relativo, clave_s3, etiqueta)] para todas las imágenes del catálogo demo."""
     targets = []
     for company in data.COMPANIES:
@@ -51,6 +55,7 @@ def build_targets():
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--images-dir', default=os.path.join(HERE, 'images'))
+    parser.add_argument('--dataset', choices=sorted(DATASETS), default='categories')
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--force', action='store_true', help='Vuelve a subir aunque ya exista en el bucket.')
     args = parser.parse_args()
@@ -58,7 +63,7 @@ def main():
     if storage_manager.storage_type != 'aws':
         print(f"⚠️  STORAGE_TYPE={storage_manager.storage_type!r}: las imágenes se guardarán en MEDIA_ROOT, no en S3.")
 
-    targets = build_targets()
+    targets = build_targets(DATASETS[args.dataset])
     uploaded = skipped = missing = failed = 0
     for rel_file, key, label in targets:
         path = os.path.join(args.images_dir, *rel_file.split('/'))

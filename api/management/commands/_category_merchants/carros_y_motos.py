@@ -1,0 +1,192 @@
+# -*- coding: utf-8 -*-
+"""Catálogo demo de AutoPartes La California (Carros, Motos y Otros): 20 productos."""
+from ._helpers import ALT, STUDIO, TOK_A, TOK_B, TOK_C, M, P, V, grid, sizes  # noqa: F401
+
+CAT = 'Carros, Motos y Otros'
+
+PRODUCTS = [
+    # ------------------------------------------------------------------ Cauchos y Rines
+    P('caucho-pirelli-p400-evo', 'Caucho Pirelli P400 Evo Rin 13 a 15', 'Cauchos y Rines', CAT, 68.00,
+      'Caucho radial para carros de ciudad con banda de rodamiento silenciosa y excelente agarre en pavimento mojado. '
+      'Medidas para Aveo, Corsa, Spark, Yaris, Fiesta y similares. Nuevo, garantía de fábrica de 1 año.',
+      (STUDIO.format(what='a new black passenger car tire with an asymmetric tread pattern, standing upright, three quarter view'),
+       ALT.format(what='close-up of a new car tire tread mounted on a silver alloy wheel, shallow depth of field')),
+      attrs={'marca': 'Pirelli', 'medida_caucho_rin': '175/70 R13 - 195/65 R15', 'tipo_terreno': 'Pista / Ciudad (H/T)',
+             'condicion': 'Nuevo', 'garantia': '1 año'},
+      variants=[V({'tire_size': '175/70 R13'}, 16), V({'tire_size': '185/65 R14'}, 12, 79.00),
+                V({'tire_size': '195/65 R15'}, 8, 89.00)],
+      tokens=TOK_C),
+    P('caucho-general-grabber-at3', 'Caucho General Grabber AT3 Todo Terreno', 'Cauchos y Rines', CAT, 189.00,
+      'Caucho todo terreno para camionetas, con taco agresivo para tierra y lluvia y buen confort en autopista. '
+      'Medidas para Hilux, Fortuner, 4Runner, Tacoma y Grand Cherokee. Nuevo, 1 año de garantía.',
+      (STUDIO.format(what='a rugged all terrain SUV tire with aggressive block tread and raised sidewall pattern'),
+       ALT.format(what='pickup truck with all terrain tires on a muddy mountain road in the Venezuelan Andes, overcast')),
+      attrs={'marca': 'General Tire', 'medida_caucho_rin': '265/70 R16 - 285/70 R17', 'tipo_terreno': 'Todo Terreno (A/T)',
+             'condicion': 'Nuevo', 'garantia': '1 año'},
+      variants=[V({'tire_size': '265/70 R16'}, 8), V({'tire_size': '265/65 R17'}, 6, 209.00),
+                V({'tire_size': '285/70 R17'}, 0, 239.00)],
+      offer=8),
+    # ------------------------------------------------------------------ Aceites, Filtros y Fluidos
+    P('aceite-venoco-mineral-20w50', 'Aceite de Motor Mineral Venoco 20W-50', 'Aceites de Motor, Filtros y Fluidos', CAT, 6.50,
+      'Aceite multigrado nacional para motores a gasolina con kilometraje alto, que protege contra el desgaste en el '
+      'calor del tráfico caraqueño. Disponible en pinta (946 ml) y en galón.',
+      (STUDIO.format(what='two plain unlabeled motor oil plastic bottles, a quart and a gallon, golden amber color'),
+       ALT.format(what='mechanic pouring golden motor oil into a car engine with a funnel, garage lighting')),
+      attrs={'marca': 'Venoco', 'tipo_aceite': 'Mineral', 'viscosidad_codigo': 'SAE 20W-50 API SL'},
+      variants=[V({'viscosity': '20W-50', 'presentation': 'Pinta / Cuarto (946 ml)'}, 60),
+                V({'viscosity': '20W-50', 'presentation': 'Galón (3.78L)'}, 25, 23.00)],
+      tokens=TOK_A),
+    P('aceite-mobil-1-5w30-sintetico', 'Aceite Sintético Mobil 1 5W-30 Pimpina 4.73 L', 'Aceites de Motor, Filtros y Fluidos', CAT, 54.00,
+      'Aceite 100 % sintético para motores modernos, turbo e inyección directa. Mantiene el motor limpio y alarga los '
+      'intervalos de cambio hasta 10.000 km. Pimpina de 5 cuartos.',
+      (STUDIO.format(what='a plain unlabeled 5 quart plastic jug of synthetic motor oil, dark gray color'),
+       ALT.format(what='modern car engine bay with the oil cap open during an oil change, clean workshop')),
+      attrs={'marca': 'Mobil', 'tipo_aceite': '100% Sintético (Full Synthetic)', 'viscosidad_codigo': 'SAE 5W-30 API SP'},
+      offer=10, stock=14),
+    P('filtro-aceite-wix-51515', 'Filtro de Aceite Wix 51515', 'Aceites de Motor, Filtros y Fluidos', CAT, 7.50,
+      'Filtro de aceite de rosca con válvula antirretorno y medio filtrante de celulosa reforzada. Compatible con '
+      'Chevrolet Aveo, Optra, Corsa y Ford Fiesta, entre otros. Cámbialo en cada cambio de aceite.',
+      (STUDIO.format(what='a spin-on automotive oil filter canister with a plain white body and threaded base'),
+       ALT.format(what='mechanic hand installing a new oil filter under a car engine, close-up, workshop light')),
+      attrs={'marca': 'Wix', 'tipo_aceite': 'Filtro de Aceite / Aire / Gasolina', 'viscosidad_codigo': '51515'},
+      tokens=TOK_A, stock=35),
+    # ------------------------------------------------------------------ Repuestos de Motor y Tren Delantero
+    P('bujias-ngk-iridium-x4', 'Juego de 4 Bujías NGK Iridium IX', 'Repuestos de Motor y Tren Delantero', CAT, 34.00,
+      'Bujías de punta de iridio que mejoran el arranque, la respuesta del acelerador y el consumo de gasolina. '
+      'Duran hasta 3 veces más que una bujía convencional. Juego de 4 unidades.',
+      (STUDIO.format(what='four iridium spark plugs lined up in a row with white ceramic insulators'),
+       ALT.format(what='mechanic installing a spark plug into a car engine with a socket wrench, macro shot')),
+      unit='set',
+      attrs={'marca_repuesto': 'NGK', 'compatibilidad': 'Toyota Corolla 1.8 (2009-2019), Yaris 1.5, Hyundai Accent 1.6',
+             'numero_parte_oem': 'BKR6EIX', 'condicion': 'Nuevo Original (OEM)', 'garantia': '3 meses'},
+      tokens=TOK_B, stock=20),
+    P('amortiguadores-gabriel-aveo', 'Par de Amortiguadores Gabriel para Chevrolet Aveo', 'Repuestos de Motor y Tren Delantero', CAT, 95.00,
+      'Amortiguadores hidráulicos de gas Gabriel que devuelven la estabilidad y el confort en calles con huecos. '
+      'Se venden por par, delanteros o traseros. Instalación disponible en talleres aliados de La California.',
+      (STUDIO.format(what='a pair of automotive gas shock absorbers struts with springs mounts, red and black finish'),
+       ALT.format(what='car on a lift in a mechanic workshop with the front suspension exposed during a shock replacement')),
+      unit='pair',
+      attrs={'marca_repuesto': 'Gabriel', 'compatibilidad': 'Chevrolet Aveo (2004-2017)',
+             'condicion': 'Nuevo Reemplazo (Aftermarket)', 'garantia': '6 meses'},
+      variants=[V({'position': 'Delantero'}, 6), V({'position': 'Trasero'}, 8, 79.00)],
+      tokens=TOK_C),
+    P('bateria-duncan-22mf-900', 'Batería Duncan 22MF-900 Libre de Mantenimiento', 'Repuestos de Motor y Tren Delantero', CAT, 129.00,
+      'Batería venezolana de 12 V y 900 amperios de arranque, sellada y libre de mantenimiento. Para la mayoría de '
+      'sedanes y camionetas medianas. Te la instalamos y probamos el alternador sin costo. 18 meses de garantía.',
+      (STUDIO.format(what='a black sealed maintenance free 12V car battery with red and black terminal caps'),
+       ALT.format(what='mechanic connecting a new car battery terminal in an engine bay, close-up with tools')),
+      attrs={'marca_repuesto': 'Duncan', 'compatibilidad': 'Toyota Corolla, Hyundai Elantra, Ford Fiesta, Chevrolet Optra',
+             'numero_parte_oem': '22MF-900', 'condicion': 'Nuevo Original (OEM)', 'garantia': '1 año'},
+      stock=8),
+    P('kit-correa-tiempo-gates-fiesta', 'Kit de Correa de Tiempo Gates Ford Fiesta / Ka 1.6', 'Repuestos de Motor y Tren Delantero', CAT, 59.00,
+      'Incluye correa de tiempo, tensor y polea guía Gates. Se recomienda cambiar cada 60.000 km para evitar daños '
+      'graves al motor. Compatible con Ford Fiesta, Ka y EcoSport con motor 1.6 Zetec Rocam.',
+      (STUDIO.format(what='an automotive timing belt kit with a black toothed belt, tensioner pulley and idler pulley'),
+       ALT.format(what='timing belt installed on an open car engine with pulleys visible, mechanic workshop')),
+      unit='set',
+      attrs={'marca_repuesto': 'Gates', 'compatibilidad': 'Ford Fiesta / Ka / EcoSport 1.6 Rocam (2004-2014)',
+             'numero_parte_oem': 'TCK328', 'condicion': 'Nuevo Reemplazo (Aftermarket)', 'garantia': '6 meses'},
+      offer=12, stock=7),
+    # ------------------------------------------------------------------ Frenos
+    P('pastillas-freno-ceramicas-bosch', 'Pastillas de Freno Cerámicas Bosch QuietCast', 'Frenos, Pastillas y Discos', CAT, 28.00,
+      'Pastillas cerámicas de bajo polvo y frenado silencioso, con láminas antirruido. Juego para un eje (4 pastillas). '
+      'Compatibles con Toyota Corolla y Yaris. Pídelas delanteras o traseras.',
+      (STUDIO.format(what='a set of four ceramic brake pads with metal backing plates and anti noise shims'),
+       ALT.format(what='car wheel removed showing a brake disc and caliper during a brake pad replacement, workshop')),
+      unit='set',
+      attrs={'marca_repuesto': 'Bosch', 'compatibilidad': 'Toyota Corolla (2009-2019), Yaris (2006-2018)',
+             'codigo_fmsi': 'D1210'},
+      variants=[V({'position': 'Delanteras'}, 14), V({'position': 'Traseras'}, 9, 24.00)],
+      tokens=TOK_A),
+    # ------------------------------------------------------------------ Motos
+    P('casco-integral-ls2-rapid', 'Casco Integral LS2 Rapid Certificado', 'Repuestos, Cascos y Accesorios para Motos', CAT, 69.00,
+      'Casco integral con carcasa de termoplástico, certificación DOT y ECE, visera antirrayas de cambio rápido e '
+      'interior desmontable y lavable. Ventilación frontal y trasera para el calor de Caracas.',
+      (STUDIO.format(what='a full face motorcycle helmet in matte black with a clear visor, three quarter side view'),
+       ALT.format(what='motorcycle rider wearing a full face helmet riding through a Caracas avenue, motion blur, daytime')),
+      attrs={'tipo_articulo': 'Casco (Integral / Abatible / Abierto)', 'compatibilidad': 'Universal'},
+      variants=grid('variant', ['Talla M', 'Talla L', 'Talla XL'], 'color', ['Negro Mate', 'Blanco'], stock=5,
+                    sold_out=[('Talla XL', 'Blanco')]),
+      tokens=TOK_B),
+    P('kit-arrastre-moto-reforzado', 'Kit de Arrastre Reforzado para Moto', 'Repuestos, Cascos y Accesorios para Motos', CAT, 24.00,
+      'Cadena 428H reforzada, piñón y corona de acero templado para motos de trabajo. Mayor duración para delivery y '
+      'mototaxi. Elige el modelo de tu moto.',
+      (STUDIO.format(what='a motorcycle chain and sprocket kit with a steel rear sprocket, small front sprocket and coiled chain'),
+       ALT.format(what='mechanic installing a chain and sprocket on a small commuter motorcycle, workshop floor')),
+      unit='set',
+      attrs={'tipo_articulo': 'Kit de Arrastre / Frenos / Motor', 'compatibilidad': 'Bera SBR, Empire Horse, Owen, Arsen, TX 200, RK 200'},
+      variants=[V({'variant': 'SBR / Horse / Owen / Arsen'}, 20), V({'variant': 'TX 200 / RK 200'}, 12, 28.00)],
+      offer=10),
+    # ------------------------------------------------------------------ Luces LED
+    P('bombillos-led-faro-csp', 'Bombillos LED para Faros 12.000 Lúmenes (Par)', 'Luces LED, Barras y Faros', CAT, 25.00,
+      'Par de bombillos LED con chips CSP y ventilador interno, luz blanca de 6000 K, plug and play sin modificar '
+      'el carro. Mucho más visibilidad de noche en la Cota Mil y la autopista. 6 meses de garantía.',
+      (STUDIO.format(what='a pair of LED headlight bulbs with aluminum heat sinks and small cooling fans'),
+       ALT.format(what='car headlights emitting bright white LED light on a dark road at night')),
+      unit='pair',
+      attrs={'potencia_lumenes': '60 W / 12.000 lm por par, 6000 K', 'voltaje': '12V', 'garantia': '6 meses'},
+      variants=sizes('socket', ['H4 (Alta y Baja)', 'H7', 'H11', '9005 (HB3)', '9006 (HB4)'], stock=10,
+                     sold_out=('H11',)),
+      tokens=TOK_A),
+    P('barra-led-32-doble-fila', 'Barra LED 32" Doble Fila 180 W', 'Luces LED, Barras y Faros', CAT, 49.00,
+      'Barra LED de aluminio con lente de policarbonato, haz combinado spot y flood y protección IP67 contra agua y polvo. '
+      'Para camionetas y rústicos. Incluye soportes y arnés con interruptor.',
+      (STUDIO.format(what='a 32 inch double row LED light bar with black aluminum housing and mounting brackets'),
+       ALT.format(what='off road pickup truck with a roof LED light bar lighting a dirt trail at dusk')),
+      unit='unit',
+      attrs={'potencia_lumenes': '180 W / 18.000 lm', 'voltaje': '12V - 24V (Carro y Camión)', 'garantia': '6 meses'},
+      offer=15, stock=10),
+    # ------------------------------------------------------------------ Sonido
+    P('radio-android-9-carplay', 'Radio Android 9" con CarPlay y Android Auto', 'Sonido para Carros, Reproductores y Plantas', CAT, 119.00,
+      'Reproductor doble DIN con pantalla táctil de 9", CarPlay y Android Auto inalámbricos, GPS, Bluetooth, radio FM '
+      'y entrada para cámara de retroceso (incluida). Te asesoramos con el marco para tu modelo.',
+      (STUDIO.format(what='a 9 inch touchscreen car stereo head unit showing a navigation map, with a small rear view camera'),
+       ALT.format(what='car dashboard with a large touchscreen stereo showing a music app, night city lights outside')),
+      attrs={'marca': 'Pioneer', 'potencia_rms': '4 x 45 W máx.', 'garantia': '6 meses'},
+      variants=[V({'spec': '2GB + 32GB CarPlay'}, 9), V({'spec': '4GB + 64GB CarPlay'}, 5, 149.00)],
+      tokens=TOK_C),
+    P('cornetas-pioneer-ts-a6970f', 'Cornetas Pioneer TS-A6970F 6x9" 5 Vías (Par)', 'Sonido para Carros, Reproductores y Plantas', CAT, 79.00,
+      'Par de cornetas ovaladas de 6x9" de 5 vías, 100 W RMS y 650 W de potencia máxima. Graves profundos y agudos '
+      'claros para la bandeja trasera. Incluye rejillas y cables.',
+      (STUDIO.format(what='a pair of 6x9 inch oval coaxial car speakers with multiple tweeters and black grilles beside them'),
+       ALT.format(what='oval car speakers installed in a rear deck of a sedan, close-up with soft light')),
+      unit='pair',
+      attrs={'marca': 'Pioneer', 'potencia_rms': '100 W RMS / 650 W máx.', 'garantia': '1 año'},
+      stock=10),
+    # ------------------------------------------------------------------ Alarmas y Papel Ahumado
+    P('alarma-viper-3105v', 'Alarma Viper 3105V con 2 Controles', 'Alarmas, Trancapalancas y Papel Ahumado', CAT, 119.00,
+      'Alarma con sensor de impacto de doble zona, corte de encendido, sirena de 6 tonos y dos controles de 4 botones. '
+      'Instalación profesional en nuestra tienda de La California en unas 3 horas. 1 año de garantía.',
+      (STUDIO.format(what='a car alarm kit with two remote key fobs, a siren, a control module and wiring harness'),
+       ALT.format(what='hand pressing a car alarm remote key fob in front of a parked sedan, headlights flashing')),
+      unit='set',
+      attrs={'marca': 'Viper', 'garantia': '1 año'},
+      tokens=TOK_B, stock=6),
+    P('papel-ahumado-3m-por-metro', 'Papel Ahumado 3M para Vidrios (por metro)', 'Alarmas, Trancapalancas y Papel Ahumado', CAT, 6.00,
+      'Lámina de control solar para vidrios de carro que bloquea el 99 % de los rayos UV y reduce el calor. Rollo de '
+      '1.52 m de ancho, se vende por metro lineal. Consulta el tono permitido antes de instalar.',
+      (STUDIO.format(what='a roll of dark window tint film partially unrolled showing its smoky translucent surface'),
+       ALT.format(what='installer applying window tint film to a car side window with a squeegee, workshop')),
+      unit='m',
+      attrs={'marca': '3M', 'garantia': '6 meses'},
+      variants=[V({'shade_or_model': 'Claro (35% - 50%)'}, 60), V({'shade_or_model': 'Medio (20%)'}, 45),
+                V({'shade_or_model': 'Nanocerámico'}, 25, 14.00)]),
+    # ------------------------------------------------------------------ Cuidado Automotriz
+    P('champu-cera-meguiars-gold-class', "Champú con Cera Meguiar's Gold Class 1.89 L", 'Cuidado Automotriz, Ceras y Champú', CAT, 22.00,
+      'Champú concentrado que limpia y acondiciona la pintura en un solo paso, sin quitar la cera. Rinde hasta 30 '
+      'lavados. Ideal para mantener el brillo del carro con el sol caribeño.',
+      (STUDIO.format(what='a plain unlabeled amber bottle of car wash shampoo next to a microfiber mitt and a bucket'),
+       ALT.format(what='person washing a shiny red car with foam and a microfiber mitt in a sunny driveway')),
+      unit='unit',
+      attrs={'marca': "Meguiar's"},
+      offer=10, stock=18),
+    P('ambientador-little-trees-x3', 'Ambientador Little Trees (Pack x3)', 'Cuidado Automotriz, Ceras y Champú', CAT, 4.50,
+      'El clásico arbolito colgante para el retrovisor, con fragancia que dura hasta 7 semanas. Pack de 3 unidades del '
+      'mismo aroma.',
+      (STUDIO.format(what='three tree shaped hanging car air fresheners in different colors, no readable text'),
+       ALT.format(what='tree shaped air freshener hanging from the rear view mirror of a car, blurred windshield view')),
+      unit='pack',
+      attrs={'marca': 'Little Trees'},
+      variants=sizes('size', ['Carro Nuevo', 'Vainilla', 'Black Ice', 'Fresa'], stock=20),
+      tokens=TOK_A),
+]

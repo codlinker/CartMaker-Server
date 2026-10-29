@@ -12,6 +12,7 @@ test_*.py
 node_chat_server/test_client.js
 node_chat_server/node_modules/
 scripts/osrm/data/
+scripts/demo_merchants/images/
 staticfiles/
 *.log
 nohup.out
