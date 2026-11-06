@@ -55,6 +55,9 @@ _base_allowed_hosts = [
     _domain_host,                   # ej. www.cartmaker.app
     CARTMAKER_ROOT_DOMAIN,          # ej. cartmaker.app
     f".{CARTMAKER_ROOT_DOMAIN}",    # Subdominios oficiales (*.cartmaker.app)
+    "cartmaker.app",
+    "www.cartmaker.app",
+    ".cartmaker.app",
     "127.0.0.1",                    # Loopback interno (Nginx / Node.js WebSockets / Healthchecks)
     "localhost",
 ]
@@ -575,12 +578,23 @@ REALTIME_REDIS_URL = (os.environ.get("REALTIME_REDIS_URL", "") or os.environ.get
 # UUID de 16 bits del Service Data BLE del repartidor (pendiente de confirmar/registrar antes de producción)
 DELIVERY_BLE_SERVICE_UUID16 = (os.environ.get("DELIVERY_BLE_SERVICE_UUID16", "") or "CA7E").strip().upper()
 
-# APP LINKS (Android) / UNIVERSAL LINKS (iOS) para que https://www.cartmaker.app/join/... abra la app directamente.
+# APP LINKS (Android) / UNIVERSAL LINKS (iOS) para que https://cartmaker.app/... y https://www.cartmaker.app/... abran la app directamente.
 # ANDROID_APP_PACKAGE: id de la app (ej. com.codlinker.cartmaker)
-# ANDROID_SHA256_CERT_FINGERPRINTS: huellas SHA-256 separadas por coma (firma de release + Play App Signing)
+# ANDROID_SHA256_CERT_FINGERPRINTS: huellas SHA-256 separadas por coma (Play App Signing + firma de subida + debug local)
 # IOS_APP_IDS: "<TEAMID>.<bundle_id>" separados por coma
-ANDROID_APP_PACKAGE = (os.environ.get("ANDROID_APP_PACKAGE", "") or "").strip()
-ANDROID_SHA256_CERT_FINGERPRINTS = [
-    fp.strip() for fp in (os.environ.get("ANDROID_SHA256_CERT_FINGERPRINTS", "") or "").split(",") if fp.strip()
+DEFAULT_ANDROID_SHA256_CERT_FINGERPRINTS = [
+    "F6:5A:B2:A1:E0:46:ED:6B:F2:02:BA:CD:9C:39:E3:4C:23:10:90:59:6D:41:44:75:5F:49:F9:D7:2B:7B:E3:C4",
+    "BE:AB:4B:64:28:A7:6E:5F:AD:44:C2:99:E3:2E:B9:1A:6B:1A:53:10:49:91:47:CD:D0:AE:46:99:03:C5:2B:AC",
+    "6A:43:18:78:3E:CA:9E:19:6F:5D:D0:BF:FF:0E:5B:FA:F2:23:54:CC:24:54:7A:AF:36:24:02:3D:DE:57:23:5B",
+    "C0:9F:9F:7F:8B:9F:4B:C8:E5:29:C3:20:3E:50:AF:7E:9B:10:88:71:41:5B:E3:62:FA:66:0E:97:AA:36:8A:F4",
 ]
+ANDROID_APP_PACKAGE = (os.environ.get("ANDROID_APP_PACKAGE", "") or "com.codlinker.cartmaker").strip()
+_env_android_fingerprints = [
+    fp.strip().upper()
+    for fp in (os.environ.get("ANDROID_SHA256_CERT_FINGERPRINTS", "") or "").split(",")
+    if fp.strip() and not fp.strip().startswith("<")
+]
+ANDROID_SHA256_CERT_FINGERPRINTS = list(
+    dict.fromkeys(DEFAULT_ANDROID_SHA256_CERT_FINGERPRINTS + _env_android_fingerprints)
+)
 IOS_APP_IDS = [x.strip() for x in (os.environ.get("IOS_APP_IDS", "") or "").split(",") if x.strip()]

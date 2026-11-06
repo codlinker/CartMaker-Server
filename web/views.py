@@ -1593,16 +1593,19 @@ def atlas_invoice_view(request, invoice_id):
 def android_assetlinks_view(request):
     """
     GET /.well-known/assetlinks.json
-    Verificación de Android App Links (autoVerify) para que https://www.cartmaker.app/join/...,
-    /tienda/..., /p/... y /orden-express/... abran la app directamente.
+    Verificación de Android App Links (autoVerify) para que https://cartmaker.app/... y
+    https://www.cartmaker.app/join/..., /tienda/..., /p/... y /orden-express/... abran la app directamente.
     Configurar en variables.sh: ANDROID_APP_PACKAGE y ANDROID_SHA256_CERT_FINGERPRINTS.
     """
-    package = getattr(settings, 'ANDROID_APP_PACKAGE', '') or ''
+    package = getattr(settings, 'ANDROID_APP_PACKAGE', '') or 'com.codlinker.cartmaker'
     fingerprints = list(getattr(settings, 'ANDROID_SHA256_CERT_FINGERPRINTS', []) or [])
     payload = []
     if package and fingerprints:
         payload.append({
-            'relation': ['delegate_permission/common.handle_all_urls'],
+            'relation': [
+                'delegate_permission/common.handle_all_urls',
+                'delegate_permission/common.get_login_creds',
+            ],
             'target': {
                 'namespace': 'android_app',
                 'package_name': package,
