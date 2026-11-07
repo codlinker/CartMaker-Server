@@ -710,6 +710,75 @@ class AtlasShoppingListRegressionTests(SimpleTestCase):
         self.assertTrue(E._candidate_name_matches_need(tuna, 'atún enlatado'))
         self.assertFalse(E._candidate_name_matches_need(sardine, 'atún enlatado'))
 
+    def test_compound_words_abrelatas_matches_both_joined_and_separated(self):
+        import re
+        from api.core.ve_commerce_lexicon import (
+            expand_search_variants,
+            lexical_match,
+            substring_regex,
+        )
+
+        variants_joined = expand_search_variants('abrelatas')
+        self.assertIn('abre latas', variants_joined)
+        self.assertTrue(lexical_match(['Abre latas de acero inoxidable'], variants_joined))
+        self.assertTrue(lexical_match(['Abre-latas manual'], variants_joined))
+        self.assertTrue(lexical_match(['Abrelata mariposa'], variants_joined))
+        self.assertFalse(lexical_match(['Atún en lata 170g'], variants_joined))
+
+        variants_split = expand_search_variants('abre latas')
+        self.assertIn('abrelatas', variants_split)
+        self.assertNotIn('lata', variants_split)
+        self.assertNotIn('latas', variants_split)
+        self.assertTrue(lexical_match(['Abrelatas de acero inoxidable'], variants_split))
+        self.assertFalse(lexical_match(['Atún en lata 170g'], variants_split))
+
+        # El patrón regex de 'abre latas' tolera espacio, guion o palabra pegada
+        pat = substring_regex('abre latas')
+        self.assertIsNotNone(re.search(pat, 'Abrelatas manual', re.IGNORECASE))
+        self.assertIsNotNone(re.search(pat, 'Abre latas manual', re.IGNORECASE))
+        self.assertIsNotNone(re.search(pat, 'Abre-latas manual', re.IGNORECASE))
+
+    def test_spanish_morphology_units_and_intent_noise_preservation(self):
+        import re
+        from api.core.product_search_engine import ProductSearchEngine as E
+        from api.core.ve_commerce_lexicon import (
+            expand_search_variants,
+            lexical_match,
+            substring_regex,
+        )
+
+        # Morfología plural -es / -ces <-> singular
+        for plural_q, singular_title in (
+            ('cargadores', 'Cargador Rápido GaN 65W'),
+            ('pantalones', 'Pantalón Jean de Caballero'),
+            ('colchones', 'Colchón Ortopédico Individual'),
+            ('lápices', 'Lápiz de Grafito Mongol'),
+            ('relojes', 'Reloj Casio Clásico'),
+            ('morrales', 'Morral Escolar Impermeable'),
+        ):
+            variants = expand_search_variants(plural_q)
+            self.assertTrue(
+                lexical_match([singular_title], variants),
+                f"{plural_q} debería coincidir con {singular_title} (variants={variants})",
+            )
+
+        # Tolerancia de espacio/guion entre números y unidades ('128gb' <-> '128 GB', '20w50' <-> '20W-50')
+        self.assertIsNotNone(re.search(substring_regex('128gb'), 'Pendrive 128 GB USB 3.2', re.IGNORECASE))
+        self.assertIsNotNone(re.search(substring_regex('20w50'), 'Aceite Mineral 20W-50 1 Litro', re.IGNORECASE))
+
+        # Preservación de frases de producto con 'para' / 'rápido' / 'express' / 'sin'
+        self.assertEqual(E._clean_intent_noise_from_query('alimento para perro')[0], 'alimento para perro')
+        self.assertEqual(E._clean_intent_noise_from_query('cargador rápido')[0], 'cargador rápido')
+        self.assertEqual(E._clean_intent_noise_from_query('olla express')[0], 'olla express')
+        self.assertEqual(
+            E._clean_intent_noise_from_query('Productos con delivery inmediato cerca de mi ubicación')[0],
+            '',
+        )
+
+        # Frases por conjunto de tokens ('alimento perro' -> 'perrarina')
+        dog_variants = expand_search_variants('alimento perro')
+        self.assertIn('perrarina', dog_variants)
+
 
 
 class AndroidAssetLinksTests(SimpleTestCase):

@@ -48,7 +48,11 @@ def _get_tools_schema() -> List[Dict[str, Any]]:
                         },
                         "categoria": {
                             "type": "string",
-                            "description": "Filtro opcional por categoría o subcategoría del catálogo (ej. 'Alimentos y Bebidas', 'Calzado', 'Farmacia', 'Celulares')."
+                            "description": (
+                                "Filtro opcional por categoría o subcategoría oficial del catálogo (ej. 'Alimentos y Bebidas', "
+                                "'Ferretería y Construcción', 'Teléfonos y Tablets', 'Ollas, Sartenes y Utensilios de Cocina'). "
+                                "Déjalo vacío si `query` ya especifica un producto concreto."
+                            ),
                         },
                         "comercio_o_centro_comercial": {
                             "type": "string",
@@ -56,12 +60,12 @@ def _get_tools_schema() -> List[Dict[str, Any]]:
                         },
                         "atributo_o_variante": {
                             "type": "string",
-                            "description": "Filtro opcional por talla, presentación, peso, marca o especificación (ej. 'talla 42', '500g', '256gb', 'sin gluten')."
+                            "description": "Filtro opcional SOLO si el usuario exigió una talla, medida o capacidad exacta (ej. '42', '500g', '256GB')."
                         },
                         "unidad_venta": {
                             "type": "string",
                             "enum": ["unit", "kg", "g", "lb", "l", "ml", "pack", "box", "portion", "combo", "pair", "set"],
-                            "description": "Filtro opcional por unidad de venta ('kg', 'g', 'unit', 'portion', 'combo', 'pair')."
+                            "description": "Filtro opcional SOLO si el usuario exigió explícitamente comprar a granel o por unidad de venta específica."
                         },
                         "precio_min_usd": {
                             "type": "number",

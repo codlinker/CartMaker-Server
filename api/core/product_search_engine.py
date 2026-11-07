@@ -899,10 +899,10 @@ class ProductSearchEngine:
     # Si se filtran como nombre de producto literal, arruinan el recall.
     ATLAS_INTENT_NOISE_WORDS = frozenset({
         'producto', 'productos', 'articulo', 'articulos', 'cosas', 'algo',
-        'con', 'sin', 'para', 'por', 'que', 'tenga', 'tengan', 'tienen', 'hay',
-        'delivery', 'domicilio', 'envio', 'inmediato', 'rapido', 'express',
+        'tenga', 'tengan', 'tienen', 'hay',
+        'delivery', 'domicilio', 'envio', 'inmediato',
         'cerca', 'cercano', 'cercanos', 'cercana', 'cercanas', 'aqui', 'aca',
-        'mi', 'tu', 'su', 'ubicacion', 'zona', 'sector', 'alrededor',
+        'ubicacion', 'zona', 'sector', 'alrededor',
         'abierto', 'abiertos', 'abierta', 'abiertas', 'ahorita', 'ahora', 'hoy',
         'oferta', 'ofertas', 'descuento', 'descuentos', 'promo', 'promocion', 'promociones',
         'token', 'tokens', 'puntos', 'canje', 'canjear',
@@ -911,6 +911,10 @@ class ProductSearchEngine:
         'comprar', 'busco', 'buscar', 'quiero', 'necesito', 'recomienda', 'recomendame', 'mostrar', 'muestrame', 'ver',
         'disponible', 'disponibles', 'stock',
     })
+    ATLAS_CONNECTOR_ONLY_WORDS = frozenset({
+        'con', 'sin', 'para', 'por', 'que', 'de', 'del', 'en', 'el', 'la', 'los', 'las',
+        'un', 'una', 'unos', 'unas', 'mi', 'tu', 'su', 'rapido', 'express',
+    })
 
     @classmethod
     def _clean_intent_noise_from_query(cls, raw_query: str) -> tuple:
@@ -918,7 +922,8 @@ class ProductSearchEngine:
         Separa las palabras de intención logística/comercial del término real de producto.
         Retorna `(clean_product_query, inferred_flags_dict)`.
         Si el usuario pidió 'Productos con delivery inmediato cerca de mi ubicación',
-        `clean_product_query` queda `''` (modo descubrimiento) e infiere filtros útiles.
+        `clean_product_query` queda `''` (modo descubrimiento) e infiere filtros útiles,
+        sin destruir frases legítimas de producto ('alimento para perro', 'cargador rápido', 'olla express').
         """
         if not raw_query or not str(raw_query).strip():
             return "", {}
@@ -933,7 +938,7 @@ class ProductSearchEngine:
         tokens = re.findall(r'[a-z0-9ñ]+', norm)
         inferred = {}
 
-        if any(w in tokens for w in ('abierto', 'abiertos', 'abierta', 'abiertas', 'ahorita', 'ahora', 'inmediato', 'rapido', 'express')):
+        if any(w in tokens for w in ('abierto', 'abiertos', 'abierta', 'abiertas', 'ahorita', 'ahora', 'inmediato')):
             inferred['prefer_open_now'] = True
         if any(w in tokens for w in ('oferta', 'ofertas', 'descuento', 'descuentos', 'promo', 'promocion', 'promociones')):
             inferred['only_offers'] = True
@@ -945,6 +950,7 @@ class ProductSearchEngine:
             inferred['mode'] = 'nearby'
 
         kept_words = []
+        norm_kept = []
         for orig_word in raw_str.split():
             w_clean = (
                 re.sub(r'[^a-záéíóúñ0-9]', '', orig_word.lower())
@@ -953,6 +959,31 @@ class ProductSearchEngine:
             )
             if w_clean and w_clean not in cls.ATLAS_INTENT_NOISE_WORDS and len(w_clean) >= 2:
                 kept_words.append(orig_word)
+                norm_kept.append(w_clean)
+
+        # Si tras limpiar el ruido solo quedaron conectores ('con', 'para', 'de', 'mi', 'rapido'), es búsqueda abierta
+        if not any(w not in cls.ATLAS_CONNECTOR_ONLY_WORDS for w in norm_kept):
+            if any(w in tokens for w in ('rapido', 'express')):
+                inferred['prefer_open_now'] = True
+            return "", inferred
+
+        # Quitar conectores que hayan quedado colgados al inicio o al final
+        dangling_connectors = {
+            'con', 'sin', 'para', 'por', 'que', 'de', 'del', 'en', 'el', 'la', 'los', 'las',
+            'un', 'una', 'unos', 'unas', 'mi', 'tu', 'su',
+        }
+        while kept_words and (
+            re.sub(r'[^a-záéíóúñ0-9]', '', kept_words[0].lower())
+            .replace('á', 'a').replace('é', 'e').replace('í', 'i').replace('ó', 'o').replace('ú', 'u')
+            in dangling_connectors
+        ):
+            kept_words.pop(0)
+        while kept_words and (
+            re.sub(r'[^a-záéíóúñ0-9]', '', kept_words[-1].lower())
+            .replace('á', 'a').replace('é', 'e').replace('í', 'i').replace('ó', 'o').replace('ú', 'u')
+            in dangling_connectors
+        ):
+            kept_words.pop()
 
         return " ".join(kept_words).strip(), inferred
 
@@ -995,9 +1026,15 @@ class ProductSearchEngine:
         }
 
     def _apply_purchase_text_filter(self, queryset, query: str):
-        """Recall alto para Atlas: sinónimos VE + trigram + tokens + categorías padre/hija."""
+        """Recall alto para Atlas: sinónimos VE + compuestos + trigram + atributos/variantes + categorías."""
         if not query or not str(query).strip():
             return queryset
+
+        if 'attrs_text' not in queryset.query.annotations:
+            queryset = queryset.annotate(
+                attrs_text=Cast('product__attributes', output_field=CharField()),
+                vars_text=Cast('product__variants', output_field=CharField()),
+            )
 
         variants = expand_search_variants(query)
         text_q = Q()
@@ -1011,17 +1048,21 @@ class ProductSearchEngine:
                 text_q |= (
                     Q(product__name__iregex=pattern)
                     | Q(product__description__iregex=pattern)
+                    | Q(attrs_text__iregex=pattern)
+                    | Q(vars_text__iregex=pattern)
                     | Q(product__category__name__iregex=pattern)
                     | Q(product__category__parent_category__name__iregex=pattern)
                     | Q(store__company__name__iregex=pattern)
                     | Q(store__name__iregex=pattern)
                 )
             else:
-                # Subcadena sin distinguir tildes ('camara' encuentra 'Cámara Digital').
+                # Subcadena sin distinguir tildes y tolerando espacios/guiones ('abrelatas' <-> 'Abre latas').
                 pattern = substring_regex(clean_variant)
                 text_q |= (
                     Q(product__name__iregex=pattern)
                     | Q(product__description__iregex=pattern)
+                    | Q(attrs_text__iregex=pattern)
+                    | Q(vars_text__iregex=pattern)
                     | Q(product__category__name__iregex=pattern)
                     | Q(product__category__parent_category__name__iregex=pattern)
                     | Q(store__company__name__iregex=pattern)
@@ -1587,11 +1628,15 @@ class ProductSearchEngine:
 
         if variants:
             combo_summary_txt = (product.attributes or {}).get('__combo_summary') if isinstance(product.attributes, dict) else None
+            attrs_txt = str(product.attributes or '')
+            vars_txt = str(product.variants or '')
             matches_lexically = lexical_match(
                 [
                     product.name,
                     product.description,
                     combo_summary_txt,
+                    attrs_txt,
+                    vars_txt,
                     category.name if category else None,
                     parent_cat.name if parent_cat else None,
                     company.name,
@@ -1661,7 +1706,8 @@ class ProductSearchEngine:
 
         prefer_open_now = bool(only_open_now or inferred.get('prefer_open_now'))
 
-        qs = self._get_base_active_queryset()
+        # En búsquedas explícitas de Atlas no ocultamos la tienda del usuario si también es comerciante
+        qs = self._get_base_active_queryset(exclude_own_company=False)
         qs = self._annotate_proximity_flag(qs)
         qs = self._annotate_merchant_rating(qs)
         # Un solo JOIN para todo lo que get_json()/is_currently_open/effective_work_* tocan.
@@ -1685,14 +1731,6 @@ class ProductSearchEngine:
             )
 
         # --- FILTROS ESTRUCTURADOS DE ATLAS 2.0 ---
-        if category_query and str(category_query).strip():
-            cat_pat = substring_regex(str(category_query).strip())
-            qs = qs.filter(
-                Q(product__category__name__iregex=cat_pat)
-                | Q(product__category__parent_category__name__iregex=cat_pat)
-                | Q(store__company__category__name__iregex=cat_pat)
-            )
-
         if company_or_store_query and str(company_or_store_query).strip():
             comp_pat = substring_regex(str(company_or_store_query).strip())
             qs = qs.filter(
@@ -1725,9 +1763,6 @@ class ProductSearchEngine:
         if mall_only:
             qs = qs.filter(store__location__mall__isnull=False)
 
-        if selling_unit and str(selling_unit).strip():
-            qs = qs.filter(product__selling_unit__iexact=str(selling_unit).strip())
-
         qs = qs.annotate(effective_price=Coalesce(F('custom_price'), F('product__price')))
 
         if min_price is not None:
@@ -1741,9 +1776,43 @@ class ProductSearchEngine:
             except (ValueError, TypeError):
                 pass
 
+        # Respaldo antes de filtros auxiliares (categoría/unidad/atributo) que el LLM puede
+        # haber deducido con un nombre distinto al del catálogo real: si `effective_query`
+        # existe pero los filtros auxiliares dejan 0 resultados, se relajan automáticamente.
+        qs_before_aux = qs
+        had_aux_filter = False
+
+        if category_query and str(category_query).strip():
+            had_aux_filter = True
+            cat_variants = expand_search_variants(str(category_query).strip())[:12]
+            cat_q = Q()
+            for cv in cat_variants:
+                if len(cv.strip()) < 2:
+                    continue
+                cat_pat = substring_regex(cv.strip())
+                cat_q |= (
+                    Q(product__category__name__iregex=cat_pat)
+                    | Q(product__category__parent_category__name__iregex=cat_pat)
+                    | Q(store__company__category__name__iregex=cat_pat)
+                )
+            if cat_q:
+                qs = qs.filter(cat_q)
+
+        if selling_unit and str(selling_unit).strip():
+            had_aux_filter = True
+            qs = qs.filter(product__selling_unit__iexact=str(selling_unit).strip())
+
         if attribute_or_variant_query and str(attribute_or_variant_query).strip():
-            attr_str = str(attribute_or_variant_query).strip()
-            attr_pat = substring_regex(attr_str)
+            had_aux_filter = True
+            raw_attr = str(attribute_or_variant_query).strip()
+            # Limpiar etiquetas genéricas ('talla 42' -> '42', 'capacidad 256gb' -> '256gb')
+            cleaned_attr = re.sub(
+                r'^(talla|medida|color|marca|capacidad|modelo|peso|presentacion|presentación)\s+',
+                '',
+                raw_attr,
+                flags=re.IGNORECASE,
+            ).strip() or raw_attr
+            attr_pat = substring_regex(cleaned_attr)
             qs = qs.annotate(
                 attrs_text=Cast('product__attributes', output_field=CharField()),
                 vars_text=Cast('product__variants', output_field=CharField()),
@@ -1756,6 +1825,8 @@ class ProductSearchEngine:
 
         if effective_query:
             qs = self._apply_purchase_text_filter(qs, effective_query)
+            if had_aux_filter and not qs.exists():
+                qs = self._apply_purchase_text_filter(qs_before_aux, effective_query)
 
         # Ordenar por similitud semántica si se aplicó el filtro de texto, o por cercanía y popularidad
         if 'match_sim' in qs.query.annotations:
@@ -1777,7 +1848,7 @@ class ProductSearchEngine:
 
         # --- POOL DE COMBOS (ProductsCombo) PARA ATLAS 2.0 ---
         try:
-            combos_qs = self._get_base_active_combos_queryset()
+            combos_qs = self._get_base_active_combos_queryset(exclude_own_company=False)
             combos_qs = self._annotate_proximity_flag(combos_qs)
             combos_qs = self._annotate_merchant_rating(combos_qs)
             combos_qs = combos_qs.select_related(
@@ -2532,7 +2603,7 @@ class ProductSearchEngine:
         
         base_cache_key = f"cartmaker:struct:cat:v2:{sub_category_id}:{approx_lat}:{approx_lng}:{sort_by}:{price_order}"
         
-        qs = self._get_base_active_queryset()
+        qs = self._get_base_active_queryset(exclude_own_company=False)
         qs = self._annotate_proximity_flag(qs)
         qs = qs.filter(
             product__category_id=sub_category_id,
@@ -2540,13 +2611,20 @@ class ProductSearchEngine:
         )
         qs = self._apply_feed_sorting(qs, sort_by, price_order)
 
-        combos_qs = self._get_base_active_combos_queryset().filter(
+        combos_qs = self._get_base_active_combos_queryset(exclude_own_company=False).filter(
             category_id=sub_category_id,
             store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters)),
         )
         combos_qs = self._order_combos_for_feed(combos_qs, sort_by, price_order)
         
-        return self._get_cached_structural_feed(base_cache_key, qs, page, page_size, extra_combos_qs=combos_qs)
+        return self._get_cached_structural_feed(
+            base_cache_key,
+            qs,
+            page,
+            page_size,
+            extra_combos_qs=combos_qs,
+            include_merchant_exclusion_scope=False,
+        )
 
     def get_offers_feed(self, page: int = 1, page_size: int = 20, sort_by: str = 'relevance', price_order: str = None, max_distance_meters: float = 10000) -> list:
         now = timezone.now()
@@ -2617,60 +2695,51 @@ class ProductSearchEngine:
         approx_lng = round(self.user_location.x, 3)
         
         query_hash = hashlib.md5(search_query.strip().lower().encode()).hexdigest() if search_query else "empty"
-        base_cache_key = f"cartmaker:struct:search:v2:{query_hash}:{approx_lat}:{approx_lng}:{sort_by}:{price_order}"
+        base_cache_key = f"cartmaker:struct:search:v3:{query_hash}:{approx_lat}:{approx_lng}:{sort_by}:{price_order}"
         
-        qs = self._get_base_active_queryset()
+        qs = self._get_base_active_queryset(exclude_own_company=False)
         qs = self._annotate_proximity_flag(qs)
         qs = qs.filter(
             store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters))
         )
 
-        combos_qs = self._get_base_active_combos_queryset().filter(
+        combos_qs = self._get_base_active_combos_queryset(exclude_own_company=False).filter(
             store__location__coordinates__distance_lte=(self.user_location, D(m=max_distance_meters))
         )
 
-        if search_query:
-            import operator
-            from functools import reduce
-
-            search_terms = search_query.strip().split()
-            word_queries = []
-            combo_word_queries = []
-            
-            # 🕵️ DEBUG 3: Ver los términos exactos que exige la consulta SQL
-            print(f"🔍 ENGINE SQL -> Buscando coincidencia ESTRICTA (AND) para las palabras: {search_terms}")
-            
-            for term in search_terms:
-                if len(term) > 2:
-                    term_filter = (
-                        Q(product__name__icontains=term) | 
-                        Q(product__description__icontains=term) |
-                        Q(product__category__name__icontains=term) |
-                        Q(product__company__name__icontains=term)
-                    )
-                    word_queries.append(term_filter)
-                    combo_item_sub = ProductsComboItem.objects.filter(
-                        combo_id=OuterRef('pk'),
-                        product__name__icontains=term,
-                    )
-                    combo_term_filter = (
-                        Q(name__icontains=term) |
-                        Q(description__icontains=term) |
-                        Q(category__name__icontains=term) |
-                        Q(store__company__name__icontains=term) |
-                        Exists(combo_item_sub)
-                    )
-                    combo_word_queries.append(combo_term_filter)
-            
-            if word_queries:
-                global_search_filter = reduce(operator.and_, word_queries)
-                qs = qs.filter(global_search_filter)
-            if combo_word_queries:
-                combos_qs = combos_qs.filter(reduce(operator.and_, combo_word_queries))
+        if search_query and search_query.strip():
+            qs = self._apply_purchase_text_filter(qs, search_query.strip())
+            variants = expand_search_variants(search_query.strip())
+            combo_text_q = Q()
+            for v in variants:
+                cv = v.strip()
+                if len(cv) < 2:
+                    continue
+                pat = word_boundary_regex(cv) if is_short_term(cv) else substring_regex(cv)
+                combo_item_sub = ProductsComboItem.objects.filter(
+                    combo_id=OuterRef('pk'),
+                    product__name__iregex=pat,
+                )
+                combo_text_q |= (
+                    Q(name__iregex=pat)
+                    | Q(description__iregex=pat)
+                    | Q(category__name__iregex=pat)
+                    | Q(store__company__name__iregex=pat)
+                    | Exists(combo_item_sub)
+                )
+            if combo_text_q:
+                combos_qs = combos_qs.filter(combo_text_q)
 
         qs = self._apply_feed_sorting(qs, sort_by, price_order)
         combos_qs = self._order_combos_for_feed(combos_qs, sort_by, price_order)
-        return self._get_cached_structural_feed(base_cache_key, qs, page, page_size, extra_combos_qs=combos_qs)
+        return self._get_cached_structural_feed(
+            base_cache_key,
+            qs,
+            page,
+            page_size,
+            extra_combos_qs=combos_qs,
+            include_merchant_exclusion_scope=False,
+        )
     
     def get_home_feed(self, page: int = 1, page_size: int = 20, max_distance_meters: float = 15000) -> dict:
         """
